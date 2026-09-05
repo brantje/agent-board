@@ -170,7 +170,7 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 		  AND job.available_at <= now()
 		  AND run.status='QUEUED'
 		ORDER BY job.available_at, job.created_at, job.id
-		FOR UPDATE OF job SKIP LOCKED
+		FOR UPDATE OF job, run SKIP LOCKED
 		LIMIT 1
 	`).Scan(
 		&job.ID, &job.ProjectID, &job.RunID, &job.Kind, &job.State, &job.WaitReason, &job.IdempotencyKey, &job.AvailableAt, &job.CreatedAt, &job.UpdatedAt,
