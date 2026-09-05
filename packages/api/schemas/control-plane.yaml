@@ -39,7 +39,7 @@ ProjectUpdate:
 Provider:
   type: object
   description: Credential references are write-only and are never returned.
-  required: [id, name, kind, enabled, healthStatus, safeMetadata, createdAt, updatedAt]
+  required: [id, name, kind, baseUrl, enabled, healthStatus, safeMetadata, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     name: {type: string}
@@ -63,7 +63,7 @@ ProviderInput:
     safeMetadata: {$ref: '#/JSONMap'}
 ModelProfile:
   type: object
-  required: [id, projectId, providerId, name, model, enabled, generationSettings, createdAt, updatedAt]
+  required: [id, projectId, providerId, name, model, temperature, maxTokens, maxConcurrent, enabled, generationSettings, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: [string, 'null'], format: uuid}
@@ -92,7 +92,7 @@ ModelProfileInput:
     enabled: {type: boolean, default: true}
 Runtime:
   type: object
-  required: [id, projectId, name, kind, image, networkPolicy, workspacePolicy, allowedSecretRefs, capabilities, enabled, healthStatus, createdAt, updatedAt]
+  required: [id, projectId, name, kind, image, cpuLimitMillis, memoryLimitBytes, pidLimit, timeoutSeconds, networkPolicy, workspacePolicy, allowedSecretRefs, capabilities, enabled, healthStatus, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: [string, 'null'], format: uuid}
@@ -177,7 +177,7 @@ AgentInput:
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}
 Issue:
   type: object
-  required: [id, projectId, title, description, status, createdAt, updatedAt]
+  required: [id, projectId, title, description, status, assignedAgentId, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
@@ -204,7 +204,7 @@ IssueUpdate:
     status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]}
 Run:
   type: object
-  required: [id, projectId, issueId, workspaceId, attempt, status, createdAt, updatedAt]
+  required: [id, projectId, issueId, workspaceId, agentId, attempt, status, queueReason, failureReason, createdAt, startedAt, completedAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
