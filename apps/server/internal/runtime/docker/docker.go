@@ -206,7 +206,7 @@ func (r *Runtime) ensureImage(ctx context.Context, image string) error {
 	if err != nil {
 		return fmt.Errorf("pull Docker image %q: %w", image, err)
 	}
-	defer response.Close()
+	defer func() { _ = response.Close() }()
 	if err := response.Wait(ctx); err != nil {
 		return fmt.Errorf("pull Docker image %q: %w", image, err)
 	}
