@@ -106,8 +106,8 @@ func createRunWithoutAgent(t *testing.T, s *Store, f runFixture, suffix string) 
 	workspace, err := s.CreateWorkspace(ctx, store.Workspace{
 		ProjectID:     f.project.ID,
 		IssueID:       issue.ID,
-		Path:          "/workspace/" + suffix,
-		WorkingBranch: "issue/" + suffix,
+		Path:          "/workspace/malformed-" + suffix,
+		WorkingBranch: "issue/malformed-" + suffix,
 	})
 	if err != nil {
 		t.Fatalf("create workspace %s: %v", suffix, err)
