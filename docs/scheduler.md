@@ -92,15 +92,17 @@ Goals:
 
 Lease expiry is only a reconciliation trigger. It is not evidence that external execution stopped. An expired owner is fenced with a fresh reconciliation lease while capacity remains reserved. Requeue is allowed only after reconciliation explicitly establishes that retry is safe.
 
+A genuine `UNKNOWN` reconciliation outcome is fail-closed: the scheduler keeps ownership and capacity reserved until a later reconciliation obtains positive evidence for `ACTIVE`, safe `RETRY`, or a terminal outcome. An attempt count or elapsed-time limit alone must not convert uncertainty into release/retry because the external execution may still be alive.
+
 ## Go v0.1 implementation boundary
 
-The Go scheduler exposes one authoritative admission primitive: `SchedulerStore.AdmitNextJob`. It locks a queued scheduler job with PostgreSQL `FOR UPDATE SKIP LOCKED`, locks the selected Agent and Model Profile in deterministic order, checks their current reservations, and commits both reservations, the lease, the job claim, and the Run `STARTING` transition together. Capacity exhaustion commits only queue/wait metadata and creates no partial ownership.
+The Go scheduler exposes one authoritative admission primitive: `SchedulerStore.AdmitNextJob`. It locks a queued scheduler job and its Run with PostgreSQL `FOR UPDATE ... SKIP LOCKED`, locks the selected Agent and Model Profile in deterministic order, checks their current reservations, and commits both reservations, the lease, the job claim, and the Run `STARTING` transition together. Capacity exhaustion commits only queue/wait metadata and creates no partial ownership.
 
 Every post-admission Run transition is fenced by the current lease token. `RUNNING` keeps reservations; `WAITING_FOR_INPUT`, `PAUSED`, `READY_FOR_REVIEW`, terminal success/failure and cancellation release reservations and the lease in the same PostgreSQL transaction as their durable state change.
 
-`internal/scheduler.Coordinator` owns polling, lease heartbeats, restart reconciliation and bounded process-local backpressure. Its process-local concurrency bound is not an admission authority; PostgreSQL remains authoritative. The coordinator accepts a narrow execution `Processor` and optional external-state `Reconciler`, so Docker, runner WebSocket and Engine implementation details do not enter the scheduler package.
+`internal/scheduler.Coordinator` owns polling, lease heartbeats, restart reconciliation and bounded process-local backpressure. Its process-local concurrency bound is not an admission authority; PostgreSQL remains authoritative. The coordinator requires narrow execution `Processor` and external-state `Reconciler` dependencies, so Docker, runner WebSocket and Engine implementation details do not enter the scheduler package while reconciliation can never silently degrade to permanent `UNKNOWN` because a dependency was omitted.
 
-Issue #8 deliberately does not activate the coordinator with a placeholder processor. Runtime/runner/Engine work is excluded from this scheduler slice; the execution composition introduced by the later execution issues supplies the real processor and starts the coordinator with the server lifecycle. Claiming work without a real execution processor would create false ownership and is therefore prohibited.
+Issue #8 deliberately does not activate the coordinator with a placeholder processor. Runtime/runner/Engine work is excluded from this scheduler slice; the execution composition introduced by the later execution issues supplies the real processor and reconciler and starts the coordinator with the server lifecycle. Claiming work without real execution/reconciliation dependencies would create false ownership and is therefore prohibited.
 
 ## Assignment changes
 
