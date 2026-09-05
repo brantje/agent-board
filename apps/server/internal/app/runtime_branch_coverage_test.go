@@ -291,7 +291,7 @@ func TestRuntimeInstanceServiceLifecycleFailureBranches(t *testing.T) {
 }
 
 func TestRuntimeInstanceServicePersistenceAndValidationGuards(t *testing.T) {
-	service, runtimeStore, implementation, workspace := runtimeServiceFixture(t)
+	service, runtimeStore, _, workspace := runtimeServiceFixture(t)
 	ctx := context.Background()
 	if _, err := service.getInstance(ctx, "", "instance"); err == nil {
 		t.Fatal("getInstance() unexpectedly accepted blank project")
@@ -321,7 +321,7 @@ func TestRuntimeInstanceServicePersistenceAndValidationGuards(t *testing.T) {
 		t.Fatal("Create() unexpectedly accepted mutated immutable binding")
 	}
 
-	service, runtimeStore, implementation, workspace = runtimeServiceFixture(t)
+	service, runtimeStore, _, workspace = runtimeServiceFixture(t)
 	instance, err := service.Create(ctx, workspace.ProjectID, workspace.IssueID, runtimeStore.runtime.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -332,7 +332,7 @@ func TestRuntimeInstanceServicePersistenceAndValidationGuards(t *testing.T) {
 		t.Fatalf("Start() update error=%v", err)
 	}
 
-	service, runtimeStore, implementation, workspace = runtimeServiceFixture(t)
+	service, runtimeStore, implementation, workspace := runtimeServiceFixture(t)
 	instance, err = service.Create(ctx, workspace.ProjectID, workspace.IssueID, runtimeStore.runtime.ID)
 	if err != nil {
 		t.Fatal(err)
