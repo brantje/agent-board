@@ -25,9 +25,14 @@ jobs:
         with:
           go-version-file: apps/server/go.mod
           cache-dependency-path: apps/server/go.sum
-      - name: Test
+      - name: Test and enforce coverage
         working-directory: apps/server
-        run: go test ./...
+        run: |
+          set -eu
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
+          awk -v coverage="$total" 'BEGIN { printf "server coverage: %.1f%%\n", coverage; if (coverage + 0 < 85) exit 1 }'
       - name: Vet
         working-directory: apps/server
         run: go vet ./...
@@ -46,9 +51,14 @@ jobs:
         with:
           go-version-file: apps/agent-runner/go.mod
           cache: false
-      - name: Test
+      - name: Test and enforce coverage
         working-directory: apps/agent-runner
-        run: go test ./...
+        run: |
+          set -eu
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
+          awk -v coverage="$total" 'BEGIN { printf "agent-runner coverage: %.1f%%\n", coverage; if (coverage + 0 < 85) exit 1 }'
       - name: Vet
         working-directory: apps/agent-runner
         run: go vet ./...
