@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/brantje/agent-board/apps/agent-runner/internal/redact"
 )
 
 type Request struct {
@@ -29,8 +31,8 @@ type Session struct {
 	id     string
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
-	stdout io.ReadCloser
-	stderr io.ReadCloser
+	stdout io.Reader
+	stderr io.Reader
 
 	done   chan struct{}
 	result Result
@@ -69,8 +71,10 @@ func start(id, workspaceRoot string, request Request) (*Session, error) {
 		return nil, fmt.Errorf("start process: %w", err)
 	}
 
+	secrets := secretValues(request.Secrets)
 	s := &Session{
-		id: id, cmd: cmd, stdin: newSafeWriteCloser(stdin), stdout: stdout, stderr: stderr,
+		id: id, cmd: cmd, stdin: newSafeWriteCloser(stdin),
+		stdout: redact.NewReader(stdout, secrets), stderr: redact.NewReader(stderr, secrets),
 		done: make(chan struct{}),
 	}
 	go s.reap()
@@ -198,6 +202,16 @@ func mergeEnvironment(env, secrets map[string]string) []string {
 		result = append(result, key+"="+value)
 	}
 	return result
+}
+
+func secretValues(secrets map[string]string) []string {
+	values := make([]string, 0, len(secrets))
+	for _, value := range secrets {
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func isClosed(ch <-chan struct{}) bool {
