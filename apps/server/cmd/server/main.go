@@ -24,11 +24,15 @@ const (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	os.Exit(exitCode(ctx, configuredAddress()))
+}
 
-	if err := run(ctx, configuredAddress()); err != nil {
+func exitCode(ctx context.Context, address string) int {
+	if err := run(ctx, address); err != nil {
 		slog.Error("server stopped", "error", err)
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func configuredAddress() string {
