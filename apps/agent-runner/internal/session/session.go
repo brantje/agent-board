@@ -51,7 +51,7 @@ func start(id, workspaceRoot string, request Request) (*Session, error) {
 	cmd := exec.Command(request.Command[0], request.Command[1:]...)
 	cmd.Dir = workingDir
 	cmd.Env = mergeEnvironment(request.Env, request.Secrets)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureProcessTree(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -95,14 +95,14 @@ func (s *Session) Wait(ctx context.Context) (Result, error) {
 }
 
 func (s *Session) Terminate() error {
-	return s.signal(syscall.SIGTERM)
+	return s.signal(terminateProcessTree)
 }
 
 func (s *Session) Kill() error {
-	return s.signal(syscall.SIGKILL)
+	return s.signal(killProcessTree)
 }
 
-func (s *Session) signal(sig syscall.Signal) error {
+func (s *Session) signal(signalTree func(int) error) error {
 	s.mu.RLock()
 	done := isClosed(s.done)
 	pid := s.cmd.Process.Pid
@@ -110,10 +110,7 @@ func (s *Session) signal(sig syscall.Signal) error {
 	if done {
 		return nil
 	}
-	if err := syscall.Kill(-pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return fmt.Errorf("signal process tree: %w", err)
-	}
-	return nil
+	return signalTree(pid)
 }
 
 func (s *Session) reap() {
