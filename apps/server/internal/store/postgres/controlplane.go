@@ -204,7 +204,11 @@ func (s *Store) GetRuntime(ctx context.Context, projectID *string, id string) (s
 }
 
 func (s *Store) UpdateRuntime(ctx context.Context, scope *string, input store.Runtime) (store.Runtime, error) {
-	return scanRuntime(s.pool.QueryRow(ctx, `UPDATE runtimes SET name=$3, kind=$4, image=$5, cpu_limit_millis=$6, memory_limit_bytes=$7, pid_limit=$8, timeout_seconds=$9, network_policy=$10, workspace_policy=$11, allowed_secret_refs=$12, capabilities=$13, enabled=$14, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status, created_at, updated_at`, scope, input.ID, input.Name, input.Kind, input.Image, input.CPULimitMillis, input.MemoryLimitBytes, input.PIDLimit, input.TimeoutSeconds, input.NetworkPolicy, input.WorkspacePolicy, input.AllowedSecretRefs, objectJSON(input.Capabilities), input.Enabled))
+	allowedSecretRefs := input.AllowedSecretRefs
+	if allowedSecretRefs == nil {
+		allowedSecretRefs = []string{}
+	}
+	return scanRuntime(s.pool.QueryRow(ctx, `UPDATE runtimes SET name=$3, kind=$4, image=$5, cpu_limit_millis=$6, memory_limit_bytes=$7, pid_limit=$8, timeout_seconds=$9, network_policy=$10, workspace_policy=$11, allowed_secret_refs=$12, capabilities=$13, enabled=$14, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status, created_at, updated_at`, scope, input.ID, input.Name, input.Kind, input.Image, input.CPULimitMillis, input.MemoryLimitBytes, input.PIDLimit, input.TimeoutSeconds, input.NetworkPolicy, input.WorkspacePolicy, allowedSecretRefs, objectJSON(input.Capabilities), input.Enabled))
 }
 
 func (s *Store) ListExecutorProfiles(ctx context.Context, projectID *string) ([]store.ExecutorProfile, error) {
