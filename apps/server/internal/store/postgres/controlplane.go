@@ -73,7 +73,7 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 				SELECT 1
 				FROM runs
 				WHERE project_id=$1 AND issue_id=$2
-				  AND status IN ('QUEUED','STARTING','RUNNING','WAITING_FOR_INPUT','PAUSED','READY_FOR_REVIEW')
+				  AND status = ANY($3::text[])
 			) OR EXISTS (
 				SELECT 1
 				FROM scheduler_jobs AS job
@@ -81,7 +81,7 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 				WHERE run.project_id=$1 AND run.issue_id=$2
 				  AND job.state IN ('QUEUED','CLAIMED')
 			)
-		`, input.ProjectID, input.ID).Scan(&active); err != nil {
+		`, input.ProjectID, input.ID, activeRunStatuses).Scan(&active); err != nil {
 			return store.Issue{}, err
 		}
 		if active {
@@ -173,7 +173,9 @@ func (s *Store) ListModelProfiles(ctx context.Context, projectID *string) ([]sto
 	var out []store.ModelProfile
 	for rows.Next() {
 		value, err := scanModelProfile(rows)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, value)
 	}
 	return out, rows.Err()
@@ -191,10 +193,18 @@ func (s *Store) UpdateModelProfile(ctx context.Context, scope *string, input sto
 func (s *Store) ListRuntimes(ctx context.Context, projectID *string) ([]store.Runtime, error) {
 	project, scoped := visibleScope(projectID)
 	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status, created_at, updated_at FROM runtimes WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var out []store.Runtime
-	for rows.Next() { value, err := scanRuntime(rows); if err != nil { return nil, err }; out = append(out, value) }
+	for rows.Next() {
+		value, err := scanRuntime(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
 	return out, rows.Err()
 }
 
@@ -214,10 +224,18 @@ func (s *Store) UpdateRuntime(ctx context.Context, scope *string, input store.Ru
 func (s *Store) ListExecutorProfiles(ctx context.Context, projectID *string) ([]store.ExecutorProfile, error) {
 	project, scoped := visibleScope(projectID)
 	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, engine, model_profile_id::text, runtime_id::text, engine_settings, enabled, created_at, updated_at FROM executor_profiles WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var out []store.ExecutorProfile
-	for rows.Next() { value, err := scanExecutorProfile(rows); if err != nil { return nil, err }; out = append(out, value) }
+	for rows.Next() {
+		value, err := scanExecutorProfile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
 	return out, rows.Err()
 }
 
@@ -233,10 +251,18 @@ func (s *Store) UpdateExecutorProfile(ctx context.Context, scope *string, input 
 func (s *Store) ListAgents(ctx context.Context, projectID *string) ([]store.Agent, error) {
 	project, scoped := visibleScope(projectID)
 	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, role_instructions, executor_profile_id::text, concurrency_limit, state, created_at, updated_at FROM agents WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	var out []store.Agent
-	for rows.Next() { value, err := scanAgent(rows); if err != nil { return nil, err }; out = append(out, value) }
+	for rows.Next() {
+		value, err := scanAgent(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
 	return out, rows.Err()
 }
 
