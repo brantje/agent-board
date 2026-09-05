@@ -10,10 +10,11 @@ import (
 var replacementCandidates = []string{"***", "[REDACTED]", "<redacted>", "[masked]"}
 
 type Stream struct {
-	patterns    [][]byte
-	replacement []byte
-	maxLen      int
-	pending     []byte
+	patterns      [][]byte
+	replacement   []byte
+	maxLen        int
+	pending       []byte
+	outputPending []byte
 }
 
 func New(values []string) *Stream {
@@ -47,7 +48,7 @@ func chooseReplacement(patterns [][]byte) []byte {
 		encoded := []byte(candidate)
 		safe := true
 		for _, pattern := range patterns {
-			if bytes.Contains(encoded, pattern) {
+			if bytes.Contains(encoded, pattern) || bytes.Contains(pattern, encoded) {
 				safe = false
 				break
 			}
@@ -56,9 +57,9 @@ func chooseReplacement(patterns [][]byte) []byte {
 			return encoded
 		}
 	}
-	// Dropping the matched secret is safer than emitting a marker that itself
-	// contains a configured secret. This is only a fallback for pathological
-	// secret sets that collide with every human-readable candidate above.
+	// The output sanitizer below is the final secrecy boundary. Dropping a
+	// matched value here avoids choosing a human-readable marker that directly
+	// collides with the configured secret set.
 	return nil
 }
 
@@ -71,7 +72,7 @@ func (s *Stream) Push(data []byte) []byte {
 }
 
 func (s *Stream) Flush() []byte {
-	if s.maxLen == 0 || len(s.pending) == 0 {
+	if s.maxLen == 0 {
 		return nil
 	}
 	return s.consume(true)
@@ -83,7 +84,7 @@ func (s *Stream) consume(final bool) []byte {
 		matched := false
 		for _, pattern := range s.patterns {
 			if len(s.pending) >= len(pattern) && bytes.HasPrefix(s.pending, pattern) {
-				output = append(output, s.replacement...)
+				output = append(output, s.appendSanitized(s.replacement)...)
 				s.pending = s.pending[len(pattern):]
 				matched = true
 				break
@@ -93,14 +94,16 @@ func (s *Stream) consume(final bool) []byte {
 			continue
 		}
 
-		// Keep only a suffix that can still become a secret when the next
-		// source chunk arrives. Everything before it is known-safe and can be
-		// emitted immediately, which is important for interactive processes.
+		// Keep raw input that can still become a secret when the next source
+		// chunk arrives. Everything before it can be transformed immediately.
 		if !final && s.pendingIsSecretPrefix() {
 			break
 		}
-		output = append(output, s.pending[0])
+		output = append(output, s.appendSanitized(s.pending[:1])...)
 		s.pending = s.pending[1:]
+	}
+	if final {
+		output = append(output, s.flushSanitized()...)
 	}
 	return output
 }
@@ -112,6 +115,72 @@ func (s *Stream) pendingIsSecretPrefix() bool {
 		}
 	}
 	return false
+}
+
+// appendSanitized keeps a small transformed-output suffix until it is certain
+// future bytes cannot turn that suffix into a configured secret. Any secret
+// reconstructed by a replacement marker or by bytes adjacent to a replacement
+// is removed before the suffix is emitted.
+func (s *Stream) appendSanitized(data []byte) []byte {
+	var output []byte
+	for _, value := range data {
+		s.outputPending = append(s.outputPending, value)
+		s.removeSecretSuffixes()
+		output = append(output, s.emitSafePrefix()...)
+	}
+	return output
+}
+
+func (s *Stream) removeSecretSuffixes() {
+	for {
+		matched := false
+		for _, pattern := range s.patterns {
+			if len(s.outputPending) >= len(pattern) && bytes.HasSuffix(s.outputPending, pattern) {
+				s.outputPending = s.outputPending[:len(s.outputPending)-len(pattern)]
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return
+		}
+	}
+}
+
+func (s *Stream) emitSafePrefix() []byte {
+	keep := s.longestSecretPrefixSuffix()
+	emitLen := len(s.outputPending) - keep
+	if emitLen <= 0 {
+		return nil
+	}
+
+	output := append([]byte(nil), s.outputPending[:emitLen]...)
+	copy(s.outputPending, s.outputPending[emitLen:])
+	s.outputPending = s.outputPending[:keep]
+	return output
+}
+
+func (s *Stream) longestSecretPrefixSuffix() int {
+	longest := 0
+	for _, pattern := range s.patterns {
+		limit := len(s.outputPending)
+		if patternLimit := len(pattern) - 1; limit > patternLimit {
+			limit = patternLimit
+		}
+		for length := limit; length > longest; length-- {
+			if bytes.Equal(s.outputPending[len(s.outputPending)-length:], pattern[:length]) {
+				longest = length
+				break
+			}
+		}
+	}
+	return longest
+}
+
+func (s *Stream) flushSanitized() []byte {
+	output := append([]byte(nil), s.outputPending...)
+	s.outputPending = nil
+	return output
 }
 
 type reader struct {
