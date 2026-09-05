@@ -9,7 +9,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const shutdownGracePeriod = 500 * time.Millisecond
+const (
+	shutdownGracePeriod    = 500 * time.Millisecond
+	websocketCloseDeadline = 100 * time.Millisecond
+)
 
 var errServerShuttingDown = errors.New("runner is shutting down")
 
@@ -26,6 +29,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 	s.shutdownCancel()
 	for _, conn := range connections {
+		_ = conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseGoingAway, "runner is shutting down"),
+			time.Now().Add(websocketCloseDeadline),
+		)
 		_ = conn.Close()
 	}
 
