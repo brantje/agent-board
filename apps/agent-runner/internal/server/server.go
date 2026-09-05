@@ -258,8 +258,8 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 	}
 
 	go s.cleanupStdinPump(msg.SessionID, execution, stdin)
-	_ = writer.send(protocol.TypeSessionStarted, msg.SessionID, nil)
 	delivery := s.registerDelivery(msg.SessionID, writer)
+	_ = writer.send(protocol.TypeSessionStarted, msg.SessionID, nil)
 	go func() {
 		defer s.streamWG.Done()
 		defer s.removeDelivery(msg.SessionID, delivery)
