@@ -303,7 +303,7 @@ func validObject(value json.RawMessage) bool {
 		return true
 	}
 	var object map[string]any
-	return json.Unmarshal(value, &object) == nil
+	return json.Unmarshal(value, &object) == nil && object != nil
 }
 func validateProject(v store.Project) error {
 	if strings.TrimSpace(v.Name) == "" || strings.TrimSpace(v.RepositoryPath) == "" {
