@@ -70,7 +70,7 @@ func (s *Store) UpdateRuntimeInstanceState(ctx context.Context, projectID, insta
 		    runner_status = $5,
 		    safe_handle_metadata = $6,
 		    started_at = CASE WHEN $3 = 'RUNNING' AND started_at IS NULL THEN now() ELSE started_at END,
-		    stopped_at = CASE WHEN $3 IN ('STOPPED', 'DESTROYED', 'FAILED') THEN now() ELSE stopped_at END,
+		    stopped_at = CASE WHEN $3 IN ('STOPPED', 'DESTROYED', 'FAILED') AND stopped_at IS NULL THEN now() ELSE stopped_at END,
 		    updated_at = now()
 		WHERE project_id = $1 AND id = $2
 		RETURNING id::text, project_id::text, workspace_id::text, runtime_id::text, status, external_id, runner_status, safe_handle_metadata, created_at, started_at, stopped_at, updated_at
