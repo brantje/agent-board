@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"testing"
+	"time"
 )
 
 func TestStreamRedactsAcrossChunkBoundaries(t *testing.T) {
@@ -40,6 +41,36 @@ func TestReaderRedactsWithSmallConsumerBuffers(t *testing.T) {
 	}
 }
 
+func TestReaderEmitsShortSafeOutputWithoutWaitingForNextSourceRead(t *testing.T) {
+	unblock := make(chan struct{})
+	defer close(unblock)
+	source := &blockAfterFirstReader{first: []byte("ready\n"), unblock: unblock}
+	reader := NewReader(source, []string{"a-much-longer-secret"})
+
+	type result struct {
+		data string
+		err  error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		buffer := make([]byte, 32)
+		n, err := reader.Read(buffer)
+		resultCh <- result{data: string(buffer[:n]), err: err}
+	}()
+
+	select {
+	case got := <-resultCh:
+		if got.err != nil {
+			t.Fatalf("unexpected read error: %v", got.err)
+		}
+		if got.data != "ready\n" {
+			t.Fatalf("unexpected output %q", got.data)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("safe output was withheld while source waited for more input")
+	}
+}
+
 func TestReaderWithoutSecretsReturnsOriginalReader(t *testing.T) {
 	source := bytes.NewBufferString("plain")
 	reader := NewReader(source, nil)
@@ -55,4 +86,19 @@ func (r *oneByteReader) Read(p []byte) (int, error) {
 		p = p[:1]
 	}
 	return r.reader.Read(p)
+}
+
+type blockAfterFirstReader struct {
+	first   []byte
+	unblock <-chan struct{}
+}
+
+func (r *blockAfterFirstReader) Read(p []byte) (int, error) {
+	if r.first != nil {
+		data := r.first
+		r.first = nil
+		return copy(p, data), nil
+	}
+	<-r.unblock
+	return 0, io.EOF
 }

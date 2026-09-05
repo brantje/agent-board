@@ -55,10 +55,6 @@ func (s *Stream) Flush() []byte {
 func (s *Stream) consume(final bool) []byte {
 	var output []byte
 	for len(s.pending) > 0 {
-		if !final && len(s.pending) < s.maxLen {
-			break
-		}
-
 		matched := false
 		for _, pattern := range s.patterns {
 			if len(s.pending) >= len(pattern) && bytes.HasPrefix(s.pending, pattern) {
@@ -71,10 +67,26 @@ func (s *Stream) consume(final bool) []byte {
 		if matched {
 			continue
 		}
+
+		// Keep only a suffix that can still become a secret when the next
+		// source chunk arrives. Everything before it is known-safe and can be
+		// emitted immediately, which is important for interactive processes.
+		if !final && s.pendingIsSecretPrefix() {
+			break
+		}
 		output = append(output, s.pending[0])
 		s.pending = s.pending[1:]
 	}
 	return output
+}
+
+func (s *Stream) pendingIsSecretPrefix() bool {
+	for _, pattern := range s.patterns {
+		if len(s.pending) < len(pattern) && bytes.HasPrefix(pattern, s.pending) {
+			return true
+		}
+	}
+	return false
 }
 
 type reader struct {
