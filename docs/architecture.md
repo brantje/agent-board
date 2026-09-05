@@ -30,7 +30,7 @@ Do not add parallel schedulers, Run lifecycles, Engine-owned Workspaces, or conf
 
 ```text
 Frontend        Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS + Nuxt UI v4
-Backend         Go (`apps/server-go`)
+Backend         Go (`apps/server`)
 HTTP            chi
 Database        PostgreSQL + pgvector
 Live updates    Server-Sent Events
