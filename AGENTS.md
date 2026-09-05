@@ -134,25 +134,41 @@ The Go backend is the production control plane. `agent-runner` is a narrow execu
 
 Read `docs/testing.md`. Work Red -> Green -> Refactor. Bug fixes start with a regression test.
 
+**Test coverage is a delivery gate:** affected executable apps/modules must maintain at least **85% automated test coverage**, with **90%+ as the normal target**. Work below 85% is not complete, review-ready, or merge-ready. Agents and reviewers must measure coverage with the language/framework coverage tooling for every affected app/module and report the measured percentage before marking work complete. Do not game the threshold with trivial tests or unjustified exclusions, and do not treat numeric coverage as a substitute for meaningful regression, security, isolation, concurrency, persistence, and integration tests.
+
 Backend verification includes as applicable:
 
 ```bash
 cd apps/server
-go test ./...
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
 go vet ./...
 go build ./...
 ```
+
+Confirm the reported total coverage is at least 85% before completion; 90%+ remains the target.
 
 Runner verification includes as applicable once implemented:
 
 ```bash
 cd apps/agent-runner
-go test ./...
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
 go vet ./...
 go build ./...
 ```
 
-Frontend changes run typecheck/tests/build as applicable.
+Confirm the reported total coverage is at least 85% before completion; 90%+ remains the target.
+
+Frontend verification from the repository root includes:
+
+```bash
+pnpm typecheck
+pnpm test:coverage
+pnpm build
+```
+
+`pnpm test:coverage` is the canonical frontend coverage command and is required in CI. It uses the Vitest V8 coverage configuration in `apps/web/vitest.config.ts`, which enforces at least 85% for statements, branches, functions, and lines; 90%+ remains the normal target.
 
 ## Backend rules
 

@@ -10,6 +10,20 @@ Agent Board uses TDD for backend, persistence, runtime orchestration, contracts 
 
 Bug fixes begin with a regression test.
 
+## Coverage gate
+
+Test coverage is a completion and review gate for executable production code.
+
+- **85% is the hard minimum** for the affected app/module.
+- **90%+ is the normal target**. Agents should keep adding meaningful behavior and error-path coverage when reasonably achievable rather than treating 85% as the goal.
+- Work below 85% coverage is not complete, review-ready, or merge-ready.
+- Coverage must be measured by the language/framework coverage tooling for the affected code and reported with the verification results.
+- Agents and reviewers must inspect the measured total for every affected executable app/module and enforce the 85% minimum even when CI does not yet provide a numeric coverage check.
+- Do not game the number with trivial assertions, duplicated tests, or broad exclusions. Generated code, third-party code, and pure entrypoint wiring may be excluded only when the exclusion is explicit, narrow, and justified.
+- The percentage is not a substitute for required regression, Project-isolation, persistence, concurrency, integration, failure-path, or security tests. Critical behavior still needs direct tests even when the numeric threshold is satisfied.
+
+When a change spans multiple independently testable apps/modules, each affected executable app/module must satisfy the 85% minimum independently; a high-coverage component must not hide a low-coverage one.
+
 ## Backend testing
 
 The production backend is Go under `apps/server`.
@@ -35,14 +49,25 @@ Required concerns include:
 
 ```bash
 cd apps/server
-go test ./...
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
 go vet ./...
 go build ./...
 ```
 
-Runner changes also run the equivalent Go test/vet/build commands under `apps/agent-runner` once that package exists.
+Confirm the reported total coverage is at least 85% before completion; 90%+ remains the normal target.
 
-Use targeted package/test invocations during Red/Green iteration, then run broader relevant suites before completion.
+Runner changes run the equivalent commands under `apps/agent-runner` once that package exists:
+
+```bash
+cd apps/agent-runner
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+go vet ./...
+go build ./...
+```
+
+Use targeted package/test invocations during Red/Green iteration, then run broader relevant suites before completion. Before completion, measure and report coverage for every affected Go module and confirm the 85% gate.
 
 Docker integration tests should be explicit/gated where they require a live Docker daemon.
 
@@ -71,13 +96,13 @@ Prefer behavior-focused Vue tests over implementation-detail snapshots. For inte
 Run as applicable from repository root:
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm typecheck
-pnpm test
+pnpm test:coverage
 pnpm build
 ```
 
-If a dedicated frontend lint/theme/accessibility check exists, run it when relevant. Frontend policy follows `frontend-implementation.md` and `frontend-theme.md`.
+`pnpm test:coverage` is the canonical frontend coverage command. It runs Vitest with the V8 coverage provider and the thresholds configured in `apps/web/vitest.config.ts`: at least 85% for statements, branches, functions, and lines, with 90%+ as the normal target. CI must run this command for the Web job. Report the measured result with verification. If a dedicated frontend lint/theme/accessibility check exists, run it when relevant. Frontend policy follows `frontend-implementation.md` and `frontend-theme.md`.
 
 ## API/contracts
 
@@ -203,6 +228,8 @@ A change is not complete until:
 
 - behavior was driven through Red/Green/Refactor where automatable
 - meaningful regression/error/isolation/security cases are covered
+- affected executable apps/modules satisfy the **85% minimum coverage gate**, with **90%+ targeted**
+- measured coverage is reported with verification results
 - targeted tests pass
 - relevant broader Go/frontend suites pass
 - Go vet/build pass when backend or runner changed
@@ -210,7 +237,7 @@ A change is not complete until:
 - schema applies cleanly to a fresh database when database structure changed
 - Docker/integration suites pass when the change affects those boundaries
 
-PR descriptions should state which tests were written first and which verification commands were run.
+PR descriptions should state which tests were written first, which verification commands were run, and the measured coverage for affected executable code.
 
 ## v0.1 end-to-end gate
 
@@ -230,4 +257,4 @@ Local Project repository
  -> Review-ready result
 ```
 
-Green unit tests alone are not proof that the v0.1 flow is complete.
+Green unit tests or a passing numeric coverage threshold alone are not proof that the v0.1 flow is complete.

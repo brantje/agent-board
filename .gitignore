@@ -1,0 +1,14 @@
+node_modules/
+.pnpm-store/
+.nuxt/
+.output/
+coverage/
+dist/
+bin/
+*.test
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/

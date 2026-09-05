@@ -14,6 +14,15 @@ For every meaningful behavior change, follow **red → green → refactor**:
 3. Implement the minimum production change needed to make it pass.
 4. Refactor only while the relevant tests remain green.
 
+Coverage is a completion gate, not a reporting metric:
+
+- executable production code must maintain at least **85% test coverage** in the affected app/module
+- **90%+ is the normal target**; agents should prefer adding meaningful behavior/error-path coverage over stopping at the minimum
+- work must not be marked complete, review-ready, or merge-ready while measured coverage is below 85%
+- agents and reviewers must run the configured language/framework coverage tooling for each affected executable app/module, inspect the measured total, and report it with verification results even when CI does not yet provide a numeric coverage check
+- do not game the threshold with trivial assertions or broad coverage exclusions; generated code, third-party code, and pure entrypoint wiring may be excluded only when the exclusion is explicit and justified
+- numeric coverage never replaces required regression, isolation, concurrency, persistence, integration, or security tests
+
 Additional requirements:
 
 - Bug fixes start with a regression test.
@@ -24,7 +33,7 @@ Additional requirements:
 - Frontend tests focus on user-visible behavior, interaction state, validation, and composable logic rather than brittle internal markup details.
 - Runtime Provider behavior is driven by provider contract tests; destructive Docker integration is isolated from ordinary unit tests.
 - Do not backfill tests after a large implementation and call that TDD.
-- Before considering work complete, run targeted tests, the relevant broader suite, and type checking.
-- PR descriptions should state which tests were written first and the commands used to verify the work.
+- Before considering work complete, run targeted tests, the relevant broader suite, measured coverage, and type checking.
+- PR descriptions should state which tests were written first, the commands used to verify the work, and the measured coverage for affected code.
 
 Tests are part of the design process and definition of done, not an optional final step.

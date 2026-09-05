@@ -1,0 +1,6 @@
+-- Agent Board v0.1 bootstrap schema placeholder.
+--
+-- Issue #5 owns the canonical pre-release schema and persistence layer.
+-- Keeping this file valid but intentionally empty lets fresh Compose databases
+-- initialize through the documented schema path without inventing domain state
+-- in the bootstrap issue.
