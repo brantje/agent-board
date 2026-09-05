@@ -153,13 +153,16 @@ func assertDockerPolicy(t *testing.T, ctx context.Context, rt *Runtime, handle r
 	if container.HostConfig == nil || container.Config == nil {
 		t.Fatalf("incomplete Docker inspection: %+v", container)
 	}
+	if container.Config.Image != spec.Image {
+		t.Fatalf("runtime image=%q want=%q", container.Config.Image, spec.Image)
+	}
 	if container.HostConfig.NanoCPUs != 500_000_000 || container.HostConfig.Memory != 64<<20 || container.HostConfig.PidsLimit == nil || *container.HostConfig.PidsLimit != 64 {
 		t.Fatalf("resource policy not enforced: %+v", container.HostConfig.Resources)
 	}
 	if !container.HostConfig.NetworkMode.IsNone() || !container.Config.NetworkDisabled {
 		t.Fatalf("network policy not enforced: mode=%q disabled=%v", container.HostConfig.NetworkMode, container.Config.NetworkDisabled)
 	}
-	if container.HostConfig.Privileged || container.HostConfig.PublishAllPorts || len(container.HostConfig.Resources.Devices) != 0 || len(container.HostConfig.Resources.DeviceRequests) != 0 {
+	if container.HostConfig.Privileged || container.HostConfig.PublishAllPorts || len(container.HostConfig.CapAdd) != 0 || len(container.HostConfig.Devices) != 0 || len(container.HostConfig.DeviceRequests) != 0 {
 		t.Fatalf("unsafe Docker privileges: %+v", container.HostConfig)
 	}
 	if len(container.Mounts) != 1 || container.Mounts[0].Source != spec.Workspace.Source || container.Mounts[0].Destination != runtimepkg.WorkspaceTarget || !container.Mounts[0].RW {
