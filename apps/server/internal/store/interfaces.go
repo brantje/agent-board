@@ -9,6 +9,7 @@ import (
 
 var (
 	ErrNotFound        = errors.New("store: not found")
+	ErrConflict        = errors.New("store: conflict")
 	ErrInvalidArgument = errors.New("store: invalid argument")
 )
 
