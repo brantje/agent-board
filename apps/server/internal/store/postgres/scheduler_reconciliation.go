@@ -32,6 +32,16 @@ func (s *Store) claimExpiredJobForReconciliation(ctx context.Context, ownerID st
 		return nil, err
 	}
 
+	if run.Status == "QUEUED" && (agentID == "" || modelProfileID == "") {
+		if err := resetInvalidQueuedClaim(ctx, tx, job, oldLease); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
 	lease, err := scanSchedulerLease(tx.QueryRow(ctx, `
 		UPDATE scheduler_leases
 		SET owner_id=$2,
@@ -61,7 +71,7 @@ func lockExpiredReconciliationCandidate(ctx context.Context, tx pgx.Tx) (store.S
 	var job store.SchedulerJob
 	var run store.Run
 	var lease store.SchedulerLease
-	var agentID, modelProfileID string
+	var agentID, modelProfileID *string
 	err := tx.QueryRow(ctx, `
 		SELECT
 			job.id::text, job.project_id::text, job.run_id::text, job.kind, job.state, job.wait_reason, job.idempotency_key, job.available_at, job.created_at, job.updated_at,
@@ -71,12 +81,18 @@ func lockExpiredReconciliationCandidate(ctx context.Context, tx pgx.Tx) (store.S
 		FROM scheduler_leases AS lease
 		JOIN scheduler_jobs AS job ON job.id=lease.job_id
 		JOIN runs AS run ON run.project_id=job.project_id AND run.id=job.run_id
-		JOIN agents AS agent ON agent.id=run.agent_id
-		JOIN executor_profiles AS executor ON executor.id=agent.executor_profile_id
-		JOIN model_profiles AS model ON model.id=executor.model_profile_id
+		LEFT JOIN agents AS agent
+		  ON agent.id=run.agent_id
+		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
+		LEFT JOIN executor_profiles AS executor
+		  ON executor.id=agent.executor_profile_id
+		 AND (executor.project_id IS NULL OR executor.project_id=run.project_id)
+		LEFT JOIN model_profiles AS model
+		  ON model.id=executor.model_profile_id
+		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
 		WHERE job.state='CLAIMED' AND lease.expires_at <= now()
 		ORDER BY lease.expires_at, job.created_at, job.id
-		FOR UPDATE OF lease, job SKIP LOCKED
+		FOR UPDATE OF lease, job, run SKIP LOCKED
 		LIMIT 1
 	`).Scan(
 		&job.ID, &job.ProjectID, &job.RunID, &job.Kind, &job.State, &job.WaitReason, &job.IdempotencyKey, &job.AvailableAt, &job.CreatedAt, &job.UpdatedAt,
@@ -87,7 +103,43 @@ func lockExpiredReconciliationCandidate(ctx context.Context, tx pgx.Tx) (store.S
 	if err != nil {
 		return store.SchedulerJob{}, store.Run{}, "", "", store.SchedulerLease{}, notFound(err)
 	}
-	return job, run, agentID, modelProfileID, lease, nil
+	var resolvedAgentID, resolvedModelProfileID string
+	if agentID != nil {
+		resolvedAgentID = *agentID
+	}
+	if modelProfileID != nil {
+		resolvedModelProfileID = *modelProfileID
+	}
+	return job, run, resolvedAgentID, resolvedModelProfileID, lease, nil
+}
+
+func resetInvalidQueuedClaim(ctx context.Context, tx pgx.Tx, job store.SchedulerJob, lease store.SchedulerLease) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE scheduler_jobs
+		SET state='QUEUED', wait_reason=$2,
+		    available_at=now() + ($3::bigint * interval '1 microsecond'), updated_at=now()
+		WHERE id=$1 AND state='CLAIMED'
+	`, job.ID, schedulerConfigurationWaitReason, schedulerConfigurationBackoff.Microseconds()); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE runs
+		SET queue_reason=$3, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND status='QUEUED'
+	`, job.ProjectID, job.RunID, schedulerConfigurationWaitReason); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, job.ProjectID, job.ID); err != nil {
+		return err
+	}
+	command, err := tx.Exec(ctx, `DELETE FROM scheduler_leases WHERE job_id=$1 AND lease_token=$2`, job.ID, lease.LeaseToken)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() != 1 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 func (s *Store) resolveReconciliation(ctx context.Context, input store.SchedulerReconciliation) (store.Run, error) {
