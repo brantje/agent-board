@@ -16,7 +16,7 @@ func TestStaleWebSocketIsReclaimedWithoutCancelingExecution(t *testing.T) {
 	defer httpServer.Close()
 
 	conn := dialAndHandshake(t, httpServer.URL, 1)
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	send(t, conn, protocol.TypeStart, "liveness", protocol.StartRequest{Command: []string{"sh", "-c", "sleep 30"}})
 	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
 		t.Fatalf("unexpected start response %#v", msg)
@@ -35,7 +35,7 @@ func TestStaleWebSocketIsReclaimedWithoutCancelingExecution(t *testing.T) {
 	}
 
 	reconnected := dialAndHandshakeExpectHealth(t, httpServer.URL, 1, "liveness")
-	defer reconnected.Close()
+	defer func() { _ = reconnected.Close() }()
 	send(t, reconnected, protocol.TypeKill, "liveness", nil)
 	waitFor(t, 2*time.Second, func() bool { return runner.manager.ActiveCount() == 0 })
 }
