@@ -74,23 +74,33 @@ func start(id, workspaceRoot string, request Request, redactionValues []string) 
 	if err != nil {
 		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	stdout, stdoutChild, err := os.Pipe()
 	if err != nil {
 		_ = stdin.Close()
 		return nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrChild, err := os.Pipe()
 	if err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
+		_ = stdoutChild.Close()
 		return nil, fmt.Errorf("create stderr pipe: %w", err)
 	}
+	cmd.Stdout = stdoutChild
+	cmd.Stderr = stderrChild
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
 		_ = stdout.Close()
+		_ = stdoutChild.Close()
 		_ = stderr.Close()
+		_ = stderrChild.Close()
 		return nil, fmt.Errorf("start process: %w", err)
 	}
+	// The child received duplicated descriptors during Start. The runner must
+	// close its write-side copies so EOF reflects the process tree, not the
+	// runner itself keeping the pipes open.
+	_ = stdoutChild.Close()
+	_ = stderrChild.Close()
 
 	stdoutBuffer := newStreamBuffer()
 	stderrBuffer := newStreamBuffer()
@@ -144,8 +154,17 @@ func (s *Session) supervise(stdout, stderr io.ReadCloser, stdoutBuffer, stderrBu
 	streams.Add(2)
 	go copyProcessStream(&streams, stdoutBuffer, stdout, redactionValues)
 	go copyProcessStream(&streams, stderrBuffer, stderr, redactionValues)
+
+	result, processErr := s.waitAndCleanupProcessTree()
+	if processErr != nil {
+		// A cleanup failure can leave a descendant holding an inherited stream
+		// descriptor. Close the runner-owned read sides so completion still
+		// reports the process error instead of hanging forever on stream EOF.
+		_ = stdout.Close()
+		_ = stderr.Close()
+	}
 	streams.Wait()
-	s.reap()
+	s.complete(result, processErr)
 }
 
 func copyProcessStream(group *sync.WaitGroup, destination *streamBuffer, source io.ReadCloser, redactionValues []string) {
@@ -155,9 +174,10 @@ func copyProcessStream(group *sync.WaitGroup, destination *streamBuffer, source 
 	destination.CloseWithError(err)
 }
 
-func (s *Session) reap() {
+func (s *Session) waitAndCleanupProcessTree() (Result, error) {
+	pid := s.cmd.Process.Pid
 	err := s.cmd.Wait()
-	cleanupErr := cleanupProcessTree(s.cmd.Process.Pid)
+	cleanupErr := cleanupProcessTree(pid)
 	result := Result{}
 	if state := s.cmd.ProcessState; state != nil {
 		result.ExitCode = state.ExitCode()
@@ -171,11 +191,13 @@ func (s *Session) reap() {
 	if err != nil && !errors.As(err, &exitErr) {
 		waitErr = fmt.Errorf("wait for process: %w", err)
 	}
-	waitErr = errors.Join(waitErr, cleanupErr)
+	return result, errors.Join(waitErr, cleanupErr)
+}
 
+func (s *Session) complete(result Result, err error) {
 	s.mu.Lock()
 	s.result = result
-	s.err = waitErr
+	s.err = err
 	close(s.done)
 	s.mu.Unlock()
 }
