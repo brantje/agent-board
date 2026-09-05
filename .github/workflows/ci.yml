@@ -63,7 +63,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
-          cache: pnpm
       - name: Install
         run: pnpm install --no-frozen-lockfile
       - name: Typecheck
