@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -35,7 +36,22 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return false
+	}
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
+		return false
+	}
+	if trimmed[0] != '{' {
+		writeError(w, http.StatusBadRequest, "invalid_request", "request body must contain one JSON object")
+		return false
+	}
+
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
