@@ -101,6 +101,9 @@ func TestValidateTransition(t *testing.T) {
 		{StateProvisioning, StateRunning},
 		{StateRunning, StateProvisioning},
 		{StateDestroyed, StateStarting},
+		{State("UNKNOWN"), State("UNKNOWN")},
+		{StateRunning, State("UNKNOWN")},
+		{State("UNKNOWN"), StateRunning},
 	}
 	for _, transition := range invalid {
 		if err := ValidateTransition(transition[0], transition[1]); !errors.Is(err, ErrInvalidTransition) {
