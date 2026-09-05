@@ -12,9 +12,9 @@ type WorkspaceBootstrapLock interface {
 // filesystem materializer. It is intentionally separate from generic control-
 // plane persistence so normal API test doubles do not need filesystem concerns.
 type WorkspaceBootstrapStore interface {
-	GetWorkspaceByIssue(context.Context, string, string) (Workspace, error)
-	AcquireWorkspaceBootstrapLock(context.Context, string) (WorkspaceBootstrapLock, error)
-	MarkWorkspaceBootstrapPending(context.Context, string, string, string, string, string, string, string) (Workspace, error)
-	MarkWorkspaceBootstrapReady(context.Context, string, string, string, string, string, string, string, string) (Workspace, error)
-	MarkWorkspaceBootstrapFailed(context.Context, string, string, string) (Workspace, error)
+	GetWorkspaceByIssue(ctx context.Context, projectID, issueID string) (Workspace, error)
+	AcquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string) (WorkspaceBootstrapLock, error)
+	MarkWorkspaceBootstrapPending(ctx context.Context, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, workingBranch string) (Workspace, error)
+	MarkWorkspaceBootstrapReady(ctx context.Context, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, baseRevision, workingBranch string) (Workspace, error)
+	MarkWorkspaceBootstrapFailed(ctx context.Context, projectID, issueID, workspaceID string) (Workspace, error)
 }

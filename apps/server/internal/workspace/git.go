@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 )
+
+const defaultGitCommandTimeout = 5 * time.Minute
 
 type Git interface {
 	ValidateBranch(context.Context, string) error
@@ -16,14 +20,22 @@ type Git interface {
 	HeadRevision(context.Context, string) (string, error)
 	CurrentBranch(context.Context, string) (string, error)
 	OriginURL(context.Context, string) (string, error)
-	IsRepository(context.Context, string) bool
+	IsRepository(context.Context, string) (bool, error)
 }
 
 type GitCLI struct {
-	binary string
+	binary         string
+	commandTimeout time.Duration
 }
 
 func NewGitCLI(binary string) (*GitCLI, error) {
+	return NewGitCLIWithTimeout(binary, defaultGitCommandTimeout)
+}
+
+func NewGitCLIWithTimeout(binary string, commandTimeout time.Duration) (*GitCLI, error) {
+	if commandTimeout <= 0 {
+		return nil, fmt.Errorf("git command timeout must be positive")
+	}
 	if strings.TrimSpace(binary) == "" {
 		binary = "git"
 	}
@@ -31,7 +43,7 @@ func NewGitCLI(binary string) (*GitCLI, error) {
 	if err != nil {
 		return nil, fmt.Errorf("find git executable: %w", err)
 	}
-	return &GitCLI{binary: resolved}, nil
+	return &GitCLI{binary: resolved, commandTimeout: commandTimeout}, nil
 }
 
 func (g *GitCLI) ValidateBranch(ctx context.Context, branch string) error {
@@ -65,12 +77,32 @@ func (g *GitCLI) OriginURL(ctx context.Context, repositoryPath string) (string, 
 	return g.run(ctx, "-C", repositoryPath, "remote", "get-url", "origin")
 }
 
-func (g *GitCLI) IsRepository(ctx context.Context, repositoryPath string) bool {
-	_, err := g.run(ctx, "-C", repositoryPath, "rev-parse", "--show-toplevel")
-	return err == nil
+func (g *GitCLI) IsRepository(ctx context.Context, repositoryPath string) (bool, error) {
+	if _, err := os.Lstat(filepath.Join(repositoryPath, ".git")); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("inspect git metadata: %w", err)
+	}
+	toplevel, err := g.run(ctx, "-C", repositoryPath, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return false, err
+	}
+	requested, err := filepath.EvalSymlinks(repositoryPath)
+	if err != nil {
+		return false, fmt.Errorf("canonicalize repository path: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(toplevel)
+	if err != nil {
+		return false, fmt.Errorf("canonicalize git top-level: %w", err)
+	}
+	return filepath.Clean(resolved) == filepath.Clean(requested), nil
 }
 
 func (g *GitCLI) run(ctx context.Context, args ...string) (string, error) {
+	commandCtx, cancel := context.WithTimeout(ctx, g.commandTimeout)
+	defer cancel()
+
 	hardened := []string{
 		"-c", "core.hooksPath=/dev/null",
 		"-c", "core.fsmonitor=false",
@@ -79,19 +111,25 @@ func (g *GitCLI) run(ctx context.Context, args ...string) (string, error) {
 		"-c", "protocol.file.allow=user",
 	}
 	commandArgs := append(hardened, args...)
-	cmd := exec.CommandContext(ctx, g.binary, commandArgs...)
+	cmd := exec.CommandContext(commandCtx, g.binary, commandArgs...)
 	cmd.Env = hardenedGitEnv()
-	var output bytes.Buffer
-	cmd.Stdout = &output
-	cmd.Stderr = &output
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		message := strings.TrimSpace(output.String())
+		if contextErr := commandCtx.Err(); contextErr != nil {
+			return "", fmt.Errorf("git %s: %w", commandName(args), contextErr)
+		}
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = strings.TrimSpace(stdout.String())
+		}
 		if message == "" {
 			return "", fmt.Errorf("git %s: %w", commandName(args), err)
 		}
 		return "", fmt.Errorf("git %s: %w: %s", commandName(args), err, message)
 	}
-	return strings.TrimSpace(output.String()), nil
+	return strings.TrimSpace(stdout.String()), nil
 }
 
 func commandName(args []string) string {

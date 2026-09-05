@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -16,6 +17,8 @@ var (
 	ErrInvalidRoot     = errors.New("workspace: invalid workspace root")
 	ErrBootstrapFailed = errors.New("workspace: bootstrap failed")
 )
+
+const failedTransitionTimeout = 5 * time.Second
 
 type RepositoryResolver interface {
 	Resolve(string) (string, error)
@@ -54,6 +57,9 @@ func (m *Materializer) Ensure(ctx context.Context, project store.Project, issue 
 		return store.Workspace{}, err
 	}
 	if current.BootstrapStatus == "READY" {
+		if err := m.validateReadyCheckout(ctx, current); err != nil {
+			return store.Workspace{}, err
+		}
 		return current, nil
 	}
 
@@ -76,6 +82,9 @@ func (m *Materializer) Ensure(ctx context.Context, project store.Project, issue 
 		return store.Workspace{}, err
 	}
 	if current.BootstrapStatus == "READY" {
+		if err := m.validateReadyCheckout(ctx, current); err != nil {
+			return store.Workspace{}, err
+		}
 		return current, nil
 	}
 
@@ -151,26 +160,63 @@ func (m *Materializer) Ensure(ctx context.Context, project store.Project, issue 
 	return ready, nil
 }
 
+func (m *Materializer) validateReadyCheckout(ctx context.Context, current store.Workspace) error {
+	info, err := os.Stat(current.Path)
+	if err != nil {
+		return fmt.Errorf("%w: inspect ready workspace path: %w", ErrBootstrapFailed, err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%w: ready workspace path is not a directory", ErrBootstrapFailed)
+	}
+	isRepository, err := m.git.IsRepository(ctx, current.Path)
+	if err != nil {
+		return fmt.Errorf("%w: inspect ready workspace repository: %w", ErrBootstrapFailed, err)
+	}
+	if !isRepository {
+		return fmt.Errorf("%w: ready workspace path is not a Git repository", ErrBootstrapFailed)
+	}
+	return nil
+}
+
 func (m *Materializer) recoverPublished(ctx context.Context, current store.Workspace, finalPath, source, baseBranch string) (store.Workspace, bool, error) {
 	info, err := os.Stat(finalPath)
-	if err != nil || !info.IsDir() || !m.git.IsRepository(ctx, finalPath) {
+	if os.IsNotExist(err) {
+		return store.Workspace{}, false, nil
+	}
+	if err != nil {
+		return store.Workspace{}, false, fmt.Errorf("inspect published workspace: %w", err)
+	}
+	if !info.IsDir() {
+		return store.Workspace{}, false, nil
+	}
+	isRepository, err := m.git.IsRepository(ctx, finalPath)
+	if err != nil {
+		return store.Workspace{}, false, fmt.Errorf("inspect published workspace repository: %w", err)
+	}
+	if !isRepository {
 		return store.Workspace{}, false, nil
 	}
 	branch, err := m.git.CurrentBranch(ctx, finalPath)
-	if err != nil || branch != current.WorkingBranch {
+	if err != nil {
+		return store.Workspace{}, false, fmt.Errorf("inspect published workspace branch: %w", err)
+	}
+	if branch != current.WorkingBranch {
 		return store.Workspace{}, false, nil
 	}
 	origin, err := m.git.OriginURL(ctx, finalPath)
 	if err != nil {
-		return store.Workspace{}, false, nil
+		return store.Workspace{}, false, fmt.Errorf("inspect published workspace origin: %w", err)
 	}
 	canonicalOrigin, err := filepath.EvalSymlinks(origin)
-	if err != nil || canonicalOrigin != source {
+	if err != nil {
+		return store.Workspace{}, false, fmt.Errorf("canonicalize published workspace origin: %w", err)
+	}
+	if canonicalOrigin != source {
 		return store.Workspace{}, false, nil
 	}
 	baseRevision, err := m.git.HeadRevision(ctx, finalPath)
 	if err != nil {
-		return store.Workspace{}, false, nil
+		return store.Workspace{}, false, fmt.Errorf("inspect published workspace revision: %w", err)
 	}
 	ready, err := m.store.MarkWorkspaceBootstrapReady(ctx, current.ProjectID, current.IssueID, current.ID, finalPath, source, baseBranch, baseRevision, current.WorkingBranch)
 	if err != nil {
@@ -181,7 +227,12 @@ func (m *Materializer) recoverPublished(ctx context.Context, current store.Works
 
 func (m *Materializer) fail(ctx context.Context, current store.Workspace, cause error) (store.Workspace, error) {
 	if current.ID != "" && current.ProjectID != "" && current.IssueID != "" {
-		_, _ = m.store.MarkWorkspaceBootstrapFailed(ctx, current.ProjectID, current.IssueID, current.ID)
+		failureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), failedTransitionTimeout)
+		_, _ = m.store.MarkWorkspaceBootstrapFailed(failureCtx, current.ProjectID, current.IssueID, current.ID)
+		cancel()
+	}
+	if errors.Is(cause, ErrInvalidRoot) || errors.Is(cause, ErrInvalidMetadata) {
+		return store.Workspace{}, cause
 	}
 	return store.Workspace{}, fmt.Errorf("%w: %w", ErrBootstrapFailed, cause)
 }

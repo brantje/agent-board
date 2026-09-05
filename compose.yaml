@@ -45,7 +45,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-agent_board}
       POSTGRES_USER: ${POSTGRES_USER:-agent_board}
       AGENT_BOARD_WORKSPACE_ROOT: ${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}
-      AGENT_BOARD_REPOSITORY_ROOTS: ${AGENT_BOARD_REPOSITORY_ROOTS:-/repositories}
+      AGENT_BOARD_REPOSITORY_ROOTS: ${AGENT_BOARD_REPOSITORY_ROOTS:-${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}}
     entrypoint:
       - /bin/sh
       - -ec
