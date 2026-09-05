@@ -1,0 +1,58 @@
+openapi: 3.1.0
+info:
+  title: Agent Board Control Plane API
+  version: 0.1.0
+  description: Intentional public API for Agent Board v0.1. Database row shapes are not API contracts.
+servers:
+- url: /
+paths:
+  /api/projects:
+    $ref: ./paths/projects.yaml#/path1
+  /api/projects/{projectID}:
+    $ref: ./paths/projects.yaml#/path2
+  /api/providers:
+    $ref: ./paths/providers.yaml#/path1
+  /api/providers/{resourceID}:
+    $ref: ./paths/providers.yaml#/path2
+  /api/model-profiles:
+    $ref: ./paths/model-profiles.yaml#/path1
+  /api/model-profiles/{resourceID}:
+    $ref: ./paths/model-profiles.yaml#/path2
+  /api/runtimes:
+    $ref: ./paths/runtimes.yaml#/path1
+  /api/runtimes/{resourceID}:
+    $ref: ./paths/runtimes.yaml#/path2
+  /api/executor-profiles:
+    $ref: ./paths/executor-profiles.yaml#/path1
+  /api/executor-profiles/{resourceID}:
+    $ref: ./paths/executor-profiles.yaml#/path2
+  /api/agents:
+    $ref: ./paths/agents.yaml#/path1
+  /api/agents/{resourceID}:
+    $ref: ./paths/agents.yaml#/path2
+  /api/projects/{projectID}/model-profiles:
+    $ref: ./paths/model-profiles.yaml#/path3
+  /api/projects/{projectID}/model-profiles/{resourceID}:
+    $ref: ./paths/model-profiles.yaml#/path4
+  /api/projects/{projectID}/runtimes:
+    $ref: ./paths/runtimes.yaml#/path3
+  /api/projects/{projectID}/runtimes/{resourceID}:
+    $ref: ./paths/runtimes.yaml#/path4
+  /api/projects/{projectID}/executor-profiles:
+    $ref: ./paths/executor-profiles.yaml#/path3
+  /api/projects/{projectID}/executor-profiles/{resourceID}:
+    $ref: ./paths/executor-profiles.yaml#/path4
+  /api/projects/{projectID}/agents:
+    $ref: ./paths/agents.yaml#/path3
+  /api/projects/{projectID}/agents/{resourceID}:
+    $ref: ./paths/agents.yaml#/path4
+  /api/projects/{projectID}/issues:
+    $ref: ./paths/issues-runs.yaml#/path1
+  /api/projects/{projectID}/issues/{issueID}:
+    $ref: ./paths/issues-runs.yaml#/path2
+  /api/projects/{projectID}/issues/{issueID}/assignment:
+    $ref: ./paths/issues-runs.yaml#/path3
+  /api/projects/{projectID}/runs:
+    $ref: ./paths/issues-runs.yaml#/path4
+  /api/projects/{projectID}/runs/{runID}:
+    $ref: ./paths/issues-runs.yaml#/path5

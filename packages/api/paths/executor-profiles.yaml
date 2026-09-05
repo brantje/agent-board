@@ -1,0 +1,77 @@
+path1:
+  get:
+    operationId: listExecutorProfiles
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ExecutorProfileList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createExecutorProfile
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ExecutorProfileInput
+    responses:
+      '201':
+        $ref: ../components/api-components.yaml#/responses/ExecutorProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path2:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getExecutorProfile
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ExecutorProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  put:
+    operationId: updateExecutorProfile
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ExecutorProfileInput
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ExecutorProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path3:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listProjectExecutorProfiles
+    description: Returns Project-owned resources plus visible shared resources.
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ExecutorProfileList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createProjectExecutorProfile
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ExecutorProfileInput
+    responses:
+      '201':
+        $ref: ../components/api-components.yaml#/responses/ExecutorProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path4:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getProjectExecutorProfile
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ExecutorProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  put:
+    operationId: updateProjectExecutorProfile
+    description: Mutates Project-owned resources only; shared resources are read-only in Project scope.
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ExecutorProfileInput
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ExecutorProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

@@ -1,0 +1,77 @@
+path1:
+  get:
+    operationId: listModelProfiles
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ModelProfileList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createModelProfile
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ModelProfileInput
+    responses:
+      '201':
+        $ref: ../components/api-components.yaml#/responses/ModelProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path2:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getModelProfile
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ModelProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  put:
+    operationId: updateModelProfile
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ModelProfileInput
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ModelProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path3:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listProjectModelProfiles
+    description: Returns Project-owned resources plus visible shared resources.
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ModelProfileList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createProjectModelProfile
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ModelProfileInput
+    responses:
+      '201':
+        $ref: ../components/api-components.yaml#/responses/ModelProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path4:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getProjectModelProfile
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ModelProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  put:
+    operationId: updateProjectModelProfile
+    description: Mutates Project-owned resources only; shared resources are read-only in Project scope.
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ModelProfileInput
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ModelProfile
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
