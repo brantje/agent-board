@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sort"
 	"sync"
 	"testing"
@@ -281,8 +282,19 @@ func TestEvidencePersistenceIsImmutableOrderedAndScoped(t *testing.T) {
 	if err := s.PutRunProvenance(ctx, f.project.ID, f.run.ID, snapshot); err != nil {
 		t.Fatalf("put provenance: %v", err)
 	}
-	if got, err := s.GetRunProvenance(ctx, f.project.ID, f.run.ID); err != nil || string(got) != string(snapshot) {
-		t.Fatalf("get provenance=%s err=%v", got, err)
+	got, err := s.GetRunProvenance(ctx, f.project.ID, f.run.ID)
+	if err != nil {
+		t.Fatalf("get provenance: %v", err)
+	}
+	var gotSnapshot, wantSnapshot any
+	if err := json.Unmarshal(got, &gotSnapshot); err != nil {
+		t.Fatalf("decode stored provenance: %v", err)
+	}
+	if err := json.Unmarshal(snapshot, &wantSnapshot); err != nil {
+		t.Fatalf("decode expected provenance: %v", err)
+	}
+	if !reflect.DeepEqual(gotSnapshot, wantSnapshot) {
+		t.Fatalf("get provenance=%s want=%s", got, snapshot)
 	}
 	if err := s.PutRunProvenance(ctx, f.project.ID, f.run.ID, json.RawMessage(`{"changed":true}`)); err == nil {
 		t.Fatal("expected immutable provenance")
@@ -332,14 +344,14 @@ func TestEvidencePersistenceIsImmutableOrderedAndScoped(t *testing.T) {
 	for err := range errs {
 		t.Fatalf("append event: %v", err)
 	}
-	got := make([]int, 0, n)
+	gotSeqs := make([]int, 0, n)
 	for seq := range seqs {
-		got = append(got, int(seq))
+		gotSeqs = append(gotSeqs, int(seq))
 	}
-	sort.Ints(got)
-	for i, seq := range got {
+	sort.Ints(gotSeqs)
+	for i, seq := range gotSeqs {
 		if seq != i+1 {
-			t.Fatalf("sequences=%v", got)
+			t.Fatalf("sequences=%v", gotSeqs)
 		}
 	}
 	events, err := s.ListRunEvents(ctx, f.project.ID, f.run.ID, 0, 0)
