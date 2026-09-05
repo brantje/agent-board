@@ -52,7 +52,11 @@ func TestDockerRuntimeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restart New() error=%v", err)
 	}
-	defer restarted.Close()
+	defer func() {
+		if err := restarted.Close(); err != nil {
+			t.Errorf("restart Close() error=%v", err)
+		}
+	}()
 	recovered, inspection, err := restarted.Recover(ctx, spec)
 	if err != nil || recovered.ExternalID != handle.ExternalID || inspection.State != runtimepkg.StateRunning {
 		t.Fatalf("Recover() handle=%+v inspection=%+v err=%v", recovered, inspection, err)
