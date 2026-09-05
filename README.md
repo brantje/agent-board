@@ -19,6 +19,8 @@ Local Project repository
   -> durable scheduler
   -> durable Issue Workspace
   -> Runtime Instance
+  -> agent-runner
+  -> Execution Session
   -> coding Engine
   -> commands / files / tests / Artifacts
   -> Question / resume when needed
@@ -52,6 +54,8 @@ The v0.1 self-hosted deployment uses the host Docker daemon for Runtime Instance
 
 Runtime Workspaces must be visible to the host Docker daemon at the same absolute path used by the server. The default Compose setup uses `/var/lib/agent-board/workspaces`.
 
+Official v0.1 Runtime images include `agent-runner`, which communicates with the server over a versioned WebSocket protocol and executes Engine process sessions inside the Runtime Instance.
+
 ### Create a runnable Agent
 
 1. In **Settings**, create a **Provider** and **Model Profile**.
@@ -75,7 +79,7 @@ BACKLOG / TODO
 IN_PROGRESS + QUEUED Run
       |
       v
-scheduler -> Workspace -> Runtime -> Engine
+scheduler -> Workspace -> Runtime -> Runtime Instance -> agent-runner -> Engine
       |
       +--> success -----------------------> REVIEW
       |                                     |
@@ -107,7 +111,8 @@ scheduler -> Workspace -> Runtime -> Engine
 | **Runtime** | Reusable execution environment and complete execution policy. |
 | **Executor Profile** | Engine + Model Profile + Runtime. |
 | **Workspace** | Durable repository state owned by an Issue. |
-| **Runtime Instance** | Disposable compute materialized from Runtime. |
+| **Runtime Instance** | Disposable compute materialized from Runtime and bound to one Workspace. |
+| **Execution Session** | One runner-supervised process-tree execution. |
 | **Question** | Structured request for human input. |
 | **Decision** | Durable human/product outcome. |
 | **Event** | Append-only execution/audit history. |
@@ -138,22 +143,32 @@ Go backend (apps/server)
         Runtime Instance
              |
              v
+        agent-runner
+             |
+             v
+      Execution Session
+             |
+             v
            Engine
 ```
+
+Runtime Instance, runner, Execution Session and Run are separate identities. A Runtime Instance is bound to one Workspace for its lifetime; its runner may execute many sequential sessions against that Workspace.
 
 The browser never owns long-running execution. PostgreSQL is authoritative for durable state and scheduler ownership.
 
 ### Stack
 
 ```text
-Frontend        Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS + Nuxt UI v4
-Backend         Go
-HTTP            chi
-Database        PostgreSQL + pgvector
-Live updates    Server-Sent Events
-Runtime         Docker first
-API contracts   OpenAPI + intentional frontend types
-Blob storage    local filesystem first; S3-compatible later
+Frontend         Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS + Nuxt UI v4
+Backend          Go
+Agent runner     Go
+HTTP             chi
+Database         PostgreSQL + pgvector
+Live updates     Server-Sent Events
+Runtime          Docker first
+Runner transport WebSocket
+API contracts    OpenAPI + intentional frontend types
+Blob storage     local filesystem first; S3-compatible later
 ```
 
 Nuxt/Nitro is the web application layer, not a second Agent Board control plane. Durable product state, scheduling, execution and authorization remain Go-owned.
@@ -164,6 +179,7 @@ Nuxt/Nitro is the web application layer, not a second Agent Board control plane.
 agent-board/
 ├── apps/
 │   ├── server/
+│   ├── agent-runner/
 │   └── web/             # Nuxt application
 ├── packages/
 │   └── database/
@@ -179,8 +195,14 @@ agent-board/
 - scheduler claims are race-safe and restart-safe
 - Model Profile capacity and Agent concurrency are scheduler constraints
 - one durable Workspace is reused across Issue attempts
+- one Runtime Instance is bound to exactly one Workspace for its lifetime
+- runner, Runtime Instance, Execution Session and Run identities remain separate
+- a runner may execute many sequential sessions against its bound Workspace
+- v0.1 allows one active Execution Session per runner while the protocol remains capacity-extensible
 - Executor Profile selects Runtime directly
-- Engine processes execute inside the selected Runtime Instance
+- Engine adapters remain server-side
+- Engine processes execute inside the selected Runtime Instance through `agent-runner`
+- runner/server transport is versioned WebSocket
 - secrets are resolved only in trusted code and injected ephemerally
 - Events are persisted before live publication
 - large raw output and Artifacts use durable output storage
@@ -219,6 +241,15 @@ go vet ./...
 go build ./...
 ```
 
+Runner (once implemented):
+
+```bash
+cd apps/agent-runner
+go test ./...
+go vet ./...
+go build ./...
+```
+
 Frontend:
 
 ```bash
@@ -241,6 +272,8 @@ Read `AGENTS.md`, [`docs/testing.md`](./docs/testing.md), [`docs/frontend-implem
 - [`docs/execution-context.md`](./docs/execution-context.md) — resolved execution context and secrets
 - [`docs/execution-evidence.md`](./docs/execution-evidence.md) — provenance, logs, Artifacts and Review evidence
 - [`docs/runtime-contract.md`](./docs/runtime-contract.md) — Runtime boundary and security
+- [`docs/runtime-execution.md`](./docs/runtime-execution.md) — Engine execution through Runtime/runner sessions
+- [`docs/agent-runner.md`](./docs/agent-runner.md) — runner identity, WebSocket protocol, session lifecycle and same-Workspace reuse
 - [`docs/frontend-implementation.md`](./docs/frontend-implementation.md) — clean-room Nuxt/Nuxt UI implementation rules
 - [`docs/frontend-theme.md`](./docs/frontend-theme.md) — component and theme rules
 - [`docs/automations.md`](./docs/automations.md) — scheduled work and Agent-created Issues

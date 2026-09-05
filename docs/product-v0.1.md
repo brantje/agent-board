@@ -18,6 +18,8 @@ Local Project repository
   -> durable scheduler
   -> durable Issue Workspace
   -> Runtime Instance
+  -> agent-runner
+  -> Execution Session
   -> coding Engine
   -> commands / files / tests / Artifacts
   -> Question / resume when needed
@@ -38,6 +40,8 @@ Engine + Model Profile + Runtime -> Executor Profile
 Agent -> Executor Profile
 Issue -> assignee -> Run
 ```
+
+`agent-runner` and Execution Session are infrastructure concepts, not additional user configuration layers.
 
 Do not expose implementation layers unless they solve a concrete user problem.
 
@@ -149,6 +153,10 @@ Enabled state
 
 Runtime health/preflight distinguishes saved configuration from operational executability.
 
+For v0.1, official Runtime images contain `agent-runner`. A Runtime Instance is bound to one Issue Workspace for its lifetime and may remain alive for many sequential Execution Sessions against that same Workspace.
+
+Runtime Instance, runner, Execution Session and Run remain separate identities. v0.1 permits one active Execution Session per runner while keeping the versioned WebSocket runner protocol compatible with higher future capacity.
+
 ## Executor Profile
 
 ```text
@@ -226,6 +234,8 @@ Questions are answered from Issue detail. Inbox contains blocking Questions, Rev
 
 Any continuation required by a Question answer is durable before the answer command returns success.
 
+The runner owns no durable Question/resume state. Resume may reuse a healthy same-Workspace Runtime Instance or use a replacement Runtime Instance against the same durable Workspace.
+
 ## Runs
 
 Run detail is first-class and exposes persisted evidence:
@@ -239,6 +249,7 @@ Run detail is first-class and exposes persisted evidence:
 - complete changed-file evidence/diff
 - tests/checks
 - selected Runtime + Runtime Instance lifecycle
+- Execution Session/runner diagnostics where useful
 - raw logs when needed
 - Artifacts
 - failure/cancellation/blocking reason
@@ -265,7 +276,7 @@ Automatic merge/deploy is a separate, stronger permission and must not be implie
 
 ## Execution preflight
 
-The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Executor Profile, Engine, Model Profile/Provider credentials/health, direct Runtime health/policy and local Project repository prerequisites.
+The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Executor Profile, Engine, Model Profile/Provider credentials/health, direct Runtime health/policy, runner protocol compatibility/availability and local Project repository prerequisites.
 
 ## Explicitly after the v0.1 flow
 
@@ -277,6 +288,7 @@ The product distinguishes `configured` from `runnable`. Preflight evaluates Agen
 - Agent delegation
 - Squads
 - worker pools / warm / spot execution
+- higher concurrent Execution Session capacity where safe/useful
 - users, groups, permissions and broader multi-user administration
 - additional provider/account integrations
 - Plugins and plugin ecosystem work last
@@ -286,13 +298,14 @@ The product distinguishes `configured` from `runnable`. Preflight evaluates Agen
 1. direct Executor Profile -> Runtime configuration
 2. durable async scheduler/restart-safe continuation
 3. local repository-backed Issue Workspaces
-4. Runtime process/session execution and Docker operability
-5. canonical execution context + secure Provider credentials
-6. immutable provenance + durable raw logs/Artifacts
-7. complete Run/Review evidence
-8. operational preflight/runtime-policy truthfulness
-9. first real coding Engine (OpenCode first)
-10. prove local repository -> Run -> Runtime -> changes -> Review end to end
-11. only then broaden repository integrations and the roadmap
+4. Runtime Instance lifecycle with same-Workspace reuse
+5. `agent-runner` binary + versioned WebSocket Execution Session transport
+6. canonical execution context + secure Provider credentials
+7. immutable provenance + durable raw logs/Artifacts
+8. complete Run/Review evidence
+9. operational preflight/runtime-policy truthfulness
+10. first real coding Engine (OpenCode first)
+11. prove local repository -> Run -> Runtime -> runner -> Engine -> changes -> Review end to end
+12. only then broaden repository integrations and the roadmap
 
 Frontend implementation uses Nuxt 4 + Nuxt UI v4 and remains within this v0.1 product scope. Plugin work is deliberately last, including after future users/groups/permissions work unless explicitly reprioritized.
