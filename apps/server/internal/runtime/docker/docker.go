@@ -45,6 +45,7 @@ type handleMetadata struct {
 	IssueID           string                   `json:"issueId"`
 	WorkspaceID       string                   `json:"workspaceId"`
 	RuntimeID         string                   `json:"runtimeId"`
+	Image             string                   `json:"image"`
 	WorkspaceSource   string                   `json:"workspaceSource"`
 	WorkingDirectory  string                   `json:"workingDirectory"`
 	Network           runtimepkg.NetworkPolicy `json:"network"`
@@ -60,7 +61,7 @@ func New() (*Runtime, error) {
 
 func newWithClient(api mobyAPI) (*Runtime, error) {
 	if api == nil {
-		return nil, fmt.Errorf("Docker client is required")
+		return nil, fmt.Errorf("docker client is required")
 	}
 	return &Runtime{api: api}, nil
 }
@@ -185,13 +186,18 @@ func (r *Runtime) Destroy(ctx context.Context, handle runtimepkg.Handle) error {
 	if err != nil {
 		return err
 	}
+	var stopErr error
 	if inspected.State != nil && inspected.State.Running {
 		if _, err := r.api.ContainerStop(ctx, inspected.ID, client.ContainerStopOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
-			return fmt.Errorf("stop Docker container before destroy: %w", err)
+			stopErr = fmt.Errorf("stop Docker container before destroy: %w", err)
 		}
 	}
 	if _, err := r.api.ContainerRemove(ctx, inspected.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false}); err != nil && !cerrdefs.IsNotFound(err) {
-		return fmt.Errorf("destroy Docker container: %w", err)
+		removeErr := fmt.Errorf("destroy Docker container: %w", err)
+		if stopErr != nil {
+			return errors.Join(stopErr, removeErr)
+		}
+		return removeErr
 	}
 	return nil
 }
@@ -326,13 +332,19 @@ func verifyContainer(inspected container.InspectResponse, meta handleMetadata) e
 			return fmt.Errorf("%w: Docker label %s does not match", runtimepkg.ErrOwnershipMismatch, key)
 		}
 	}
+	if inspected.Config.Image != meta.Image {
+		return fmt.Errorf("%w: Docker image does not match", runtimepkg.ErrOwnershipMismatch)
+	}
 	if inspected.Config.WorkingDir != meta.WorkingDirectory {
 		return fmt.Errorf("%w: Docker working directory does not match", runtimepkg.ErrOwnershipMismatch)
 	}
 	if inspected.HostConfig.Privileged || inspected.HostConfig.PublishAllPorts || inspected.HostConfig.PidMode.IsHost() || inspected.HostConfig.IpcMode.IsHost() {
 		return fmt.Errorf("%w: Docker container has unsafe host privileges", runtimepkg.ErrOwnershipMismatch)
 	}
-	if len(inspected.HostConfig.Resources.Devices) != 0 || len(inspected.HostConfig.Resources.DeviceRequests) != 0 {
+	if len(inspected.HostConfig.CapAdd) != 0 {
+		return fmt.Errorf("%w: Docker container has added Linux capabilities", runtimepkg.ErrOwnershipMismatch)
+	}
+	if len(inspected.HostConfig.Devices) != 0 || len(inspected.HostConfig.DeviceRequests) != 0 {
 		return fmt.Errorf("%w: Docker container has host device access", runtimepkg.ErrOwnershipMismatch)
 	}
 	if len(inspected.Mounts) != 1 {
@@ -378,6 +390,7 @@ func metadataFromSpec(spec runtimepkg.RuntimeSpec) handleMetadata {
 		IssueID:           spec.IssueID,
 		WorkspaceID:       spec.WorkspaceID,
 		RuntimeID:         spec.RuntimeID,
+		Image:             spec.Image,
 		WorkspaceSource:   spec.Workspace.Source,
 		WorkingDirectory:  spec.WorkingDirectory,
 		Network:           spec.Network,
@@ -397,7 +410,7 @@ func decodeHandleMetadata(raw json.RawMessage) (handleMetadata, error) {
 	if len(raw) == 0 || json.Unmarshal(raw, &meta) != nil {
 		return handleMetadata{}, fmt.Errorf("%w: invalid Docker handle metadata", runtimepkg.ErrOwnershipMismatch)
 	}
-	if meta.ContainerName == "" || meta.RuntimeInstanceID == "" || meta.ProjectID == "" || meta.WorkspaceID == "" || meta.RuntimeID == "" || meta.WorkspaceSource == "" || meta.WorkingDirectory == "" {
+	if meta.ContainerName == "" || meta.RuntimeInstanceID == "" || meta.ProjectID == "" || meta.WorkspaceID == "" || meta.RuntimeID == "" || meta.Image == "" || meta.WorkspaceSource == "" || meta.WorkingDirectory == "" {
 		return handleMetadata{}, fmt.Errorf("%w: incomplete Docker handle metadata", runtimepkg.ErrOwnershipMismatch)
 	}
 	return meta, nil
