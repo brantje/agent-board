@@ -157,6 +157,7 @@ func copyProcessStream(group *sync.WaitGroup, destination *streamBuffer, source 
 
 func (s *Session) reap() {
 	err := s.cmd.Wait()
+	cleanupErr := cleanupProcessTree(s.cmd.Process.Pid)
 	result := Result{}
 	if state := s.cmd.ProcessState; state != nil {
 		result.ExitCode = state.ExitCode()
@@ -170,6 +171,7 @@ func (s *Session) reap() {
 	if err != nil && !errors.As(err, &exitErr) {
 		waitErr = fmt.Errorf("wait for process: %w", err)
 	}
+	waitErr = errors.Join(waitErr, cleanupErr)
 
 	s.mu.Lock()
 	s.result = result
