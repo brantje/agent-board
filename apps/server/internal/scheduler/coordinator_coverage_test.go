@@ -18,7 +18,7 @@ func TestCoordinatorRunReportsReconciliationErrorAndStopsOnCancellation(t *testi
 		reported <- err
 		cancel()
 	}
-	c, err := New(fs, noopProcessor(), nil, cfg)
+	c, err := New(fs, noopProcessor(), testReconciler(), cfg)
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestCoordinatorRunReportsAdmissionErrorAndStopsOnCancellation(t *testing.T)
 		reported <- err
 		cancel()
 	}
-	c, err := New(fs, noopProcessor(), nil, cfg)
+	c, err := New(fs, noopProcessor(), testReconciler(), cfg)
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestCoordinatorRunReportsAdmissionErrorAndStopsOnCancellation(t *testing.T)
 func TestCoordinatorRunReturnsImmediatelyForCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	c, err := New(&runErrorStore{}, noopProcessor(), nil, testConfig())
+	c, err := New(&runErrorStore{}, noopProcessor(), testReconciler(), testConfig())
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestCoordinatorRejectsUnsupportedProcessorFinalStatus(t *testing.T) {
 	cfg.ReportError = func(err error) { reported <- err }
 	c, err := New(fs, processorFunc(func(context.Context, *store.SchedulerAdmission, Lifecycle) (Result, error) {
 		return Result{RunStatus: "RUNNING"}, nil
-	}), nil, cfg)
+	}), testReconciler(), cfg)
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
