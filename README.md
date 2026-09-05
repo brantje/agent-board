@@ -127,7 +127,7 @@ Agent -> Executor Profile
 Nuxt web
    |
    v
-Go backend (apps/server-go)
+Go backend (apps/server)
    |
    +--> PostgreSQL durable state + scheduling
    +--> blob/output storage
@@ -163,7 +163,7 @@ Nuxt/Nitro is the web application layer, not a second Agent Board control plane.
 ```text
 agent-board/
 ├── apps/
-│   ├── server-go/
+│   ├── server/
 │   └── web/             # Nuxt application
 ├── packages/
 │   └── database/
@@ -213,7 +213,7 @@ See [`docs/roadmap.md`](./docs/roadmap.md).
 Backend:
 
 ```bash
-cd apps/server-go
+cd apps/server
 go test ./...
 go vet ./...
 go build ./...
