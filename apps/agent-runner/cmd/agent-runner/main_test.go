@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -49,5 +50,20 @@ func TestRunReportsListenFailure(t *testing.T) {
 	defer cancel()
 	if err := run(ctx, appConfig{ListenAddr: "invalid address", WorkspaceRoot: t.TempDir()}); err == nil {
 		t.Fatal("expected listen error")
+	}
+}
+
+func TestJoinShutdownErrorsPreservesBothErrors(t *testing.T) {
+	httpErr := errors.New("http shutdown failed")
+	runnerErr := errors.New("runner shutdown failed")
+	err := joinShutdownErrors(httpErr, runnerErr)
+	if !errors.Is(err, httpErr) {
+		t.Fatalf("joined error does not preserve HTTP error: %v", err)
+	}
+	if !errors.Is(err, runnerErr) {
+		t.Fatalf("joined error does not preserve runner error: %v", err)
+	}
+	if err := joinShutdownErrors(nil, nil); err != nil {
+		t.Fatalf("expected nil when both shutdown errors are nil, got %v", err)
 	}
 }

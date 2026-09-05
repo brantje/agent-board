@@ -67,11 +67,8 @@ func run(ctx context.Context, config appConfig) error {
 		defer cancel()
 		httpErr := httpServer.Shutdown(shutdownCtx)
 		runnerErr := handler.Shutdown(shutdownCtx)
-		if httpErr != nil {
-			return httpErr
-		}
-		if runnerErr != nil {
-			return runnerErr
+		if err := joinShutdownErrors(httpErr, runnerErr); err != nil {
+			return err
 		}
 		err := <-errCh
 		if errors.Is(err, http.ErrServerClosed) {
@@ -79,4 +76,8 @@ func run(ctx context.Context, config appConfig) error {
 		}
 		return err
 	}
+}
+
+func joinShutdownErrors(httpErr, runnerErr error) error {
+	return errors.Join(httpErr, runnerErr)
 }
