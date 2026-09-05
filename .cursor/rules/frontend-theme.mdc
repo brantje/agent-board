@@ -1,0 +1,32 @@
+---
+description: Agent Board frontend uses Nuxt 4, Vue 3, TypeScript and mandatory Nuxt UI-first composition
+alwaysApply: true
+---
+
+# Frontend Theme
+
+For work under `apps/web`, read `docs/frontend-implementation.md`, `docs/frontend-theme.md`, and root `AGENTS.md` before changing UI.
+
+Rules:
+
+- Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS is the frontend stack; Nuxt UI v4 is the required component foundation.
+- Before creating a generic primitive, inspect existing shared components and the current official Nuxt UI catalog.
+- Use `https://nuxt.com/llms.txt` for unfamiliar Nuxt APIs/best practices.
+- Use the configured Nuxt UI MCP server for unfamiliar component props, slots, events, examples and metadata.
+- Do not hand-roll a generic primitive when Nuxt UI provides the component or a documented composition.
+- A custom primitive requires explicit justification identifying the Nuxt UI options checked, why they are insufficient, and the accessibility/interaction behavior provided.
+- Product components compose Nuxt UI; do not put Agent Board backend/domain ownership into generic presentation components.
+- The visual language is dense and technical: neutral graphite surfaces, sparse muted steel-blue emphasis, thin borders and restrained/no shadows.
+- Cards and large panels are square by default (`0px` radius). Inputs, buttons, menus, overlays and similar controls use at most `0-2px` radius unless interaction semantics justify otherwise.
+- Do not introduce generic `rounded-lg`/`rounded-xl`, soft floating cards, or pill-shaped controls as a default design treatment.
+- Pill shapes are reserved for cases where the shape conveys useful semantics such as tags/chips/statuses.
+- Prefer tonal surface hierarchy and borders over shadows for depth.
+- Use shared Nuxt UI theme/component defaults and semantic colors rather than scattered raw palette values.
+- Primary/accent color is a restrained steel blue and should be used sparingly for active navigation, links, primary actions, selection and focus.
+- Dark mode is default; light mode remains fully supported and retains the same square technical visual language.
+- Preserve semantic HTML and readable hierarchy for headings, body text, status/meta text, logs and code.
+- Preserve accessibility, keyboard/focus behavior and responsive behavior provided by Nuxt UI/Reka UI.
+- Muted text/borders still need sufficient readability and contrast; status never relies on color alone.
+- Nuxt/Nitro server facilities do not own Agent Board domain state. Durable product state, scheduling, execution and authorization remain Go-owned.
+- Live Run/Issue UI reconciles against persisted API/SSE state.
+- Theme changes use TDD according to `docs/testing.md`.

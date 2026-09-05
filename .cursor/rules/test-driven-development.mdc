@@ -1,0 +1,30 @@
+---
+description: Agent Board uses test-driven development for implementation work
+alwaysApply: true
+---
+
+# Test-Driven Development
+
+Agent Board is developed test-first. Read `docs/testing.md` before implementing an issue.
+
+For every meaningful behavior change, follow **red → green → refactor**:
+
+1. Write the smallest failing automated test that specifies the next behavior or reproduces the bug.
+2. Run it and confirm it fails for the expected reason.
+3. Implement the minimum production change needed to make it pass.
+4. Refactor only while the relevant tests remain green.
+
+Additional requirements:
+
+- Bug fixes start with a regression test.
+- PostgreSQL behavior is tested against real PostgreSQL/pgvector where applicable rather than mocked SQL behavior.
+- Project-scoped behavior includes cross-project isolation tests.
+- Security-sensitive behavior includes negative tests.
+- Shared Zod contracts include parsing/rejection tests.
+- Frontend tests focus on user-visible behavior, interaction state, validation, and composable logic rather than brittle internal markup details.
+- Runtime Provider behavior is driven by provider contract tests; destructive Docker integration is isolated from ordinary unit tests.
+- Do not backfill tests after a large implementation and call that TDD.
+- Before considering work complete, run targeted tests, the relevant broader suite, and type checking.
+- PR descriptions should state which tests were written first and the commands used to verify the work.
+
+Tests are part of the design process and definition of done, not an optional final step.

@@ -1,0 +1,19 @@
+---
+description: Agent Board uses one disposable pre-release PostgreSQL schema and never versioned migrations
+alwaysApply: true
+---
+
+# Canonical Database Schema
+
+`packages/database/schema.sql` is the single canonical PostgreSQL schema for Agent Board.
+
+Hard requirements:
+
+- Edit `packages/database/schema.sql` directly for every schema change.
+- Do not create numbered or versioned migration SQL.
+- Do not create a migrations directory, migration runner, migration framework, migration history table, or upgrade/compatibility SQL.
+- Do not preserve development data across incompatible schema changes. Recreate the development database or Docker volume from `schema.sql` instead.
+- Database integration tests create an isolated empty database and apply the canonical schema.
+- Keep `pnpm check:database-schema` green; its purpose is to prevent migration infrastructure from being reintroduced.
+
+Only an explicit future repository-wide architecture decision establishing release upgrade compatibility may replace this policy. Feature work must not make that decision implicitly.
