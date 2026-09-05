@@ -57,6 +57,26 @@ jobs:
         working-directory: apps/server
         run: go build ./...
 
+  docker-runtime:
+    name: Docker runtime
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - name: Build lifecycle fixture image
+        run: docker build --file apps/server/internal/runtime/docker/testdata/Dockerfile --tag agent-board-runtime-lifecycle-test:ci apps/server/internal/runtime/docker/testdata
+      - name: Run real Docker lifecycle integration
+        working-directory: apps/server
+        env:
+          AGENT_BOARD_TEST_DOCKER: "1"
+          AGENT_BOARD_TEST_RUNTIME_IMAGE: agent-board-runtime-lifecycle-test:ci
+        run: go test -count=1 -run '^TestDockerRuntimeIntegration$' -v ./internal/runtime/docker
+
   agent-runner:
     name: Agent runner
     runs-on: ubuntu-latest
@@ -127,8 +147,8 @@ jobs:
           jq -e 'any(.services.server.volumes[]; .target == "/mnt/repositories")' /tmp/agent-board-compose.json
       - name: Build runner image
         run: docker build --file apps/agent-runner/Dockerfile --tag agent-board-agent-runner:ci .
-      - name: Verify runner has no Docker socket
-        run: docker run --rm --entrypoint sh agent-board-agent-runner:ci -c 'test ! -S /var/run/docker.sock'
+      - name: Verify official runner image boundary
+        run: docker run --rm --entrypoint sh agent-board-agent-runner:ci -c 'test ! -S /var/run/docker.sock && test "$(id -u)" -ne 0 && test "$(pwd)" = /workspace && command -v agent-runner >/dev/null'
       - name: Start stack
         run: docker compose up --detach --build --wait
       - name: Verify endpoints

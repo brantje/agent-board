@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,8 +29,14 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	if !ok {
 		t.Fatalf("handler type = %T, want *applicationHandler", handler)
 	}
-	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil {
+	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil {
 		t.Fatalf("application services were not fully wired: %+v", application.services)
+	}
+}
+
+func TestReconcileRuntimeInstancesRejectsNonApplicationHandler(t *testing.T) {
+	if err := reconcileRuntimeInstances(context.Background(), http.NotFoundHandler()); err == nil {
+		t.Fatal("reconcileRuntimeInstances() unexpectedly accepted an unrelated handler")
 	}
 }
 

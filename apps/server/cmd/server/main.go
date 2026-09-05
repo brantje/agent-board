@@ -15,6 +15,8 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
+	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
+	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
@@ -40,6 +42,12 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
+	if err := reconcileRuntimeInstances(ctx, handler); err != nil {
+		slog.Error("reconcile Runtime Instances", "error", err)
+		closeStore()
+		stop()
+		os.Exit(1)
+	}
 	code := exitCode(ctx, configuredAddress(), handler)
 	closeStore()
 	stop()
@@ -59,10 +67,26 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 		return nil, nil, fmt.Errorf("configure application: %w", err)
 	}
+	closeApplication := func() {
+		if err := services.Close(); err != nil {
+			slog.Error("close Runtime implementations", "error", err)
+		}
+		database.Close()
+	}
 	return &applicationHandler{
 		Handler:  httpapi.NewRouter(services.ControlPlane),
 		services: services,
-	}, database.Close, nil
+	}, closeApplication, nil
+}
+
+func reconcileRuntimeInstances(ctx context.Context, handler http.Handler) error {
+	application, ok := handler.(*applicationHandler)
+	if !ok || application.services == nil || application.services.RuntimeInstances == nil {
+		return fmt.Errorf("runtime instance service is unavailable")
+	}
+	return application.services.RuntimeInstances.ReconcileAllWithReporter(ctx, func(err error) {
+		slog.Error("reconcile Runtime Instance", "error", err)
+	})
 }
 
 func configuredApplication(database *postgres.Store) (*app.Services, error) {
@@ -82,7 +106,16 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	return app.NewServices(database, materializer)
+	dockerRuntime, err := dockerruntime.New()
+	if err != nil {
+		return nil, err
+	}
+	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime})
+	if err != nil {
+		_ = dockerRuntime.Close()
+		return nil, err
+	}
+	return services, nil
 }
 
 func configuredWorkspaceRoot() string {

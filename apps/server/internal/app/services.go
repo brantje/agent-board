@@ -3,15 +3,16 @@ package app
 import (
 	"fmt"
 
+	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-// Services groups the control-plane API service with the execution-facing
-// Workspace service so server startup constructs one coherent application
-// boundary. Future scheduler workers use Workspaces before Runtime provisioning.
+// Services groups the control-plane API with execution-facing services so
+// server startup constructs one coherent application boundary.
 type Services struct {
-	ControlPlane *Service
-	Workspaces    *WorkspaceService
+	ControlPlane     *Service
+	Workspaces       *WorkspaceService
+	RuntimeInstances *RuntimeInstanceService
 }
 
 func NewServices(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer) (*Services, error) {
@@ -24,4 +25,24 @@ func NewServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 		return nil, err
 	}
 	return &Services{ControlPlane: controlPlane, Workspaces: workspaces}, nil
+}
+
+func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, implementations map[string]runtimepkg.Implementation) (*Services, error) {
+	services, err := NewServices(controlPlaneStore, materializer)
+	if err != nil {
+		return nil, err
+	}
+	runtimeInstances, err := NewRuntimeInstanceService(controlPlaneStore, services.Workspaces, implementations)
+	if err != nil {
+		return nil, err
+	}
+	services.RuntimeInstances = runtimeInstances
+	return services, nil
+}
+
+func (s *Services) Close() error {
+	if s == nil || s.RuntimeInstances == nil {
+		return nil
+	}
+	return s.RuntimeInstances.Close()
 }
