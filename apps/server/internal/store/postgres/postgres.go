@@ -7,12 +7,11 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Store struct {
-	pool *pgxpool.Pool
-}
+type Store struct{ pool *pgxpool.Pool }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
@@ -25,11 +24,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	}
 	return New(pool), nil
 }
-
-func New(pool *pgxpool.Pool) *Store {
-	return &Store{pool: pool}
-}
-
+func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 func (s *Store) Close() {
 	if s != nil && s.pool != nil {
 		s.pool.Close()
@@ -40,16 +35,23 @@ func notFound(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.ErrNotFound
 	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505":
+			return store.ErrConflict
+		case "23503", "23514", "22P02":
+			return store.ErrInvalidArgument
+		}
+	}
 	return err
 }
-
 func objectJSON(value json.RawMessage) json.RawMessage {
 	if len(value) == 0 {
 		return store.EmptyObject
 	}
 	return value
 }
-
 func arrayJSON(value json.RawMessage) json.RawMessage {
 	if len(value) == 0 {
 		return json.RawMessage(`[]`)

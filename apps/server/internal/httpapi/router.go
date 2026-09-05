@@ -35,7 +35,7 @@ func handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", "request body must be valid JSON")
@@ -78,8 +78,10 @@ func writeAppError(w http.ResponseWriter, err error) {
 		switch {
 		case strings.HasSuffix(apiErr.Code, "_not_found"):
 			status = http.StatusNotFound
-		case apiErr.Code == "conflict":
+		case apiErr.Code == "conflict", apiErr.Code == "issue_done", apiErr.Code == "agent_unavailable":
 			status = http.StatusConflict
+		case apiErr.Code == "execution_configuration_invalid":
+			status = http.StatusUnprocessableEntity
 		}
 		writeError(w, status, apiErr.Code, apiErr.Message)
 		return
