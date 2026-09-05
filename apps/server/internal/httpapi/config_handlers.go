@@ -10,9 +10,9 @@ import (
 func (a *api) registerConfigurationRoutes(r chi.Router) {
 	r.Get("/projects", a.listProjects)
 	r.Post("/projects", a.createProject)
+	r.Get("/projects/{projectID}", a.getProject)
+	r.Patch("/projects/{projectID}", a.updateProject)
 	r.Route("/projects/{projectID}", func(r chi.Router) {
-		r.Get("", a.getProject)
-		r.Patch("", a.updateProject)
 		a.registerScopedConfig(r)
 	})
 
