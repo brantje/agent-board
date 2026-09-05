@@ -21,16 +21,10 @@ type RepositoryResolver interface {
 	Resolve(string) (string, error)
 }
 
-type BootstrapLock interface {
-	Release() error
-}
+type BootstrapLock = store.WorkspaceBootstrapLock
 
 type StateStore interface {
-	GetWorkspaceByIssue(context.Context, string, string) (store.Workspace, error)
-	AcquireWorkspaceBootstrapLock(context.Context, string) (BootstrapLock, error)
-	MarkWorkspaceBootstrapPending(context.Context, string, string, string, string, string, string, string) (store.Workspace, error)
-	MarkWorkspaceBootstrapReady(context.Context, string, string, string, string, string, string, string, string) (store.Workspace, error)
-	MarkWorkspaceBootstrapFailed(context.Context, string, string, string) (store.Workspace, error)
+	store.WorkspaceBootstrapStore
 }
 
 type Materializer struct {
