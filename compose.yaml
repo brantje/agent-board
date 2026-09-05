@@ -1,12 +1,9 @@
 name: agent-board
 
 services:
-  postgres:
-    image: pgvector/pgvector:pg18
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-agent_board}
-      POSTGRES_USER: ${POSTGRES_USER:-agent_board}
-    entrypoint:
+  credential-init:
+    image: alpine:3.22
+    command:
       - /bin/sh
       - -ec
       - |
@@ -14,10 +11,21 @@ services:
         if [ ! -s "$$credential_file" ]; then
           umask 077
           dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n' > "$$credential_file"
-          chmod 0444 "$$credential_file"
         fi
-        export POSTGRES_PASSWORD="$$(cat "$$credential_file")"
-        exec docker-entrypoint.sh postgres
+        chmod 0444 "$$credential_file"
+    volumes:
+      - postgres-credentials:/run/agent-board
+    restart: "no"
+
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agent_board}
+      POSTGRES_USER: ${POSTGRES_USER:-agent_board}
+      POSTGRES_PASSWORD_FILE: /run/agent-board/postgres-password
+    depends_on:
+      credential-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -25,7 +33,7 @@ services:
       retries: 10
     volumes:
       - postgres-data:/var/lib/postgresql
-      - postgres-credentials:/run/agent-board
+      - postgres-credentials:/run/agent-board:ro
       - ./packages/database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
 
   server:
