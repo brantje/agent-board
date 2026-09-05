@@ -36,20 +36,30 @@ func TestPolicyRejectsUnavailableRepositoryAndUnavailableRoot(t *testing.T) {
 		t.Fatalf("missing repository error = %v, want ErrPathUnavailable", err)
 	}
 
-	unavailableRoot := filepath.Join(t.TempDir(), "gone")
-	if err := os.Mkdir(unavailableRoot, 0o755); err != nil {
+	unavailableRoot := filepath.Join(t.TempDir(), "missing-root")
+	if _, err := NewPolicy([]string{unavailableRoot}); !errors.Is(err, ErrPathUnavailable) {
+		t.Fatalf("unavailable root error = %v, want ErrPathUnavailable", err)
+	}
+
+	rootFile := filepath.Join(t.TempDir(), "root.txt")
+	if err := os.WriteFile(rootFile, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	policy, err = NewPolicy([]string{unavailableRoot})
+	if _, err := NewPolicy([]string{rootFile}); !errors.Is(err, ErrPathNotDirectory) {
+		t.Fatalf("non-directory root error = %v, want ErrPathNotDirectory", err)
+	}
+
+	transientRoot := t.TempDir()
+	policy, err = NewPolicy([]string{transientRoot})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(unavailableRoot); err != nil {
+	if err := os.RemoveAll(transientRoot); err != nil {
 		t.Fatal(err)
 	}
 	candidate := t.TempDir()
 	if _, err := policy.Resolve(candidate); !errors.Is(err, ErrPathNotAuthorized) {
-		t.Fatalf("unavailable root error = %v, want ErrPathNotAuthorized", err)
+		t.Fatalf("root unavailable after startup error = %v, want ErrPathNotAuthorized", err)
 	}
 }
 

@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestWorkspaceBootstrapTransitionsAreScopedAndReadyIsTerminal(t *testing.T) {
@@ -145,5 +147,67 @@ func TestWorkspaceBootstrapLockWaitIsBoundedAndRetryable(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("bounded lock wait took %v", elapsed)
+	}
+}
+
+func TestOpenUsesDedicatedWorkspaceBootstrapLockPool(t *testing.T) {
+	databaseURL := os.Getenv(testDatabaseURLEnv)
+	if databaseURL == "" {
+		t.Skipf("%s is not set; PostgreSQL integration test skipped", testDatabaseURLEnv)
+	}
+
+	s, err := Open(context.Background(), databaseURL)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer s.Close()
+	if s.pool == s.lockPool {
+		t.Fatal("Open() reused the main pool for workspace bootstrap locks")
+	}
+}
+
+func TestWorkspaceBootstrapLockPoolRemainsAvailableWhenMainPoolIsExhausted(t *testing.T) {
+	databaseURL := os.Getenv(testDatabaseURLEnv)
+	if databaseURL == "" {
+		t.Skipf("%s is not set; PostgreSQL integration test skipped", testDatabaseURLEnv)
+	}
+	ctx := context.Background()
+
+	mainConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatalf("parse main pool config: %v", err)
+	}
+	mainConfig.MaxConns = 1
+	mainPool, err := pgxpool.NewWithConfig(ctx, mainConfig)
+	if err != nil {
+		t.Fatalf("create main pool: %v", err)
+	}
+
+	lockConfig, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		mainPool.Close()
+		t.Fatalf("parse lock pool config: %v", err)
+	}
+	lockConfig.MaxConns = 1
+	lockPool, err := pgxpool.NewWithConfig(ctx, lockConfig)
+	if err != nil {
+		mainPool.Close()
+		t.Fatalf("create lock pool: %v", err)
+	}
+
+	s := NewWithPools(mainPool, lockPool)
+	defer s.Close()
+	held, err := mainPool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("exhaust main pool: %v", err)
+	}
+	defer held.Release()
+
+	lock, err := s.acquireWorkspaceBootstrapLock(ctx, "pool-isolation", 250*time.Millisecond)
+	if err != nil {
+		t.Fatalf("acquire lock with exhausted main pool: %v", err)
+	}
+	if err := lock.Release(); err != nil {
+		t.Fatalf("release isolated lock: %v", err)
 	}
 }

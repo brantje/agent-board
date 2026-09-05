@@ -28,7 +28,7 @@ func (s *Store) acquireWorkspaceBootstrapLock(ctx context.Context, workspaceID s
 	lockCtx, cancel := context.WithTimeout(ctx, waitTimeout)
 	defer cancel()
 
-	conn, err := s.pool.Acquire(lockCtx)
+	conn, err := s.lockPool.Acquire(lockCtx)
 	if err != nil {
 		return nil, workspaceBootstrapLockWaitError(ctx, lockCtx, workspaceID, err)
 	}

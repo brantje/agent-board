@@ -33,7 +33,18 @@ func NewPolicy(roots []string) (*Policy, error) {
 		if !filepath.IsAbs(root) {
 			return nil, fmt.Errorf("authorized root %q: %w", root, ErrPathNotAbsolute)
 		}
-		cleaned = append(cleaned, filepath.Clean(root))
+		canonical, err := filepath.EvalSymlinks(filepath.Clean(root))
+		if err != nil {
+			return nil, fmt.Errorf("resolve authorized root %q: %w: %v", root, ErrPathUnavailable, err)
+		}
+		info, err := os.Stat(canonical)
+		if err != nil {
+			return nil, fmt.Errorf("stat authorized root %q: %w: %v", canonical, ErrPathUnavailable, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("authorized root %q: %w", canonical, ErrPathNotDirectory)
+		}
+		cleaned = append(cleaned, canonical)
 	}
 	return &Policy{roots: cleaned}, nil
 }
