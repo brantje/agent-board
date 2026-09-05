@@ -204,7 +204,7 @@ func TestSchedulerPersistenceIsScopedAndClaimsOnce(t *testing.T) {
 	if err := s.ReserveCapacity(ctx, f.project.ID, job.ID, f.run.ID, "AGENT", other.agent.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("foreign agent reservation error=%v", err)
 	}
-	for _, tc := range []struct; kind, id string }{{"AGENT", f.agent.ID}, {"MODEL_PROFILE", f.model.ID}} {
+	for _, tc := range []struct{ kind, id string }{{"AGENT", f.agent.ID}, {"MODEL_PROFILE", f.model.ID}} {
 		if err := s.ReserveCapacity(ctx, f.project.ID, job.ID, f.run.ID, tc.kind, tc.id); err != nil {
 			t.Fatalf("reserve %s: %v", tc.kind, err)
 		}
