@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - name: Test
+        working-directory: apps/server
+        run: go test ./...
+      - name: Vet
+        working-directory: apps/server
+        run: go vet ./...
+      - name: Build
+        working-directory: apps/server
+        run: go build ./...
+
+  agent-runner:
+    name: Agent runner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/agent-runner/go.mod
+          cache: false
+      - name: Test
+        working-directory: apps/agent-runner
+        run: go test ./...
+      - name: Vet
+        working-directory: apps/agent-runner
+        run: go vet ./...
+      - name: Build
+        working-directory: apps/agent-runner
+        run: go build ./...
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install
+        run: pnpm install --no-frozen-lockfile
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
+  compose:
+    name: Compose smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Prepare workspace root
+        run: |
+          sudo mkdir -p /var/lib/agent-board/workspaces
+          sudo chmod 0777 /var/lib/agent-board/workspaces
+      - name: Build runner image
+        run: docker build --file apps/agent-runner/Dockerfile --tag agent-board-agent-runner:ci .
+      - name: Verify runner has no Docker socket
+        run: docker run --rm --entrypoint sh agent-board-agent-runner:ci -c 'test ! -S /var/run/docker.sock'
+      - name: Start stack
+        run: docker compose up --detach --build --wait
+      - name: Verify endpoints
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:3001/healthz
+          curl --fail --silent --show-error http://127.0.0.1:3000/
+      - name: Show service logs on failure
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Stop stack
+        if: always()
+        run: docker compose down --volumes --remove-orphans
