@@ -134,6 +134,8 @@ The Go backend is the production control plane. `agent-runner` is a narrow execu
 
 Read `docs/testing.md`. Work Red -> Green -> Refactor. Bug fixes start with a regression test.
 
+**Test coverage is a delivery gate:** affected executable apps/modules must maintain at least **85% automated test coverage**, with **90%+ as the normal target**. Work below 85% is not complete, review-ready, or merge-ready. Do not game the threshold with trivial tests or unjustified exclusions, and do not treat numeric coverage as a substitute for meaningful regression, security, isolation, concurrency, persistence, and integration tests.
+
 Backend verification includes as applicable:
 
 ```bash
