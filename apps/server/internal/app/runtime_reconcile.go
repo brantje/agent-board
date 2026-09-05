@@ -19,9 +19,24 @@ type RuntimeReconcileStore interface {
 }
 
 // ReconcileAll reconciles non-terminal Runtime Instances after server restart.
-// It uses durable external identity when available and deterministic recovery
-// when a crash happened before the external ID was persisted.
+// It preserves aggregate error reporting for callers that need every failure.
 func (s *RuntimeInstanceService) ReconcileAll(ctx context.Context) error {
+	var instanceErrors []error
+	fatalErr := s.ReconcileAllWithReporter(ctx, func(err error) {
+		instanceErrors = append(instanceErrors, err)
+	})
+	if fatalErr != nil {
+		instanceErrors = append(instanceErrors, fatalErr)
+	}
+	return errors.Join(instanceErrors...)
+}
+
+// ReconcileAllWithReporter reconciles non-terminal Runtime Instances while
+// reporting per-instance failures separately. Store enumeration failures are
+// returned because they make reconciliation incomplete at the control-plane
+// level; an individual Runtime failure does not prevent other instances from
+// being reconciled.
+func (s *RuntimeInstanceService) ReconcileAllWithReporter(ctx context.Context, report func(error)) error {
 	reconcileStore, ok := s.store.(RuntimeReconcileStore)
 	if !ok {
 		return fmt.Errorf("runtime instance store does not support reconciliation")
@@ -30,7 +45,7 @@ func (s *RuntimeInstanceService) ReconcileAll(ctx context.Context) error {
 	if err != nil {
 		return translateStoreError(err, "project")
 	}
-	var reconcileErrors []error
+	var storeErrors []error
 	statuses := []string{
 		string(runtimepkg.StateProvisioning),
 		string(runtimepkg.StateStarting),
@@ -40,16 +55,21 @@ func (s *RuntimeInstanceService) ReconcileAll(ctx context.Context) error {
 	for _, project := range projects {
 		instances, err := reconcileStore.ListRuntimeInstances(ctx, project.ID, statuses)
 		if err != nil {
-			reconcileErrors = append(reconcileErrors, fmt.Errorf("list Runtime Instances for project %s: %w", project.ID, err))
+			storeErrors = append(storeErrors, fmt.Errorf("list Runtime Instances for project %s: %w", project.ID, err))
 			continue
 		}
 		for _, instance := range instances {
 			if _, err := s.reconcile(ctx, reconcileStore, instance); err != nil {
-				reconcileErrors = append(reconcileErrors, fmt.Errorf("reconcile Runtime Instance %s: %w", instance.ID, err))
+				wrapped := fmt.Errorf("reconcile Runtime Instance %s: %w", instance.ID, err)
+				if report != nil {
+					report(wrapped)
+				} else {
+					storeErrors = append(storeErrors, wrapped)
+				}
 			}
 		}
 	}
-	return errors.Join(reconcileErrors...)
+	return errors.Join(storeErrors...)
 }
 
 func (s *RuntimeInstanceService) Reconcile(ctx context.Context, projectID, instanceID string) (store.RuntimeInstance, error) {
