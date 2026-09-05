@@ -188,6 +188,9 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 				return
 			case <-ticker.C:
 				if _, err := c.store.RenewLease(ctx, claim.Job.ProjectID, claim.Job.ID, claim.Lease.LeaseToken, c.config.LeaseDuration); err != nil {
+					if parent.Err() != nil {
+						return
+					}
 					c.config.ReportError(err)
 					leaseLost.Store(true)
 					cancel()
