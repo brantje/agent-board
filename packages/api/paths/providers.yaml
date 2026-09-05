@@ -1,0 +1,36 @@
+path1:
+  get:
+    operationId: listProviders
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ProviderList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createProvider
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ProviderInput
+    responses:
+      '201':
+        $ref: ../components/api-components.yaml#/responses/Provider
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path2:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getProvider
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Provider
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  put:
+    operationId: updateProvider
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ProviderInput
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Provider
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

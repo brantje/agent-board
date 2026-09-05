@@ -1,0 +1,243 @@
+JSONMap:
+  type: object
+  additionalProperties: true
+Project:
+  type: object
+  required:
+  - id
+  - name
+  - repositoryPath
+  - defaultBranch
+  - workflowSettings
+  - createdAt
+  - updatedAt
+  properties:
+    id: {type: string, format: uuid}
+    name: {type: string}
+    repositoryPath: {type: string}
+    defaultBranch: {type: string}
+    workflowSettings: {$ref: '#/JSONMap'}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+ProjectCreate:
+  type: object
+  additionalProperties: false
+  required: [name, repositoryPath]
+  properties:
+    name: {type: string}
+    repositoryPath: {type: string}
+    defaultBranch: {type: string, default: main}
+    workflowSettings: {$ref: '#/JSONMap'}
+ProjectUpdate:
+  type: object
+  additionalProperties: false
+  properties:
+    name: {type: string}
+    repositoryPath: {type: string}
+    defaultBranch: {type: string}
+    workflowSettings: {$ref: '#/JSONMap'}
+Provider:
+  type: object
+  description: Credential references are write-only and are never returned.
+  required: [id, name, kind, baseUrl, enabled, healthStatus, safeMetadata, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    name: {type: string}
+    kind: {type: string}
+    baseUrl: {type: [string, 'null']}
+    enabled: {type: boolean}
+    healthStatus: {type: string, enum: [UNKNOWN, HEALTHY, UNHEALTHY]}
+    safeMetadata: {$ref: '#/JSONMap'}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+ProviderInput:
+  type: object
+  additionalProperties: false
+  required: [name, kind]
+  properties:
+    name: {type: string}
+    kind: {type: string}
+    baseUrl: {type: [string, 'null']}
+    credentialRef: {type: [string, 'null'], writeOnly: true}
+    enabled: {type: boolean, default: true}
+    safeMetadata: {$ref: '#/JSONMap'}
+ModelProfile:
+  type: object
+  required: [id, projectId, providerId, name, model, temperature, maxTokens, maxConcurrent, enabled, generationSettings, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: [string, 'null'], format: uuid}
+    providerId: {type: string, format: uuid}
+    name: {type: string}
+    model: {type: string}
+    temperature: {type: [number, 'null'], minimum: 0, maximum: 2}
+    maxTokens: {type: [integer, 'null'], minimum: 1}
+    maxConcurrent: {type: [integer, 'null'], minimum: 1}
+    generationSettings: {$ref: '#/JSONMap'}
+    enabled: {type: boolean}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+ModelProfileInput:
+  type: object
+  additionalProperties: false
+  required: [providerId, name, model]
+  properties:
+    providerId: {type: string, format: uuid}
+    name: {type: string}
+    model: {type: string}
+    temperature: {type: [number, 'null'], minimum: 0, maximum: 2}
+    maxTokens: {type: [integer, 'null'], minimum: 1}
+    maxConcurrent: {type: [integer, 'null'], minimum: 1}
+    generationSettings: {$ref: '#/JSONMap'}
+    enabled: {type: boolean, default: true}
+Runtime:
+  type: object
+  required: [id, projectId, name, kind, image, cpuLimitMillis, memoryLimitBytes, pidLimit, timeoutSeconds, networkPolicy, workspacePolicy, allowedSecretRefs, capabilities, enabled, healthStatus, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: [string, 'null'], format: uuid}
+    name: {type: string}
+    kind: {type: string, enum: [docker]}
+    image: {type: string}
+    cpuLimitMillis: {type: [integer, 'null'], minimum: 1}
+    memoryLimitBytes: {type: [integer, 'null'], minimum: 1}
+    pidLimit: {type: [integer, 'null'], minimum: 1}
+    timeoutSeconds: {type: [integer, 'null'], minimum: 1}
+    networkPolicy: {type: string, enum: [none, restricted, outbound]}
+    workspacePolicy: {type: string, enum: [issue]}
+    allowedSecretRefs: {type: array, items: {type: string}}
+    capabilities: {$ref: '#/JSONMap'}
+    enabled: {type: boolean}
+    healthStatus: {type: string, enum: [UNKNOWN, HEALTHY, UNHEALTHY]}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+RuntimeInput:
+  type: object
+  additionalProperties: false
+  required: [name, kind, image, networkPolicy]
+  properties:
+    name: {type: string}
+    kind: {type: string, enum: [docker]}
+    image: {type: string}
+    cpuLimitMillis: {type: [integer, 'null'], minimum: 1}
+    memoryLimitBytes: {type: [integer, 'null'], minimum: 1}
+    pidLimit: {type: [integer, 'null'], minimum: 1}
+    timeoutSeconds: {type: [integer, 'null'], minimum: 1}
+    networkPolicy: {type: string, enum: [none, restricted, outbound]}
+    allowedSecretRefs: {type: array, items: {type: string}}
+    capabilities: {$ref: '#/JSONMap'}
+    enabled: {type: boolean, default: true}
+ExecutorProfile:
+  type: object
+  required: [id, projectId, name, engine, modelProfileId, runtimeId, engineSettings, enabled, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: [string, 'null'], format: uuid}
+    name: {type: string}
+    engine: {type: string}
+    modelProfileId: {type: string, format: uuid}
+    runtimeId: {type: string, format: uuid}
+    engineSettings: {$ref: '#/JSONMap'}
+    enabled: {type: boolean}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+ExecutorProfileInput:
+  type: object
+  additionalProperties: false
+  required: [name, engine, modelProfileId, runtimeId]
+  properties:
+    name: {type: string}
+    engine: {type: string}
+    modelProfileId: {type: string, format: uuid}
+    runtimeId: {type: string, format: uuid}
+    engineSettings: {$ref: '#/JSONMap'}
+    enabled: {type: boolean, default: true}
+Agent:
+  type: object
+  required: [id, projectId, name, roleInstructions, executorProfileId, concurrencyLimit, state, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: [string, 'null'], format: uuid}
+    name: {type: string}
+    roleInstructions: {type: string}
+    executorProfileId: {type: string, format: uuid}
+    concurrencyLimit: {type: integer, minimum: 1}
+    state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED]}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+AgentInput:
+  type: object
+  additionalProperties: false
+  required: [name, executorProfileId]
+  properties:
+    name: {type: string}
+    roleInstructions: {type: string}
+    executorProfileId: {type: string, format: uuid}
+    concurrencyLimit: {type: integer, minimum: 1, default: 1}
+    state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}
+Issue:
+  type: object
+  required: [id, projectId, title, description, status, assignedAgentId, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: string, format: uuid}
+    title: {type: string}
+    description: {type: string}
+    status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]}
+    assignedAgentId: {type: [string, 'null'], format: uuid}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+IssueCreate:
+  type: object
+  additionalProperties: false
+  required: [title]
+  properties:
+    title: {type: string}
+    description: {type: string}
+    status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE], default: BACKLOG}
+IssueUpdate:
+  type: object
+  additionalProperties: false
+  properties:
+    title: {type: string}
+    description: {type: string}
+    status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]}
+Run:
+  type: object
+  required: [id, projectId, issueId, workspaceId, agentId, attempt, status, queueReason, failureReason, createdAt, startedAt, completedAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: string, format: uuid}
+    issueId: {type: string, format: uuid}
+    workspaceId: {type: string, format: uuid}
+    agentId: {type: [string, 'null'], format: uuid}
+    attempt: {type: integer, minimum: 1}
+    status: {type: string, enum: [QUEUED, STARTING, RUNNING, WAITING_FOR_INPUT, PAUSED, READY_FOR_REVIEW, COMPLETED, FAILED, CANCELLED]}
+    queueReason: {type: [string, 'null']}
+    failureReason: {type: [string, 'null']}
+    createdAt: {type: string, format: date-time}
+    startedAt: {type: [string, 'null'], format: date-time}
+    completedAt: {type: [string, 'null'], format: date-time}
+    updatedAt: {type: string, format: date-time}
+AssignmentInput:
+  type: object
+  additionalProperties: false
+  required: [agentId]
+  properties:
+    agentId: {type: string, format: uuid}
+AssignmentResponse:
+  type: object
+  required: [issue, run]
+  properties:
+    issue: {$ref: '#/Issue'}
+    run: {$ref: '#/Run'}
+ErrorResponse:
+  type: object
+  required: [error]
+  properties:
+    error:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}

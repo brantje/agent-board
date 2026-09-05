@@ -1,0 +1,74 @@
+path1:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listIssues
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/IssueList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createIssue
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/IssueCreate
+    responses:
+      '201':
+        $ref: ../components/api-components.yaml#/responses/Issue
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path2:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  get:
+    operationId: getIssue
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Issue
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  patch:
+    operationId: updateIssue
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/IssueUpdate
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Issue
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path3:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  post:
+    operationId: assignIssue
+    description: Persists durable assignment and scheduling intent. Request lifetime never executes the Run.
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/Assignment
+    responses:
+      '202':
+        $ref: ../components/api-components.yaml#/responses/Assignment
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path4:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listRuns
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/RunList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path5:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/RunID
+  get:
+    operationId: getRun
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Run
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

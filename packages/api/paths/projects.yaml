@@ -1,0 +1,36 @@
+path1:
+  get:
+    operationId: listProjects
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ProjectList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createProject
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ProjectCreate
+    responses:
+      '201':
+        $ref: ../components/api-components.yaml#/responses/Project
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path2:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: getProject
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Project
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  patch:
+    operationId: updateProject
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ProjectUpdate
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Project
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

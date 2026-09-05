@@ -1,0 +1,215 @@
+parameters:
+  ProjectID:
+    name: projectID
+    in: path
+    required: true
+    schema:
+      type: string
+      format: uuid
+  ResourceID:
+    name: resourceID
+    in: path
+    required: true
+    schema:
+      type: string
+      format: uuid
+  IssueID:
+    name: issueID
+    in: path
+    required: true
+    schema:
+      type: string
+      format: uuid
+  RunID:
+    name: runID
+    in: path
+    required: true
+    schema:
+      type: string
+      format: uuid
+requestBodies:
+  ProjectCreate:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/ProjectCreate
+  ProjectUpdate:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/ProjectUpdate
+  ProviderInput:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/ProviderInput
+  ModelProfileInput:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/ModelProfileInput
+  RuntimeInput:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/RuntimeInput
+  ExecutorProfileInput:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/ExecutorProfileInput
+  AgentInput:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/AgentInput
+  IssueCreate:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/IssueCreate
+  IssueUpdate:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/IssueUpdate
+  Assignment:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/AssignmentInput
+responses:
+  Error:
+    description: Stable machine-readable error.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/ErrorResponse
+  Project:
+    description: Project response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/Project
+  ProjectList:
+    description: Project list response.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/Project
+  Provider:
+    description: Provider response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/Provider
+  ProviderList:
+    description: Provider list response.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/Provider
+  ModelProfile:
+    description: ModelProfile response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/ModelProfile
+  ModelProfileList:
+    description: ModelProfile list response.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/ModelProfile
+  Runtime:
+    description: Runtime response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/Runtime
+  RuntimeList:
+    description: Runtime list response.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/Runtime
+  ExecutorProfile:
+    description: ExecutorProfile response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/ExecutorProfile
+  ExecutorProfileList:
+    description: ExecutorProfile list response.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/ExecutorProfile
+  Agent:
+    description: Agent response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/Agent
+  AgentList:
+    description: Agent list response.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/Agent
+  Issue:
+    description: Issue response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/Issue
+  IssueList:
+    description: Issue list response.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/Issue
+  Run:
+    description: Run response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/Run
+  RunList:
+    description: Run list response.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/Run
+  Assignment:
+    description: Durable assignment accepted.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/AssignmentResponse
