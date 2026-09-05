@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/jackc/pgx/v5"
 )
 
 func (s *Store) ListProjects(ctx context.Context) ([]store.Project, error) {
@@ -49,11 +50,57 @@ func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue
 }
 
 func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue, error) {
-	return scanIssue(s.pool.QueryRow(ctx, `
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return store.Issue{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var issueID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id::text
+		FROM issues
+		WHERE project_id=$1 AND id=$2
+		FOR UPDATE
+	`, input.ProjectID, input.ID).Scan(&issueID); err != nil {
+		return store.Issue{}, notFound(err)
+	}
+
+	if input.Status == "DONE" {
+		var active bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM runs
+				WHERE project_id=$1 AND issue_id=$2
+				  AND status IN ('QUEUED','STARTING','RUNNING','WAITING_FOR_INPUT','PAUSED','READY_FOR_REVIEW')
+			) OR EXISTS (
+				SELECT 1
+				FROM scheduler_jobs AS job
+				JOIN runs AS run ON run.id=job.run_id AND run.project_id=job.project_id
+				WHERE run.project_id=$1 AND run.issue_id=$2
+				  AND job.state IN ('QUEUED','CLAIMED')
+			)
+		`, input.ProjectID, input.ID).Scan(&active); err != nil {
+			return store.Issue{}, err
+		}
+		if active {
+			return store.Issue{}, store.ErrConflict
+		}
+	}
+
+	updated, err := scanIssue(tx.QueryRow(ctx, `
 		UPDATE issues SET title=$3, description=$4, status=$5, assigned_agent_id=$6, updated_at=now()
 		WHERE project_id=$1 AND id=$2
 		RETURNING id::text, project_id::text, title, description, status, assigned_agent_id::text, created_at, updated_at
 	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.AssignedAgentID))
+	if err != nil {
+		return store.Issue{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.Issue{}, err
+	}
+	return updated, nil
 }
 
 func (s *Store) ListRuns(ctx context.Context, projectID string) ([]store.Run, error) {
