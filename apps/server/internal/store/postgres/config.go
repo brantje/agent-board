@@ -36,11 +36,15 @@ func (s *Store) CreateRuntime(ctx context.Context, input store.Runtime) (store.R
 	if health == "" {
 		health = "UNKNOWN"
 	}
+	allowedSecretRefs := input.AllowedSecretRefs
+	if allowedSecretRefs == nil {
+		allowedSecretRefs = []string{}
+	}
 	return scanRuntime(s.pool.QueryRow(ctx, `
 		INSERT INTO runtimes (project_id, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		RETURNING id::text, project_id::text, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status, created_at, updated_at
-	`, input.ProjectID, input.Name, input.Kind, input.Image, input.CPULimitMillis, input.MemoryLimitBytes, input.PIDLimit, input.TimeoutSeconds, input.NetworkPolicy, workspacePolicy, input.AllowedSecretRefs, objectJSON(input.Capabilities), input.Enabled, health))
+	`, input.ProjectID, input.Name, input.Kind, input.Image, input.CPULimitMillis, input.MemoryLimitBytes, input.PIDLimit, input.TimeoutSeconds, input.NetworkPolicy, workspacePolicy, allowedSecretRefs, objectJSON(input.Capabilities), input.Enabled, health))
 }
 
 func (s *Store) CreateExecutorProfile(ctx context.Context, input store.ExecutorProfile) (store.ExecutorProfile, error) {
