@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -10,6 +11,9 @@ import (
 )
 
 func (s *Store) EnqueueJob(ctx context.Context, input store.SchedulerJob) (store.SchedulerJob, error) {
+	if strings.TrimSpace(input.IdempotencyKey) == "" {
+		return store.SchedulerJob{}, store.ErrInvalidArgument
+	}
 	kind := input.Kind
 	if kind == "" {
 		kind = "START"
@@ -38,6 +42,11 @@ func (s *Store) EnqueueJob(ctx context.Context, input store.SchedulerJob) (store
 }
 
 func (s *Store) ClaimNextJob(ctx context.Context, ownerID string, leaseDuration time.Duration) (*store.SchedulerJob, *store.SchedulerLease, error) {
+	leaseMicros := leaseDuration.Microseconds()
+	if strings.TrimSpace(ownerID) == "" || leaseMicros <= 0 {
+		return nil, nil, store.ErrInvalidArgument
+	}
+
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return nil, nil, err
@@ -59,12 +68,11 @@ func (s *Store) ClaimNextJob(ctx context.Context, ownerID string, leaseDuration 
 		return nil, nil, err
 	}
 
-	expiresAt := time.Now().Add(leaseDuration)
 	lease, err := scanSchedulerLease(tx.QueryRow(ctx, `
 		INSERT INTO scheduler_leases (job_id, owner_id, expires_at)
-		VALUES ($1, $2, $3)
+		VALUES ($1, $2, now() + ($3::bigint * interval '1 microsecond'))
 		RETURNING job_id::text, owner_id, lease_token::text, acquired_at, expires_at
-	`, job.ID, ownerID, expiresAt))
+	`, job.ID, ownerID, leaseMicros))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -78,17 +86,32 @@ func (s *Store) ClaimNextJob(ctx context.Context, ownerID string, leaseDuration 
 	return &job, &lease, nil
 }
 
-func (s *Store) RenewLease(ctx context.Context, jobID, leaseToken string, leaseDuration time.Duration) (store.SchedulerLease, error) {
+func (s *Store) RenewLease(ctx context.Context, projectID, jobID, leaseToken string, leaseDuration time.Duration) (store.SchedulerLease, error) {
+	leaseMicros := leaseDuration.Microseconds()
+	if leaseMicros <= 0 {
+		return store.SchedulerLease{}, store.ErrInvalidArgument
+	}
 	return scanSchedulerLease(s.pool.QueryRow(ctx, `
-		UPDATE scheduler_leases
-		SET expires_at = now() + $3::interval
-		WHERE job_id = $1 AND lease_token = $2
-		RETURNING job_id::text, owner_id, lease_token::text, acquired_at, expires_at
-	`, jobID, leaseToken, leaseDuration.String()))
+		UPDATE scheduler_leases AS lease
+		SET expires_at = now() + ($4::bigint * interval '1 microsecond')
+		FROM scheduler_jobs AS job
+		WHERE lease.job_id = $2
+		  AND lease.lease_token = $3
+		  AND job.id = lease.job_id
+		  AND job.project_id = $1
+		RETURNING lease.job_id::text, lease.owner_id, lease.lease_token::text, lease.acquired_at, lease.expires_at
+	`, projectID, jobID, leaseToken, leaseMicros))
 }
 
-func (s *Store) ReleaseLease(ctx context.Context, jobID, leaseToken string) error {
-	command, err := s.pool.Exec(ctx, `DELETE FROM scheduler_leases WHERE job_id = $1 AND lease_token = $2`, jobID, leaseToken)
+func (s *Store) ReleaseLease(ctx context.Context, projectID, jobID, leaseToken string) error {
+	command, err := s.pool.Exec(ctx, `
+		DELETE FROM scheduler_leases AS lease
+		USING scheduler_jobs AS job
+		WHERE lease.job_id = $2
+		  AND lease.lease_token = $3
+		  AND job.id = lease.job_id
+		  AND job.project_id = $1
+	`, projectID, jobID, leaseToken)
 	if err != nil {
 		return err
 	}
@@ -99,11 +122,28 @@ func (s *Store) ReleaseLease(ctx context.Context, jobID, leaseToken string) erro
 }
 
 func (s *Store) ReserveCapacity(ctx context.Context, projectID, jobID, runID, resourceKind, resourceID string) error {
+	if resourceKind != "AGENT" && resourceKind != "MODEL_PROFILE" {
+		return store.ErrInvalidArgument
+	}
+
 	command, err := s.pool.Exec(ctx, `
 		INSERT INTO scheduler_capacity_reservations (project_id, job_id, run_id, resource_kind, resource_id)
-		SELECT $1, id, run_id, $4, $5
-		FROM scheduler_jobs
-		WHERE id = $2 AND project_id = $1 AND run_id = $3
+		SELECT $1, job.id, job.run_id, $4, $5
+		FROM scheduler_jobs AS job
+		WHERE job.id = $2
+		  AND job.project_id = $1
+		  AND job.run_id = $3
+		  AND (
+			($4 = 'AGENT' AND EXISTS (
+				SELECT 1 FROM agents AS agent
+				WHERE agent.id = $5 AND (agent.project_id IS NULL OR agent.project_id = $1)
+			))
+			OR
+			($4 = 'MODEL_PROFILE' AND EXISTS (
+				SELECT 1 FROM model_profiles AS model_profile
+				WHERE model_profile.id = $5 AND (model_profile.project_id IS NULL OR model_profile.project_id = $1)
+			))
+		  )
 		ON CONFLICT (job_id, resource_kind) DO NOTHING
 	`, projectID, jobID, runID, resourceKind, resourceID)
 	if err != nil {
@@ -126,8 +166,8 @@ func (s *Store) ReserveCapacity(ctx context.Context, projectID, jobID, runID, re
 	return nil
 }
 
-func (s *Store) ReleaseCapacity(ctx context.Context, jobID string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE job_id = $1`, jobID)
+func (s *Store) ReleaseCapacity(ctx context.Context, projectID, jobID string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE project_id = $1 AND job_id = $2`, projectID, jobID)
 	return err
 }
 

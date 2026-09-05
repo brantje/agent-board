@@ -7,7 +7,10 @@ import (
 	"time"
 )
 
-var ErrNotFound = errors.New("store: not found")
+var (
+	ErrNotFound        = errors.New("store: not found")
+	ErrInvalidArgument = errors.New("store: invalid argument")
+)
 
 type CoreStore interface {
 	CreateProject(context.Context, Project) (Project, error)
@@ -41,14 +44,15 @@ type ExecutionStore interface {
 type SchedulerStore interface {
 	EnqueueJob(context.Context, SchedulerJob) (SchedulerJob, error)
 	ClaimNextJob(context.Context, string, time.Duration) (*SchedulerJob, *SchedulerLease, error)
-	RenewLease(context.Context, string, string, time.Duration) (SchedulerLease, error)
-	ReleaseLease(context.Context, string, string) error
+	RenewLease(context.Context, string, string, string, time.Duration) (SchedulerLease, error)
+	ReleaseLease(context.Context, string, string, string) error
 	ReserveCapacity(context.Context, string, string, string, string, string) error
-	ReleaseCapacity(context.Context, string) error
+	ReleaseCapacity(context.Context, string, string) error
 }
 
 type EvidenceStore interface {
 	PutRunProvenance(context.Context, string, string, json.RawMessage) error
+	GetRunProvenance(context.Context, string, string) (json.RawMessage, error)
 	AppendEvent(context.Context, Event) (Event, error)
 	ListRunEvents(context.Context, string, string, int64, int) ([]Event, error)
 	CreateRawOutputChunk(context.Context, RawOutputChunk) (RawOutputChunk, error)

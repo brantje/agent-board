@@ -104,7 +104,9 @@ func (s *Store) CreateQuestion(ctx context.Context, input store.Question) (store
 	}
 	return scanQuestion(s.pool.QueryRow(ctx, `
 		INSERT INTO questions (project_id, issue_id, run_id, prompt, kind, options, recommendation, blocking, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		SELECT $1, run.issue_id, run.id, $4, $5, $6, $7, $8, $9
+		FROM runs AS run
+		WHERE run.project_id = $1 AND run.id = $3 AND run.issue_id = $2
 		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
 	`, input.ProjectID, input.IssueID, input.RunID, input.Prompt, kind, arrayJSON(input.Options), input.Recommendation, input.Blocking, status))
 }
@@ -112,7 +114,24 @@ func (s *Store) CreateQuestion(ctx context.Context, input store.Question) (store
 func (s *Store) CreateDecision(ctx context.Context, input store.Decision) (store.Decision, error) {
 	return scanDecision(s.pool.QueryRow(ctx, `
 		INSERT INTO decisions (project_id, issue_id, run_id, question_id, kind, outcome, actor_type, actor_id, safe_details)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+		WHERE
+			($2::uuid IS NULL OR EXISTS (
+				SELECT 1 FROM issues AS issue WHERE issue.project_id = $1 AND issue.id = $2
+			))
+			AND
+			($3::uuid IS NULL OR EXISTS (
+				SELECT 1 FROM runs AS run
+				WHERE run.project_id = $1 AND run.id = $3 AND ($2::uuid IS NULL OR run.issue_id = $2)
+			))
+			AND
+			($4::uuid IS NULL OR EXISTS (
+				SELECT 1 FROM questions AS question
+				WHERE question.project_id = $1
+				  AND question.id = $4
+				  AND ($2::uuid IS NULL OR question.issue_id = $2)
+				  AND ($3::uuid IS NULL OR question.run_id = $3)
+			))
 		RETURNING id::text, project_id::text, issue_id::text, run_id::text, question_id::text, kind, outcome, actor_type, actor_id, safe_details, created_at
 	`, input.ProjectID, input.IssueID, input.RunID, input.QuestionID, input.Kind, input.Outcome, input.ActorType, input.ActorID, objectJSON(input.SafeDetails)))
 }
@@ -124,7 +143,18 @@ func (s *Store) CreateReview(ctx context.Context, input store.Review) (store.Rev
 	}
 	return scanReview(s.pool.QueryRow(ctx, `
 		INSERT INTO reviews (project_id, issue_id, run_id, status, decision_id)
-		VALUES ($1, $2, $3, $4, $5)
+		SELECT $1, run.issue_id, run.id, $4, $5
+		FROM runs AS run
+		WHERE run.project_id = $1
+		  AND run.id = $3
+		  AND run.issue_id = $2
+		  AND ($5::uuid IS NULL OR EXISTS (
+			SELECT 1 FROM decisions AS decision
+			WHERE decision.project_id = $1
+			  AND decision.id = $5
+			  AND (decision.issue_id IS NULL OR decision.issue_id = run.issue_id)
+			  AND (decision.run_id IS NULL OR decision.run_id = run.id)
+		  ))
 		RETURNING id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text, requested_at, decided_at, created_at, updated_at
 	`, input.ProjectID, input.IssueID, input.RunID, status, input.DecisionID))
 }

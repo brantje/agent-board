@@ -3,19 +3,38 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 
 func (s *Store) PutRunProvenance(ctx context.Context, projectID, runID string, snapshot json.RawMessage) error {
-	_, err := s.pool.Exec(ctx, `
+	command, err := s.pool.Exec(ctx, `
 		INSERT INTO run_provenance (project_id, run_id, snapshot)
 		SELECT $1, id, $3
 		FROM runs
 		WHERE project_id = $1 AND id = $2
 	`, projectID, runID, objectJSON(snapshot))
-	return err
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
+func (s *Store) GetRunProvenance(ctx context.Context, projectID, runID string) (json.RawMessage, error) {
+	var snapshot json.RawMessage
+	if err := s.pool.QueryRow(ctx, `
+		SELECT snapshot
+		FROM run_provenance
+		WHERE project_id = $1 AND run_id = $2
+	`, projectID, runID).Scan(&snapshot); err != nil {
+		return nil, notFound(err)
+	}
+	return snapshot, nil
 }
 
 func (s *Store) AppendEvent(ctx context.Context, input store.Event) (store.Event, error) {
@@ -24,6 +43,10 @@ func (s *Store) AppendEvent(ctx context.Context, input store.Event) (store.Event
 		return store.Event{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := validateEventReferences(ctx, tx, input); err != nil {
+		return store.Event{}, err
+	}
 
 	if input.RunID != nil {
 		var sequence int64
@@ -65,6 +88,28 @@ func (s *Store) AppendEvent(ctx context.Context, input store.Event) (store.Event
 	return value, nil
 }
 
+func validateEventReferences(ctx context.Context, tx pgx.Tx, input store.Event) error {
+	var valid bool
+	if err := tx.QueryRow(ctx, `
+		SELECT
+			($2::uuid IS NULL OR EXISTS (
+				SELECT 1 FROM agents AS agent
+				WHERE agent.id = $2 AND (agent.project_id IS NULL OR agent.project_id = $1)
+			))
+			AND
+			($3::uuid IS NULL OR EXISTS (
+				SELECT 1 FROM events AS parent
+				WHERE parent.id = $3 AND parent.project_id = $1
+			))
+	`, input.ProjectID, input.AgentID, input.ParentEventID).Scan(&valid); err != nil {
+		return err
+	}
+	if !valid {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) ListRunEvents(ctx context.Context, projectID, runID string, afterSequence int64, limit int) ([]store.Event, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 200
@@ -97,7 +142,9 @@ func (s *Store) ListRunEvents(ctx context.Context, projectID, runID string, afte
 func (s *Store) CreateRawOutputChunk(ctx context.Context, input store.RawOutputChunk) (store.RawOutputChunk, error) {
 	return scanRawOutputChunk(s.pool.QueryRow(ctx, `
 		INSERT INTO raw_output_chunks (project_id, issue_id, run_id, stream, sequence, storage_ref, size_bytes, digest)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		SELECT $1, run.issue_id, run.id, $4, $5, $6, $7, $8
+		FROM runs AS run
+		WHERE run.project_id = $1 AND run.id = $3 AND run.issue_id = $2
 		RETURNING id::text, project_id::text, issue_id::text, run_id::text, stream, sequence, storage_ref, size_bytes, digest, created_at
 	`, input.ProjectID, input.IssueID, input.RunID, input.Stream, input.Sequence, input.StorageRef, input.SizeBytes, input.Digest))
 }
@@ -105,7 +152,9 @@ func (s *Store) CreateRawOutputChunk(ctx context.Context, input store.RawOutputC
 func (s *Store) CreateArtifact(ctx context.Context, input store.Artifact) (store.Artifact, error) {
 	return scanArtifact(s.pool.QueryRow(ctx, `
 		INSERT INTO artifacts (project_id, issue_id, run_id, name, kind, media_type, size_bytes, digest, storage_ref, safe_metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		SELECT $1, run.issue_id, run.id, $4, $5, $6, $7, $8, $9, $10
+		FROM runs AS run
+		WHERE run.project_id = $1 AND run.id = $3 AND run.issue_id = $2
 		RETURNING id::text, project_id::text, issue_id::text, run_id::text, name, kind, media_type, size_bytes, digest, storage_ref, safe_metadata, created_at, deleted_at
 	`, input.ProjectID, input.IssueID, input.RunID, input.Name, input.Kind, input.MediaType, input.SizeBytes, input.Digest, input.StorageRef, objectJSON(input.SafeMetadata)))
 }
@@ -128,16 +177,16 @@ func (s *Store) ListArtifacts(ctx context.Context, projectID, runID string) ([]s
 		if err != nil {
 			return nil, err
 		}
-		values = append(values, value)
+		valus = append(values, value)
 	}
 	return values, rows.Err()
 }
 
 func scanEvent(row pgx.Row) (store.Event, error) {
 	var value store.Event
-	if err := row.Scan(&value.ID, &value.SchemaVersion, &value.Type, &value.OccurredAt, &value.ProjectID,
+	if err := row.Scan(&value.ID, &value.SchemaVersion, 'value.Type, &value.OccurredAt, &value.ProjectID,
 		&value.IssueID, &value.RunID, &value.AgentID, &value.WorkspaceID, &value.RuntimeInstanceID,
-		&value.CorrelationID, &value.ParentEventID, &value.Sequence, &value.Actor, &value.Payload, &value.CreatedAt); err != nil {
+		&value.CorrelationID, &value.ParentEventID, &value.Sequence, 'value.Actor, &value.Payload, 'value.CreatedAt); err != nil {
 		return store.Event{}, notFound(err)
 	}
 	return value, nil
