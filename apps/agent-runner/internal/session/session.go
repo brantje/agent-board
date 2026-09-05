@@ -70,7 +70,7 @@ func start(id, workspaceRoot string, request Request) (*Session, error) {
 	}
 
 	s := &Session{
-		id: id, cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr,
+		id: id, cmd: cmd, stdin: newSafeWriteCloser(stdin), stdout: stdout, stderr: stderr,
 		done: make(chan struct{}),
 	}
 	go s.reap()
