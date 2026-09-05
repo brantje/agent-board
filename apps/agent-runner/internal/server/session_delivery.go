@@ -33,6 +33,17 @@ func (d *sessionDelivery) attach(writer *connectionWriter) {
 	d.mu.Unlock()
 }
 
+func (d *sessionDelivery) attachIfIdle(writer *connectionWriter) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.writer != nil {
+		return false
+	}
+	d.writer = writer
+	d.notifyLocked()
+	return true
+}
+
 func (d *sessionDelivery) detach(writer *connectionWriter) {
 	d.mu.Lock()
 	if d.writer == writer {
