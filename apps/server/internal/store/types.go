@@ -182,6 +182,48 @@ type SchedulerLease struct {
 	ExpiresAt  time.Time
 }
 
+const (
+	SchedulerWaitAgentCapacity = "agent_capacity"
+	SchedulerWaitModelCapacity = "model_capacity"
+)
+
+type SchedulerAdmission struct {
+	Job            SchedulerJob
+	Lease          SchedulerLease
+	Run            Run
+	AgentID        string
+	ModelProfileID string
+}
+
+type SchedulerTransition struct {
+	ProjectID     string
+	JobID         string
+	RunID         string
+	LeaseToken    string
+	RunStatus     string
+	FailureReason *string
+}
+
+type SchedulerReconciliationOutcome string
+
+const (
+	SchedulerReconciliationActive    SchedulerReconciliationOutcome = "ACTIVE"
+	SchedulerReconciliationRetry     SchedulerReconciliationOutcome = "RETRY"
+	SchedulerReconciliationCompleted SchedulerReconciliationOutcome = "COMPLETED"
+	SchedulerReconciliationFailed    SchedulerReconciliationOutcome = "FAILED"
+	SchedulerReconciliationCancelled SchedulerReconciliationOutcome = "CANCELLED"
+	SchedulerReconciliationUnknown   SchedulerReconciliationOutcome = "UNKNOWN"
+)
+
+type SchedulerReconciliation struct {
+	ProjectID     string
+	JobID         string
+	RunID         string
+	LeaseToken    string
+	Outcome       SchedulerReconciliationOutcome
+	FailureReason *string
+}
+
 type Question struct {
 	ID             string
 	ProjectID      string
