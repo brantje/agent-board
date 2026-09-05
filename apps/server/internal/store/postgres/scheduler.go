@@ -365,16 +365,16 @@ func (s *Store) ReleaseCapacity(ctx context.Context, projectID, jobID string) er
 	return err
 }
 
-func (s *Store) TransitionAdmittedJob(context.Context, store.SchedulerTransition) (store.Run, error) {
-	return store.Run{}, store.ErrInvalidArgument
+func (s *Store) TransitionAdmittedJob(ctx context.Context, input store.SchedulerTransition) (store.Run, error) {
+	return s.transitionAdmittedJob(ctx, input)
 }
 
-func (s *Store) ClaimExpiredJobForReconciliation(context.Context, string, time.Duration) (*store.SchedulerAdmission, error) {
-	return nil, store.ErrInvalidArgument
+func (s *Store) ClaimExpiredJobForReconciliation(ctx context.Context, ownerID string, leaseDuration time.Duration) (*store.SchedulerAdmission, error) {
+	return s.claimExpiredJobForReconciliation(ctx, ownerID, leaseDuration)
 }
 
-func (s *Store) ResolveReconciliation(context.Context, store.SchedulerReconciliation) (store.Run, error) {
-	return store.Run{}, store.ErrInvalidArgument
+func (s *Store) ResolveReconciliation(ctx context.Context, input store.SchedulerReconciliation) (store.Run, error) {
+	return s.resolveReconciliation(ctx, input)
 }
 
 func scanSchedulerJob(row pgx.Row) (store.SchedulerJob, error) {
