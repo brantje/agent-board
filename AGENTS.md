@@ -106,7 +106,7 @@ Board state is separate from Run state. Capacity-only waiting remains queued and
 
 ## Stack
 
-- Backend: Go (`apps/server-go`)
+- Backend: Go (`apps/server`)
 - HTTP: chi
 - Frontend: Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS + Nuxt UI v4
 - Database: PostgreSQL + pgvector
@@ -124,7 +124,7 @@ Read `docs/testing.md`. Work Red -> Green -> Refactor. Bug fixes start with a re
 Backend verification includes as applicable:
 
 ```bash
-cd apps/server-go
+cd apps/server
 go test ./...
 go vet ./...
 go build ./...
