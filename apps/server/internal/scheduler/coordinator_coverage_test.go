@@ -139,6 +139,26 @@ func TestCoordinatorRejectsUnsupportedProcessorFinalStatus(t *testing.T) {
 	}
 }
 
+func TestCoordinatorReportsFinalTransitionError(t *testing.T) {
+	reported := make(chan error, 1)
+	fs := &transitionErrorStore{fakeSchedulerStore: &fakeSchedulerStore{}, err: errors.New("persist final failed")}
+	cfg := testConfig()
+	cfg.ReportError = func(err error) { reported <- err }
+	c, err := New(fs, noopProcessor(), testReconciler(), cfg)
+	if err != nil {
+		t.Fatalf("new coordinator: %v", err)
+	}
+	c.process(context.Background(), fakeAdmission("transition-error"))
+	select {
+	case got := <-reported:
+		if got.Error() != "persist final failed" {
+			t.Fatalf("reported error=%v", got)
+		}
+	default:
+		t.Fatal("expected final transition error report")
+	}
+}
+
 func TestFinalProcessorStatusesAndWaitCancellation(t *testing.T) {
 	for _, status := range []string{"WAITING_FOR_INPUT", "PAUSED", "READY_FOR_REVIEW", "COMPLETED", "FAILED", "CANCELLED"} {
 		if !isFinalProcessorStatus(status) {
@@ -153,6 +173,9 @@ func TestFinalProcessorStatusesAndWaitCancellation(t *testing.T) {
 	cancel()
 	if waitFor(ctx, time.Hour) {
 		t.Fatal("cancelled wait must return false")
+	}
+	if !waitFor(context.Background(), time.Millisecond) {
+		t.Fatal("completed wait must return true")
 	}
 }
 
@@ -191,6 +214,15 @@ func (s *reconciliationCaptureStore) ClaimExpiredJobForReconciliation(context.Co
 func (s *reconciliationCaptureStore) ResolveReconciliation(_ context.Context, input store.SchedulerReconciliation) (store.Run, error) {
 	s.resolved = input
 	return inputRun(input), nil
+}
+
+type transitionErrorStore struct {
+	*fakeSchedulerStore
+	err error
+}
+
+func (s *transitionErrorStore) TransitionAdmittedJob(context.Context, store.SchedulerTransition) (store.Run, error) {
+	return store.Run{}, s.err
 }
 
 func inputRun(input store.SchedulerReconciliation) store.Run {
