@@ -65,8 +65,13 @@ func run(ctx context.Context, config appConfig) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			return err
+		httpErr := httpServer.Shutdown(shutdownCtx)
+		runnerErr := handler.Shutdown(shutdownCtx)
+		if httpErr != nil {
+			return httpErr
+		}
+		if runnerErr != nil {
+			return runnerErr
 		}
 		err := <-errCh
 		if errors.Is(err, http.ErrServerClosed) {

@@ -27,17 +27,29 @@ type Server struct {
 
 	stdinMu    sync.RWMutex
 	stdinPumps map[string]*stdinPump
+
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
+	lifecycleMu    sync.Mutex
+	shuttingDown   bool
+	connections    map[*websocket.Conn]struct{}
+	handlerWG      sync.WaitGroup
+	streamWG       sync.WaitGroup
 }
 
 func New(config Config) *Server {
 	manager := session.NewManagerWithWorkspace(config.MaxActiveSessions, config.WorkspaceRoot)
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	s := &Server{
 		manager: manager,
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == "" },
 		},
-		mux:        http.NewServeMux(),
-		stdinPumps: make(map[string]*stdinPump),
+		mux:            http.NewServeMux(),
+		stdinPumps:     make(map[string]*stdinPump),
+		shutdownCtx:    shutdownCtx,
+		shutdownCancel: shutdownCancel,
+		connections:    make(map[*websocket.Conn]struct{}),
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWebSocket)
@@ -63,6 +75,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	if !s.registerConnection(conn) {
+		_ = conn.Close()
+		return
+	}
+	defer s.unregisterConnection(conn)
 	defer conn.Close()
 	conn.SetReadLimit(maxMessageSize)
 	writer := &connectionWriter{conn: conn}
@@ -158,7 +175,7 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 		writer.sendError("invalid_start", "invalid start request", msg.SessionID)
 		return
 	}
-	execution, err := s.manager.Start(msg.SessionID, session.Request{
+	execution, stdin, err := s.startSession(msg.SessionID, session.Request{
 		Command: request.Command,
 		Dir: request.Dir,
 		Env: request.Env,
@@ -166,6 +183,8 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 	})
 	if err != nil {
 		switch {
+		case errors.Is(err, errServerShuttingDown):
+			writer.sendError("shutting_down", "runner is shutting down", msg.SessionID)
 		case errors.Is(err, session.ErrCapacityReached):
 			writer.sendError("capacity_reached", "runner session capacity reached", msg.SessionID)
 		case errors.Is(err, session.ErrDuplicateID):
@@ -176,14 +195,12 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 		return
 	}
 
-	stdin := newStdinPump(execution.Stdin())
-	s.stdinMu.Lock()
-	s.stdinPumps[msg.SessionID] = stdin
-	s.stdinMu.Unlock()
 	go s.cleanupStdinPump(msg.SessionID, execution, stdin)
-
 	_ = writer.send(protocol.TypeSessionStarted, msg.SessionID, nil)
-	go streamExecution(writer, execution)
+	go func() {
+		defer s.streamWG.Done()
+		streamExecution(s.shutdownCtx, writer, execution)
+	}()
 }
 
 func (s *Server) handleStdin(writer *connectionWriter, msg protocol.Message) {
@@ -258,7 +275,7 @@ func (s *Server) handleSignal(writer *connectionWriter, sessionID string, force 
 	}
 }
 
-func streamExecution(writer *connectionWriter, execution *session.Session) {
+func streamExecution(ctx context.Context, writer *connectionWriter, execution *session.Session) {
 	var streams sync.WaitGroup
 	streams.Add(2)
 	go func() {
@@ -270,9 +287,12 @@ func streamExecution(writer *connectionWriter, execution *session.Session) {
 		pumpStream(writer, protocol.TypeStderr, execution.ID(), execution.Stderr())
 	}()
 
-	result, err := execution.Wait(context.Background())
+	result, err := execution.Wait(ctx)
 	streams.Wait()
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		writer.sendError("wait_failed", "execution result is unavailable", execution.ID())
 		return
 	}
