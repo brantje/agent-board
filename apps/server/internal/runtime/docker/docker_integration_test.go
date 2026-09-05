@@ -97,12 +97,15 @@ func TestDockerRuntimeIntegration(t *testing.T) {
 func registerRuntimeCleanup(t *testing.T, handle runtimepkg.Handle) {
 	t.Helper()
 	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
 		cleanup, err := New()
 		if err != nil {
 			t.Errorf("cleanup New() error=%v", err)
 			return
 		}
-		if err := cleanup.Destroy(context.Background(), handle); err != nil {
+		if err := cleanup.Destroy(cleanupCtx, handle); err != nil {
 			t.Errorf("cleanup Destroy() error=%v", err)
 		}
 		if err := cleanup.Close(); err != nil {
