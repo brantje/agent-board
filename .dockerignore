@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+.pnpm-store
+.nuxt
+.output
+coverage
+.env*
+*.md
+!README.md
