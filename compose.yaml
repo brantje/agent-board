@@ -6,7 +6,18 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-agent_board}
       POSTGRES_USER: ${POSTGRES_USER:-agent_board}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent_board}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        credential_file=/run/agent-board/postgres-password
+        if [ ! -s "$$credential_file" ]; then
+          umask 077
+          dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n' > "$$credential_file"
+          chmod 0444 "$$credential_file"
+        fi
+        export POSTGRES_PASSWORD="$$(cat "$$credential_file")"
+        exec docker-entrypoint.sh postgres
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -14,6 +25,7 @@ services:
       retries: 10
     volumes:
       - postgres-data:/var/lib/postgresql
+      - postgres-credentials:/run/agent-board
       - ./packages/database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
 
   server:
@@ -22,8 +34,16 @@ services:
       dockerfile: apps/server/Dockerfile
     environment:
       AGENT_BOARD_SERVER_ADDR: :3001
-      AGENT_BOARD_DATABASE_URL: postgres://${POSTGRES_USER:-agent_board}:${POSTGRES_PASSWORD:-agent_board}@postgres:5432/${POSTGRES_DB:-agent_board}?sslmode=disable
+      POSTGRES_DB: ${POSTGRES_DB:-agent_board}
+      POSTGRES_USER: ${POSTGRES_USER:-agent_board}
       AGENT_BOARD_WORKSPACE_ROOT: ${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        password="$$(cat /run/agent-board/postgres-password)"
+        export AGENT_BOARD_DATABASE_URL="postgres://$${POSTGRES_USER}:$${password}@postgres:5432/$${POSTGRES_DB}?sslmode=disable"
+        exec /usr/local/bin/agent-board-server
     depends_on:
       postgres:
         condition: service_healthy
@@ -37,6 +57,7 @@ services:
     volumes:
       - ${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}:${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}
       - ${AGENT_BOARD_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
+      - postgres-credentials:/run/agent-board:ro
 
   web:
     build:
@@ -58,3 +79,4 @@ services:
 
 volumes:
   postgres-data:
+  postgres-credentials:

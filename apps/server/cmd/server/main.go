@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	defaultAddress  = ":3001"
-	shutdownTimeout = 10 * time.Second
+	defaultAddress    = ":3001"
+	shutdownTimeout   = 10 * time.Second
+	serverIdleTimeout = 60 * time.Second
 )
 
 func main() {
@@ -35,6 +36,7 @@ func run() error {
 		Addr:              address,
 		Handler:           httpapi.NewRouter(),
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       serverIdleTimeout,
 	}
 
 	serverErrors := make(chan error, 1)
