@@ -55,7 +55,7 @@ type Session struct {
 	mu     sync.RWMutex
 }
 
-func start(id, workspaceRoot string, request Request) (*Session, error) {
+func start(id, workspaceRoot string, request Request, redactionValues []string) (*Session, error) {
 	if len(request.Command) == 0 || request.Command[0] == "" {
 		return nil, errors.New("command is required")
 	}
@@ -94,10 +94,9 @@ func start(id, workspaceRoot string, request Request) (*Session, error) {
 
 	stdoutBuffer := newStreamBuffer()
 	stderrBuffer := newStreamBuffer()
-	secrets := secretValues(request.Secrets)
 	s := &Session{
 		id: id, cmd: cmd, stdin: newSafeWriteCloser(stdin),
-		stdout: redact.NewReader(stdoutBuffer, secrets), stderr: redact.NewReader(stderrBuffer, secrets),
+		stdout: redact.NewReader(stdoutBuffer, redactionValues), stderr: redact.NewReader(stderrBuffer, redactionValues),
 		done: make(chan struct{}),
 	}
 	go s.supervise(stdout, stderr, stdoutBuffer, stderrBuffer)

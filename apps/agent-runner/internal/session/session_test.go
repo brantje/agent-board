@@ -143,8 +143,11 @@ func TestSequentialSessionsReuseWorkspaceWithoutEnvironmentLeak(t *testing.T) {
 	if _, err := second.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != "ephemeral|unset" {
+	if string(output) != "***|unset" {
 		t.Fatalf("workspace/env isolation mismatch: %q", output)
+	}
+	if strings.Contains(string(output), "ephemeral") {
+		t.Fatalf("prior session secret leaked through reusable workspace: %q", output)
 	}
 }
 
