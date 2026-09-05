@@ -16,13 +16,13 @@ import (
 )
 
 const (
-	labelRuntimeInstance       = "agent-board.runtime-instance-id"
-	labelProject               = "agent-board.project-id"
-	labelIssue                 = "agent-board.issue-id"
-	labelWorkspace             = "agent-board.workspace-id"
-	labelRuntime               = "agent-board.runtime-id"
-	containerNamePrefix        = "agent-board-runtime-"
-	postCreateCleanupTimeout   = 10 * time.Second
+	labelRuntimeInstance     = "agent-board.runtime-instance-id"
+	labelProject             = "agent-board.project-id"
+	labelIssue               = "agent-board.issue-id"
+	labelWorkspace           = "agent-board.workspace-id"
+	labelRuntime             = "agent-board.runtime-id"
+	containerNamePrefix      = "agent-board-runtime-"
+	postCreateCleanupTimeout = 10 * time.Second
 )
 
 type mobyAPI interface {
@@ -360,6 +360,9 @@ func verifyContainer(inspected container.InspectResponse, meta handleMetadata) e
 	if len(inspected.HostConfig.CapAdd) != 0 {
 		return fmt.Errorf("%w: Docker container has added Linux capabilities", runtimepkg.ErrOwnershipMismatch)
 	}
+	if !noNewPrivilegesEnabled(inspected.HostConfig.SecurityOpt) {
+		return fmt.Errorf("%w: Docker container permits privilege escalation", runtimepkg.ErrOwnershipMismatch)
+	}
 	if len(inspected.HostConfig.Devices) != 0 || len(inspected.HostConfig.DeviceRequests) != 0 {
 		return fmt.Errorf("%w: Docker container has host device access", runtimepkg.ErrOwnershipMismatch)
 	}
@@ -386,6 +389,16 @@ func verifyContainer(inspected container.InspectResponse, meta handleMetadata) e
 		return fmt.Errorf("%w: unsupported persisted network policy", runtimepkg.ErrOwnershipMismatch)
 	}
 	return nil
+}
+
+func noNewPrivilegesEnabled(options []string) bool {
+	for _, option := range options {
+		switch strings.ToLower(strings.TrimSpace(option)) {
+		case "no-new-privileges", "no-new-privileges=true", "no-new-privileges:true":
+			return true
+		}
+	}
+	return false
 }
 
 func ownershipLabels(spec runtimepkg.RuntimeSpec) map[string]string {
