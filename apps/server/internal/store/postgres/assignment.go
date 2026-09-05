@@ -11,6 +11,15 @@ import (
 
 const pendingWorkspacePrefix = "pending://workspace/"
 
+var activeRunStatuses = []string{
+	"QUEUED",
+	"STARTING",
+	"RUNNING",
+	"WAITING_FOR_INPUT",
+	"PAUSED",
+	"READY_FOR_REVIEW",
+}
+
 func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID string) (store.Issue, store.Run, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
@@ -35,6 +44,9 @@ func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID str
 	}
 	if err == nil {
 		if active.AgentID != nil && *active.AgentID == agentID {
+			// Assignment retries are idempotent. Preserve the current Issue board
+			// state because it can legitimately diverge from Run state (for
+			// example BLOCKED/WAITING_FOR_INPUT or REVIEW/READY_FOR_REVIEW).
 			if err := tx.Commit(ctx); err != nil {
 				return store.Issue{}, store.Run{}, err
 			}
@@ -150,11 +162,11 @@ func latestActiveRun(ctx context.Context, tx pgx.Tx, projectID, issueID string) 
 	return scanRun(tx.QueryRow(ctx, `
         SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
         FROM runs
-        WHERE project_id=$1 AND issue_id=$2 AND status IN ('QUEUED','STARTING','RUNNING','WAITING_FOR_INPUT','PAUSED')
+        WHERE project_id=$1 AND issue_id=$2 AND status = ANY($3::text[])
         ORDER BY attempt DESC
         LIMIT 1
         FOR UPDATE
-    `, projectID, issueID))
+    `, projectID, issueID, activeRunStatuses))
 }
 
 func workspaceForAssignment(ctx context.Context, tx pgx.Tx, projectID, issueID, repositoryPath, defaultBranch string) (store.Workspace, error) {
