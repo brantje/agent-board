@@ -6,10 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
+
+const orphanRuntimeCleanupTimeout = 30 * time.Second
 
 type RuntimeInstanceStore interface {
 	GetRuntime(context.Context, *string, string) (store.Runtime, error)
@@ -39,7 +42,7 @@ func NewRuntimeInstanceService(runtimeStore RuntimeInstanceStore, workspaces Iss
 	for kind, implementation := range implementations {
 		kind = strings.TrimSpace(kind)
 		if kind == "" || implementation == nil {
-			return nil, fmt.Errorf("Runtime implementation kind and value are required")
+			return nil, fmt.Errorf("runtime implementation kind and value are required")
 		}
 		copyImplementations[kind] = implementation
 	}
@@ -80,6 +83,11 @@ func (s *RuntimeInstanceService) Create(ctx context.Context, projectID, issueID,
 	externalID := handle.ExternalID
 	instance, err = s.updateState(ctx, instance, runtimepkg.StateProvisioning, &externalID, "CONNECTING", handle.Metadata)
 	if err != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), orphanRuntimeCleanupTimeout)
+		defer cancel()
+		if destroyErr := implementation.Destroy(cleanupCtx, handle); destroyErr != nil {
+			return store.RuntimeInstance{}, errors.Join(err, fmt.Errorf("destroy orphaned Runtime instance: %w", destroyErr))
+		}
 		return store.RuntimeInstance{}, err
 	}
 	return instance, nil
@@ -108,7 +116,7 @@ func (s *RuntimeInstanceService) Start(ctx context.Context, projectID, instanceI
 		return s.failInstance(ctx, instance, err)
 	}
 	if inspection.State != runtimepkg.StateRunning {
-		return s.failInstance(ctx, instance, fmt.Errorf("Runtime Instance did not reach RUNNING state: %s", inspection.State))
+		return s.failInstance(ctx, instance, fmt.Errorf("runtime instance did not reach RUNNING state: %s", inspection.State))
 	}
 	return s.updateState(ctx, instance, runtimepkg.StateRunning, instance.ExternalID, "CONNECTING", instance.SafeHandleMetadata)
 }
@@ -218,7 +226,7 @@ func (s *RuntimeInstanceService) updateState(ctx context.Context, instance store
 		return store.RuntimeInstance{}, translateStoreError(err, "runtime_instance")
 	}
 	if updated.WorkspaceID != instance.WorkspaceID || updated.RuntimeID != instance.RuntimeID {
-		return store.RuntimeInstance{}, fmt.Errorf("Runtime Instance immutable binding changed during state update")
+		return store.RuntimeInstance{}, fmt.Errorf("runtime instance immutable binding changed during state update")
 	}
 	return updated, nil
 }
