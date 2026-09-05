@@ -326,11 +326,11 @@ CREATE TABLE reviews (
 CREATE INDEX reviews_pending_idx ON reviews (project_id, requested_at) WHERE status = 'PENDING';
 
 CREATE TABLE run_provenance (
-    run_id uuid PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
-    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    run_id uuid PRIMARY KEY REFERENCES runs(id) ON DELETE RESTRICT,
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
     snapshot jsonb NOT NULL CHECK (jsonb_typeof(snapshot) = 'object'),
     created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT run_provenance_run_scope_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE
+    CONSTRAINT run_provenance_run_scope_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE RESTRICT
 );
 
 CREATE TABLE events (
@@ -338,20 +338,20 @@ CREATE TABLE events (
     schema_version integer NOT NULL DEFAULT 1 CHECK (schema_version >= 1),
     type text NOT NULL CHECK (btrim(type) <> ''),
     occurred_at timestamptz NOT NULL DEFAULT now(),
-    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
     issue_id uuid,
     run_id uuid,
-    agent_id uuid REFERENCES agents(id) ON DELETE SET NULL,
+    agent_id uuid REFERENCES agents(id) ON DELETE RESTRICT,
     workspace_id uuid,
     runtime_instance_id uuid,
     correlation_id uuid,
-    parent_event_id uuid REFERENCES events(id) ON DELETE SET NULL,
+    parent_event_id uuid REFERENCES events(id) ON DELETE RESTRICT,
     sequence bigint,
     actor jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(actor) = 'object'),
     payload jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(payload) = 'object'),
     created_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT events_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
-    CONSTRAINT events_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT events_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE RESTRICT,
+    CONSTRAINT events_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE RESTRICT,
     CONSTRAINT events_workspace_fk FOREIGN KEY (project_id, workspace_id) REFERENCES workspaces(project_id, id) ON DELETE RESTRICT,
     CONSTRAINT events_runtime_instance_fk FOREIGN KEY (project_id, runtime_instance_id) REFERENCES runtime_instances(project_id, id) ON DELETE RESTRICT,
     CHECK ((run_id IS NULL AND sequence IS NULL) OR (run_id IS NOT NULL AND sequence IS NOT NULL AND sequence >= 1)),
@@ -446,6 +446,45 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE FUNCTION enforce_configuration_owner_change() RETURNS trigger AS $$
+BEGIN
+    IF NEW.project_id IS NOT DISTINCT FROM OLD.project_id OR NEW.project_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+
+    IF TG_TABLE_NAME = 'model_profiles' THEN
+        IF EXISTS (
+            SELECT 1 FROM executor_profiles
+            WHERE model_profile_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
+        ) THEN
+            RAISE EXCEPTION 'model profile ownership change would cross project scope' USING ERRCODE = '23514';
+        END IF;
+    ELSIF TG_TABLE_NAME = 'runtimes' THEN
+        IF EXISTS (
+            SELECT 1 FROM executor_profiles
+            WHERE runtime_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
+        ) OR EXISTS (
+            SELECT 1 FROM runtime_instances
+            WHERE runtime_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
+        ) THEN
+            RAISE EXCEPTION 'runtime ownership change would cross project scope' USING ERRCODE = '23514';
+        END IF;
+    ELSIF TG_TABLE_NAME = 'executor_profiles' THEN
+        IF EXISTS (
+            SELECT 1 FROM agents
+            WHERE executor_profile_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
+        ) THEN
+            RAISE EXCEPTION 'executor profile ownership change would cross project scope' USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER model_profiles_owner_change_check BEFORE UPDATE OF project_id ON model_profiles FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
+CREATE TRIGGER runtimes_owner_change_check BEFORE UPDATE OF project_id ON runtimes FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
+CREATE TRIGGER executor_profiles_owner_change_check BEFORE UPDATE OF project_id ON executor_profiles FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 
 CREATE TRIGGER executor_profiles_scope_check BEFORE INSERT OR UPDATE OF project_id, model_profile_id, runtime_id ON executor_profiles FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER agents_scope_check BEFORE INSERT OR UPDATE OF project_id, executor_profile_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
