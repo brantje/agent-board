@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -28,11 +29,11 @@ func TestWaitCompletesWithoutConsumingProcessOutput(t *testing.T) {
 	waitFor(t, time.Second, func() bool { return manager.ActiveCount() == 0 })
 
 	stdout, err := io.ReadAll(execution.Stdout())
-	if err != nil {
-		t.Fatal(err)
+	if !errors.Is(err, ErrOutputTruncated) {
+		t.Fatalf("expected bounded output truncation, got %v", err)
 	}
-	if len(stdout) != 2*1024*1024 {
-		t.Fatalf("unexpected stdout length %d", len(stdout))
+	if len(stdout) != defaultStreamBufferLimit {
+		t.Fatalf("unexpected retained stdout length %d", len(stdout))
 	}
 	stderr, err := io.ReadAll(execution.Stderr())
 	if err != nil {
@@ -40,5 +41,21 @@ func TestWaitCompletesWithoutConsumingProcessOutput(t *testing.T) {
 	}
 	if string(stderr) != "stderr-marker" {
 		t.Fatalf("unexpected stderr %q", stderr)
+	}
+}
+
+func TestStreamBufferRetainsBoundedTailAndReportsTruncation(t *testing.T) {
+	buffer := newStreamBufferWithLimit(4)
+	if n, err := buffer.Write([]byte("abcdef")); err != nil || n != 6 {
+		t.Fatalf("Write() n=%d err=%v", n, err)
+	}
+	buffer.CloseWithError(nil)
+
+	data, err := io.ReadAll(buffer)
+	if !errors.Is(err, ErrOutputTruncated) {
+		t.Fatalf("expected truncation error, got %v", err)
+	}
+	if string(data) != "cdef" {
+		t.Fatalf("expected retained tail, got %q", data)
 	}
 }

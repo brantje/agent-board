@@ -96,10 +96,10 @@ func start(id, workspaceRoot string, request Request, redactionValues []string) 
 	stderrBuffer := newStreamBuffer()
 	s := &Session{
 		id: id, cmd: cmd, stdin: newSafeWriteCloser(stdin),
-		stdout: redact.NewReader(stdoutBuffer, redactionValues), stderr: redact.NewReader(stderrBuffer, redactionValues),
+		stdout: stdoutBuffer, stderr: stderrBuffer,
 		done: make(chan struct{}),
 	}
-	go s.supervise(stdout, stderr, stdoutBuffer, stderrBuffer)
+	go s.supervise(stdout, stderr, stdoutBuffer, stderrBuffer, redactionValues)
 	return s, nil
 }
 
@@ -139,18 +139,18 @@ func (s *Session) signal(signalTree func(int) error) error {
 	return signalTree(pid)
 }
 
-func (s *Session) supervise(stdout, stderr io.ReadCloser, stdoutBuffer, stderrBuffer *streamBuffer) {
+func (s *Session) supervise(stdout, stderr io.ReadCloser, stdoutBuffer, stderrBuffer *streamBuffer, redactionValues []string) {
 	var streams sync.WaitGroup
 	streams.Add(2)
-	go copyProcessStream(&streams, stdoutBuffer, stdout)
-	go copyProcessStream(&streams, stderrBuffer, stderr)
+	go copyProcessStream(&streams, stdoutBuffer, stdout, redactionValues)
+	go copyProcessStream(&streams, stderrBuffer, stderr, redactionValues)
 	streams.Wait()
 	s.reap()
 }
 
-func copyProcessStream(group *sync.WaitGroup, destination *streamBuffer, source io.ReadCloser) {
+func copyProcessStream(group *sync.WaitGroup, destination *streamBuffer, source io.ReadCloser, redactionValues []string) {
 	defer group.Done()
-	_, err := io.Copy(destination, source)
+	_, err := io.Copy(destination, redact.NewReader(source, redactionValues))
 	_ = source.Close()
 	destination.CloseWithError(err)
 }
