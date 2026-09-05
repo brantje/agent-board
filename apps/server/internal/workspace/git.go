@@ -15,6 +15,7 @@ type Git interface {
 	CheckoutNewBranch(context.Context, string, string) error
 	HeadRevision(context.Context, string) (string, error)
 	CurrentBranch(context.Context, string) (string, error)
+	OriginURL(context.Context, string) (string, error)
 	IsRepository(context.Context, string) bool
 }
 
@@ -58,6 +59,10 @@ func (g *GitCLI) HeadRevision(ctx context.Context, repositoryPath string) (strin
 
 func (g *GitCLI) CurrentBranch(ctx context.Context, repositoryPath string) (string, error) {
 	return g.run(ctx, "-C", repositoryPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+}
+
+func (g *GitCLI) OriginURL(ctx context.Context, repositoryPath string) (string, error) {
+	return g.run(ctx, "-C", repositoryPath, "remote", "get-url", "origin")
 }
 
 func (g *GitCLI) IsRepository(ctx context.Context, repositoryPath string) bool {
