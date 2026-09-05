@@ -35,6 +35,9 @@ type Server struct {
 	stdinMu    sync.RWMutex
 	stdinPumps map[string]*stdinPump
 
+	deliveryMu sync.Mutex
+	deliveries map[string]*sessionDelivery
+
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
 	lifecycleMu    sync.Mutex
@@ -57,6 +60,7 @@ func New(config Config) *Server {
 		},
 		mux:            http.NewServeMux(),
 		stdinPumps:     make(map[string]*stdinPump),
+		deliveries:     make(map[string]*sessionDelivery),
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
 		connections:    make(map[*websocket.Conn]struct{}),
@@ -98,6 +102,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writer := &connectionWriter{conn: conn}
+	defer s.detachDeliveries(writer)
 	pingStop := make(chan struct{})
 	pingDone := make(chan struct{})
 	go func() {
@@ -199,6 +204,7 @@ func (s *Server) handshake(conn *websocket.Conn, writer *connectionWriter) bool 
 		},
 	})
 	_ = writer.send(protocol.TypeHealth, "", s.health())
+	s.attachDeliveries(writer)
 	return true
 }
 
@@ -249,9 +255,11 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 
 	go s.cleanupStdinPump(msg.SessionID, execution, stdin)
 	_ = writer.send(protocol.TypeSessionStarted, msg.SessionID, nil)
+	delivery := s.registerDelivery(msg.SessionID, writer)
 	go func() {
 		defer s.streamWG.Done()
-		streamExecution(s.shutdownCtx, writer, execution)
+		defer s.removeDelivery(msg.SessionID, delivery)
+		streamExecution(s.shutdownCtx, delivery, execution)
 	}()
 }
 
@@ -311,6 +319,38 @@ func (s *Server) getStdinPump(sessionID string) (*stdinPump, bool) {
 	return stdin, ok
 }
 
+func (s *Server) registerDelivery(sessionID string, writer *connectionWriter) *sessionDelivery {
+	delivery := newSessionDelivery(s.shutdownCtx, writer)
+	s.deliveryMu.Lock()
+	s.deliveries[sessionID] = delivery
+	s.deliveryMu.Unlock()
+	return delivery
+}
+
+func (s *Server) removeDelivery(sessionID string, delivery *sessionDelivery) {
+	s.deliveryMu.Lock()
+	if s.deliveries[sessionID] == delivery {
+		delete(s.deliveries, sessionID)
+	}
+	s.deliveryMu.Unlock()
+}
+
+func (s *Server) attachDeliveries(writer *connectionWriter) {
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	for _, delivery := range s.deliveries {
+		delivery.attach(writer)
+	}
+}
+
+func (s *Server) detachDeliveries(writer *connectionWriter) {
+	s.deliveryMu.Lock()
+	defer s.deliveryMu.Unlock()
+	for _, delivery := range s.deliveries {
+		delivery.detach(writer)
+	}
+}
+
 func (s *Server) handleSignal(writer *connectionWriter, sessionID string, force bool) {
 	execution, err := s.manager.Get(sessionID)
 	if err != nil {
@@ -327,7 +367,7 @@ func (s *Server) handleSignal(writer *connectionWriter, sessionID string, force 
 	}
 }
 
-func streamExecution(ctx context.Context, writer *connectionWriter, execution *session.Session) {
+func streamExecution(ctx context.Context, writer streamWriter, execution *session.Session) {
 	var streams sync.WaitGroup
 	streams.Add(2)
 	go func() {
