@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	cerrdefs "github.com/containerd/errdefs"
@@ -15,12 +16,13 @@ import (
 )
 
 const (
-	labelRuntimeInstance = "agent-board.runtime-instance-id"
-	labelProject         = "agent-board.project-id"
-	labelIssue           = "agent-board.issue-id"
-	labelWorkspace       = "agent-board.workspace-id"
-	labelRuntime         = "agent-board.runtime-id"
-	containerNamePrefix  = "agent-board-runtime-"
+	labelRuntimeInstance       = "agent-board.runtime-instance-id"
+	labelProject               = "agent-board.project-id"
+	labelIssue                 = "agent-board.issue-id"
+	labelWorkspace             = "agent-board.workspace-id"
+	labelRuntime               = "agent-board.runtime-id"
+	containerNamePrefix        = "agent-board-runtime-"
+	postCreateCleanupTimeout   = 10 * time.Second
 )
 
 type mobyAPI interface {
@@ -108,14 +110,20 @@ func (r *Runtime) Create(ctx context.Context, spec runtimepkg.RuntimeSpec) (runt
 	inspected, err := r.api.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		validationErr := fmt.Errorf("inspect created Docker container: %w", err)
-		_, _ = r.api.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false})
+		r.cleanupCreatedContainer(created.ID)
 		return runtimepkg.Handle{}, validationErr
 	}
 	if err := verifyContainer(inspected.Container, metadataFromSpec(spec)); err != nil {
-		_, _ = r.api.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false})
+		r.cleanupCreatedContainer(created.ID)
 		return runtimepkg.Handle{}, err
 	}
 	return handleFromSpec(spec, created.ID)
+}
+
+func (r *Runtime) cleanupCreatedContainer(containerID string) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), postCreateCleanupTimeout)
+	defer cancel()
+	_, _ = r.api.ContainerRemove(cleanupCtx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false})
 }
 
 // Recover rediscovers a container by the deterministic Runtime Instance name.
@@ -180,6 +188,7 @@ func (r *Runtime) Stop(ctx context.Context, handle runtimepkg.Handle, _ runtimep
 	}
 	return nil
 }
+
 func (r *Runtime) Destroy(ctx context.Context, handle runtimepkg.Handle) error {
 	inspected, _, err := r.inspectOwned(ctx, handle)
 	if errors.Is(err, runtimepkg.ErrNotFound) {
