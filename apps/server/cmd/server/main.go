@@ -73,11 +73,12 @@ func newHTTPServer(address string, handlers ...http.Handler) *http.Server {
 }
 
 func run(ctx context.Context, address string, handlers ...http.Handler) error {
-	listener, err := net.Listen("tcp", address)
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(ctx, "tcp", address)
 	if err != nil {
 		return err
 	}
-	defer listener.Close()
+	defer func() { _ = listener.Close() }()
 	return serve(ctx, newHTTPServer(address, handlers...), listener)
 }
 
