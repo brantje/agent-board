@@ -7,13 +7,19 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/brantje/agent-board/apps/agent-runner/internal/protocol"
 	"github.com/brantje/agent-board/apps/agent-runner/internal/session"
 	"github.com/gorilla/websocket"
 )
 
-const maxMessageSize = 1 << 20
+const (
+	maxMessageSize   = 1 << 20
+	defaultPongWait  = 60 * time.Second
+	defaultPingPeriod = 45 * time.Second
+	pingWriteTimeout = 5 * time.Second
+)
 
 type Config struct {
 	WorkspaceRoot     string
@@ -35,6 +41,9 @@ type Server struct {
 	connections    map[*websocket.Conn]struct{}
 	handlerWG      sync.WaitGroup
 	streamWG       sync.WaitGroup
+
+	pongWait   time.Duration
+	pingPeriod time.Duration
 }
 
 func New(config Config) *Server {
@@ -50,6 +59,8 @@ func New(config Config) *Server {
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
 		connections:    make(map[*websocket.Conn]struct{}),
+		pongWait:       defaultPongWait,
+		pingPeriod:     defaultPingPeriod,
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWebSocket)
@@ -82,7 +93,20 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	defer s.unregisterConnection(conn)
 	defer conn.Close()
 	conn.SetReadLimit(maxMessageSize)
+	if err := s.configureConnectionLiveness(conn); err != nil {
+		return
+	}
 	writer := &connectionWriter{conn: conn}
+	pingStop := make(chan struct{})
+	pingDone := make(chan struct{})
+	go func() {
+		defer close(pingDone)
+		s.runConnectionPings(pingStop, writer)
+	}()
+	defer func() {
+		close(pingStop)
+		<-pingDone
+	}()
 
 	if !s.handshake(conn, writer) {
 		return
@@ -106,6 +130,33 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		s.handleMessage(writer, msg)
+	}
+}
+
+func (s *Server) configureConnectionLiveness(conn *websocket.Conn) error {
+	if err := conn.SetReadDeadline(time.Now().Add(s.pongWait)); err != nil {
+		return err
+	}
+	conn.SetPongHandler(func(string) error {
+		return conn.SetReadDeadline(time.Now().Add(s.pongWait))
+	})
+	return nil
+}
+
+func (s *Server) runConnectionPings(stop <-chan struct{}, writer *connectionWriter) {
+	ticker := time.NewTicker(s.pingPeriod)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-s.shutdownCtx.Done():
+			return
+		case now := <-ticker.C:
+			if err := writer.ping(now.Add(pingWriteTimeout)); err != nil {
+				return
+			}
+		}
 	}
 }
 
@@ -342,6 +393,12 @@ func (w *connectionWriter) send(typ protocol.MessageType, sessionID string, payl
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.conn.WriteMessage(websocket.TextMessage, data)
+}
+
+func (w *connectionWriter) ping(deadline time.Time) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.conn.WriteControl(websocket.PingMessage, nil, deadline)
 }
 
 func (w *connectionWriter) sendError(code, message, sessionID string) {
