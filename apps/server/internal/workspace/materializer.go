@@ -175,12 +175,12 @@ func (m *Materializer) validateReadyCheckout(ctx context.Context, current store.
 	if !isRepository {
 		return fmt.Errorf("%w: ready workspace path is not a Git repository", ErrBootstrapFailed)
 	}
-	branch, err := m.git.CurrentBranch(ctx, current.Path)
+	headRevision, err := m.git.HeadRevision(ctx, current.Path)
 	if err != nil {
-		return fmt.Errorf("%w: inspect ready workspace branch: %w", ErrBootstrapFailed, err)
+		return fmt.Errorf("%w: inspect ready workspace revision: %w", ErrBootstrapFailed, err)
 	}
-	if branch != current.WorkingBranch {
-		return fmt.Errorf("%w: ready workspace branch %q does not match %q", ErrBootstrapFailed, branch, current.WorkingBranch)
+	if strings.TrimSpace(headRevision) == "" {
+		return fmt.Errorf("%w: ready workspace HEAD is not a valid commit", ErrBootstrapFailed)
 	}
 	if current.RepositoryPath == nil || strings.TrimSpace(*current.RepositoryPath) == "" {
 		return fmt.Errorf("%w: ready workspace repository identity is missing", ErrBootstrapFailed)

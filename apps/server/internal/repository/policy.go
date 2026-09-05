@@ -86,7 +86,7 @@ func (p *Policy) Resolve(path string) (string, error) {
 
 	for _, configuredRoot := range p.roots {
 		root, err := filepath.EvalSymlinks(configuredRoot)
-		if err != nil {
+		if err != nil || filepath.Clean(root) != filepath.Clean(configuredRoot) {
 			continue
 		}
 		rootInfo, err := os.Stat(root)
