@@ -10,6 +10,17 @@ import (
 	"github.com/moby/moby/client"
 )
 
+type contextCheckingMoby struct {
+	*errorMoby
+	removeContextErr error
+}
+
+func (f *contextCheckingMoby) ContainerRemove(ctx context.Context, _ string, _ client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
+	f.removeCalls++
+	f.removeContextErr = ctx.Err()
+	return client.ContainerRemoveResult{}, f.removeErr
+}
+
 func TestDockerCreateCleansUpAfterPostCreateValidationFailure(t *testing.T) {
 	spec := dockerSpec()
 
@@ -44,6 +55,24 @@ func TestDockerCreateCleansUpAfterPostCreateValidationFailure(t *testing.T) {
 		_, err := runtime.Create(context.Background(), spec)
 		if !errors.Is(err, runtimepkg.ErrOwnershipMismatch) || errors.Is(err, removeErr) || fake.removeCalls != 1 {
 			t.Fatalf("Create() error=%v removeCalls=%d", err, fake.removeCalls)
+		}
+	})
+
+	t.Run("request cancellation does not cancel cleanup", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		base := &fakeMoby{inspectFn: func(ref string) (client.ContainerInspectResult, error) {
+			if ref == containerName(spec.RuntimeInstanceID) {
+				return client.ContainerInspectResult{}, cerrdefs.ErrNotFound
+			}
+			cancel()
+			return client.ContainerInspectResult{}, context.Canceled
+		}}
+		fake := &contextCheckingMoby{errorMoby: &errorMoby{fakeMoby: base}}
+		runtime, _ := newWithClient(fake)
+
+		_, err := runtime.Create(ctx, spec)
+		if !errors.Is(err, context.Canceled) || fake.removeCalls != 1 || fake.removeContextErr != nil {
+			t.Fatalf("Create() error=%v removeCalls=%d removeContextErr=%v", err, fake.removeCalls, fake.removeContextErr)
 		}
 	})
 }
