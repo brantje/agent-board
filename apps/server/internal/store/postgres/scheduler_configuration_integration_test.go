@@ -135,6 +135,30 @@ func TestReconciliationRecoversExpiredInvalidLegacyClaim(t *testing.T) {
 	assertSchedulerOwnershipCounts(t, s, jobID, 0, 0)
 }
 
+func TestSchedulerPublicClaimsValidateOwnershipAndDurations(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+
+	if _, err := s.AdmitNextJob(ctx, "", time.Minute, time.Second); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("admit blank owner error=%v want invalid argument", err)
+	}
+	if _, _, err := s.ClaimNextJob(ctx, "", time.Minute); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("legacy claim blank owner error=%v want invalid argument", err)
+	}
+	if _, err := s.ClaimExpiredJobForReconciliation(ctx, "", time.Minute); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("reconciliation blank owner error=%v want invalid argument", err)
+	}
+	if _, err := s.AdmitNextJob(ctx, "worker", 0, time.Second); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("admit zero lease error=%v want invalid argument", err)
+	}
+	if _, _, err := s.ClaimNextJob(ctx, "worker", 0); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("legacy claim zero lease error=%v want invalid argument", err)
+	}
+	if _, err := s.ClaimExpiredJobForReconciliation(ctx, "worker", 0); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("reconciliation zero lease error=%v want invalid argument", err)
+	}
+}
+
 func createRunWithoutAgent(t *testing.T, s *Store, f runFixture, suffix string) store.Run {
 	t.Helper()
 	ctx := context.Background()
