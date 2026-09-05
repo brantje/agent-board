@@ -84,7 +84,7 @@ func (s *Stream) consume(final bool) []byte {
 		matched := false
 		for _, pattern := range s.patterns {
 			if len(s.pending) >= len(pattern) && bytes.HasPrefix(s.pending, pattern) {
-				output = append(output, s.appendSanitized(s.replacement)...)
+				output = s.appendSanitized(output, s.replacement)
 				s.pending = s.pending[len(pattern):]
 				matched = true
 				break
@@ -99,11 +99,11 @@ func (s *Stream) consume(final bool) []byte {
 		if !final && s.pendingIsSecretPrefix() {
 			break
 		}
-		output = append(output, s.appendSanitized(s.pending[:1])...)
+		output = s.appendSanitized(output, s.pending[:1])
 		s.pending = s.pending[1:]
 	}
 	if final {
-		output = append(output, s.flushSanitized()...)
+		output = s.flushSanitizedInto(output)
 	}
 	return output
 }
@@ -121,12 +121,11 @@ func (s *Stream) pendingIsSecretPrefix() bool {
 // future bytes cannot turn that suffix into a configured secret. Any secret
 // reconstructed by a replacement marker or by bytes adjacent to a replacement
 // is removed before the suffix is emitted.
-func (s *Stream) appendSanitized(data []byte) []byte {
-	var output []byte
+func (s *Stream) appendSanitized(output, data []byte) []byte {
 	for _, value := range data {
 		s.outputPending = append(s.outputPending, value)
 		s.removeSecretSuffixes()
-		output = append(output, s.emitSafePrefix()...)
+		output = s.emitSafePrefix(output)
 	}
 	return output
 }
@@ -147,14 +146,14 @@ func (s *Stream) removeSecretSuffixes() {
 	}
 }
 
-func (s *Stream) emitSafePrefix() []byte {
+func (s *Stream) emitSafePrefix(output []byte) []byte {
 	keep := s.longestSecretPrefixSuffix()
 	emitLen := len(s.outputPending) - keep
 	if emitLen <= 0 {
-		return nil
+		return output
 	}
 
-	output := append([]byte(nil), s.outputPending[:emitLen]...)
+	output = append(output, s.outputPending[:emitLen]...)
 	copy(s.outputPending, s.outputPending[emitLen:])
 	s.outputPending = s.outputPending[:keep]
 	return output
@@ -177,8 +176,8 @@ func (s *Stream) longestSecretPrefixSuffix() int {
 	return longest
 }
 
-func (s *Stream) flushSanitized() []byte {
-	output := append([]byte(nil), s.outputPending...)
+func (s *Stream) flushSanitizedInto(output []byte) []byte {
+	output = append(output, s.outputPending...)
 	s.outputPending = nil
 	return output
 }
