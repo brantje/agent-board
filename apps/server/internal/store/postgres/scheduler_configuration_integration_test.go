@@ -32,6 +32,49 @@ func TestSchedulerRejectsEnqueueWithoutProfileChain(t *testing.T) {
 	}
 }
 
+func TestSchedulerEnqueueRemainsIdempotentAfterConfigurationBecomesUnavailable(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "enqueue-idempotent-config")
+	first, err := s.EnqueueJob(ctx, store.SchedulerJob{
+		ProjectID:      f.project.ID,
+		RunID:          f.run.ID,
+		IdempotencyKey: "enqueue-idempotent-config",
+	})
+	if err != nil {
+		t.Fatalf("enqueue first job: %v", err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE runs SET agent_id=NULL WHERE id=$1`, f.run.ID); err != nil {
+		t.Fatalf("remove run agent: %v", err)
+	}
+
+	second, err := s.EnqueueJob(ctx, store.SchedulerJob{
+		ProjectID:      f.project.ID,
+		RunID:          f.run.ID,
+		IdempotencyKey: "enqueue-idempotent-config",
+	})
+	if err != nil {
+		t.Fatalf("enqueue idempotent job after config loss: %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("job id=%s want existing %s", second.ID, first.ID)
+	}
+}
+
+func TestSchedulerEnqueueRejectsMissingRun(t *testing.T) {
+	s := New(testPool(t))
+	f := seedRunFixture(t, s, "enqueue-missing-run")
+
+	_, err := s.EnqueueJob(context.Background(), store.SchedulerJob{
+		ProjectID:      f.project.ID,
+		RunID:          "00000000-0000-0000-0000-000000000001",
+		IdempotencyKey: "enqueue-missing-run",
+	})
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("enqueue missing run error=%v want not found", err)
+	}
+}
+
 func TestSchedulerAdmissionDefersPersistedInvalidProfileChain(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
