@@ -8,7 +8,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/agent-b
 
 FROM alpine:3.22
 
-RUN addgroup -S agentboard && adduser -S -G agentboard agentboard
+RUN apk add --no-cache git \
+    && addgroup -S agentboard \
+    && adduser -S -G agentboard agentboard
 COPY --from=build /out/agent-board-server /usr/local/bin/agent-board-server
 
 USER agentboard

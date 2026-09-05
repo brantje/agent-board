@@ -11,7 +11,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Store struct{ pool *pgxpool.Pool }
+type Store struct {
+	pool     *pgxpool.Pool
+	lockPool *pgxpool.Pool
+}
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
@@ -22,11 +25,39 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
-	return New(pool), nil
+
+	lockPool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	if err := lockPool.Ping(ctx); err != nil {
+		lockPool.Close()
+		pool.Close()
+		return nil, err
+	}
+	return NewWithPools(pool, lockPool), nil
 }
-func New(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+func New(pool *pgxpool.Pool) *Store {
+	return NewWithPools(pool, pool)
+}
+
+func NewWithPools(pool, lockPool *pgxpool.Pool) *Store {
+	if lockPool == nil {
+		lockPool = pool
+	}
+	return &Store{pool: pool, lockPool: lockPool}
+}
+
 func (s *Store) Close() {
-	if s != nil && s.pool != nil {
+	if s == nil {
+		return
+	}
+	if s.lockPool != nil && s.lockPool != s.pool {
+		s.lockPool.Close()
+	}
+	if s.pool != nil {
 		s.pool.Close()
 	}
 }
@@ -46,12 +77,14 @@ func notFound(err error) error {
 	}
 	return err
 }
+
 func objectJSON(value json.RawMessage) json.RawMessage {
 	if len(value) == 0 {
 		return store.EmptyObject
 	}
 	return value
 }
+
 func arrayJSON(value json.RawMessage) json.RawMessage {
 	if len(value) == 0 {
 		return json.RawMessage(`[]`)

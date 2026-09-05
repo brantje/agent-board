@@ -14,15 +14,23 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
+	"github.com/brantje/agent-board/apps/server/internal/repository"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
+	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
 const (
-	defaultAddress    = ":3001"
-	shutdownTimeout   = 10 * time.Second
-	serverReadTimeout = 30 * time.Second
-	serverIdleTimeout = 60 * time.Second
+	defaultAddress       = ":3001"
+	defaultWorkspaceRoot = "/var/lib/agent-board/workspaces"
+	shutdownTimeout      = 10 * time.Second
+	serverReadTimeout    = 30 * time.Second
+	serverIdleTimeout    = 60 * time.Second
 )
+
+type applicationHandler struct {
+	http.Handler
+	services *app.Services
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -46,7 +54,42 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 	if err != nil {
 		return nil, nil, fmt.Errorf("open PostgreSQL: %w", err)
 	}
-	return httpapi.NewRouter(app.New(database)), database.Close, nil
+	services, err := configuredApplication(database)
+	if err != nil {
+		database.Close()
+		return nil, nil, fmt.Errorf("configure application: %w", err)
+	}
+	return &applicationHandler{
+		Handler:  httpapi.NewRouter(services.ControlPlane),
+		services: services,
+	}, database.Close, nil
+}
+
+func configuredApplication(database *postgres.Store) (*app.Services, error) {
+	roots := repository.ParseRoots(os.Getenv("AGENT_BOARD_REPOSITORY_ROOTS"))
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("repository roots: %w", repository.ErrNoAuthorizedRoots)
+	}
+	policy, err := repository.NewPolicy(roots)
+	if err != nil {
+		return nil, fmt.Errorf("repository roots: %w", err)
+	}
+	git, err := workspace.NewGitCLI("")
+	if err != nil {
+		return nil, err
+	}
+	materializer, err := workspace.NewMaterializer(database, policy, git, configuredWorkspaceRoot())
+	if err != nil {
+		return nil, err
+	}
+	return app.NewServices(database, materializer)
+}
+
+func configuredWorkspaceRoot() string {
+	if root := os.Getenv("AGENT_BOARD_WORKSPACE_ROOT"); root != "" {
+		return root
+	}
+	return defaultWorkspaceRoot
 }
 
 func exitCode(ctx context.Context, address string, handlers ...http.Handler) int {
