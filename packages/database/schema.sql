@@ -423,15 +423,19 @@ BEGIN
         IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
             RAISE EXCEPTION 'agent cannot reference executor profile from another project' USING ERRCODE = '23514';
         END IF;
-    ELSIF TG_TABLE_NAME = 'issues' AND NEW.assigned_agent_id IS NOT NULL THEN
-        SELECT project_id INTO referenced_project_id FROM agents WHERE id = NEW.assigned_agent_id;
-        IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
-            RAISE EXCEPTION 'issue cannot reference agent from another project' USING ERRCODE = '23514';
+    ELSIF TG_TABLE_NAME = 'issues' THEN
+        IF NEW.assigned_agent_id IS NOT NULL THEN
+            SELECT project_id INTO referenced_project_id FROM agents WHERE id = NEW.assigned_agent_id;
+            IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
+                RAISE EXCEPTION 'issue cannot reference agent from another project' USING ERRCODE = '23514';
+            END IF;
         END IF;
-    ELSIF TG_TABLE_NAME = 'runs' AND NEW.agent_id IS NOT NULL THEN
-        SELECT project_id INTO referenced_project_id FROM agents WHERE id = NEW.agent_id;
-        IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
-            RAISE EXCEPTION 'run cannot reference agent from another project' USING ERRCODE = '23514';
+    ELSIF TG_TABLE_NAME = 'runs' THEN
+        IF NEW.agent_id IS NOT NULL THEN
+            SELECT project_id INTO referenced_project_id FROM agents WHERE id = NEW.agent_id;
+            IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
+                RAISE EXCEPTION 'run cannot reference agent from another project' USING ERRCODE = '23514';
+            END IF;
         END IF;
     ELSIF TG_TABLE_NAME = 'runtime_instances' THEN
         SELECT project_id INTO referenced_project_id FROM runtimes WHERE id = NEW.runtime_id;
