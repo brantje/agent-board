@@ -24,7 +24,7 @@ type RuntimeReconcileStore interface {
 func (s *RuntimeInstanceService) ReconcileAll(ctx context.Context) error {
 	reconcileStore, ok := s.store.(RuntimeReconcileStore)
 	if !ok {
-		return fmt.Errorf("Runtime Instance store does not support reconciliation")
+		return fmt.Errorf("runtime instance store does not support reconciliation")
 	}
 	projects, err := reconcileStore.ListProjects(ctx)
 	if err != nil {
@@ -55,7 +55,7 @@ func (s *RuntimeInstanceService) ReconcileAll(ctx context.Context) error {
 func (s *RuntimeInstanceService) Reconcile(ctx context.Context, projectID, instanceID string) (store.RuntimeInstance, error) {
 	reconcileStore, ok := s.store.(RuntimeReconcileStore)
 	if !ok {
-		return store.RuntimeInstance{}, fmt.Errorf("Runtime Instance store does not support reconciliation")
+		return store.RuntimeInstance{}, fmt.Errorf("runtime instance store does not support reconciliation")
 	}
 	instance, err := s.getInstance(ctx, projectID, instanceID)
 	if err != nil {
@@ -77,7 +77,7 @@ func (s *RuntimeInstanceService) reconcile(ctx context.Context, reconcileStore R
 		return store.RuntimeInstance{}, translateStoreError(err, "workspace")
 	}
 	if workspace.ProjectID != instance.ProjectID || workspace.ID != instance.WorkspaceID {
-		return store.RuntimeInstance{}, fmt.Errorf("Runtime Instance workspace binding does not match persisted Workspace")
+		return store.RuntimeInstance{}, fmt.Errorf("runtime instance workspace binding does not match persisted Workspace")
 	}
 	spec := runtimeSpec(instance, workspace, workspace.IssueID, runtimeConfig)
 
@@ -133,7 +133,7 @@ func (s *RuntimeInstanceService) reconcileState(ctx context.Context, instance st
 		return store.RuntimeInstance{}, translateStoreError(err, "runtime_instance")
 	}
 	if updated.WorkspaceID != instance.WorkspaceID || updated.RuntimeID != instance.RuntimeID {
-		return store.RuntimeInstance{}, fmt.Errorf("Runtime Instance immutable binding changed during reconciliation")
+		return store.RuntimeInstance{}, fmt.Errorf("runtime instance immutable binding changed during reconciliation")
 	}
 	return updated, nil
 }
