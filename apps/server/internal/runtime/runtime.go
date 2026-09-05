@@ -163,9 +163,6 @@ func validateResources(resources ResourcePolicy) error {
 }
 
 func ValidateTransition(from, to State) error {
-	if from == to {
-		return nil
-	}
 	allowed := map[State]map[State]bool{
 		StateProvisioning: {StateStarting: true, StateFailed: true, StateDestroyed: true},
 		StateStarting:     {StateRunning: true, StateFailed: true, StateStopping: true},
@@ -174,6 +171,15 @@ func ValidateTransition(from, to State) error {
 		StateFailed:       {StateStopping: true, StateStopped: true, StateDestroyed: true},
 		StateStopped:      {StateStarting: true, StateDestroyed: true},
 		StateDestroyed:    {},
+	}
+	if _, ok := allowed[from]; !ok {
+		return fmt.Errorf("%w: unknown state %s", ErrInvalidTransition, from)
+	}
+	if _, ok := allowed[to]; !ok {
+		return fmt.Errorf("%w: unknown state %s", ErrInvalidTransition, to)
+	}
+	if from == to {
+		return nil
 	}
 	if allowed[from][to] {
 		return nil
