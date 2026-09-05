@@ -3,7 +3,9 @@ package protocol
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 )
 
 func Encode(msg Message) ([]byte, error) {
@@ -25,7 +27,8 @@ func Decode(data []byte) (Message, error) {
 	if err := decoder.Decode(&msg); err != nil {
 		return Message{}, fmt.Errorf("%w: decode envelope: %v", ErrInvalidMessage, err)
 	}
-	if decoder.More() {
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return Message{}, fmt.Errorf("%w: multiple JSON values", ErrInvalidMessage)
 	}
 	if err := msg.Validate(); err != nil {

@@ -53,8 +53,9 @@ type Capabilities struct {
 }
 
 type Health struct {
-	Status         string `json:"status"`
-	ActiveSessions int    `json:"active_sessions"`
+	Status           string   `json:"status"`
+	ActiveSessions   int      `json:"active_sessions"`
+	ActiveSessionIDs []string `json:"active_session_ids,omitempty"`
 }
 
 type StartRequest struct {

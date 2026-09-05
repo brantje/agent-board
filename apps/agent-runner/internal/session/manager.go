@@ -3,6 +3,7 @@ package session
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -47,6 +48,17 @@ func (m *Manager) ActiveCount() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return len(m.sessions)
+}
+
+func (m *Manager) ActiveIDs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ids := make([]string, 0, len(m.sessions))
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func (m *Manager) Start(id string, request Request) (*Session, error) {
