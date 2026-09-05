@@ -8,15 +8,13 @@ import (
 )
 
 func (a *api) registerIssueRunRoutes(r chi.Router) {
-	r.Route("/projects/{projectID}", func(r chi.Router) {
-		r.Get("/issues", a.listIssues)
-		r.Post("/issues", a.createIssue)
-		r.Get("/issues/{issueID}", a.getIssue)
-		r.Patch("/issues/{issueID}", a.updateIssue)
-		r.Post("/issues/{issueID}/assignment", a.assignIssue)
-		r.Get("/runs", a.listRuns)
-		r.Get("/runs/{runID}", a.getRun)
-	})
+	r.Get("/projects/{projectID}/issues", a.listIssues)
+	r.Post("/projects/{projectID}/issues", a.createIssue)
+	r.Get("/projects/{projectID}/issues/{issueID}", a.getIssue)
+	r.Patch("/projects/{projectID}/issues/{issueID}", a.updateIssue)
+	r.Post("/projects/{projectID}/issues/{issueID}/assignment", a.assignIssue)
+	r.Get("/projects/{projectID}/runs", a.listRuns)
+	r.Get("/projects/{projectID}/runs/{runID}", a.getRun)
 }
 
 func (a *api) listIssues(w http.ResponseWriter, r *http.Request) {
