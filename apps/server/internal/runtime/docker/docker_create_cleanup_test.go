@@ -24,23 +24,24 @@ func (f *contextCheckingMoby) ContainerRemove(ctx context.Context, _ string, _ c
 func TestDockerCreateCleansUpAfterPostCreateValidationFailure(t *testing.T) {
 	spec := dockerSpec()
 
-	t.Run("inspect failure", func(t *testing.T) {
+	t.Run("inspect failure joins cleanup error", func(t *testing.T) {
 		inspectErr := errors.New("created inspect failed")
+		removeErr := errors.New("remove failed")
 		fake := &errorMoby{fakeMoby: &fakeMoby{inspectFn: func(ref string) (client.ContainerInspectResult, error) {
 			if ref == containerName(spec.RuntimeInstanceID) {
 				return client.ContainerInspectResult{}, cerrdefs.ErrNotFound
 			}
 			return client.ContainerInspectResult{}, inspectErr
-		}}}
+		}}, removeErr: removeErr}
 		runtime, _ := newWithClient(fake)
 
 		_, err := runtime.Create(context.Background(), spec)
-		if !errors.Is(err, inspectErr) || fake.removeCalls != 1 {
+		if !errors.Is(err, inspectErr) || !errors.Is(err, removeErr) || fake.removeCalls != 1 {
 			t.Fatalf("Create() error=%v removeCalls=%d", err, fake.removeCalls)
 		}
 	})
 
-	t.Run("verification failure preserves validation error when cleanup fails", func(t *testing.T) {
+	t.Run("verification failure joins cleanup error", func(t *testing.T) {
 		removeErr := errors.New("remove failed")
 		fake := &errorMoby{fakeMoby: &fakeMoby{inspectFn: func(ref string) (client.ContainerInspectResult, error) {
 			if ref == containerName(spec.RuntimeInstanceID) {
@@ -53,7 +54,7 @@ func TestDockerCreateCleansUpAfterPostCreateValidationFailure(t *testing.T) {
 		runtime, _ := newWithClient(fake)
 
 		_, err := runtime.Create(context.Background(), spec)
-		if !errors.Is(err, runtimepkg.ErrOwnershipMismatch) || errors.Is(err, removeErr) || fake.removeCalls != 1 {
+		if !errors.Is(err, runtimepkg.ErrOwnershipMismatch) || !errors.Is(err, removeErr) || fake.removeCalls != 1 {
 			t.Fatalf("Create() error=%v removeCalls=%d", err, fake.removeCalls)
 		}
 	})
