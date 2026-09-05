@@ -12,9 +12,7 @@ func (a *api) registerConfigurationRoutes(r chi.Router) {
 	r.Post("/projects", a.createProject)
 	r.Get("/projects/{projectID}", a.getProject)
 	r.Patch("/projects/{projectID}", a.updateProject)
-	r.Route("/projects/{projectID}", func(r chi.Router) {
-		a.registerScopedConfig(r)
-	})
+	a.registerScopedConfig(r)
 
 	r.Get("/providers", a.listProviders)
 	r.Post("/providers", a.createProvider)
@@ -44,22 +42,22 @@ func (a *api) registerGlobalConfig(r chi.Router) {
 }
 
 func (a *api) registerScopedConfig(r chi.Router) {
-	r.Get("/model-profiles", a.listProjectModelProfiles)
-	r.Post("/model-profiles", a.createProjectModelProfile)
-	r.Get("/model-profiles/{resourceID}", a.getProjectModelProfile)
-	r.Put("/model-profiles/{resourceID}", a.updateProjectModelProfile)
-	r.Get("/runtimes", a.listProjectRuntimes)
-	r.Post("/runtimes", a.createProjectRuntime)
-	r.Get("/runtimes/{resourceID}", a.getProjectRuntime)
-	r.Put("/runtimes/{resourceID}", a.updateProjectRuntime)
-	r.Get("/executor-profiles", a.listProjectExecutorProfiles)
-	r.Post("/executor-profiles", a.createProjectExecutorProfile)
-	r.Get("/executor-profiles/{resourceID}", a.getProjectExecutorProfile)
-	r.Put("/executor-profiles/{resourceID}", a.updateProjectExecutorProfile)
-	r.Get("/agents", a.listProjectAgents)
-	r.Post("/agents", a.createProjectAgent)
-	r.Get("/agents/{resourceID}", a.getProjectAgent)
-	r.Put("/agents/{resourceID}", a.updateProjectAgent)
+	r.Get("/projects/{projectID}/model-profiles", a.listProjectModelProfiles)
+	r.Post("/projects/{projectID}/model-profiles", a.createProjectModelProfile)
+	r.Get("/projects/{projectID}/model-profiles/{resourceID}", a.getProjectModelProfile)
+	r.Put("/projects/{projectID}/model-profiles/{resourceID}", a.updateProjectModelProfile)
+	r.Get("/projects/{projectID}/runtimes", a.listProjectRuntimes)
+	r.Post("/projects/{projectID}/runtimes", a.createProjectRuntime)
+	r.Get("/projects/{projectID}/runtimes/{resourceID}", a.getProjectRuntime)
+	r.Put("/projects/{projectID}/runtimes/{resourceID}", a.updateProjectRuntime)
+	r.Get("/projects/{projectID}/executor-profiles", a.listProjectExecutorProfiles)
+	r.Post("/projects/{projectID}/executor-profiles", a.createProjectExecutorProfile)
+	r.Get("/projects/{projectID}/executor-profiles/{resourceID}", a.getProjectExecutorProfile)
+	r.Put("/projects/{projectID}/executor-profiles/{resourceID}", a.updateProjectExecutorProfile)
+	r.Get("/projects/{projectID}/agents", a.listProjectAgents)
+	r.Post("/projects/{projectID}/agents", a.createProjectAgent)
+	r.Get("/projects/{projectID}/agents/{resourceID}", a.getProjectAgent)
+	r.Put("/projects/{projectID}/agents/{resourceID}", a.updateProjectAgent)
 }
 
 func boolDefault(value *bool, fallback bool) bool {
