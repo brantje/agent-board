@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	maxMessageSize   = 1 << 20
-	defaultPongWait  = 60 * time.Second
+	maxMessageSize    = 1 << 20
+	defaultPongWait   = 60 * time.Second
 	defaultPingPeriod = 45 * time.Second
-	pingWriteTimeout = 5 * time.Second
+	pingWriteTimeout  = 5 * time.Second
+	writeTimeout      = 10 * time.Second
 )
 
 type Config struct {
@@ -228,8 +229,8 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 	}
 	execution, stdin, err := s.startSession(msg.SessionID, session.Request{
 		Command: request.Command,
-		Dir: request.Dir,
-		Env: request.Env,
+		Dir:     request.Dir,
+		Env:     request.Env,
 		Secrets: request.Secrets,
 	})
 	if err != nil {
@@ -350,7 +351,12 @@ func streamExecution(ctx context.Context, writer *connectionWriter, execution *s
 	_ = writer.send(protocol.TypeExit, execution.ID(), protocol.ExitResult{ExitCode: result.ExitCode, Signaled: result.Signaled})
 }
 
-func pumpStream(writer *connectionWriter, typ protocol.MessageType, sessionID string, reader io.Reader) {
+type streamWriter interface {
+	send(protocol.MessageType, string, any) error
+	sendError(string, string, string)
+}
+
+func pumpStream(writer streamWriter, typ protocol.MessageType, sessionID string, reader io.Reader) {
 	buffer := make([]byte, 32*1024)
 	sendOutput := true
 	for {
@@ -362,6 +368,9 @@ func pumpStream(writer *connectionWriter, typ protocol.MessageType, sessionID st
 			}
 		}
 		if err != nil {
+			if sendOutput && errors.Is(err, session.ErrOutputTruncated) {
+				writer.sendError("output_truncated", "session output was truncated", sessionID)
+			}
 			return
 		}
 	}
@@ -376,9 +385,15 @@ func containsVersion(versions []int, target int) bool {
 	return false
 }
 
+type websocketWriteConn interface {
+	SetWriteDeadline(time.Time) error
+	WriteMessage(int, []byte) error
+	WriteControl(int, []byte, time.Time) error
+}
+
 type connectionWriter struct {
 	mu   sync.Mutex
-	conn *websocket.Conn
+	conn websocketWriteConn
 }
 
 func (w *connectionWriter) send(typ protocol.MessageType, sessionID string, payload any) error {
@@ -392,6 +407,9 @@ func (w *connectionWriter) send(typ protocol.MessageType, sessionID string, payl
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if err := w.conn.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
+		return err
+	}
 	return w.conn.WriteMessage(websocket.TextMessage, data)
 }
 
