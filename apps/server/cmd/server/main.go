@@ -84,7 +84,9 @@ func reconcileRuntimeInstances(ctx context.Context, handler http.Handler) error 
 	if !ok || application.services == nil || application.services.RuntimeInstances == nil {
 		return fmt.Errorf("runtime instance service is unavailable")
 	}
-	return application.services.RuntimeInstances.ReconcileAll(ctx)
+	return application.services.RuntimeInstances.ReconcileAllWithReporter(ctx, func(err error) {
+		slog.Error("reconcile Runtime Instance", "error", err)
+	})
 }
 
 func configuredApplication(database *postgres.Store) (*app.Services, error) {
