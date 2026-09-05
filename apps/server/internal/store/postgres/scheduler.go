@@ -291,6 +291,7 @@ func (s *Store) RenewLease(ctx context.Context, projectID, jobID, leaseToken str
 		  AND lease.lease_token = $3
 		  AND job.id = lease.job_id
 		  AND job.project_id = $1
+		  AND lease.expires_at > now()
 		RETURNING lease.job_id::text, lease.owner_id, lease.lease_token::text, lease.acquired_at, lease.expires_at
 	`, projectID, jobID, leaseToken, leaseMicros))
 }

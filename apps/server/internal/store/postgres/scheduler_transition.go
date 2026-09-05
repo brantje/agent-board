@@ -80,7 +80,7 @@ func lockFencedRun(ctx context.Context, tx pgx.Tx, projectID, jobID, runID, leas
 		JOIN scheduler_jobs AS job ON job.id=lease.job_id
 		JOIN runs AS run ON run.project_id=job.project_id AND run.id=job.run_id
 		WHERE job.project_id=$1 AND job.id=$2 AND job.run_id=$3
-		  AND job.state='CLAIMED' AND lease.lease_token=$4
+		  AND job.state='CLAIMED' AND lease.lease_token=$4 AND lease.expires_at > now()
 		FOR UPDATE OF lease, job, run
 	`, projectID, jobID, runID, leaseToken))
 }
