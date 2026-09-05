@@ -348,6 +348,18 @@ func validateRuntime(v store.Runtime) error {
 	if strings.TrimSpace(v.Name) == "" || v.Kind != "docker" || strings.TrimSpace(v.Image) == "" {
 		return invalid("runtime requires name, docker kind and image")
 	}
+	if v.CPULimitMillis != nil && *v.CPULimitMillis < 1 {
+		return invalid("cpuLimitMillis must be positive")
+	}
+	if v.MemoryLimitBytes != nil && *v.MemoryLimitBytes < 1 {
+		return invalid("memoryLimitBytes must be positive")
+	}
+	if v.PIDLimit != nil && *v.PIDLimit < 1 {
+		return invalid("pidLimit must be positive")
+	}
+	if v.TimeoutSeconds != nil && *v.TimeoutSeconds < 1 {
+		return invalid("timeoutSeconds must be positive")
+	}
 	if v.NetworkPolicy != "none" && v.NetworkPolicy != "restricted" && v.NetworkPolicy != "outbound" {
 		return invalid("invalid networkPolicy")
 	}
