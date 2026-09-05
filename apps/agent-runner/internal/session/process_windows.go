@@ -29,3 +29,9 @@ func killProcessTree(pid int) error {
 	}
 	return err
 }
+
+func cleanupProcessTree(_ int) error {
+	// v0.1 supports the Linux/Alpine runner target. Windows process-tree
+	// containment remains intentionally outside this runtime contract.
+	return nil
+}
