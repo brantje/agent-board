@@ -44,11 +44,11 @@ type ExecutionStore interface {
 
 type SchedulerStore interface {
 	EnqueueJob(context.Context, SchedulerJob) (SchedulerJob, error)
-	ClaimNextJob(context.Context, string, time.Duration) (*SchedulerJob, *SchedulerLease, error)
+	AdmitNextJob(context.Context, string, time.Duration, time.Duration) (*SchedulerAdmission, error)
 	RenewLease(context.Context, string, string, string, time.Duration) (SchedulerLease, error)
-	ReleaseLease(context.Context, string, string, string) error
-	ReserveCapacity(context.Context, string, string, string, string, string) error
-	ReleaseCapacity(context.Context, string, string) error
+	TransitionAdmittedJob(context.Context, SchedulerTransition) (Run, error)
+	ClaimExpiredJobForReconciliation(context.Context, string, time.Duration) (*SchedulerAdmission, error)
+	ResolveReconciliation(context.Context, SchedulerReconciliation) (Run, error)
 }
 
 type EvidenceStore interface {
