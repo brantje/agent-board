@@ -11,6 +11,8 @@ Prioritize findings: correctness/data loss, security/authorization, domain invar
 
 Check that Agent/Run/Runtime/Workspace concepts remain distinct; important behavior is persisted; configured delivery gates are respected; database changes are transactional where needed; frontend uses Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS + Nuxt UI with intentional public API contracts.
 
+Treat the repository coverage policy as a review gate: affected executable production code must measure at least **85% coverage**, with **90%+ as the expected target**. Request changes when coverage is below 85%, when important behavior is untested despite the number, or when exclusions/trivial assertions are being used to game the threshold.
+
 For frontend changes verify:
 
 - `docs/frontend-implementation.md` and `docs/frontend-theme.md` are followed
