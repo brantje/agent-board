@@ -34,11 +34,18 @@ func (s *Store) EnqueueJob(ctx context.Context, input store.SchedulerJob) (store
 	if !errors.Is(err, store.ErrNotFound) {
 		return store.SchedulerJob{}, err
 	}
-	return scanSchedulerJob(s.pool.QueryRow(ctx, `
+	existing, err := scanSchedulerJob(s.pool.QueryRow(ctx, `
 		SELECT id::text, project_id::text, run_id::text, kind, state, wait_reason, idempotency_key, available_at, created_at, updated_at
 		FROM scheduler_jobs
-		WHERE idempotency_key = $1 AND project_id = $2 AND run_id = $3 AND kind = $4
-	`, input.IdempotencyKey, input.ProjectID, input.RunID, kind))
+		WHERE idempotency_key = $1
+	`, input.IdempotencyKey))
+	if err != nil {
+		return store.SchedulerJob{}, err
+	}
+	if existing.ProjectID != input.ProjectID || existing.RunID != input.RunID || existing.Kind != kind {
+		return store.SchedulerJob{}, store.ErrConflict
+	}
+	return existing, nil
 }
 
 func (s *Store) ClaimNextJob(ctx context.Context, ownerID string, leaseDuration time.Duration) (*store.SchedulerJob, *store.SchedulerLease, error) {
