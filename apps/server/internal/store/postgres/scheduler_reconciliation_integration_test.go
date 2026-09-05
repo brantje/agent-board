@@ -131,31 +131,104 @@ func TestSchedulerRetryReconciliationReleasesAndRequeues(t *testing.T) {
 	}
 }
 
-func TestSchedulerReconciliationTerminalOutcomeReleasesOwnership(t *testing.T) {
-	s := New(testPool(t))
-	ctx := context.Background()
-	f := seedRunFixture(t, s, "reconcile-failed")
-	enqueueFixtureRun(t, s, f, f.run, "reconcile-failed")
-	admission := mustAdmit(t, s, "worker-old")
-	expireLease(t, s, admission.Job.ID)
-	reconciled := mustClaimReconciliation(t, s, "reconciler")
-
+func TestSchedulerReconciliationTerminalOutcomes(t *testing.T) {
 	reason := "external execution failed"
-	run, err := s.ResolveReconciliation(ctx, store.SchedulerReconciliation{
-		ProjectID:     f.project.ID,
-		JobID:         admission.Job.ID,
-		RunID:         f.run.ID,
-		LeaseToken:    reconciled.Lease.LeaseToken,
-		Outcome:       store.SchedulerReconciliationFailed,
-		FailureReason: &reason,
-	})
-	if err != nil {
-		t.Fatalf("resolve failed: %v", err)
+	blankReason := "   "
+	cases := []struct {
+		name              string
+		outcome           store.SchedulerReconciliationOutcome
+		failureReason     *string
+		wantRunStatus     string
+		wantJobState      string
+		wantError         error
+		wantLeaseCount    int
+		wantReservationCount int
+	}{
+		{
+			name:                 "completed",
+			outcome:              store.SchedulerReconciliationCompleted,
+			wantRunStatus:        "COMPLETED",
+			wantJobState:         "DONE",
+			wantLeaseCount:       0,
+			wantReservationCount: 0,
+		},
+		{
+			name:                 "cancelled",
+			outcome:              store.SchedulerReconciliationCancelled,
+			wantRunStatus:        "CANCELLED",
+			wantJobState:         "CANCELLED",
+			wantLeaseCount:       0,
+			wantReservationCount: 0,
+		},
+		{
+			name:                 "failed",
+			outcome:              store.SchedulerReconciliationFailed,
+			failureReason:        &reason,
+			wantRunStatus:        "FAILED",
+			wantJobState:         "FAILED",
+			wantLeaseCount:       0,
+			wantReservationCount: 0,
+		},
+		{
+			name:                 "failed blank reason",
+			outcome:              store.SchedulerReconciliationFailed,
+			failureReason:        &blankReason,
+			wantRunStatus:        "STARTING",
+			wantJobState:         "CLAIMED",
+			wantError:            store.ErrInvalidArgument,
+			wantLeaseCount:       1,
+			wantReservationCount: 2,
+		},
 	}
-	if run.Status != "FAILED" || run.CompletedAt == nil || run.FailureReason == nil || *run.FailureReason != reason {
-		t.Fatalf("failed reconciliation run=%+v", run)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := New(testPool(t))
+			ctx := context.Background()
+			f := seedRunFixture(t, s, "reconcile-terminal-"+tc.name)
+			enqueueFixtureRun(t, s, f, f.run, "reconcile-terminal-"+tc.name)
+			admission := mustAdmit(t, s, "worker-old")
+			expireLease(t, s, admission.Job.ID)
+			reconciled := mustClaimReconciliation(t, s, "reconciler")
+
+			run, err := s.ResolveReconciliation(ctx, store.SchedulerReconciliation{
+				ProjectID:     f.project.ID,
+				JobID:         admission.Job.ID,
+				RunID:         f.run.ID,
+				LeaseToken:    reconciled.Lease.LeaseToken,
+				Outcome:       tc.outcome,
+				FailureReason: tc.failureReason,
+			})
+			if tc.wantError != nil {
+				if !errors.Is(err, tc.wantError) {
+					t.Fatalf("resolve error=%v want %v", err, tc.wantError)
+				}
+				run, err = s.GetRun(ctx, f.project.ID, f.run.ID)
+				if err != nil {
+					t.Fatalf("read run after rejected reconciliation: %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("resolve %s: %v", tc.outcome, err)
+			}
+			if run.Status != tc.wantRunStatus {
+				t.Fatalf("run status=%s want %s", run.Status, tc.wantRunStatus)
+			}
+			if tc.outcome == store.SchedulerReconciliationFailed && tc.wantError == nil {
+				if run.CompletedAt == nil || run.FailureReason == nil || *run.FailureReason != reason {
+					t.Fatalf("failed reconciliation run=%+v", run)
+				}
+			}
+			assertSchedulerOwnershipCounts(t, s, admission.Job.ID, tc.wantLeaseCount, tc.wantReservationCount)
+
+			var jobState string
+			if err := s.pool.QueryRow(ctx, `SELECT state FROM scheduler_jobs WHERE id=$1`, admission.Job.ID).Scan(&jobState); err != nil {
+				t.Fatalf("read job state: %v", err)
+			}
+			if jobState != tc.wantJobState {
+				t.Fatalf("job state=%s want %s", jobState, tc.wantJobState)
+			}
+		})
 	}
-	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 0, 0)
 }
 
 func TestSchedulerConcurrentReconciliationClaimsOnce(t *testing.T) {
