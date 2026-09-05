@@ -15,6 +15,8 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
+	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
+	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
@@ -59,10 +61,21 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 		return nil, nil, fmt.Errorf("configure application: %w", err)
 	}
+	if err := services.RuntimeInstances.ReconcileAll(ctx); err != nil {
+		_ = services.Close()
+		database.Close()
+		return nil, nil, fmt.Errorf("reconcile Runtime Instances: %w", err)
+	}
+	closeApplication := func() {
+		if err := services.Close(); err != nil {
+			slog.Error("close Runtime implementations", "error", err)
+		}
+		database.Close()
+	}
 	return &applicationHandler{
 		Handler:  httpapi.NewRouter(services.ControlPlane),
 		services: services,
-	}, database.Close, nil
+	}, closeApplication, nil
 }
 
 func configuredApplication(database *postgres.Store) (*app.Services, error) {
@@ -82,7 +95,16 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	return app.NewServices(database, materializer)
+	dockerRuntime, err := dockerruntime.New()
+	if err != nil {
+		return nil, err
+	}
+	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime})
+	if err != nil {
+		_ = dockerRuntime.Close()
+		return nil, err
+	}
+	return services, nil
 }
 
 func configuredWorkspaceRoot() string {

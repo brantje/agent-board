@@ -32,6 +32,7 @@ type ConfigurationStore interface {
 type ExecutionStore interface {
 	CreateWorkspace(context.Context, Workspace) (Workspace, error)
 	GetWorkspaceByIssue(context.Context, string, string) (Workspace, error)
+	GetWorkspace(context.Context, string, string) (Workspace, error)
 	CreateRun(context.Context, Run) (Run, error)
 	GetRun(context.Context, string, string) (Run, error)
 	CreateRuntimeInstance(context.Context, RuntimeInstance) (RuntimeInstance, error)

@@ -85,6 +85,13 @@ type Implementation interface {
 	Destroy(context.Context, Handle) error
 }
 
+// RecoveringImplementation can rediscover compute when the durable Runtime
+// Instance row exists but external identity was not persisted before a crash.
+type RecoveringImplementation interface {
+	Implementation
+	Recover(context.Context, RuntimeSpec) (Handle, Inspection, error)
+}
+
 var (
 	ErrInvalidSpec       = errors.New("runtime: invalid spec")
 	ErrInvalidTransition = errors.New("runtime: invalid lifecycle transition")
