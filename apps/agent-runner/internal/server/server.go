@@ -24,6 +24,9 @@ type Server struct {
 	manager  *session.Manager
 	upgrader websocket.Upgrader
 	mux      *http.ServeMux
+
+	stdinMu    sync.RWMutex
+	stdinPumps map[string]*stdinPump
 }
 
 func New(config Config) *Server {
@@ -33,7 +36,8 @@ func New(config Config) *Server {
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == "" },
 		},
-		mux: http.NewServeMux(),
+		mux:        http.NewServeMux(),
+		stdinPumps: make(map[string]*stdinPump),
 	}
 	s.mux.HandleFunc("GET /healthz", s.handleHealth)
 	s.mux.HandleFunc("GET /v1/ws", s.handleWebSocket)
@@ -172,13 +176,18 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 		return
 	}
 
+	stdin := newStdinPump(execution.Stdin())
+	s.stdinMu.Lock()
+	s.stdinPumps[msg.SessionID] = stdin
+	s.stdinMu.Unlock()
+	go s.cleanupStdinPump(msg.SessionID, execution, stdin)
+
 	_ = writer.send(protocol.TypeSessionStarted, msg.SessionID, nil)
 	go streamExecution(writer, execution)
 }
 
 func (s *Server) handleStdin(writer *connectionWriter, msg protocol.Message) {
-	execution, err := s.manager.Get(msg.SessionID)
-	if err != nil {
+	if _, err := s.manager.Get(msg.SessionID); err != nil {
 		writer.sendError("session_not_found", "execution session is not active", msg.SessionID)
 		return
 	}
@@ -187,20 +196,50 @@ func (s *Server) handleStdin(writer *connectionWriter, msg protocol.Message) {
 		writer.sendError("invalid_stdin", "invalid stdin payload", msg.SessionID)
 		return
 	}
-	if _, err := execution.Stdin().Write(stream.Data); err != nil {
+	stdin, ok := s.getStdinPump(msg.SessionID)
+	if !ok {
+		writer.sendError("stdin_failed", "stdin is unavailable", msg.SessionID)
+		return
+	}
+	if err := stdin.Enqueue(stream.Data); err != nil {
+		if errors.Is(err, errStdinQueueFull) {
+			writer.sendError("stdin_backpressure", "stdin queue is full", msg.SessionID)
+			return
+		}
 		writer.sendError("stdin_failed", "stdin is closed", msg.SessionID)
 	}
 }
 
 func (s *Server) handleStdinClose(writer *connectionWriter, msg protocol.Message) {
-	execution, err := s.manager.Get(msg.SessionID)
-	if err != nil {
+	if _, err := s.manager.Get(msg.SessionID); err != nil {
 		writer.sendError("session_not_found", "execution session is not active", msg.SessionID)
 		return
 	}
-	if err := execution.Stdin().Close(); err != nil {
+	stdin, ok := s.getStdinPump(msg.SessionID)
+	if !ok {
+		writer.sendError("stdin_close_failed", "stdin is unavailable", msg.SessionID)
+		return
+	}
+	if err := stdin.Close(); err != nil {
 		writer.sendError("stdin_close_failed", "stdin could not be closed", msg.SessionID)
 	}
+}
+
+func (s *Server) cleanupStdinPump(sessionID string, execution *session.Session, stdin *stdinPump) {
+	<-execution.Done()
+	_ = stdin.Close()
+	s.stdinMu.Lock()
+	if s.stdinPumps[sessionID] == stdin {
+		delete(s.stdinPumps, sessionID)
+	}
+	s.stdinMu.Unlock()
+}
+
+func (s *Server) getStdinPump(sessionID string) (*stdinPump, bool) {
+	s.stdinMu.RLock()
+	defer s.stdinMu.RUnlock()
+	stdin, ok := s.stdinPumps[sessionID]
+	return stdin, ok
 }
 
 func (s *Server) handleSignal(writer *connectionWriter, sessionID string, force bool) {
