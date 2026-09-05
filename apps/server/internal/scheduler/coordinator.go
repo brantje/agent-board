@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -172,6 +173,7 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 	defer cancel()
 
 	heartbeatDone := make(chan struct{})
+	var leaseLost atomic.Bool
 	var heartbeat sync.WaitGroup
 	heartbeat.Add(1)
 	go func() {
@@ -187,6 +189,7 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 			case <-ticker.C:
 				if _, err := c.store.RenewLease(ctx, claim.Job.ProjectID, claim.Job.ID, claim.Lease.LeaseToken, c.config.LeaseDuration); err != nil {
 					c.config.ReportError(err)
+					leaseLost.Store(true)
 					cancel()
 					return
 				}
@@ -204,7 +207,7 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 		}
 		return
 	}
-	if ctx.Err() != nil {
+	if leaseLost.Load() {
 		return
 	}
 	if !isFinalProcessorStatus(result.RunStatus) {
@@ -212,7 +215,9 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 		return
 	}
 
-	_, err = c.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(parent), c.config.LeaseDuration)
+	defer persistCancel()
+	_, err = c.store.TransitionAdmittedJob(persistCtx, store.SchedulerTransition{
 		ProjectID:     claim.Job.ProjectID,
 		JobID:         claim.Job.ID,
 		RunID:         claim.Run.ID,
