@@ -15,6 +15,21 @@ import (
 	"github.com/brantje/agent-board/apps/agent-runner/internal/redact"
 )
 
+var inheritedEnvironmentAllowlist = []string{
+	"PATH",
+	"HOME",
+	"USER",
+	"LOGNAME",
+	"SHELL",
+	"TMPDIR",
+	"TMP",
+	"TEMP",
+	"LANG",
+	"LC_ALL",
+	"LC_CTYPE",
+	"TZ",
+}
+
 type Request struct {
 	Command []string
 	Dir     string
@@ -208,9 +223,8 @@ func resolveWorkingDir(workspaceRoot, requested string) (string, error) {
 
 func mergeEnvironment(env, secrets map[string]string) []string {
 	values := make(map[string]string)
-	for _, item := range os.Environ() {
-		key, value, ok := strings.Cut(item, "=")
-		if ok {
+	for _, key := range inheritedEnvironmentAllowlist {
+		if value, ok := os.LookupEnv(key); ok {
 			values[key] = value
 		}
 	}
