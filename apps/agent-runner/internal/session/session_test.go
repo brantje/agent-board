@@ -37,7 +37,7 @@ func TestSessionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(stdout) != "out:hello" || string(stderr) != "err:secret" {
+	if string(stdout) != "out:hello" || string(stderr) != "err:***" {
 		t.Fatalf("unexpected output stdout=%q stderr=%q", stdout, stderr)
 	}
 	if result.ExitCode != 7 || result.Signaled {

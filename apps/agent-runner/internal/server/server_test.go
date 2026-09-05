@@ -38,8 +38,7 @@ func TestHealthEndpoint(t *testing.T) {
 }
 
 func TestWebSocketExecutionLifecycle(t *testing.T) {
-	runner, httpServer := newTestRunner(t)
-	_ = runner
+	_, httpServer := newTestRunner(t)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer conn.Close()
 
@@ -71,7 +70,7 @@ func TestWebSocketExecutionLifecycle(t *testing.T) {
 			var err error
 			exit, err = protocol.DecodePayload[protocol.ExitResult](msg)
 			if err != nil { t.Fatal(err) }
-			if stdout != "out:hello" || stderr != "err:secret" || exit.ExitCode != 7 || exit.Signaled {
+			if stdout != "out:hello" || stderr != "err:***" || exit.ExitCode != 7 || exit.Signaled {
 				t.Fatalf("unexpected lifecycle stdout=%q stderr=%q exit=%#v", stdout, stderr, exit)
 			}
 			return
@@ -105,8 +104,6 @@ func TestCapacityAndKill(t *testing.T) {
 
 func TestDisconnectPreservesExecutionAndReconnectReportsIt(t *testing.T) {
 	runner, httpServer := newTestRunner(t)
-	workspace := runner.manager.ActiveIDs
-	_ = workspace
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	send(t, conn, protocol.TypeStart, "survivor", protocol.StartRequest{Command: []string{"sh", "-c", "sleep 30"}})
 	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted { t.Fatalf("unexpected %#v", msg) }

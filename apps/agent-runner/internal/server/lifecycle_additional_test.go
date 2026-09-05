@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -48,8 +49,24 @@ func TestGracefulTerminateThenForcedKill(t *testing.T) {
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer conn.Close()
 
-	send(t, conn, protocol.TypeStart, "stubborn", protocol.StartRequest{Command: []string{"sh", "-c", "trap '' TERM; sleep 30 & wait"}})
+	send(t, conn, protocol.TypeStart, "stubborn", protocol.StartRequest{Command: []string{"sh", "-c", "trap '' TERM; printf ready; sleep 30 & wait"}})
 	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted { t.Fatalf("unexpected %#v", msg) }
+
+	ready := false
+	for !ready {
+		msg := read(t, conn)
+		switch msg.Type {
+		case protocol.TypeStdout:
+			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
+			if err != nil { t.Fatal(err) }
+			ready = strings.Contains(string(stream.Data), "ready")
+		case protocol.TypeError:
+			t.Fatalf("unexpected protocol error before readiness %#v", msg)
+		case protocol.TypeExit:
+			t.Fatalf("process exited before TERM trap was ready: %#v", msg)
+		}
+	}
+
 	send(t, conn, protocol.TypeTerminate, "stubborn", nil)
 	time.Sleep(100 * time.Millisecond)
 	if runner.manager.ActiveCount() != 1 {
