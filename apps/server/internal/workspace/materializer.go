@@ -226,7 +226,7 @@ func (m *Materializer) recoverPublished(ctx context.Context, current store.Works
 		return store.Workspace{}, false, fmt.Errorf("inspect published workspace branch: %w", err)
 	}
 	if branch != current.WorkingBranch {
-		return store.Workspace{}, false, nil
+		return store.Workspace{}, false, fmt.Errorf("%w: published workspace branch does not match persisted working branch", ErrBootstrapFailed)
 	}
 	origin, err := m.git.OriginURL(ctx, finalPath)
 	if err != nil {
@@ -237,7 +237,7 @@ func (m *Materializer) recoverPublished(ctx context.Context, current store.Works
 		return store.Workspace{}, false, fmt.Errorf("canonicalize published workspace origin: %w", err)
 	}
 	if canonicalOrigin != source {
-		return store.Workspace{}, false, nil
+		return store.Workspace{}, false, fmt.Errorf("%w: published workspace origin does not match persisted repository identity", ErrBootstrapFailed)
 	}
 	baseRevision, err := m.git.HeadRevision(ctx, finalPath)
 	if err != nil {
