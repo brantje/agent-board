@@ -160,7 +160,15 @@ go build ./...
 
 Confirm the reported total coverage is at least 85% before completion; 90%+ remains the target.
 
-Frontend changes run typecheck/tests/build and the configured frontend coverage command as applicable. Frontend work is subject to the same 85% minimum and 90%+ target once executable production behavior is affected.
+Frontend verification from the repository root includes:
+
+```bash
+pnpm typecheck
+pnpm test:coverage
+pnpm build
+```
+
+`pnpm test:coverage` is the canonical frontend coverage command and is required in CI. It uses the Vitest V8 coverage configuration in `apps/web/vitest.config.ts`, which enforces at least 85% for statements, branches, functions, and lines; 90%+ remains the normal target.
 
 ## Backend rules
 

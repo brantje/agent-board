@@ -5,6 +5,7 @@
   "scripts": {
     "typecheck": "pnpm --filter @agent-board/web typecheck",
     "test": "pnpm --filter @agent-board/web test",
+    "test:coverage": "pnpm --filter @agent-board/web test:coverage",
     "build": "pnpm --filter @agent-board/web build"
   }
 }

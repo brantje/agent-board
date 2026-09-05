@@ -96,13 +96,13 @@ Prefer behavior-focused Vue tests over implementation-detail snapshots. For inte
 Run as applicable from repository root:
 
 ```bash
-pnpm install
+pnpm install --frozen-lockfile
 pnpm typecheck
-pnpm test
+pnpm test:coverage
 pnpm build
 ```
 
-Run the configured frontend coverage command for affected executable frontend code, report the measured result, and confirm the same 85% minimum / 90%+ target. If a dedicated frontend lint/theme/accessibility check exists, run it when relevant. Frontend policy follows `frontend-implementation.md` and `frontend-theme.md`.
+`pnpm test:coverage` is the canonical frontend coverage command. It runs Vitest with the V8 coverage provider and the thresholds configured in `apps/web/vitest.config.ts`: at least 85% for statements, branches, functions, and lines, with 90%+ as the normal target. CI must run this command for the Web job. Report the measured result with verification. If a dedicated frontend lint/theme/accessibility check exists, run it when relevant. Frontend policy follows `frontend-implementation.md` and `frontend-theme.md`.
 
 ## API/contracts
 
