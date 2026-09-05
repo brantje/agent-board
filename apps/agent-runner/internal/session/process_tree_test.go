@@ -88,6 +88,46 @@ func TestSessionWaitCleansRedirectedBackgroundProcessGroup(t *testing.T) {
 	}
 }
 
+func TestSessionWaitDoesNotWaitForInheritedChildStreams(t *testing.T) {
+	workspace := t.TempDir()
+	manager := NewManagerWithWorkspace(1, workspace)
+	s, err := manager.Start("inherited-streams", Request{Command: []string{
+		"sh", "-c", "sleep 30 & echo $! > child.pid",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pidPath := filepath.Join(workspace, "child.pid")
+	var childPID int
+	waitFor(t, time.Second, func() bool {
+		data, readErr := os.ReadFile(pidPath)
+		if readErr != nil {
+			return false
+		}
+		childPID, readErr = strconv.Atoi(strings.TrimSpace(string(data)))
+		return readErr == nil && childPID > 0
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := s.Wait(ctx); err != nil {
+		t.Fatalf("session wait was blocked by inherited child streams: %v", err)
+	}
+	waitFor(t, 2*time.Second, func() bool { return processGoneOrZombie(childPID) })
+	waitFor(t, time.Second, func() bool { return manager.ActiveCount() == 0 })
+
+	next, err := manager.Start("after-inherited-streams", Request{Command: []string{"true"}})
+	if err != nil {
+		t.Fatalf("sequential session was not admitted after inherited-stream cleanup: %v", err)
+	}
+	nextCtx, nextCancel := context.WithTimeout(context.Background(), time.Second)
+	defer nextCancel()
+	if _, err := next.Wait(nextCtx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func processGoneOrZombie(pid int) bool {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if errors.Is(err, os.ErrNotExist) {
