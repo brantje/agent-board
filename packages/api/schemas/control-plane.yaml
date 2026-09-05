@@ -63,7 +63,7 @@ ProviderInput:
     safeMetadata: {$ref: '#/JSONMap'}
 ModelProfile:
   type: object
-  required: [id, providerId, name, model, enabled, generationSettings, createdAt, updatedAt]
+  required: [id, projectId, providerId, name, model, enabled, generationSettings, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: [string, 'null'], format: uuid}
@@ -92,7 +92,7 @@ ModelProfileInput:
     enabled: {type: boolean, default: true}
 Runtime:
   type: object
-  required: [id, name, kind, image, networkPolicy, workspacePolicy, allowedSecretRefs, capabilities, enabled, healthStatus, createdAt, updatedAt]
+  required: [id, projectId, name, kind, image, networkPolicy, workspacePolicy, allowedSecretRefs, capabilities, enabled, healthStatus, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: [string, 'null'], format: uuid}
@@ -129,7 +129,7 @@ RuntimeInput:
     enabled: {type: boolean, default: true}
 ExecutorProfile:
   type: object
-  required: [id, name, engine, modelProfileId, runtimeId, engineSettings, enabled, createdAt, updatedAt]
+  required: [id, projectId, name, engine, modelProfileId, runtimeId, engineSettings, enabled, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: [string, 'null'], format: uuid}
@@ -154,7 +154,7 @@ ExecutorProfileInput:
     enabled: {type: boolean, default: true}
 Agent:
   type: object
-  required: [id, name, roleInstructions, executorProfileId, concurrencyLimit, state, createdAt, updatedAt]
+  required: [id, projectId, name, roleInstructions, executorProfileId, concurrencyLimit, state, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: [string, 'null'], format: uuid}
