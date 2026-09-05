@@ -34,6 +34,21 @@ func TestDockerRuntimeIntegration(t *testing.T) {
 		_ = rt.Close()
 		t.Fatalf("Create() error=%v", err)
 	}
+	t.Cleanup(func() {
+		cleanup, err := New()
+		if err != nil {
+			t.Errorf("cleanup New() error=%v", err)
+			return
+		}
+		defer func() {
+			if err := cleanup.Close(); err != nil {
+				t.Errorf("cleanup Close() error=%v", err)
+			}
+		}()
+		if err := cleanup.Destroy(context.Background(), handle); err != nil {
+			t.Errorf("cleanup Destroy() error=%v", err)
+		}
+	})
 	if err := rt.Start(ctx, handle); err != nil {
 		_ = rt.Destroy(ctx, handle)
 		_ = rt.Close()

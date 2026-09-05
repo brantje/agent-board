@@ -82,7 +82,7 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 func reconcileRuntimeInstances(ctx context.Context, handler http.Handler) error {
 	application, ok := handler.(*applicationHandler)
 	if !ok || application.services == nil || application.services.RuntimeInstances == nil {
-		return fmt.Errorf("Runtime Instance service is unavailable")
+		return fmt.Errorf("runtime instance service is unavailable")
 	}
 	return application.services.RuntimeInstances.ReconcileAll(ctx)
 }
