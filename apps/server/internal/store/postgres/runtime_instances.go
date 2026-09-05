@@ -42,7 +42,7 @@ func (s *Store) ListRuntimeInstances(ctx context.Context, projectID string, stat
 		SELECT id::text, project_id::text, workspace_id::text, runtime_id::text, status, external_id, runner_status, safe_handle_metadata, created_at, started_at, stopped_at, updated_at
 		FROM runtime_instances
 		WHERE project_id = $1
-		  AND (cardinality($2::text[]) = 0 OR status = ANY($2::text[]))
+		  AND (coalesce(cardinality($2::text[]), 0) = 0 OR status = ANY($2::text[]))
 		ORDER BY created_at, id
 	`, projectID, statuses)
 	if err != nil {

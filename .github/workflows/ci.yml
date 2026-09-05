@@ -148,7 +148,7 @@ jobs:
       - name: Build runner image
         run: docker build --file apps/agent-runner/Dockerfile --tag agent-board-agent-runner:ci .
       - name: Verify official runner image boundary
-        run: docker run --rm --entrypoint sh agent-board-agent-runner:ci -c 'test ! -S /var/run/docker.sock && test "$$(id -u)" -ne 0 && test "$$(pwd)" = /workspace && command -v agent-runner >/dev/null'
+        run: docker run --rm --entrypoint sh agent-board-agent-runner:ci -c 'test ! -S /var/run/docker.sock && test "$(id -u)" -ne 0 && test "$(pwd)" = /workspace && command -v agent-runner >/dev/null'
       - name: Start stack
         run: docker compose up --detach --build --wait
       - name: Verify endpoints

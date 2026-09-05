@@ -42,6 +42,12 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
+	if err := reconcileRuntimeInstances(ctx, handler); err != nil {
+		slog.Error("reconcile Runtime Instances", "error", err)
+		closeStore()
+		stop()
+		os.Exit(1)
+	}
 	code := exitCode(ctx, configuredAddress(), handler)
 	closeStore()
 	stop()
@@ -61,11 +67,6 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 		return nil, nil, fmt.Errorf("configure application: %w", err)
 	}
-	if err := services.RuntimeInstances.ReconcileAll(ctx); err != nil {
-		_ = services.Close()
-		database.Close()
-		return nil, nil, fmt.Errorf("reconcile Runtime Instances: %w", err)
-	}
 	closeApplication := func() {
 		if err := services.Close(); err != nil {
 			slog.Error("close Runtime implementations", "error", err)
@@ -76,6 +77,14 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		Handler:  httpapi.NewRouter(services.ControlPlane),
 		services: services,
 	}, closeApplication, nil
+}
+
+func reconcileRuntimeInstances(ctx context.Context, handler http.Handler) error {
+	application, ok := handler.(*applicationHandler)
+	if !ok || application.services == nil || application.services.RuntimeInstances == nil {
+		return fmt.Errorf("Runtime Instance service is unavailable")
+	}
+	return application.services.RuntimeInstances.ReconcileAll(ctx)
 }
 
 func configuredApplication(database *postgres.Store) (*app.Services, error) {
