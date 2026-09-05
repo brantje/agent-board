@@ -13,6 +13,7 @@ type ControlPlaneStore interface {
 	ListIssues(context.Context, string) ([]Issue, error)
 	UpdateIssue(context.Context, Issue) (Issue, error)
 	ListRuns(context.Context, string) ([]Run, error)
+	AssignIssue(context.Context, string, string, string) (Issue, Run, error)
 
 	ListProviders(context.Context) ([]Provider, error)
 	GetProvider(context.Context, string) (Provider, error)

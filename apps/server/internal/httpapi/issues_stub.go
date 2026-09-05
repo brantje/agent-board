@@ -13,6 +13,7 @@ func (a *api) registerIssueRunRoutes(r chi.Router) {
 		r.Post("/issues", a.createIssue)
 		r.Get("/issues/{issueID}", a.getIssue)
 		r.Patch("/issues/{issueID}", a.updateIssue)
+		r.Post("/issues/{issueID}/assignment", a.assignIssue)
 		r.Get("/runs", a.listRuns)
 		r.Get("/runs/{runID}", a.getRun)
 	})
@@ -145,4 +146,29 @@ func (a *api) getRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, runDTO(value))
+}
+
+func (a *api) assignIssue(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := pathUUID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	issueID, ok := pathUUID(w, r, "issueID")
+	if !ok {
+		return
+	}
+	var req AssignmentRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if !validUUID(req.AgentID) {
+		writeError(w, http.StatusBadRequest, "invalid_id", "agentId must be a UUID")
+		return
+	}
+	issue, run, err := a.service.AssignIssue(r.Context(), projectID, issueID, req.AgentID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, AssignmentResponse{Issue: issueDTO(issue), Run: runDTO(run)})
 }
