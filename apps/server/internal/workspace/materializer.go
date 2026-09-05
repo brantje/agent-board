@@ -175,6 +175,31 @@ func (m *Materializer) validateReadyCheckout(ctx context.Context, current store.
 	if !isRepository {
 		return fmt.Errorf("%w: ready workspace path is not a Git repository", ErrBootstrapFailed)
 	}
+	branch, err := m.git.CurrentBranch(ctx, current.Path)
+	if err != nil {
+		return fmt.Errorf("%w: inspect ready workspace branch: %w", ErrBootstrapFailed, err)
+	}
+	if branch != current.WorkingBranch {
+		return fmt.Errorf("%w: ready workspace branch %q does not match %q", ErrBootstrapFailed, branch, current.WorkingBranch)
+	}
+	if current.RepositoryPath == nil || strings.TrimSpace(*current.RepositoryPath) == "" {
+		return fmt.Errorf("%w: ready workspace repository identity is missing", ErrBootstrapFailed)
+	}
+	origin, err := m.git.OriginURL(ctx, current.Path)
+	if err != nil {
+		return fmt.Errorf("%w: inspect ready workspace origin: %w", ErrBootstrapFailed, err)
+	}
+	canonicalOrigin, err := filepath.EvalSymlinks(origin)
+	if err != nil {
+		return fmt.Errorf("%w: canonicalize ready workspace origin: %w", ErrBootstrapFailed, err)
+	}
+	canonicalRepository, err := filepath.EvalSymlinks(*current.RepositoryPath)
+	if err != nil {
+		return fmt.Errorf("%w: canonicalize ready workspace repository identity: %w", ErrBootstrapFailed, err)
+	}
+	if filepath.Clean(canonicalOrigin) != filepath.Clean(canonicalRepository) {
+		return fmt.Errorf("%w: ready workspace origin does not match persisted repository identity", ErrBootstrapFailed)
+	}
 	return nil
 }
 

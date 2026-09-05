@@ -216,3 +216,47 @@ func TestValidateReadyCheckoutRejectsNonRepositoryDirectory(t *testing.T) {
 		t.Fatalf("validateReadyCheckout() error = %v", err)
 	}
 }
+
+func TestMaterializerReadyWorkspaceRejectsForeignRepository(t *testing.T) {
+	git := requireGit(t)
+	parent := t.TempDir()
+	sourceRoot := filepath.Join(parent, "sources")
+	if err := os.Mkdir(sourceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := createFixtureRepository(t, git.GitCLI, sourceRoot)
+	foreignRoot := filepath.Join(parent, "foreign-sources")
+	if err := os.Mkdir(foreignRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	foreignSource := createFixtureRepository(t, git.GitCLI, foreignRoot)
+	policy, err := repository.NewPolicy([]string{sourceRoot, foreignRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := &memoryStateStore{workspace: fixtureWorkspace(source)}
+	materializer, err := NewMaterializer(state, policy, git, filepath.Join(parent, "workspaces"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := store.Project{ID: "project-1", RepositoryPath: source, DefaultBranch: "main"}
+	issue := store.Issue{ID: "issue-1", ProjectID: project.ID}
+
+	ready, err := materializer.Ensure(context.Background(), project, issue, state.workspace)
+	if err != nil {
+		t.Fatalf("first Ensure() error = %v", err)
+	}
+	if err := os.RemoveAll(ready.Path); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.GitCLI.Clone(context.Background(), foreignSource, ready.Path, "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.GitCLI.CheckoutNewBranch(context.Background(), ready.Path, ready.WorkingBranch); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := materializer.Ensure(context.Background(), project, issue, ready); !errors.Is(err, ErrBootstrapFailed) || !strings.Contains(err.Error(), "origin does not match") {
+		t.Fatalf("Ensure() with foreign READY checkout error = %v, want origin identity failure", err)
+	}
+}
