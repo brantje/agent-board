@@ -158,20 +158,28 @@ func (s *RuntimeInstanceService) Destroy(ctx context.Context, projectID, instanc
 	if instance.Status == string(runtimepkg.StateDestroyed) {
 		return instance, nil
 	}
-	if instance.Status == string(runtimepkg.StateStarting) || instance.Status == string(runtimepkg.StateRunning) || instance.Status == string(runtimepkg.StateStopping) {
-		instance, err = s.Stop(ctx, projectID, instanceID, runtimepkg.StopReasonRequested)
-		if err != nil {
-			return store.RuntimeInstance{}, err
-		}
-	}
 	implementation, handle, err := s.implementationAndHandle(ctx, instance)
 	if err != nil {
 		return store.RuntimeInstance{}, err
 	}
-	if err := implementation.Destroy(ctx, handle); err != nil {
-		return s.failInstance(ctx, instance, err)
+
+	var stopErr error
+	if instance.Status == string(runtimepkg.StateStarting) || instance.Status == string(runtimepkg.StateRunning) || instance.Status == string(runtimepkg.StateStopping) {
+		stopped, err := s.Stop(ctx, projectID, instanceID, runtimepkg.StopReasonRequested)
+		if stopped.ID != "" {
+			instance = stopped
+		}
+		stopErr = err
 	}
-	return s.updateState(ctx, instance, runtimepkg.StateDestroyed, instance.ExternalID, "UNAVAILABLE", instance.SafeHandleMetadata)
+
+	if destroyErr := implementation.Destroy(ctx, handle); destroyErr != nil {
+		return s.failInstance(ctx, instance, errors.Join(stopErr, destroyErr))
+	}
+	destroyed, err := s.updateState(ctx, instance, runtimepkg.StateDestroyed, instance.ExternalID, "UNAVAILABLE", instance.SafeHandleMetadata)
+	if err != nil {
+		return store.RuntimeInstance{}, errors.Join(stopErr, err)
+	}
+	return destroyed, stopErr
 }
 
 func (s *RuntimeInstanceService) getInstance(ctx context.Context, projectID, instanceID string) (store.RuntimeInstance, error) {
