@@ -12,6 +12,21 @@ import (
 
 func TestNewValidatesCoordinatorConfig(t *testing.T) {
 	base := DefaultConfig("worker")
+	processor := processorFunc(func(context.Context, *store.SchedulerAdmission, Lifecycle) (Result, error) {
+		return Result{RunStatus: "COMPLETED"}, nil
+	})
+	reconciler := testReconciler()
+
+	if _, err := New(nil, processor, reconciler, base); err == nil {
+		t.Fatal("expected missing store error")
+	}
+	if _, err := New(&fakeSchedulerStore{}, nil, reconciler, base); err == nil {
+		t.Fatal("expected missing processor error")
+	}
+	if _, err := New(&fakeSchedulerStore{}, processor, nil, base); err == nil {
+		t.Fatal("expected missing reconciler error")
+	}
+
 	cases := []struct {
 		name   string
 		mutate func(*Config)
@@ -27,9 +42,7 @@ func TestNewValidatesCoordinatorConfig(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := base
 			tc.mutate(&cfg)
-			if _, err := New(&fakeSchedulerStore{}, processorFunc(func(context.Context, *store.SchedulerAdmission, Lifecycle) (Result, error) {
-				return Result{RunStatus: "COMPLETED"}, nil
-			}), nil, cfg); err == nil {
+			if _, err := New(&fakeSchedulerStore{}, processor, reconciler, cfg); err == nil {
 				t.Fatal("expected invalid config error")
 			}
 		})
@@ -98,7 +111,7 @@ func TestCoordinatorLifecycleMarksRunningThenFinal(t *testing.T) {
 		}
 		return Result{RunStatus: "READY_FOR_REVIEW"}, nil
 	})
-	c, err := New(fs, processor, nil, testConfig())
+	c, err := New(fs, processor, testReconciler(), testConfig())
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
@@ -129,7 +142,7 @@ func TestCoordinatorRenewsLeaseWhileProcessorRuns(t *testing.T) {
 	cfg := testConfig()
 	cfg.LeaseDuration = 100 * time.Millisecond
 	cfg.HeartbeatInterval = 5 * time.Millisecond
-	c, err := New(fs, processor, nil, cfg)
+	c, err := New(fs, processor, testReconciler(), cfg)
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
@@ -155,7 +168,7 @@ func TestCoordinatorLeavesAmbiguousProcessorFailureForReconciliation(t *testing.
 	})
 	cfg := testConfig()
 	cfg.ReportError = func(err error) { reported <- err }
-	c, err := New(fs, processor, nil, cfg)
+	c, err := New(fs, processor, testReconciler(), cfg)
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
@@ -183,7 +196,7 @@ func TestCoordinatorCancelsProcessorWhenLeaseHeartbeatIsLost(t *testing.T) {
 	cfg := testConfig()
 	cfg.LeaseDuration = 100 * time.Millisecond
 	cfg.HeartbeatInterval = 5 * time.Millisecond
-	c, err := New(fs, processor, nil, cfg)
+	c, err := New(fs, processor, testReconciler(), cfg)
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
@@ -209,6 +222,12 @@ func testConfig() Config {
 	cfg.CapacityBackoff = time.Millisecond
 	cfg.MaxInFlight = 2
 	return cfg
+}
+
+func testReconciler() Reconciler {
+	return reconcilerFunc(func(context.Context, *store.SchedulerAdmission) (store.SchedulerReconciliationOutcome, *string, error) {
+		return store.SchedulerReconciliationUnknown, nil, nil
+	})
 }
 
 type processorFunc func(context.Context, *store.SchedulerAdmission, Lifecycle) (Result, error)
