@@ -61,23 +61,31 @@ func start(id, workspaceRoot string, request Request) (*Session, error) {
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		_ = stdin.Close()
 		return nil, fmt.Errorf("create stdout pipe: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
 		return nil, fmt.Errorf("create stderr pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stderr.Close()
 		return nil, fmt.Errorf("start process: %w", err)
 	}
 
+	exposedStdout, stdoutWriter := io.Pipe()
+	exposedStderr, stderrWriter := io.Pipe()
 	secrets := secretValues(request.Secrets)
 	s := &Session{
 		id: id, cmd: cmd, stdin: newSafeWriteCloser(stdin),
-		stdout: redact.NewReader(stdout, secrets), stderr: redact.NewReader(stderr, secrets),
+		stdout: redact.NewReader(exposedStdout, secrets), stderr: redact.NewReader(exposedStderr, secrets),
 		done: make(chan struct{}),
 	}
-	go s.reap()
+	go s.supervise(stdout, stderr, stdoutWriter, stderrWriter)
 	return s, nil
 }
 
@@ -115,6 +123,22 @@ func (s *Session) signal(signalTree func(int) error) error {
 		return nil
 	}
 	return signalTree(pid)
+}
+
+func (s *Session) supervise(stdout, stderr io.ReadCloser, stdoutWriter, stderrWriter *io.PipeWriter) {
+	var streams sync.WaitGroup
+	streams.Add(2)
+	go copyProcessStream(&streams, stdoutWriter, stdout)
+	go copyProcessStream(&streams, stderrWriter, stderr)
+	streams.Wait()
+	s.reap()
+}
+
+func copyProcessStream(group *sync.WaitGroup, destination *io.PipeWriter, source io.ReadCloser) {
+	defer group.Done()
+	_, err := io.Copy(destination, source)
+	_ = source.Close()
+	_ = destination.CloseWithError(err)
 }
 
 func (s *Session) reap() {

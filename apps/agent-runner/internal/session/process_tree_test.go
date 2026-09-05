@@ -1,15 +1,15 @@
-//go:build !windows
+//go:build linux
 
 package session
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -46,8 +46,17 @@ func TestKillTerminatesDescendantProcess(t *testing.T) {
 		t.Fatalf("expected process tree to be killed, got %#v", result)
 	}
 
-	waitFor(t, 2*time.Second, func() bool {
-		err := syscall.Kill(childPID, 0)
-		return errors.Is(err, syscall.ESRCH)
-	})
+	waitFor(t, 2*time.Second, func() bool { return processGoneOrZombie(childPID) })
+}
+
+func processGoneOrZombie(pid int) bool {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(data))
+	return len(fields) > 2 && fields[2] == "Z"
 }
