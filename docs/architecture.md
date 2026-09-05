@@ -17,6 +17,8 @@ Local Project repository
  -> durable scheduler claim
  -> durable Issue Workspace
  -> Runtime Instance
+ -> agent-runner
+ -> Execution Session
  -> Engine process
  -> durable execution evidence
  -> Question/resume when needed
@@ -31,10 +33,12 @@ Do not add parallel schedulers, Run lifecycles, Engine-owned Workspaces, or conf
 ```text
 Frontend        Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS + Nuxt UI v4
 Backend         Go (`apps/server`)
+Runner          Go (`apps/agent-runner`)
 HTTP            chi
 Database        PostgreSQL + pgvector
 Live updates    Server-Sent Events
 Runtime         Docker first
+Runner transport WebSocket
 API contracts   OpenAPI + intentional public DTOs
 Blob storage    local filesystem first; S3-compatible later
 ```
@@ -56,11 +60,12 @@ The Go backend owns:
 - Project/Issue/Agent configuration and commands
 - Provider/Model Profile configuration
 - Runtime configuration and health
-- Executor Profiles and Engine registry
+- Executor Profiles and Engine registry/adapters
 - durable Run scheduling/claiming/reconciliation
 - canonical execution-context resolution
 - Workspace/Git orchestration
-- Runtime Instance lifecycle and process/session execution
+- Runtime Instance lifecycle
+- agent-runner session orchestration
 - Engine execution orchestration
 - Questions/Decisions/Review commands
 - Event persistence and SSE
@@ -68,6 +73,14 @@ The Go backend owns:
 - authentication/authorization and secret resolution
 
 HTTP handlers are adapters around separable application/domain/store/runtime logic.
+
+### Agent runner
+
+`agent-runner` is the small execution-plane binary inside a Runtime Instance. It is Engine-neutral and communicates with the trusted server over a versioned WebSocket protocol.
+
+Runtime Instance, runner, Execution Session and Run are separate identities. One runner may execute many sessions over time. v0.1 allows one active Execution Session per runner while keeping the protocol/session model extensible for later fleet capacity.
+
+See `agent-runner.md`.
 
 ### PostgreSQL
 
@@ -104,6 +117,8 @@ Runtime contains at least:
 - health/preflight information
 
 Runtime Instance is disposable compute materialized from the selected Runtime and is a separate identity.
+
+A Runtime Instance is bound to exactly one Workspace for its lifetime. It may remain alive and reuse its runner for many sequential Execution Sessions against that same Workspace. If it is replaced, the Workspace remains durable and may be mounted into a later Runtime Instance.
 
 ## Project repository and Workspace
 
@@ -145,14 +160,19 @@ Executor Profile
  -> verify accessible/enabled/runnable
  -> validated Runtime Spec
  -> Runtime implementation
- -> Runtime Instance
- -> process/session
+ -> Runtime Instance (one immutable Workspace binding)
+ -> agent-runner
+ -> Execution Session
  -> Engine
 ```
 
-Engine commands execute inside the selected Runtime Instance. Runtime sessions support Workspace-bounded cwd, ephemeral environment/secrets, stdout/stderr, exit status, cancellation and cleanup.
+Engine adapters stay server-side. They receive a provider-neutral execution capability and do not receive Docker clients, the Docker socket or provider-specific runtime handles.
 
-The trusted backend may access Docker. Agent Runtime Instances never receive the Docker socket.
+The server/runner WebSocket protocol is versioned from day one and scopes execution traffic to explicit Execution Session identities. Runtime sessions support Workspace-bounded cwd, ephemeral environment/secrets, stdin/stdout/stderr, exit status, cancellation and cleanup.
+
+The trusted backend may access Docker. Agent Runtime Instances and `agent-runner` never receive the Docker socket.
+
+See `runtime-contract.md`, `runtime-execution.md` and `agent-runner.md`.
 
 ## Execution context and secrets
 
@@ -164,7 +184,7 @@ Secret material is separate and ephemeral:
 encrypted secret/reference
  -> authorize
  -> resolve in trusted Go boundary
- -> inject into Runtime process/session
+ -> inject into runner Execution Session
  -> redact before every durable sink
 ```
 
@@ -173,7 +193,7 @@ Untrusted Runtime code cannot gain control-plane privileges through network reac
 ## Events and live updates
 
 ```text
-Engine / Runtime
+Engine / Runtime / runner
  -> normalize + redact
  -> persist Event
  -> projections
@@ -192,7 +212,9 @@ See `execution-evidence.md`.
 
 ## Questions and continuation
 
-Blocking Questions move the same Run to `WAITING_FOR_INPUT` and the Issue to `BLOCKED`. `BLOCKED` is both a durable Issue state and its normal Board column projection. Answering may resume the same Run according to Project policy. Workspace state persists and a replacement Runtime Instance may be materialized from the same Runtime.
+Blocking Questions move the same Run to `WAITING_FOR_INPUT` and the Issue to `BLOCKED`. `BLOCKED` is both a durable Issue state and its normal Board column projection. Answering may resume the same Run according to Project policy.
+
+Runner state is not durable product state. A healthy same-Workspace Runtime Instance may be reused for a later Execution Session, or a replacement Runtime Instance may be materialized against the same Workspace.
 
 ## Delivery policy
 
@@ -206,21 +228,28 @@ PR/MR creation does not imply auto-merge or deployment. Stronger delivery permis
 
 Planning, Automations, Agent-created Issues, Source Connections, delivery automation, delegation, Squads, workers, users/groups and Plugins reuse the same Issue/Agent/Run/scheduler/Workspace model.
 
+Future Worker/Pool selection supplies compute before Runtime Instance materialization. Worker identity remains separate from Agent, Runtime Instance and runner identity.
+
 Plugins are deliberately late roadmap work.
 
 ## Invariants
 
 1. Issue is the durable unit of work.
 2. Agent identity is not process identity.
-3. Run identity is not Runtime Instance identity.
+3. Run identity is not Runtime Instance, runner or Execution Session identity.
 4. Workspace lifetime is independent from Runtime Instance lifetime.
-5. Runtime is selected directly by Executor Profile.
-6. Runtime owns complete execution environment/policy configuration.
-7. PostgreSQL owns durable scheduling state.
-8. Browser/request lifetime never owns execution or continuation.
-9. Engine processes execute inside the selected Runtime Instance.
-10. Secrets are ephemeral and redacted before persistence.
-11. Historical execution truth comes from immutable provenance.
-12. Nuxt is presentation/application delivery, not a competing control plane.
-13. `BLOCKED` is an Issue workflow state; Run execution states remain separate.
-14. Human Review is the default v0.1 delivery gate; later autonomous delivery requires explicit Project policy.
+5. A Runtime Instance is bound to exactly one Workspace for its lifetime.
+6. One runner may execute many Execution Sessions over time against that Workspace.
+7. One Execution Session owns one process tree.
+8. Runtime is selected directly by Executor Profile.
+9. Runtime owns complete execution environment/policy configuration.
+10. PostgreSQL owns durable scheduling state.
+11. Browser/request lifetime never owns execution or continuation.
+12. Engine processes execute inside the selected Runtime Instance through `agent-runner`.
+13. Engine adapters remain server-side.
+14. Runner/server transport is versioned WebSocket and session-scoped.
+15. Secrets are ephemeral and redacted before persistence.
+16. Historical execution truth comes from immutable provenance.
+17. Nuxt is presentation/application delivery, not a competing control plane.
+18. `BLOCKED` is an Issue workflow state; Run execution states remain separate.
+19. Human Review is the default v0.1 delivery gate; later autonomous delivery requires explicit Project policy.

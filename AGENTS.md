@@ -15,6 +15,8 @@ For implementation work, read the relevant canonical docs:
 - `docs/execution-context.md` — canonical execution context/secrets
 - `docs/execution-evidence.md` — provenance/logs/Artifacts/Review evidence
 - `docs/runtime-contract.md` — Runtime boundary/security
+- `docs/runtime-execution.md` — Runtime/runner Engine execution
+- `docs/agent-runner.md` — runner identity, WebSocket/session contract and same-Workspace reuse
 - `docs/event-protocol.md` — Event contract
 - `docs/testing.md` — mandatory TDD workflow
 - `docs/frontend-implementation.md` — clean-room Nuxt/Nuxt UI implementation rules
@@ -37,6 +39,8 @@ Local Project repository
  -> durable scheduler
  -> durable Issue Workspace
  -> Runtime Instance
+ -> agent-runner
+ -> Execution Session
  -> real coding Engine
  -> durable execution evidence
  -> Question/resume when needed
@@ -72,11 +76,18 @@ After the answers, finalize the plan and proceed. Avoid extended question trees 
 - Multi-project isolation is mandatory.
 - Issue is the durable unit of work.
 - Agent is durable configuration, not a process/container.
-- Run is a durable execution attempt, not a Runtime Instance.
+- Run is a durable execution attempt, not a Runtime Instance, runner or Execution Session.
 - Workspace survives Runtime Instances and is reused per Issue.
+- A Runtime Instance is bound to exactly one Workspace for its lifetime.
+- Runtime Instance, `agent-runner`, Execution Session and Run are separate identities.
+- One runner may execute many Execution Sessions over time against its bound Workspace.
+- One Execution Session owns one process tree.
+- v0.1 allows one active Execution Session per runner; the protocol must remain extensible for more.
 - PostgreSQL is authoritative for structured state and scheduler ownership.
 - Browser/request lifetime never owns execution or continuation.
-- Engine processes execute inside the selected Runtime Instance.
+- Engine adapters remain server-side; `agent-runner` stays Engine-neutral.
+- Engine processes execute inside the selected Runtime Instance through `agent-runner`.
+- Server/runner transport is explicitly versioned WebSocket.
 - Model inference is independent from Runtime compute.
 - Executor Profile references Runtime directly.
 - Runtime owns the complete execution environment/policy configuration.
@@ -107,7 +118,9 @@ Board state is separate from Run state. Capacity-only waiting remains queued and
 ## Stack
 
 - Backend: Go (`apps/server`)
+- Agent runner: Go (`apps/agent-runner`)
 - HTTP: chi
+- Runner transport: WebSocket
 - Frontend: Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS + Nuxt UI v4
 - Database: PostgreSQL + pgvector
 - API contracts: OpenAPI + intentional public DTOs/frontend types
@@ -115,7 +128,7 @@ Board state is separate from Run state. Capacity-only waiting remains queued and
 - Runtime: Docker first
 - Blob/output storage: local filesystem first, S3-compatible later
 
-The Go backend is the production control plane. Nuxt handles web rendering, routing and browser interaction; durable product state, scheduling, execution and authorization remain Go-owned.
+The Go backend is the production control plane. `agent-runner` is a narrow execution-plane binary inside Runtime Instances. Nuxt handles web rendering, routing and browser interaction; durable product state, scheduling, execution authorization and evidence remain Go-server-owned.
 
 ## Mandatory TDD
 
@@ -125,6 +138,15 @@ Backend verification includes as applicable:
 
 ```bash
 cd apps/server
+go test ./...
+go vet ./...
+go build ./...
+```
+
+Runner verification includes as applicable once implemented:
+
+```bash
+cd apps/agent-runner
 go test ./...
 go vet ./...
 go build ./...
@@ -141,6 +163,8 @@ Frontend changes run typecheck/tests/build as applicable.
 - Human decisions requiring continuation persist that continuation durably before success returns.
 - Do not create parallel schedulers, Run lifecycles, Workspaces or Engine-owned authoritative state.
 - Do not introduce a Runtime Profile domain/API/persistence/UI layer; Executor Profiles select Runtime directly.
+- Keep Engine adapters server-side and independent from raw runner WebSocket framing.
+- Keep `agent-runner` Engine-neutral and free of PostgreSQL, scheduler, Review and control-plane authorization logic.
 
 ## Database
 
@@ -154,6 +178,8 @@ Validate local repository paths against deployment-authorized roots. Project con
 
 Normal Run orchestration materializes or reuses the Issue Workspace from that repository. One authoritative Workspace exists per Issue in v0.1.
 
+A Runtime Instance mounts exactly one Workspace for its lifetime. It may be reused for later sessions/Runs only against that same Workspace. Cross-Workspace Runtime Instance reuse is not allowed in v0.1.
+
 Authenticated GitHub/GitLab/Bitbucket/Forgejo Source Connections are later work and must not block the first local-repository v0.1 flow. When implemented, credentials remain ephemeral and never appear in durable clone URLs or Git configuration.
 
 ## Runtime and security
@@ -166,11 +192,14 @@ Executor Profile
  -> validated Runtime Spec
  -> Runtime implementation
  -> Runtime Instance
- -> process/session
+ -> agent-runner
+ -> Execution Session
  -> Engine
 ```
 
-Never execute coding-agent CLIs directly in the trusted backend process. Never mount the Docker socket into Agent Runtime Instances.
+Official v0.1 Runtime images contain `agent-runner`. The server and runner use a versioned WebSocket protocol. Runner connection/session state does not become authoritative durable product state.
+
+Never execute coding-agent CLIs directly in the trusted backend process. Never mount the Docker socket into Agent Runtime Instances. Never give the runner PostgreSQL credentials, server encryption keys or broad control-plane credentials.
 
 Control-plane authorization derives trusted actor identity; caller-controlled headers cannot grant human/admin privileges.
 
@@ -180,9 +209,13 @@ Persist important activity before live publication. Do not store hidden chain-of
 
 Large output belongs in durable raw-output/blob storage; Artifacts are first-class records. Run provenance records the selected Runtime directly. Review/Run inspection shows complete candidate evidence, including staged and new/untracked files where applicable.
 
+Runner output is normalized/redacted before durable persistence. A WebSocket disconnect is an infrastructure signal and is not, by itself, durable proof that a Run failed.
+
 ## Questions and Review
 
 Blocking Questions pause the same Run and may release its Runtime Instance while preserving Workspace state. The Issue moves to the `BLOCKED` state/column when human input is required according to workflow policy.
+
+Resume state is server-owned. A later continuation may reuse a healthy same-Workspace Runtime Instance or create a replacement Runtime Instance against the same durable Workspace.
 
 Human Review is the v0.1 shipping gate.
 
@@ -227,6 +260,8 @@ The project configures the Nuxt UI MCP server in `.cursor/mcp.json` at `https://
 ## Planned features
 
 Planning strategy, Automations, Agent-created Issues, Source Connections, delivery automation, delegation, Squads and worker pools reuse the canonical Issue/Run/scheduler/Workspace model.
+
+Future Worker Pools supply compute capacity but do not replace Agent, Runtime Instance, runner or Execution Session identities.
 
 Users, groups, roles/permissions and broader multi-user administration are expected later but are not yet designed; do not invent their product contracts.
 

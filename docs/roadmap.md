@@ -17,6 +17,8 @@ Local Project repository
  -> durable scheduler
  -> durable Issue Workspace
  -> Runtime Instance
+ -> agent-runner
+ -> Execution Session
  -> real coding Engine
  -> durable execution evidence
  -> Question/resume when needed
@@ -30,7 +32,11 @@ Required work includes:
 - durable asynchronous/restart-safe scheduling
 - Agent concurrency + Model Profile capacity admission
 - local repository-backed Issue Workspaces
-- Runtime process/session execution and Docker operability
+- Runtime Instance lifecycle with immutable same-Workspace binding
+- `agent-runner` binary in official Runtime images
+- versioned server/runner WebSocket transport
+- separate Runtime Instance / runner / Execution Session / Run identities
+- one active Execution Session per runner in v0.1, with protocol support for many sessions over runner lifetime
 - canonical execution context and ephemeral Provider secrets
 - immutable Run provenance
 - durable raw logs and first-class Artifacts
@@ -80,8 +86,11 @@ Do not create a Squad scheduler or parallel Run lifecycle.
 - warm/permanent workers
 - spot/ephemeral execution and recovery
 - scheduling preferences/classes
+- higher runner session capacity where safe/useful
 
-Agents remain independent from Worker identity.
+Agents remain independent from Worker identity. Worker, Runtime Instance, runner and Execution Session identities remain separate.
+
+The v0.1 runner contract is intentionally compatible with future fleets: a healthy Runtime Instance may already serve many sequential sessions against its one bound Workspace, while Worker Pools later decide where Runtime capacity comes from.
 
 ## Phase 4 — multi-user administration
 

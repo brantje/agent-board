@@ -21,7 +21,8 @@ Required concerns include:
 - Project isolation
 - scheduler claiming/leases/capacity/restart recovery
 - Workspace repository bootstrap/reuse/path safety
-- Runtime process/session execution/cancellation/cleanup
+- Runtime Instance lifecycle/cancellation/cleanup
+- agent-runner WebSocket/session behavior
 - canonical execution context
 - secret non-disclosure
 - immutable provenance
@@ -38,6 +39,8 @@ go test ./...
 go vet ./...
 go build ./...
 ```
+
+Runner changes also run the equivalent Go test/vet/build commands under `apps/agent-runner` once that package exists.
 
 Use targeted package/test invocations during Red/Green iteration, then run broader relevant suites before completion.
 
@@ -104,6 +107,9 @@ For the first v0.1 path cover:
 - real local fixture Git repository materialized before Engine execution
 - local source path validation against authorized roots
 - same Issue reuses Workspace across attempts
+- Runtime Instance remains bound to exactly one Workspace for its lifetime
+- same-Workspace Runtime Instance reuse does not reset/corrupt Workspace state
+- replacement Runtime Instance can mount the same durable Workspace
 - cross-Project Workspace/repository isolation
 - bootstrap concurrency/retry safety
 - repository failure does not silently create an unrelated empty repository
@@ -112,20 +118,43 @@ When remote Source Connections are implemented, extend coverage with authenticat
 
 See `source-control.md`.
 
-## Runtime tests
+## Runtime and agent-runner tests
 
-Runtime contract/integration tests cover:
+Runtime/runner contract and integration tests cover:
 
-- create/start/exec/stop/destroy
+- Runtime create/start/inspect/stop/destroy
+- runner starts from the official Runtime image
+- versioned WebSocket handshake and incompatible-version failure
+- explicit Execution Session identity
+- one active session per runner in v0.1
+- multiple sequential sessions over one runner lifetime
 - stdout/stderr channel fidelity
+- stdin forwarding/close
 - non-zero exit status
+- one process tree per Execution Session
 - `/workspace` working directory/write persistence
-- cancellation/graceful/forced cleanup
+- same Workspace remains visible across sequential sessions
+- cancellation/graceful/forced process-tree cleanup
+- runner/session disconnect reconciliation without blindly duplicating execution
 - cleanup after backend restart
+- runner capability advertisement
 - network/resource/policy enforcement
+- secret values are not reflected in runner protocol output
 - Docker socket absence inside Agent Runtime
 
-See `runtime-contract.md` and `runtime-execution.md`.
+A real-Docker flow should prove:
+
+```text
+Runtime Instance
+ -> agent-runner connects
+ -> Execution Session 1 writes Workspace
+ -> session completes
+ -> Execution Session 2 sees same Workspace state
+ -> Runtime Instance destroyed
+ -> Workspace survives
+```
+
+See `runtime-contract.md`, `runtime-execution.md` and `agent-runner.md`.
 
 ## Evidence/Review tests
 
@@ -161,11 +190,12 @@ Cover:
 
 - cross-Project access
 - forged actor headers/identity cannot gain privilege
-- untrusted Runtime cannot invoke privileged control-plane actions anonymously
-- secret values absent from DB Events, raw logs, Artifacts, provenance, HTTP responses and application logs
+- untrusted Runtime/runner cannot invoke privileged control-plane actions anonymously
+- secret values absent from DB Events, runner responses, raw logs, Artifacts, provenance, HTTP responses and application logs
 - path traversal
 - unsafe source/server URLs/SSRF where applicable
 - forbidden Docker/host access
+- Runtime Instance cannot be rebound to another Workspace
 
 ## Definition of done
 
@@ -175,7 +205,7 @@ A change is not complete until:
 - meaningful regression/error/isolation/security cases are covered
 - targeted tests pass
 - relevant broader Go/frontend suites pass
-- Go vet/build pass when backend changed
+- Go vet/build pass when backend or runner changed
 - frontend typecheck/build pass when frontend changed
 - schema applies cleanly to a fresh database when database structure changed
 - Docker/integration suites pass when the change affects those boundaries
@@ -192,6 +222,8 @@ Local Project repository
  -> durable scheduler
  -> Issue Workspace
  -> Runtime Instance
+ -> agent-runner
+ -> Execution Session
  -> real coding Engine
  -> real Workspace changes
  -> durable evidence
