@@ -33,6 +33,39 @@ func TestStreamReplacementDoesNotExposeConfiguredSecret(t *testing.T) {
 	}
 }
 
+func TestStreamReplacementCannotReconstructConfiguredSecret(t *testing.T) {
+	tests := []struct {
+		name    string
+		secrets []string
+		input   string
+	}{
+		{
+			name:    "replacement between safe bytes",
+			secrets: []string{"a***b", "X"},
+			input:   "aXb",
+		},
+		{
+			name:    "replacement beside matching bytes",
+			secrets: []string{"x***y"},
+			input:   "xx***yy",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			stream := New(test.secrets)
+			var output bytes.Buffer
+			output.Write(stream.Push([]byte(test.input)))
+			output.Write(stream.Flush())
+			for _, secret := range test.secrets {
+				if bytes.Contains(output.Bytes(), []byte(secret)) {
+					t.Fatalf("redacted output %q reconstructed configured secret %q", output.String(), secret)
+				}
+			}
+		})
+	}
+}
+
 func TestStreamFallsBackToDroppingSecretWhenEveryMarkerCollides(t *testing.T) {
 	secrets := []string{"*", "[REDACTED]", "<redacted>", "[masked]"}
 	stream := New(secrets)
