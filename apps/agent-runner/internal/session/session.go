@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 )
@@ -36,13 +38,18 @@ type Session struct {
 	mu     sync.RWMutex
 }
 
-func start(id string, request Request) (*Session, error) {
+func start(id, workspaceRoot string, request Request) (*Session, error) {
 	if len(request.Command) == 0 || request.Command[0] == "" {
 		return nil, errors.New("command is required")
 	}
 
+	workingDir, err := resolveWorkingDir(workspaceRoot, request.Dir)
+	if err != nil {
+		return nil, err
+	}
+
 	cmd := exec.Command(request.Command[0], request.Command[1:]...)
-	cmd.Dir = request.Dir
+	cmd.Dir = workingDir
 	cmd.Env = mergeEnvironment(request.Env, request.Secrets)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
@@ -132,14 +139,54 @@ func (s *Session) reap() {
 	s.mu.Unlock()
 }
 
+func resolveWorkingDir(workspaceRoot, requested string) (string, error) {
+	root, err := filepath.Abs(workspaceRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+
+	candidate := requested
+	if candidate == "" {
+		candidate = root
+	} else if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(root, candidate)
+	}
+	candidate, err = filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	candidate, err = filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return "", fmt.Errorf("compare working directory to workspace: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("working directory escapes workspace")
+	}
+	info, err := os.Stat(candidate)
+	if err != nil {
+		return "", fmt.Errorf("stat working directory: %w", err)
+	}
+	if !info.IsDir() {
+		return "", errors.New("working directory is not a directory")
+	}
+	return candidate, nil
+}
+
 func mergeEnvironment(env, secrets map[string]string) []string {
 	values := make(map[string]string)
 	for _, item := range os.Environ() {
-		for i := 0; i < len(item); i++ {
-			if item[i] == '=' {
-				values[item[:i]] = item[i+1:]
-				break
-			}
+		key, value, ok := strings.Cut(item, "=")
+		if ok {
+			values[key] = value
 		}
 	}
 	for key, value := range env {

@@ -6,6 +6,8 @@ import (
 	"sync"
 )
 
+const DefaultWorkspaceRoot = "/workspace"
+
 var (
 	ErrCapacityReached = errors.New("runner session capacity reached")
 	ErrDuplicateID     = errors.New("execution session id already exists")
@@ -13,16 +15,28 @@ var (
 )
 
 type Manager struct {
-	mu       sync.Mutex
-	capacity int
-	sessions map[string]*Session
+	mu            sync.Mutex
+	capacity      int
+	workspaceRoot string
+	sessions      map[string]*Session
 }
 
 func NewManager(capacity int) *Manager {
+	return NewManagerWithWorkspace(capacity, DefaultWorkspaceRoot)
+}
+
+func NewManagerWithWorkspace(capacity int, workspaceRoot string) *Manager {
 	if capacity < 1 {
 		capacity = 1
 	}
-	return &Manager{capacity: capacity, sessions: make(map[string]*Session)}
+	if workspaceRoot == "" {
+		workspaceRoot = DefaultWorkspaceRoot
+	}
+	return &Manager{
+		capacity:      capacity,
+		workspaceRoot: workspaceRoot,
+		sessions:      make(map[string]*Session),
+	}
 }
 
 func (m *Manager) Capacity() int {
@@ -50,7 +64,7 @@ func (m *Manager) Start(id string, request Request) (*Session, error) {
 		return nil, ErrCapacityReached
 	}
 
-	s, err := start(id, request)
+	s, err := start(id, m.workspaceRoot, request)
 	if err != nil {
 		return nil, err
 	}
