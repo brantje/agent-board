@@ -209,11 +209,19 @@ func TestDockerLifecycleAPIErrorsAndMissingContainers(t *testing.T) {
 		return ownedInspect(spec, "container-id", "running"), nil
 	}}, stopErr: stopErr}
 	runtime, _ = newWithClient(failing)
-	if err := runtime.Destroy(context.Background(), handle); !errors.Is(err, stopErr) || failing.removeCalls != 0 {
-		t.Fatalf("Destroy(stop error) stopCalls=%d removeCalls=%d err=%v", failing.stopCalls, failing.removeCalls, err)
+	if err := runtime.Destroy(context.Background(), handle); err != nil || failing.stopCalls != 1 || failing.removeCalls != 1 {
+		t.Fatalf("Destroy(stop error, forced remove succeeds) stopCalls=%d removeCalls=%d err=%v", failing.stopCalls, failing.removeCalls, err)
 	}
 
 	removeErr := errors.New("remove failed")
+	failing = &errorMoby{fakeMoby: &fakeMoby{inspectFn: func(string) (client.ContainerInspectResult, error) {
+		return ownedInspect(spec, "container-id", "running"), nil
+	}}, stopErr: stopErr, removeErr: removeErr}
+	runtime, _ = newWithClient(failing)
+	if err := runtime.Destroy(context.Background(), handle); !errors.Is(err, stopErr) || !errors.Is(err, removeErr) || failing.removeCalls != 1 {
+		t.Fatalf("Destroy(stop and remove errors) stopCalls=%d removeCalls=%d err=%v", failing.stopCalls, failing.removeCalls, err)
+	}
+
 	failing = &errorMoby{fakeMoby: &fakeMoby{inspectFn: func(string) (client.ContainerInspectResult, error) {
 		return ownedInspect(spec, "container-id", "exited"), nil
 	}}, removeErr: removeErr}
@@ -231,10 +239,12 @@ func TestVerifyContainerRejectsUnsafeOrMismatchedShapes(t *testing.T) {
 	}{
 		{"incomplete", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Config = nil }},
 		{"label", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Config.Labels[labelRuntime] = "other" }},
+		{"image", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Config.Image = "other:image" }},
 		{"working directory", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Config.WorkingDir = "/tmp" }},
 		{"privileged", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.Privileged = true }},
 		{"host pid", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.PidMode = container.PidMode("host") }},
-		{"device", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.Resources.Devices = []container.DeviceMapping{{PathOnHost: "/dev/null"}} }},
+		{"capability", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.CapAdd = append(inspected.HostConfig.CapAdd, "SYS_ADMIN") }},
+		{"device", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.Devices = []container.DeviceMapping{{PathOnHost: "/dev/null"}} }},
 		{"mount count", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Mounts = nil }},
 		{"mount shape", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Mounts[0].RW = false }},
 		{"docker socket", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Mounts[0].Source = "/var/run/docker.sock" }},
