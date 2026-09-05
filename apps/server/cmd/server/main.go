@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,34 +22,48 @@ const (
 )
 
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx, configuredAddress()); err != nil {
 		slog.Error("server stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	address := os.Getenv("AGENT_BOARD_SERVER_ADDR")
-	if address == "" {
-		address = defaultAddress
+func configuredAddress() string {
+	if address := os.Getenv("AGENT_BOARD_SERVER_ADDR"); address != "" {
+		return address
 	}
+	return defaultAddress
+}
 
-	server := &http.Server{
+func newHTTPServer(address string) *http.Server {
+	return &http.Server{
 		Addr:              address,
 		Handler:           httpapi.NewRouter(),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       serverReadTimeout,
 		IdleTimeout:       serverIdleTimeout,
 	}
+}
 
+func run(ctx context.Context, address string) error {
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
+	return serve(ctx, newHTTPServer(address), listener)
+}
+
+func serve(ctx context.Context, server *http.Server, listener net.Listener) error {
 	serverErrors := make(chan error, 1)
 	go func() {
-		slog.Info("starting Agent Board server", "address", address)
-		serverErrors <- server.ListenAndServe()
+		slog.Info("starting Agent Board server", "address", listener.Addr().String())
+		serverErrors <- server.Serve(listener)
 	}()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	select {
 	case err := <-serverErrors:
