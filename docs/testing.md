@@ -18,6 +18,7 @@ Test coverage is a completion and review gate for executable production code.
 - **90%+ is the normal target**. Agents should keep adding meaningful behavior and error-path coverage when reasonably achievable rather than treating 85% as the goal.
 - Work below 85% coverage is not complete, review-ready, or merge-ready.
 - Coverage must be measured by the language/framework coverage tooling for the affected code and reported with the verification results.
+- Agents and reviewers must inspect the measured total for every affected executable app/module and enforce the 85% minimum even when CI does not yet provide a numeric coverage check.
 - Do not game the number with trivial assertions, duplicated tests, or broad exclusions. Generated code, third-party code, and pure entrypoint wiring may be excluded only when the exclusion is explicit, narrow, and justified.
 - The percentage is not a substitute for required regression, Project-isolation, persistence, concurrency, integration, failure-path, or security tests. Critical behavior still needs direct tests even when the numeric threshold is satisfied.
 
@@ -48,14 +49,25 @@ Required concerns include:
 
 ```bash
 cd apps/server
-go test ./...
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
 go vet ./...
 go build ./...
 ```
 
-Runner changes also run the equivalent Go test/vet/build commands under `apps/agent-runner` once that package exists.
+Confirm the reported total coverage is at least 85% before completion; 90%+ remains the normal target.
 
-Use targeted package/test invocations during Red/Green iteration, then run broader relevant suites before completion. Before completion, also run the coverage command for the affected Go module and confirm the 85% gate.
+Runner changes run the equivalent commands under `apps/agent-runner` once that package exists:
+
+```bash
+cd apps/agent-runner
+go test -coverprofile=coverage.out ./...
+go tool cover -func=coverage.out
+go vet ./...
+go build ./...
+```
+
+Use targeted package/test invocations during Red/Green iteration, then run broader relevant suites before completion. Before completion, measure and report coverage for every affected Go module and confirm the 85% gate.
 
 Docker integration tests should be explicit/gated where they require a live Docker daemon.
 
@@ -90,7 +102,7 @@ pnpm test
 pnpm build
 ```
 
-Run frontend coverage for affected executable frontend code and confirm the same 85% minimum / 90%+ target. If a dedicated frontend lint/theme/accessibility check exists, run it when relevant. Frontend policy follows `frontend-implementation.md` and `frontend-theme.md`.
+Run the configured frontend coverage command for affected executable frontend code, report the measured result, and confirm the same 85% minimum / 90%+ target. If a dedicated frontend lint/theme/accessibility check exists, run it when relevant. Frontend policy follows `frontend-implementation.md` and `frontend-theme.md`.
 
 ## API/contracts
 
