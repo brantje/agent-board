@@ -158,12 +158,16 @@ func (s *Server) runConnectionPings(stop <-chan struct{}, writer *connectionWrit
 			return
 		case <-s.shutdownCtx.Done():
 			return
-		case now := <-ticker.C:
-			if err := writer.ping(now.Add(pingWriteTimeout)); err != nil {
+		case <-ticker.C:
+			if err := writer.ping(nextPingDeadline()); err != nil {
 				return
 			}
 		}
 	}
+}
+
+func nextPingDeadline() time.Time {
+	return time.Now().Add(pingWriteTimeout)
 }
 
 func (s *Server) handshake(conn *websocket.Conn, writer *connectionWriter) bool {
