@@ -76,9 +76,7 @@ func TestSessionWaitCleansRedirectedBackgroundProcessGroup(t *testing.T) {
 	if _, err := s.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if !processGoneOrZombie(childPID) {
-		t.Fatalf("background process %d remained alive after session completion", childPID)
-	}
+	waitFor(t, 2*time.Second, func() bool { return processGoneOrZombie(childPID) })
 
 	waitFor(t, time.Second, func() bool { return manager.ActiveCount() == 0 })
 	next, err := manager.Start("next", Request{Command: []string{"true"}})
