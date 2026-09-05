@@ -107,9 +107,12 @@ func (r *Runtime) Create(ctx context.Context, spec runtimepkg.RuntimeSpec) (runt
 
 	inspected, err := r.api.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 	if err != nil {
-		return runtimepkg.Handle{}, fmt.Errorf("inspect created Docker container: %w", err)
+		validationErr := fmt.Errorf("inspect created Docker container: %w", err)
+		_, _ = r.api.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false})
+		return runtimepkg.Handle{}, validationErr
 	}
 	if err := verifyContainer(inspected.Container, metadataFromSpec(spec)); err != nil {
+		_, _ = r.api.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false})
 		return runtimepkg.Handle{}, err
 	}
 	return handleFromSpec(spec, created.ID)
@@ -177,7 +180,6 @@ func (r *Runtime) Stop(ctx context.Context, handle runtimepkg.Handle, _ runtimep
 	}
 	return nil
 }
-
 func (r *Runtime) Destroy(ctx context.Context, handle runtimepkg.Handle) error {
 	inspected, _, err := r.inspectOwned(ctx, handle)
 	if errors.Is(err, runtimepkg.ErrNotFound) {
