@@ -40,7 +40,7 @@ func notFound(err error) error {
 		switch pgErr.Code {
 		case "23505":
 			return store.ErrConflict
-		case "23503", "23514", "22P02":
+		case "23502", "23503", "23514", "22P02":
 			return store.ErrInvalidArgument
 		}
 	}
