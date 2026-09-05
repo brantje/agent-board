@@ -110,8 +110,12 @@ func TestCanonicalWorkspaceRootCreatesMissingDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("canonicalWorkspaceRoot() error = %v", err)
 	}
-	if canonical != root {
-		t.Fatalf("canonicalWorkspaceRoot() = %q, want %q", canonical, root)
+	want, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonical != want {
+		t.Fatalf("canonicalWorkspaceRoot() = %q, want %q", canonical, want)
 	}
 	if info, err := os.Stat(root); err != nil || !info.IsDir() {
 		t.Fatalf("workspace root was not created: info=%v err=%v", info, err)

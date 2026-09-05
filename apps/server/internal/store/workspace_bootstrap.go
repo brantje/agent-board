@@ -1,6 +1,11 @@
 package store
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var ErrWorkspaceBootstrapLockTimeout = errors.New("store: workspace bootstrap lock timeout")
 
 // WorkspaceBootstrapLock serializes filesystem materialization for one durable
 // Workspace across server processes. Release must be safe to call more than once.

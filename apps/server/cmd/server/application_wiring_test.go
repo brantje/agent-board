@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/brantje/agent-board/apps/server/internal/repository"
 )
 
 func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
@@ -34,5 +37,12 @@ func TestConfiguredApplicationRejectsRelativeRepositoryRoot(t *testing.T) {
 	t.Setenv("AGENT_BOARD_REPOSITORY_ROOTS", "relative/repositories")
 	if _, err := configuredApplication(nil); err == nil {
 		t.Fatal("configuredApplication() unexpectedly accepted a relative repository root")
+	}
+}
+
+func TestConfiguredApplicationRejectsMissingRepositoryRoots(t *testing.T) {
+	t.Setenv("AGENT_BOARD_REPOSITORY_ROOTS", "")
+	if _, err := configuredApplication(nil); !errors.Is(err, repository.ErrNoAuthorizedRoots) {
+		t.Fatalf("configuredApplication() error = %v, want ErrNoAuthorizedRoots", err)
 	}
 }

@@ -66,7 +66,11 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 }
 
 func configuredApplication(database *postgres.Store) (*app.Services, error) {
-	policy, err := repository.NewPolicy(repository.ParseRoots(os.Getenv("AGENT_BOARD_REPOSITORY_ROOTS")))
+	roots := repository.ParseRoots(os.Getenv("AGENT_BOARD_REPOSITORY_ROOTS"))
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("repository roots: %w", repository.ErrNoAuthorizedRoots)
+	}
+	policy, err := repository.NewPolicy(roots)
 	if err != nil {
 		return nil, fmt.Errorf("repository roots: %w", err)
 	}

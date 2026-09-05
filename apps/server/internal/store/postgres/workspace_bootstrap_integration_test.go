@@ -125,3 +125,25 @@ func TestWorkspaceBootstrapCancelledLockWaitDoesNotStrandSession(t *testing.T) {
 		t.Fatalf("release after cancelled waiter: %v", err)
 	}
 }
+
+func TestWorkspaceBootstrapLockWaitIsBoundedAndRetryable(t *testing.T) {
+	s := New(testPool(t))
+	fixture := seedRunFixture(t, s, "workspace-lock-timeout")
+	first, err := s.AcquireWorkspaceBootstrapLock(context.Background(), fixture.workspace.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Release() }()
+
+	started := time.Now()
+	lock, err := s.acquireWorkspaceBootstrapLock(context.Background(), fixture.workspace.ID, 50*time.Millisecond)
+	if lock != nil {
+		_ = lock.Release()
+	}
+	if !errors.Is(err, store.ErrWorkspaceBootstrapLockTimeout) {
+		t.Fatalf("lock wait error = %v, want ErrWorkspaceBootstrapLockTimeout", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("bounded lock wait took %v", elapsed)
+	}
+}

@@ -12,22 +12,39 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-const workspaceBootstrapLockPrefix = "agent-board:workspace-bootstrap:"
+const (
+	workspaceBootstrapLockPrefix      = "agent-board:workspace-bootstrap:"
+	workspaceBootstrapLockWaitTimeout = 5 * time.Second
+)
 
 func (s *Store) AcquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string) (store.WorkspaceBootstrapLock, error) {
+	return s.acquireWorkspaceBootstrapLock(ctx, workspaceID, workspaceBootstrapLockWaitTimeout)
+}
+
+func (s *Store) acquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string, waitTimeout time.Duration) (store.WorkspaceBootstrapLock, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, store.ErrInvalidArgument
 	}
-	conn, err := s.pool.Acquire(ctx)
+	lockCtx, cancel := context.WithTimeout(ctx, waitTimeout)
+	defer cancel()
+
+	conn, err := s.pool.Acquire(lockCtx)
 	if err != nil {
-		return nil, err
+		return nil, workspaceBootstrapLockWaitError(ctx, lockCtx, workspaceID, err)
 	}
 	key := workspaceBootstrapLockPrefix + workspaceID
-	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, key); err != nil {
+	if _, err := conn.Exec(lockCtx, `SELECT pg_advisory_lock(hashtextextended($1, 0))`, key); err != nil {
 		discardPoolConn(conn)
-		return nil, err
+		return nil, workspaceBootstrapLockWaitError(ctx, lockCtx, workspaceID, err)
 	}
 	return &workspaceBootstrapLock{conn: conn, key: key}, nil
+}
+
+func workspaceBootstrapLockWaitError(parent, lockCtx context.Context, workspaceID string, err error) error {
+	if parent.Err() == nil && errors.Is(lockCtx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("workspace %s: %w", workspaceID, store.ErrWorkspaceBootstrapLockTimeout)
+	}
+	return err
 }
 
 type workspaceBootstrapLock struct {
