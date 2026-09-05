@@ -50,6 +50,12 @@ func (p *stdinPump) Enqueue(data []byte) error {
 	case p.queue <- chunk:
 		return nil
 	default:
+		// Dropping one chunk and accepting later chunks would corrupt the stdin
+		// byte stream. Make overflow terminal so the caller must start a new
+		// execution rather than unknowingly continue after missing bytes.
+		p.accepting = false
+		p.writeErr = errStdinQueueFull
+		p.closeQueueLocked()
 		return errStdinQueueFull
 	}
 }
