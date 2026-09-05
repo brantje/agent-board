@@ -110,20 +110,25 @@ func (r *Runtime) Create(ctx context.Context, spec runtimepkg.RuntimeSpec) (runt
 	inspected, err := r.api.ContainerInspect(ctx, created.ID, client.ContainerInspectOptions{})
 	if err != nil {
 		validationErr := fmt.Errorf("inspect created Docker container: %w", err)
-		r.cleanupCreatedContainer(created.ID)
+		if cleanupErr := r.cleanupCreatedContainer(created.ID); cleanupErr != nil {
+			return runtimepkg.Handle{}, errors.Join(validationErr, fmt.Errorf("remove invalid Docker container: %w", cleanupErr))
+		}
 		return runtimepkg.Handle{}, validationErr
 	}
-	if err := verifyContainer(inspected.Container, metadataFromSpec(spec)); err != nil {
-		r.cleanupCreatedContainer(created.ID)
-		return runtimepkg.Handle{}, err
+	if validationErr := verifyContainer(inspected.Container, metadataFromSpec(spec)); validationErr != nil {
+		if cleanupErr := r.cleanupCreatedContainer(created.ID); cleanupErr != nil {
+			return runtimepkg.Handle{}, errors.Join(validationErr, fmt.Errorf("remove invalid Docker container: %w", cleanupErr))
+		}
+		return runtimepkg.Handle{}, validationErr
 	}
 	return handleFromSpec(spec, created.ID)
 }
 
-func (r *Runtime) cleanupCreatedContainer(containerID string) {
+func (r *Runtime) cleanupCreatedContainer(containerID string) error {
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), postCreateCleanupTimeout)
 	defer cancel()
-	_, _ = r.api.ContainerRemove(cleanupCtx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false})
+	_, err := r.api.ContainerRemove(cleanupCtx, containerID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: false})
+	return err
 }
 
 // Recover rediscovers a container by the deterministic Runtime Instance name.
