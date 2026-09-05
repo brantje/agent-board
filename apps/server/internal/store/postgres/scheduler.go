@@ -10,6 +10,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const (
+	schedulerConfigurationWaitReason = "configuration_unavailable"
+	schedulerConfigurationBackoff    = time.Second
+)
+
+var errSchedulerConfigurationUnavailable = errors.New("scheduler configuration unavailable")
+
 func (s *Store) EnqueueJob(ctx context.Context, input store.SchedulerJob) (store.SchedulerJob, error) {
 	if strings.TrimSpace(input.IdempotencyKey) == "" {
 		return store.SchedulerJob{}, store.ErrInvalidArgument
@@ -24,7 +31,18 @@ func (s *Store) EnqueueJob(ctx context.Context, input store.SchedulerJob) (store
 	}
 	job, err := scanSchedulerJob(s.pool.QueryRow(ctx, `
 		INSERT INTO scheduler_jobs (project_id, run_id, kind, state, wait_reason, idempotency_key, available_at)
-		VALUES ($1, $2, $3, 'QUEUED', $4, $5, $6)
+		SELECT $1, $2, $3, 'QUEUED', $4, $5, $6
+		FROM runs AS run
+		JOIN agents AS agent
+		  ON agent.id=run.agent_id
+		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
+		JOIN executor_profiles AS executor
+		  ON executor.id=agent.executor_profile_id
+		 AND (executor.project_id IS NULL OR executor.project_id=run.project_id)
+		JOIN model_profiles AS model
+		  ON model.id=executor.model_profile_id
+		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
+		WHERE run.project_id=$1 AND run.id=$2
 		ON CONFLICT (idempotency_key) DO NOTHING
 		RETURNING id::text, project_id::text, run_id::text, kind, state, wait_reason, idempotency_key, available_at, created_at, updated_at
 	`, input.ProjectID, input.RunID, kind, input.WaitReason, input.IdempotencyKey, availableAt))
@@ -39,13 +57,24 @@ func (s *Store) EnqueueJob(ctx context.Context, input store.SchedulerJob) (store
 		FROM scheduler_jobs
 		WHERE idempotency_key = $1
 	`, input.IdempotencyKey))
-	if err != nil {
+	if err == nil {
+		if existing.ProjectID != input.ProjectID || existing.RunID != input.RunID || existing.Kind != kind {
+			return store.SchedulerJob{}, store.ErrConflict
+		}
+		return existing, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
 		return store.SchedulerJob{}, err
 	}
-	if existing.ProjectID != input.ProjectID || existing.RunID != input.RunID || existing.Kind != kind {
-		return store.SchedulerJob{}, store.ErrConflict
+
+	var runExists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM runs WHERE project_id=$1 AND id=$2)`, input.ProjectID, input.RunID).Scan(&runExists); err != nil {
+		return store.SchedulerJob{}, err
 	}
-	return existing, nil
+	if !runExists {
+		return store.SchedulerJob{}, store.ErrNotFound
+	}
+	return store.SchedulerJob{}, store.ErrConflict
 }
 
 func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration, capacityBackoff time.Duration) (*store.SchedulerAdmission, error) {
@@ -62,6 +91,15 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	job, run, agentID, modelProfileID, err := lockNextAdmissionCandidate(ctx, tx)
+	if errors.Is(err, errSchedulerConfigurationUnavailable) {
+		if err := deferQueuedJob(ctx, tx, job, schedulerConfigurationWaitReason, backoffMicros); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
 	}
@@ -79,7 +117,7 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 		return nil, err
 	}
 	if agentUsed >= agentLimit {
-		if err := deferForCapacity(ctx, tx, job, run, store.SchedulerWaitAgentCapacity, backoffMicros); err != nil {
+		if err := deferQueuedJob(ctx, tx, job, store.SchedulerWaitAgentCapacity, backoffMicros); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -94,7 +132,7 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 			return nil, err
 		}
 		if modelUsed >= *modelLimit {
-			if err := deferForCapacity(ctx, tx, job, run, store.SchedulerWaitModelCapacity, backoffMicros); err != nil {
+			if err := deferQueuedJob(ctx, tx, job, store.SchedulerWaitModelCapacity, backoffMicros); err != nil {
 				return nil, err
 			}
 			if err := tx.Commit(ctx); err != nil {
@@ -155,7 +193,7 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.SchedulerJob, store.Run, string, string, error) {
 	var job store.SchedulerJob
 	var run store.Run
-	var agentID, modelProfileID string
+	var agentID, modelProfileID *string
 	err := tx.QueryRow(ctx, `
 		SELECT
 			job.id::text, job.project_id::text, job.run_id::text, job.kind, job.state, job.wait_reason, job.idempotency_key, job.available_at, job.created_at, job.updated_at,
@@ -163,9 +201,15 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 			agent.id::text, model.id::text
 		FROM scheduler_jobs AS job
 		JOIN runs AS run ON run.project_id=job.project_id AND run.id=job.run_id
-		JOIN agents AS agent ON agent.id=run.agent_id
-		JOIN executor_profiles AS executor ON executor.id=agent.executor_profile_id
-		JOIN model_profiles AS model ON model.id=executor.model_profile_id
+		LEFT JOIN agents AS agent
+		  ON agent.id=run.agent_id
+		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
+		LEFT JOIN executor_profiles AS executor
+		  ON executor.id=agent.executor_profile_id
+		 AND (executor.project_id IS NULL OR executor.project_id=run.project_id)
+		LEFT JOIN model_profiles AS model
+		  ON model.id=executor.model_profile_id
+		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
 		WHERE job.state='QUEUED'
 		  AND job.available_at <= now()
 		  AND run.status='QUEUED'
@@ -180,7 +224,10 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 	if err != nil {
 		return store.SchedulerJob{}, store.Run{}, "", "", notFound(err)
 	}
-	return job, run, agentID, modelProfileID, nil
+	if agentID == nil || modelProfileID == nil {
+		return job, run, "", "", errSchedulerConfigurationUnavailable
+	}
+	return job, run, *agentID, *modelProfileID, nil
 }
 
 func lockAdmissionResources(ctx context.Context, tx pgx.Tx, agentID, modelProfileID string) (int, *int, error) {
@@ -207,7 +254,7 @@ func countCapacityReservations(ctx context.Context, tx pgx.Tx, resourceKind, res
 	return count, nil
 }
 
-func deferForCapacity(ctx context.Context, tx pgx.Tx, job store.SchedulerJob, run store.Run, reason string, backoffMicros int64) error {
+func deferQueuedJob(ctx context.Context, tx pgx.Tx, job store.SchedulerJob, reason string, backoffMicros int64) error {
 	if _, err := tx.Exec(ctx, `
 		UPDATE scheduler_jobs
 		SET wait_reason=$2, available_at=now() + ($3::bigint * interval '1 microsecond'), updated_at=now()
@@ -219,7 +266,7 @@ func deferForCapacity(ctx context.Context, tx pgx.Tx, job store.SchedulerJob, ru
 		UPDATE runs
 		SET queue_reason=$3, updated_at=now()
 		WHERE project_id=$1 AND id=$2 AND status='QUEUED'
-	`, run.ProjectID, run.ID, reason)
+	`, job.ProjectID, job.RunID, reason)
 	return err
 }
 
@@ -245,19 +292,45 @@ func (s *Store) ClaimNextJob(ctx context.Context, ownerID string, leaseDuration 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	job, err := scanSchedulerJob(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, run_id::text, kind, state, wait_reason, idempotency_key, available_at, created_at, updated_at
-		FROM scheduler_jobs
-		WHERE state = 'QUEUED' AND available_at <= now()
-		ORDER BY available_at, created_at, id
-		FOR UPDATE SKIP LOCKED
+	var job store.SchedulerJob
+	var agentID, modelProfileID *string
+	err = tx.QueryRow(ctx, `
+		SELECT
+			job.id::text, job.project_id::text, job.run_id::text, job.kind, job.state, job.wait_reason, job.idempotency_key, job.available_at, job.created_at, job.updated_at,
+			agent.id::text, model.id::text
+		FROM scheduler_jobs AS job
+		JOIN runs AS run ON run.project_id=job.project_id AND run.id=job.run_id
+		LEFT JOIN agents AS agent
+		  ON agent.id=run.agent_id
+		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
+		LEFT JOIN executor_profiles AS executor
+		  ON executor.id=agent.executor_profile_id
+		 AND (executor.project_id IS NULL OR executor.project_id=run.project_id)
+		LEFT JOIN model_profiles AS model
+		  ON model.id=executor.model_profile_id
+		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
+		WHERE job.state='QUEUED' AND job.available_at <= now()
+		ORDER BY job.available_at, job.created_at, job.id
+		FOR UPDATE OF job, run SKIP LOCKED
 		LIMIT 1
-	`))
-	if errors.Is(err, store.ErrNotFound) {
+	`).Scan(
+		&job.ID, &job.ProjectID, &job.RunID, &job.Kind, &job.State, &job.WaitReason, &job.IdempotencyKey, &job.AvailableAt, &job.CreatedAt, &job.UpdatedAt,
+		&agentID, &modelProfileID,
+	)
+	if errors.Is(notFound(err), store.ErrNotFound) {
 		return nil, nil, nil
 	}
 	if err != nil {
 		return nil, nil, err
+	}
+	if agentID == nil || modelProfileID == nil {
+		if err := deferQueuedJob(ctx, tx, job, schedulerConfigurationWaitReason, schedulerConfigurationBackoff.Microseconds()); err != nil {
+			return nil, nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, nil
 	}
 
 	lease, err := scanSchedulerLease(tx.QueryRow(ctx, `
