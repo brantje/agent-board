@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/brantje/agent-board/apps/agent-runner/internal/protocol"
+	"github.com/gorilla/websocket"
 )
 
 func TestShutdownTerminatesActiveWebSocketSession(t *testing.T) {
@@ -55,7 +57,12 @@ func TestShutdownTerminatesActiveWebSocketSession(t *testing.T) {
 	}
 
 	_ = conn.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
-	if _, _, err := conn.ReadMessage(); err == nil {
-		t.Fatal("expected shutdown to close the WebSocket connection")
+	_, _, err = conn.ReadMessage()
+	var closeErr *websocket.CloseError
+	if !errors.As(err, &closeErr) {
+		t.Fatalf("expected WebSocket close frame, got %v", err)
+	}
+	if closeErr.Code != websocket.CloseGoingAway {
+		t.Fatalf("expected close code %d, got %d", websocket.CloseGoingAway, closeErr.Code)
 	}
 }
