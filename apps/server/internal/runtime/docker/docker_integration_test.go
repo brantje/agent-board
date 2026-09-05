@@ -34,21 +34,7 @@ func TestDockerRuntimeIntegration(t *testing.T) {
 		_ = rt.Close()
 		t.Fatalf("Create() error=%v", err)
 	}
-	t.Cleanup(func() {
-		cleanup, err := New()
-		if err != nil {
-			t.Errorf("cleanup New() error=%v", err)
-			return
-		}
-		defer func() {
-			if err := cleanup.Close(); err != nil {
-				t.Errorf("cleanup Close() error=%v", err)
-			}
-		}()
-		if err := cleanup.Destroy(context.Background(), handle); err != nil {
-			t.Errorf("cleanup Destroy() error=%v", err)
-		}
-	})
+	registerRuntimeCleanup(t, handle)
 	if err := rt.Start(ctx, handle); err != nil {
 		_ = rt.Destroy(ctx, handle)
 		_ = rt.Close()
@@ -98,7 +84,7 @@ func TestDockerRuntimeIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replacement Create() error=%v", err)
 	}
-	defer restarted.Destroy(context.Background(), replacement)
+	registerRuntimeCleanup(t, replacement)
 	if err := restarted.Start(ctx, replacement); err != nil {
 		t.Fatalf("replacement Start() error=%v", err)
 	}
@@ -106,6 +92,23 @@ func TestDockerRuntimeIntegration(t *testing.T) {
 	if err := restarted.Destroy(ctx, replacement); err != nil {
 		t.Fatalf("replacement Destroy() error=%v", err)
 	}
+}
+
+func registerRuntimeCleanup(t *testing.T, handle runtimepkg.Handle) {
+	t.Helper()
+	t.Cleanup(func() {
+		cleanup, err := New()
+		if err != nil {
+			t.Errorf("cleanup New() error=%v", err)
+			return
+		}
+		if err := cleanup.Destroy(context.Background(), handle); err != nil {
+			t.Errorf("cleanup Destroy() error=%v", err)
+		}
+		if err := cleanup.Close(); err != nil {
+			t.Errorf("cleanup Close() error=%v", err)
+		}
+	})
 }
 
 func integrationSpec(image, workspace, instanceID string) runtimepkg.RuntimeSpec {
