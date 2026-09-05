@@ -17,6 +17,23 @@ jobs:
   server:
     name: Server
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: agent_board_test
+          POSTGRES_USER: agent_board
+          POSTGRES_PASSWORD: agent_board
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent_board -d agent_board_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENT_BOARD_TEST_DATABASE_URL: postgres://agent_board:agent_board@127.0.0.1:5432/agent_board_test?sslmode=disable
+      AGENT_BOARD_TEST_DATABASE_RESET: "1"
     steps:
       - uses: actions/checkout@v5
         with:
