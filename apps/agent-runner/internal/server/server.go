@@ -343,7 +343,7 @@ func (s *Server) attachDeliveries(writer *connectionWriter) {
 	s.deliveryMu.Lock()
 	defer s.deliveryMu.Unlock()
 	for _, delivery := range s.deliveries {
-		delivery.attach(writer)
+		delivery.attachIfIdle(writer)
 	}
 }
 
