@@ -12,7 +12,7 @@ Bug fixes begin with a regression test.
 
 ## Backend testing
 
-The production backend is Go under `apps/server-go`.
+The production backend is Go under `apps/server`.
 
 Backend behavior should be covered with Go unit/integration tests. PostgreSQL-dependent behavior uses real PostgreSQL rather than mocked SQL.
 
@@ -33,7 +33,7 @@ Required concerns include:
 ### Core Go commands
 
 ```bash
-cd apps/server-go
+cd apps/server
 go test ./...
 go vet ./...
 go build ./...
