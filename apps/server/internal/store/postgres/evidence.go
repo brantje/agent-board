@@ -177,16 +177,16 @@ func (s *Store) ListArtifacts(ctx context.Context, projectID, runID string) ([]s
 		if err != nil {
 			return nil, err
 		}
-		valus = append(values, value)
+		values = append(values, value)
 	}
 	return values, rows.Err()
 }
 
 func scanEvent(row pgx.Row) (store.Event, error) {
 	var value store.Event
-	if err := row.Scan(&value.ID, &value.SchemaVersion, 'value.Type, &value.OccurredAt, &value.ProjectID,
+	if err := row.Scan(&value.ID, &value.SchemaVersion, &value.Type, &value.OccurredAt, &value.ProjectID,
 		&value.IssueID, &value.RunID, &value.AgentID, &value.WorkspaceID, &value.RuntimeInstanceID,
-		&value.CorrelationID, &value.ParentEventID, &value.Sequence, 'value.Actor, &value.Payload, 'value.CreatedAt); err != nil {
+		&value.CorrelationID, &value.ParentEventID, &value.Sequence, &value.Actor, &value.Payload, &value.CreatedAt); err != nil {
 		return store.Event{}, notFound(err)
 	}
 	return value, nil
