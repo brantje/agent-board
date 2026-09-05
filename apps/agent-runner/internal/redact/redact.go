@@ -7,12 +7,13 @@ import (
 	"sort"
 )
 
-var replacement = []byte("***")
+var replacementCandidates = []string{"***", "[REDACTED]", "<redacted>", "[masked]"}
 
 type Stream struct {
-	patterns [][]byte
-	maxLen   int
-	pending  []byte
+	patterns    [][]byte
+	replacement []byte
+	maxLen      int
+	pending     []byte
 }
 
 func New(values []string) *Stream {
@@ -34,7 +35,31 @@ func New(values []string) *Stream {
 		}
 	}
 	sort.Slice(patterns, func(i, j int) bool { return len(patterns[i]) > len(patterns[j]) })
-	return &Stream{patterns: patterns, maxLen: maxLen}
+	return &Stream{
+		patterns:    patterns,
+		replacement: chooseReplacement(patterns),
+		maxLen:      maxLen,
+	}
+}
+
+func chooseReplacement(patterns [][]byte) []byte {
+	for _, candidate := range replacementCandidates {
+		encoded := []byte(candidate)
+		safe := true
+		for _, pattern := range patterns {
+			if bytes.Contains(encoded, pattern) {
+				safe = false
+				break
+			}
+		}
+		if safe {
+			return encoded
+		}
+	}
+	// Dropping the matched secret is safer than emitting a marker that itself
+	// contains a configured secret. This is only a fallback for pathological
+	// secret sets that collide with every human-readable candidate above.
+	return nil
 }
 
 func (s *Stream) Push(data []byte) []byte {
@@ -58,7 +83,7 @@ func (s *Stream) consume(final bool) []byte {
 		matched := false
 		for _, pattern := range s.patterns {
 			if len(s.pending) >= len(pattern) && bytes.HasPrefix(s.pending, pattern) {
-				output = append(output, replacement...)
+				output = append(output, s.replacement...)
 				s.pending = s.pending[len(pattern):]
 				matched = true
 				break

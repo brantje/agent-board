@@ -19,6 +19,31 @@ func TestStreamRedactsAcrossChunkBoundaries(t *testing.T) {
 	}
 }
 
+func TestStreamReplacementDoesNotExposeConfiguredSecret(t *testing.T) {
+	for _, secret := range []string{"***", "*", "[REDACTED]", "<redacted>"} {
+		t.Run(secret, func(t *testing.T) {
+			stream := New([]string{secret})
+			var output bytes.Buffer
+			output.Write(stream.Push([]byte(secret)))
+			output.Write(stream.Flush())
+			if bytes.Contains(output.Bytes(), []byte(secret)) {
+				t.Fatalf("redacted output %q still contains configured secret %q", output.String(), secret)
+			}
+		})
+	}
+}
+
+func TestStreamFallsBackToDroppingSecretWhenEveryMarkerCollides(t *testing.T) {
+	secrets := []string{"*", "[REDACTED]", "<redacted>", "[masked]"}
+	stream := New(secrets)
+	var output bytes.Buffer
+	output.Write(stream.Push([]byte("before *** after")))
+	output.Write(stream.Flush())
+	if got, want := output.String(), "before  after"; got != want {
+		t.Fatalf("fallback redaction mismatch: got %q want %q", got, want)
+	}
+}
+
 func TestStreamIgnoresEmptySecretsAndPassesThroughWithoutPatterns(t *testing.T) {
 	stream := New([]string{"", ""})
 	if got := string(stream.Push([]byte("unchanged"))); got != "unchanged" {
