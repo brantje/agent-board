@@ -2,4 +2,7 @@ module github.com/brantje/agent-board/apps/server
 
 go 1.25.0
 
-require github.com/go-chi/chi/v5 v5.3.2
+require (
+	github.com/go-chi/chi/v5 v5.3.2
+	github.com/jackc/pgx/v5 v5.7.6
+)
