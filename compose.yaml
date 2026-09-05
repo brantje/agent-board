@@ -45,6 +45,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-agent_board}
       POSTGRES_USER: ${POSTGRES_USER:-agent_board}
       AGENT_BOARD_WORKSPACE_ROOT: ${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}
+      AGENT_BOARD_REPOSITORY_ROOTS: ${AGENT_BOARD_REPOSITORY_ROOTS:-/repositories}
     entrypoint:
       - /bin/sh
       - -ec
@@ -64,6 +65,7 @@ services:
       retries: 10
     volumes:
       - ${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}:${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}
+      - ${AGENT_BOARD_REPOSITORY_ROOT:-.}:${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}:ro
       - ${AGENT_BOARD_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - postgres-credentials:/run/agent-board:ro
 
