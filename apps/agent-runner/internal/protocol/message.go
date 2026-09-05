@@ -1,9 +1,11 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 )
 
 const Version1 = 1
@@ -120,7 +122,17 @@ func DecodePayload[T any](m Message) (T, error) {
 	if len(m.Payload) == 0 {
 		return value, fmt.Errorf("%w: %s requires payload", ErrInvalidMessage, m.Type)
 	}
-	if err := json.Unmarshal(m.Payload, &value); err != nil {
+
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&value); err != nil {
+		return value, fmt.Errorf("decode %s payload: %w", m.Type, err)
+	}
+	var extra any
+	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("multiple JSON values")
+		}
 		return value, fmt.Errorf("decode %s payload: %w", m.Type, err)
 	}
 	return value, nil

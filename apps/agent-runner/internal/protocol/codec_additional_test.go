@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +24,14 @@ func TestDecodePayloadRejectsWrongShape(t *testing.T) {
 	msg := Message{Version: Version1, Type: TypeStart, SessionID: "session", Payload: []byte(`{"command":"wrong"}`)}
 	if _, err := DecodePayload[StartRequest](msg); err == nil {
 		t.Fatal("expected payload shape error")
+	}
+}
+
+func TestDecodePayloadRejectsUnknownFields(t *testing.T) {
+	msg := Message{Version: Version1, Type: TypeStart, SessionID: "session", Payload: []byte(`{"command":["true"],"commnad":["false"]}`)}
+	_, err := DecodePayload[StartRequest](msg)
+	if err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("expected unknown-field error, got %v", err)
 	}
 }
 
