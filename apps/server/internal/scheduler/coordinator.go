@@ -65,8 +65,8 @@ type Coordinator struct {
 }
 
 func New(s store.SchedulerStore, processor Processor, reconciler Reconciler, config Config) (*Coordinator, error) {
-	if s == nil || processor == nil {
-		return nil, fmt.Errorf("scheduler: store and processor are required")
+	if s == nil || processor == nil || reconciler == nil {
+		return nil, fmt.Errorf("scheduler: store, processor and reconciler are required")
 	}
 	if strings.TrimSpace(config.OwnerID) == "" {
 		return nil, fmt.Errorf("scheduler: owner id is required")
@@ -146,16 +146,11 @@ func (c *Coordinator) reconcileOne(ctx context.Context) (bool, error) {
 		return false, err
 	}
 
-	outcome := store.SchedulerReconciliationUnknown
-	var failureReason *string
-	if c.reconciler != nil {
-		resolved, reason, reconcileErr := c.reconciler.Reconcile(ctx, claim)
-		if reconcileErr != nil {
-			c.config.ReportError(reconcileErr)
-		} else {
-			outcome = resolved
-			failureReason = reason
-		}
+	outcome, failureReason, reconcileErr := c.reconciler.Reconcile(ctx, claim)
+	if reconcileErr != nil {
+		c.config.ReportError(reconcileErr)
+		outcome = store.SchedulerReconciliationUnknown
+		failureReason = nil
 	}
 	if outcome == "" {
 		outcome = store.SchedulerReconciliationUnknown
