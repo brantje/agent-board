@@ -8,6 +8,20 @@ import (
 	"time"
 )
 
+func TestExitCode(t *testing.T) {
+	t.Parallel()
+
+	if got := exitCode(context.Background(), "127.0.0.1:not-a-port"); got != 1 {
+		t.Fatalf("expected failure exit code 1, got %d", got)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if got := exitCode(ctx, "127.0.0.1:0"); got != 0 {
+		t.Fatalf("expected success exit code 0, got %d", got)
+	}
+}
+
 func TestConfiguredAddress(t *testing.T) {
 	t.Setenv("AGENT_BOARD_SERVER_ADDR", "")
 	if got := configuredAddress(); got != defaultAddress {
