@@ -48,6 +48,12 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
+	if err := reconcileExecutionSessions(ctx, handler); err != nil {
+		slog.Error("reconcile Execution Sessions", "error", err)
+		closeStore()
+		stop()
+		os.Exit(1)
+	}
 	code := exitCode(ctx, configuredAddress(), handler)
 	closeStore()
 	stop()
@@ -69,7 +75,7 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 	}
 	closeApplication := func() {
 		if err := services.Close(); err != nil {
-			slog.Error("close Runtime implementations", "error", err)
+			slog.Error("close application services", "error", err)
 		}
 		database.Close()
 	}
@@ -86,6 +92,16 @@ func reconcileRuntimeInstances(ctx context.Context, handler http.Handler) error 
 	}
 	return application.services.RuntimeInstances.ReconcileAllWithReporter(ctx, func(err error) {
 		slog.Error("reconcile Runtime Instance", "error", err)
+	})
+}
+
+func reconcileExecutionSessions(ctx context.Context, handler http.Handler) error {
+	application, ok := handler.(*applicationHandler)
+	if !ok || application.services == nil || application.services.ExecutionSessions == nil {
+		return fmt.Errorf("execution session service is unavailable")
+	}
+	return application.services.ExecutionSessions.ReconcileAllWithReporter(ctx, func(err error) {
+		slog.Error("reconcile Execution Session", "error", err)
 	})
 }
 

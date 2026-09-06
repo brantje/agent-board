@@ -1,8 +1,10 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/brantje/agent-board/apps/server/internal/runner"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -10,9 +12,11 @@ import (
 // Services groups the control-plane API with execution-facing services so
 // server startup constructs one coherent application boundary.
 type Services struct {
-	ControlPlane     *Service
-	Workspaces       *WorkspaceService
-	RuntimeInstances *RuntimeInstanceService
+	ControlPlane      *Service
+	Workspaces        *WorkspaceService
+	RuntimeInstances  *RuntimeInstanceService
+	RunnerConnections *runner.Manager
+	ExecutionSessions *ExecutionSessionService
 }
 
 func NewServices(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer) (*Services, error) {
@@ -36,13 +40,34 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	if err != nil {
 		return nil, err
 	}
+	runnerConnections, err := runner.NewManager(runtimeInstances, runtimeInstances)
+	if err != nil {
+		_ = runtimeInstances.Close()
+		return nil, err
+	}
+	executionSessions, err := NewExecutionSessionService(controlPlaneStore, runnerConnections)
+	if err != nil {
+		_ = runnerConnections.Close()
+		_ = runtimeInstances.Close()
+		return nil, err
+	}
 	services.RuntimeInstances = runtimeInstances
+	services.RunnerConnections = runnerConnections
+	services.ExecutionSessions = executionSessions
 	return services, nil
 }
 
 func (s *Services) Close() error {
-	if s == nil || s.RuntimeInstances == nil {
+	if s == nil {
 		return nil
 	}
-	return s.RuntimeInstances.Close()
+	var closeErrors []error
+	// Close transport first so no runner operation can race Runtime teardown.
+	if s.RunnerConnections != nil {
+		closeErrors = append(closeErrors, s.RunnerConnections.Close())
+	}
+	if s.RuntimeInstances != nil {
+		closeErrors = append(closeErrors, s.RuntimeInstances.Close())
+	}
+	return errors.Join(closeErrors...)
 }
