@@ -1,0 +1,285 @@
+package session
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"syscall"
+
+	"github.com/brantje/agent-board/apps/agent-runner/internal/redact"
+)
+
+var inheritedEnvironmentAllowlist = []string{
+	"PATH",
+	"HOME",
+	"USER",
+	"LOGNAME",
+	"SHELL",
+	"TMPDIR",
+	"TMP",
+	"TEMP",
+	"LANG",
+	"LC_ALL",
+	"LC_CTYPE",
+	"TZ",
+}
+
+type Request struct {
+	Command []string
+	Dir     string
+	Env     map[string]string
+	Secrets map[string]string
+}
+
+type Result struct {
+	ExitCode int
+	Signaled bool
+}
+
+type Session struct {
+	id     string
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.Reader
+	stderr io.Reader
+
+	done   chan struct{}
+	result Result
+	err    error
+	mu     sync.RWMutex
+}
+
+func start(id, workspaceRoot string, request Request, redactionValues []string) (*Session, error) {
+	if len(request.Command) == 0 || request.Command[0] == "" {
+		return nil, errors.New("command is required")
+	}
+
+	workingDir, err := resolveWorkingDir(workspaceRoot, request.Dir)
+	if err != nil {
+		return nil, err
+	}
+
+	cmd := exec.Command(request.Command[0], request.Command[1:]...)
+	cmd.Dir = workingDir
+	cmd.Env = mergeEnvironment(request.Env, request.Secrets)
+	configureProcessTree(cmd)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("create stdin pipe: %w", err)
+	}
+	stdout, stdoutChild, err := os.Pipe()
+	if err != nil {
+		_ = stdin.Close()
+		return nil, fmt.Errorf("create stdout pipe: %w", err)
+	}
+	stderr, stderrChild, err := os.Pipe()
+	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stdoutChild.Close()
+		return nil, fmt.Errorf("create stderr pipe: %w", err)
+	}
+	cmd.Stdout = stdoutChild
+	cmd.Stderr = stderrChild
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stdoutChild.Close()
+		_ = stderr.Close()
+		_ = stderrChild.Close()
+		return nil, fmt.Errorf("start process: %w", err)
+	}
+	// The child received duplicated descriptors during Start. The runner must
+	// close its write-side copies so EOF reflects the process tree, not the
+	// runner itself keeping the pipes open.
+	_ = stdoutChild.Close()
+	_ = stderrChild.Close()
+
+	stdoutBuffer := newStreamBuffer()
+	stderrBuffer := newStreamBuffer()
+	s := &Session{
+		id: id, cmd: cmd, stdin: newSafeWriteCloser(stdin),
+		stdout: stdoutBuffer, stderr: stderrBuffer,
+		done: make(chan struct{}),
+	}
+	go s.supervise(stdout, stderr, stdoutBuffer, stderrBuffer, redactionValues)
+	return s, nil
+}
+
+func (s *Session) ID() string { return s.id }
+func (s *Session) Stdin() io.WriteCloser { return s.stdin }
+func (s *Session) Stdout() io.Reader { return s.stdout }
+func (s *Session) Stderr() io.Reader { return s.stderr }
+func (s *Session) Done() <-chan struct{} { return s.done }
+
+func (s *Session) Wait(ctx context.Context) (Result, error) {
+	select {
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
+	case <-s.done:
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		return s.result, s.err
+	}
+}
+
+func (s *Session) Terminate() error {
+	return s.signal(terminateProcessTree)
+}
+
+func (s *Session) Kill() error {
+	return s.signal(killProcessTree)
+}
+
+func (s *Session) signal(signalTree func(int) error) error {
+	s.mu.RLock()
+	done := isClosed(s.done)
+	pid := s.cmd.Process.Pid
+	s.mu.RUnlock()
+	if done {
+		return nil
+	}
+	return signalTree(pid)
+}
+
+func (s *Session) supervise(stdout, stderr io.ReadCloser, stdoutBuffer, stderrBuffer *streamBuffer, redactionValues []string) {
+	var streams sync.WaitGroup
+	streams.Add(2)
+	go copyProcessStream(&streams, stdoutBuffer, stdout, redactionValues)
+	go copyProcessStream(&streams, stderrBuffer, stderr, redactionValues)
+
+	result, processErr := s.waitAndCleanupProcessTree()
+	if processErr != nil {
+		// A cleanup failure can leave a descendant holding an inherited stream
+		// descriptor. Close the runner-owned read sides so completion still
+		// reports the process error instead of hanging forever on stream EOF.
+		_ = stdout.Close()
+		_ = stderr.Close()
+	}
+	streams.Wait()
+	s.complete(result, processErr)
+}
+
+func copyProcessStream(group *sync.WaitGroup, destination *streamBuffer, source io.ReadCloser, redactionValues []string) {
+	defer group.Done()
+	_, err := io.Copy(destination, redact.NewReader(source, redactionValues))
+	_ = source.Close()
+	destination.CloseWithError(err)
+}
+
+func (s *Session) waitAndCleanupProcessTree() (Result, error) {
+	pid := s.cmd.Process.Pid
+	err := s.cmd.Wait()
+	cleanupErr := cleanupProcessTree(pid)
+	result := Result{}
+	if state := s.cmd.ProcessState; state != nil {
+		result.ExitCode = state.ExitCode()
+		if status, ok := state.Sys().(syscall.WaitStatus); ok {
+			result.Signaled = status.Signaled()
+		}
+	}
+
+	var waitErr error
+	var exitErr *exec.ExitError
+	if err != nil && !errors.As(err, &exitErr) {
+		waitErr = fmt.Errorf("wait for process: %w", err)
+	}
+	return result, errors.Join(waitErr, cleanupErr)
+}
+
+func (s *Session) complete(result Result, err error) {
+	s.mu.Lock()
+	s.result = result
+	s.err = err
+	close(s.done)
+	s.mu.Unlock()
+}
+
+func resolveWorkingDir(workspaceRoot, requested string) (string, error) {
+	root, err := filepath.Abs(workspaceRoot)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+
+	candidate := requested
+	if candidate == "" {
+		candidate = root
+	} else if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(root, candidate)
+	}
+	candidate, err = filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+	candidate, err = filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("resolve working directory: %w", err)
+	}
+
+	rel, err := filepath.Rel(root, candidate)
+	if err != nil {
+		return "", fmt.Errorf("compare working directory to workspace: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", errors.New("working directory escapes workspace")
+	}
+	info, err := os.Stat(candidate)
+	if err != nil {
+		return "", fmt.Errorf("stat working directory: %w", err)
+	}
+	if !info.IsDir() {
+		return "", errors.New("working directory is not a directory")
+	}
+	return candidate, nil
+}
+
+func mergeEnvironment(env, secrets map[string]string) []string {
+	values := make(map[string]string)
+	for _, key := range inheritedEnvironmentAllowlist {
+		if value, ok := os.LookupEnv(key); ok {
+			values[key] = value
+		}
+	}
+	for key, value := range env {
+		values[key] = value
+	}
+	for key, value := range secrets {
+		values[key] = value
+	}
+
+	result := make([]string, 0, len(values))
+	for key, value := range values {
+		result = append(result, key+"="+value)
+	}
+	return result
+}
+
+func secretValues(secrets map[string]string) []string {
+	values := make([]string, 0, len(secrets))
+	for _, value := range secrets {
+		if value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
+}
+
+func isClosed(ch <-chan struct{}) bool {
+	select {
+	case <-ch:
+		return true
+	default:
+		return false
+	}
+}
