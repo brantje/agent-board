@@ -67,6 +67,10 @@ func TestExecutionSessionLifecycleAndSequentialReuse(t *testing.T) {
 	if err != nil || len(active) != 1 || active[0].ID != second.ID {
 		t.Fatalf("active sessions=%+v err=%v", active, err)
 	}
+	unfiltered, err := s.ListExecutionSessions(ctx, fixture.project.ID, []string{"PENDING", "COMPLETED"})
+	if err != nil || len(unfiltered) != 2 {
+		t.Fatalf("unfiltered sessions=%+v err=%v", unfiltered, err)
+	}
 	if _, err := s.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
 		ProjectID: fixture.project.ID, SessionID: second.ID, FromStatuses: []string{"RUNNING"}, Status: "COMPLETED",
 	}); !errors.Is(err, store.ErrConflict) {

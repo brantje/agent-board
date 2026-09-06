@@ -52,7 +52,7 @@ func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeIns
 		SELECT id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
 		FROM execution_sessions
 		WHERE project_id = $1
-		  AND ($2 = '' OR runtime_instance_id = $2::uuid)
+		  AND (nullif($2, '')::uuid IS NULL OR runtime_instance_id = nullif($2, '')::uuid)
 		  AND (coalesce(cardinality($3::text[]), 0) = 0 OR status = ANY($3::text[]))
 		ORDER BY created_at, id
 	`, projectID, runtimeInstanceID, statuses)
