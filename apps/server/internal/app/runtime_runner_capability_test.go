@@ -78,3 +78,18 @@ func TestRuntimeInstanceServiceRejectsRunnerClaimWhenNotRunning(t *testing.T) {
 		t.Fatalf("error=%v", err)
 	}
 }
+
+type runtimeRunnerBasicStore struct{ RuntimeInstanceStore }
+
+func TestRuntimeInstanceServiceReportsMissingRunnerFencingCapabilities(t *testing.T) {
+	service := &RuntimeInstanceService{store: &runtimeRunnerBasicStore{}}
+	if _, err := service.ClaimRunnerConnection(t.Context(), "project", "runtime-instance"); err == nil {
+		t.Fatal("expected missing generation capability error")
+	}
+	if err := service.SetRunnerStatusGeneration(t.Context(), "project", "runtime-instance", "READY", 1); err == nil {
+		t.Fatal("expected missing generation status capability error")
+	}
+	if err := service.SetRunnerStatus(t.Context(), "project", "runtime-instance", "READY"); err == nil {
+		t.Fatal("expected missing lifecycle-fenced status capability error")
+	}
+}
