@@ -25,6 +25,29 @@ func (f *fakeExecutionPreparer) Prepare(_ context.Context, _, _ string, request 
 	return f.prepared, f.err
 }
 
+func TestAuthorizedExecutionConstructorAndPreparationErrors(t *testing.T) {
+	preparer := &fakeExecutionPreparer{}
+	if _, err := NewAuthorizedExecutionSessionService(nil, preparer); err == nil {
+		t.Fatal("expected nil session service rejection")
+	}
+	lowLevel, _, _ := executionServiceFixture(t)
+	if _, err := NewAuthorizedExecutionSessionService(lowLevel, nil); err == nil {
+		t.Fatal("expected nil preparer rejection")
+	}
+
+	cause := errors.New("configuration lookup failed")
+	preparer.err = &executioncontext.Error{Code: "execution_context_unavailable", Message: "Execution context is unavailable", Cause: cause}
+	service, err := NewAuthorizedExecutionSessionService(lowLevel, preparer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Start(context.Background(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"true"}})
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "execution_context_unavailable" || !errors.Is(err, cause) {
+		t.Fatalf("translated preparation error=%v api=%+v", err, apiErr)
+	}
+}
+
 func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput(t *testing.T) {
 	transport := newFakeExecutionTransport("session-1")
 	transport.stdout = "before plain-secret after"
