@@ -10,6 +10,10 @@ import (
 
 type memoryRawStore struct{ chunks []store.RawOutputChunk }
 
+func (s *memoryRawStore) ListRawOutputChunks(_ context.Context, _, _ string) ([]store.RawOutputChunk, error) {
+	return append([]store.RawOutputChunk(nil), s.chunks...), nil
+}
+
 func (s *memoryRawStore) CreateRawOutputChunk(_ context.Context, chunk store.RawOutputChunk) (store.RawOutputChunk, error) {
 	chunk.ID = "chunk"
 	s.chunks = append(s.chunks, chunk)
@@ -40,5 +44,12 @@ func TestOutputRecorderChunksLargeStreams(t *testing.T) {
 		if chunk.Sequence != int64(i+1) {
 			t.Fatalf("chunk %d sequence %d", i, chunk.Sequence)
 		}
+	}
+	more, err := recorder.Capture(context.Background(), RunScope{ProjectID: "p", IssueID: "i", RunID: "r"}, "STDOUT", strings.NewReader("xy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(more) != 1 || more[0].Sequence != 4 {
+		t.Fatalf("sequence did not continue: %+v", more)
 	}
 }

@@ -5,12 +5,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type RawOutputStore interface {
 	CreateRawOutputChunk(context.Context, store.RawOutputChunk) (store.RawOutputChunk, error)
+	ListRawOutputChunks(context.Context, string, string) ([]store.RawOutputChunk, error)
 }
 
 type RunScope struct {
@@ -23,6 +25,8 @@ type OutputRecorder struct {
 	store     RawOutputStore
 	blobs     BlobStore
 	chunkSize int
+	locksMu   sync.Mutex
+	locks     map[string]*sync.Mutex
 }
 
 func NewOutputRecorder(store RawOutputStore, blobs BlobStore, chunkSize int) (*OutputRecorder, error) {
@@ -32,16 +36,29 @@ func NewOutputRecorder(store RawOutputStore, blobs BlobStore, chunkSize int) (*O
 	if chunkSize <= 0 {
 		return nil, fmt.Errorf("evidence: output chunk size must be positive")
 	}
-	return &OutputRecorder{store: store, blobs: blobs, chunkSize: chunkSize}, nil
+	return &OutputRecorder{store: store, blobs: blobs, chunkSize: chunkSize, locks: make(map[string]*sync.Mutex)}, nil
 }
 
 func (r *OutputRecorder) Capture(ctx context.Context, scope RunScope, stream string, source io.Reader) ([]store.RawOutputChunk, error) {
 	if source == nil {
 		return nil, fmt.Errorf("evidence: output source is required")
 	}
+	lock := r.streamLock(scope.RunID, stream)
+	lock.Lock()
+	defer lock.Unlock()
+
+	existing, err := r.store.ListRawOutputChunks(ctx, scope.ProjectID, scope.RunID)
+	if err != nil {
+		return nil, err
+	}
+	var sequence int64
+	for _, chunk := range existing {
+		if chunk.Stream == stream && chunk.Sequence > sequence {
+			sequence = chunk.Sequence
+		}
+	}
 	chunks := make([]store.RawOutputChunk, 0)
 	buffer := make([]byte, r.chunkSize)
-	var sequence int64
 	for {
 		n, err := io.ReadFull(source, buffer)
 		if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
@@ -73,4 +90,16 @@ func (r *OutputRecorder) Capture(ctx context.Context, scope RunScope, stream str
 			return chunks, nil
 		}
 	}
+}
+
+func (r *OutputRecorder) streamLock(runID, stream string) *sync.Mutex {
+	key := runID + "\x00" + stream
+	r.locksMu.Lock()
+	defer r.locksMu.Unlock()
+	lock := r.locks[key]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		r.locks[key] = lock
+	}
+	return lock
 }
