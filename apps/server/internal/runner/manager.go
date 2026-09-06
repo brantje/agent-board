@@ -18,7 +18,8 @@ type EndpointResolver interface {
 }
 
 type StatusReporter interface {
-	SetRunnerStatus(context.Context, string, string, string) error
+	ClaimRunnerConnection(context.Context, string, string) (int64, error)
+	SetRunnerStatusGeneration(context.Context, string, string, string, int64) error
 }
 
 type Client interface {
@@ -37,6 +38,7 @@ type managerEntry struct {
 	client      Client
 	connecting chan struct{}
 	lastErr     error
+	generation  int64
 }
 
 type Manager struct {
@@ -95,22 +97,36 @@ func (m *Manager) Connect(ctx context.Context, projectID, runtimeInstanceID stri
 		}
 		wait := make(chan struct{})
 		entry.connecting = wait
+		localGeneration := entry.generation + 1
 		m.mu.Unlock()
 
-		m.report(ctx, projectID, runtimeInstanceID, "CONNECTING")
-		endpoint, err := m.resolver.RunnerEndpoint(ctx, projectID, runtimeInstanceID)
+		generation := localGeneration
+		claimed := m.reporter == nil
+		var err error
+		if m.reporter != nil {
+			generation, err = m.reporter.ClaimRunnerConnection(ctx, projectID, runtimeInstanceID)
+			claimed = err == nil
+		}
+
 		var client Client
 		if err == nil {
-			if endpoint.URL == "" {
-				err = fmt.Errorf("runner endpoint URL is empty")
-			} else {
-				client, err = m.dial(ctx, endpoint.URL)
+			var endpoint runtimepkg.RunnerEndpoint
+			endpoint, err = m.resolver.RunnerEndpoint(ctx, projectID, runtimeInstanceID)
+			if err == nil {
+				if endpoint.URL == "" {
+					err = fmt.Errorf("runner endpoint URL is empty")
+				} else {
+					client, err = m.dial(ctx, endpoint.URL)
+				}
 			}
 		}
 
 		m.mu.Lock()
 		entry.connecting = nil
 		entry.lastErr = err
+		if claimed && generation > entry.generation {
+			entry.generation = generation
+		}
 		if err == nil && !m.closed {
 			entry.client = client
 		} else if client != nil {
@@ -124,15 +140,17 @@ func (m *Manager) Connect(ctx context.Context, projectID, runtimeInstanceID stri
 			return nil, ErrManagerClosed
 		}
 		if err != nil {
-			m.report(ctx, projectID, runtimeInstanceID, "UNAVAILABLE")
+			if claimed {
+				m.report(ctx, projectID, runtimeInstanceID, "UNAVAILABLE", generation)
+			}
 			return nil, err
 		}
 		status := "READY"
 		if client.Health().ActiveSessions > 0 {
 			status = "BUSY"
 		}
-		m.report(ctx, projectID, runtimeInstanceID, status)
-		go m.watch(key, projectID, runtimeInstanceID, client)
+		m.report(ctx, projectID, runtimeInstanceID, status, generation)
+		go m.watch(key, projectID, runtimeInstanceID, client, generation)
 		return client, nil
 	}
 }
@@ -158,7 +176,10 @@ func (m *Manager) Reconcile(ctx context.Context, projectID, runtimeInstanceID, e
 	if health.ActiveSessions > 0 {
 		status = "BUSY"
 	}
-	m.report(ctx, projectID, runtimeInstanceID, status)
+	key := projectID + "/" + runtimeInstanceID
+	if generation, ok := m.connectionGeneration(key, client); ok {
+		m.report(ctx, projectID, runtimeInstanceID, status, generation)
+	}
 	return session, active, nil
 }
 
@@ -180,27 +201,38 @@ func clientAlive(client Client) bool {
 	}
 }
 
-func (m *Manager) watch(key, projectID, runtimeInstanceID string, client Client) {
+func (m *Manager) connectionGeneration(key string, client Client) (int64, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry := m.entries[key]
+	if entry == nil || entry.client != client || entry.generation < 1 {
+		return 0, false
+	}
+	return entry.generation, true
+}
+
+func (m *Manager) watch(key, projectID, runtimeInstanceID string, client Client, generation int64) {
 	<-client.Done()
 	m.mu.Lock()
 	entry := m.entries[key]
-	if entry != nil && entry.client == client {
+	owned := entry != nil && entry.client == client && entry.generation == generation
+	if owned {
 		entry.client = nil
 		entry.lastErr = client.Err()
 	}
 	closed := m.closed
 	m.mu.Unlock()
-	if closed {
+	if closed || !owned {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	m.report(ctx, projectID, runtimeInstanceID, "UNAVAILABLE")
+	m.report(ctx, projectID, runtimeInstanceID, "UNAVAILABLE", generation)
 }
 
-func (m *Manager) report(ctx context.Context, projectID, runtimeInstanceID, status string) {
+func (m *Manager) report(ctx context.Context, projectID, runtimeInstanceID, status string, generation int64) {
 	if m.reporter != nil {
-		_ = m.reporter.SetRunnerStatus(ctx, projectID, runtimeInstanceID, status)
+		_ = m.reporter.SetRunnerStatusGeneration(ctx, projectID, runtimeInstanceID, status, generation)
 	}
 }
 
