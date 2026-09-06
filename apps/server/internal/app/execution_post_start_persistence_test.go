@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -31,14 +32,16 @@ func (s *postStartPersistenceStore) UpdateRuntimeInstanceRunnerStatus(ctx contex
 
 func TestExecutionServiceRetainsProcessAfterPostStartPersistenceFailure(t *testing.T) {
 	tests := []struct {
-		name       string
-		wantStatus string
-		configure  func(*postStartPersistenceStore) error
-		clear      func(*postStartPersistenceStore)
+		name             string
+		wantStatus       string
+		wantRunnerStatus string
+		configure        func(*postStartPersistenceStore) error
+		clear            func(*postStartPersistenceStore)
 	}{
 		{
-			name:       "running transition",
-			wantStatus: "STARTING",
+			name:             "running transition",
+			wantStatus:       "STARTING",
+			wantRunnerStatus: "BUSY",
 			configure: func(s *postStartPersistenceStore) error {
 				err := errors.New("running transition failed")
 				s.runningErr = err
@@ -47,8 +50,9 @@ func TestExecutionServiceRetainsProcessAfterPostStartPersistenceFailure(t *testi
 			clear: func(s *postStartPersistenceStore) { s.runningErr = nil },
 		},
 		{
-			name:       "runner busy status",
-			wantStatus: "RUNNING",
+			name:             "runner busy status",
+			wantStatus:       "RUNNING",
+			wantRunnerStatus: "READY",
 			configure: func(s *postStartPersistenceStore) error {
 				err := errors.New("runner busy status failed")
 				s.busyErr = err
@@ -70,14 +74,17 @@ func TestExecutionServiceRetainsProcessAfterPostStartPersistenceFailure(t *testi
 				t.Fatalf("Start() process=%v error=%v", process, err)
 			}
 			live, ok := service.liveProcess("project-1", "session-1")
-			if !ok || live == nil || storeFake.session.Status != tt.wantStatus {
-				t.Fatalf("live=%v session=%+v", live, storeFake.session)
+			if !ok || live == nil || storeFake.session.Status != tt.wantStatus || storeFake.instance.RunnerStatus != tt.wantRunnerStatus {
+				t.Fatalf("live=%v session=%+v instance=%+v", live, storeFake.session, storeFake.instance)
 			}
 
 			tt.clear(storeFake)
 			transport.result = runner.Result{ExitCode: 0}
 			close(transport.resultCh)
-			if _, waitErr := live.Wait(context.Background()); waitErr != nil {
+			waitCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, waitErr := live.Wait(waitCtx)
+			cancel()
+			if waitErr != nil {
 				t.Fatalf("retained process Wait() error=%v", waitErr)
 			}
 			if live.Record().Status != "COMPLETED" || storeFake.session.Status != "COMPLETED" {
