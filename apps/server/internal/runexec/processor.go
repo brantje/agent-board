@@ -81,9 +81,6 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		return failed(err), nil
 	}
 	safe := resolved.Safe
-	if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
-		return scheduler.Result{}, err
-	}
 	if err := p.record(ctx, safe, "run.started", nil, nil, nil); err != nil {
 		return scheduler.Result{}, err
 	}
@@ -99,6 +96,25 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 		return failed(errors.Join(err, cleanupErr)), nil
+	}
+
+	// Runtime creation is also the boundary that materializes a placeholder
+	// Issue Workspace. Resolve again after that boundary so immutable provenance,
+	// Engine context and candidate collection all refer to the same durable
+	// Workspace that is actually mounted into the Runtime.
+	materialized, err := p.resolver.Resolve(ctx, run.ProjectID, run.ID)
+	if err != nil {
+		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
+		return failed(errors.Join(err, cleanupErr)), nil
+	}
+	if materialized.Safe.Runtime.ID != safe.Runtime.ID || materialized.Safe.Workspace.ID != safe.Workspace.ID {
+		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
+		return failed(errors.Join(fmt.Errorf("run execution: execution bindings changed during Runtime provisioning"), cleanupErr)), nil
+	}
+	safe = materialized.Safe
+	if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
+		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
+		return scheduler.Result{}, errors.Join(err, cleanupErr)
 	}
 	if err := p.record(ctx, safe, "runtime.started", map[string]any{"runtimeId": safe.Runtime.ID}, &instance.ID, nil); err != nil {
 		_ = p.cleanupRuntime(ctx, safe, instance)
