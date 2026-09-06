@@ -10,6 +10,11 @@ type stubEngine string
 func (s stubEngine) Name() string                                     { return string(s) }
 func (s stubEngine) Execute(context.Context, Request) (Result, error) { return Result{}, nil }
 
+type pointerStubEngine struct{}
+
+func (*pointerStubEngine) Name() string                                     { return "pointer" }
+func (*pointerStubEngine) Execute(context.Context, Request) (Result, error) { return Result{}, nil }
+
 func TestRegistry(t *testing.T) {
 	r, err := NewRegistry(stubEngine("scripted"))
 	if err != nil {
@@ -33,5 +38,12 @@ func TestRegistryRejectsDuplicateAndEmptyAdapters(t *testing.T) {
 	}
 	if _, err := NewRegistry(stubEngine("scripted"), stubEngine("scripted")); err == nil {
 		t.Fatal("expected duplicate error")
+	}
+}
+
+func TestRegistryRejectsTypedNilAdapter(t *testing.T) {
+	var adapter *pointerStubEngine
+	if _, err := NewRegistry(adapter); err == nil {
+		t.Fatal("expected typed-nil adapter error")
 	}
 }

@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -12,7 +13,7 @@ type Registry struct {
 func NewRegistry(engines ...Engine) (*Registry, error) {
 	r := &Registry{engines: make(map[string]Engine, len(engines))}
 	for _, adapter := range engines {
-		if adapter == nil {
+		if isNilEngine(adapter) {
 			return nil, fmt.Errorf("engine: adapter is required")
 		}
 		name := strings.TrimSpace(adapter.Name())
@@ -25,6 +26,19 @@ func NewRegistry(engines ...Engine) (*Registry, error) {
 		r.engines[name] = adapter
 	}
 	return r, nil
+}
+
+func isNilEngine(adapter Engine) bool {
+	if adapter == nil {
+		return true
+	}
+	value := reflect.ValueOf(adapter)
+	switch value.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return value.IsNil()
+	default:
+		return false
+	}
 }
 
 func (r *Registry) Get(name string) (Engine, error) {
