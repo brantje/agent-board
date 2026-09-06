@@ -482,12 +482,14 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 		p.waitErr = errors.Join(waitErr, captureErr)
 		exitCode := result.ExitCode
 		parent := p.parentEventID
+		terminalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processCancellationCleanupTimeout)
+		defer cancel()
 		if p.waitErr != nil || result.ExitCode != 0 {
 			cause := p.waitErr
 			if cause == nil {
 				cause = fmt.Errorf("process exited with code %d", result.ExitCode)
 			}
-			if eventErr := p.launcher.recordFailure(ctx, p.request, &parent, chunks, cause); eventErr != nil {
+			if eventErr := p.launcher.recordFailure(terminalCtx, p.request, &parent, chunks, cause); eventErr != nil {
 				p.waitErr = errors.Join(p.waitErr, eventErr)
 			}
 			return
@@ -497,7 +499,7 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 		if p.request.Kind == "test" {
 			eventType = "test.completed"
 		}
-		if _, eventErr := p.launcher.record(ctx, eventType, payload, &parent); eventErr != nil {
+		if _, eventErr := p.launcher.record(terminalCtx, eventType, payload, &parent); eventErr != nil {
 			p.waitErr = eventErr
 		}
 	})
