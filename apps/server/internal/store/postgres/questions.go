@@ -77,6 +77,28 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	// Read the immutable routing identity first, then acquire locks in the same
+	// Run -> Question order used by scheduler reconciliation. The Question is
+	// re-read under lock below before any state or answer validation is applied.
+	initialQuestion, err := scanQuestion(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		FROM questions
+		WHERE project_id = $1 AND id = $2
+	`, input.ProjectID, input.QuestionID))
+	if err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+
+	run, err := scanRun(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+		FROM runs
+		WHERE project_id = $1 AND id = $2 AND issue_id = $3
+		FOR UPDATE
+	`, initialQuestion.ProjectID, initialQuestion.RunID, initialQuestion.IssueID))
+	if err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+
 	question, err := scanQuestion(tx.QueryRow(ctx, `
 		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
 		FROM questions
@@ -86,20 +108,13 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 	if err != nil {
 		return store.AnswerQuestionResult{}, err
 	}
+	if question.RunID != initialQuestion.RunID || question.IssueID != initialQuestion.IssueID {
+		return store.AnswerQuestionResult{}, store.ErrConflict
+	}
 	if question.Status != "OPEN" {
 		return store.AnswerQuestionResult{}, store.ErrConflict
 	}
 	if err := validateQuestionAnswer(question, input.Answer); err != nil {
-		return store.AnswerQuestionResult{}, err
-	}
-
-	run, err := scanRun(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-		FROM runs
-		WHERE project_id = $1 AND id = $2 AND issue_id = $3
-		FOR UPDATE
-	`, question.ProjectID, question.RunID, question.IssueID))
-	if err != nil {
 		return store.AnswerQuestionResult{}, err
 	}
 
