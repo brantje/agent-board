@@ -306,11 +306,25 @@ func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope 
 }
 
 func openCandidateRegularFile(workspace, relative string) (*os.File, os.FileInfo, error) {
+	workspace, err := canonicalWorkspace(workspace)
+	if err != nil {
+		return nil, nil, err
+	}
 	path, err := candidateFilePath(workspace, relative)
 	if err != nil {
 		return nil, nil, err
 	}
-	before, err := os.Lstat(path)
+	cleanRelative, err := filepath.Rel(workspace, path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("evidence: resolve candidate path %q: %w", relative, err)
+	}
+	root, err := os.OpenRoot(workspace)
+	if err != nil {
+		return nil, nil, fmt.Errorf("evidence: open workspace root: %w", err)
+	}
+	defer root.Close()
+
+	before, err := root.Lstat(cleanRelative)
 	if err != nil {
 		return nil, nil, fmt.Errorf("evidence: inspect untracked candidate %q: %w", relative, err)
 	}
@@ -321,7 +335,7 @@ func openCandidateRegularFile(workspace, relative string) (*os.File, os.FileInfo
 		return nil, nil, fmt.Errorf("evidence: untracked candidate %q is not a regular file", relative)
 	}
 
-	file, err := os.Open(path)
+	file, err := root.Open(cleanRelative)
 	if err != nil {
 		return nil, nil, fmt.Errorf("evidence: open untracked candidate %q: %w", relative, err)
 	}
@@ -330,7 +344,7 @@ func openCandidateRegularFile(workspace, relative string) (*os.File, os.FileInfo
 		_ = file.Close()
 		return nil, nil, fmt.Errorf("evidence: inspect opened candidate %q: %w", relative, err)
 	}
-	after, err := os.Lstat(path)
+	after, err := root.Lstat(cleanRelative)
 	if err != nil {
 		_ = file.Close()
 		return nil, nil, fmt.Errorf("evidence: re-inspect untracked candidate %q: %w", relative, err)
