@@ -218,7 +218,7 @@ func TestClientHandshakeRejectionBranches(t *testing.T) {
 		{name: "unsupported hello version", messages: []protocol.Message{mustProtocolMessage(t, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: 2, Capabilities: caps})}},
 		{name: "zero capacity", messages: []protocol.Message{mustProtocolMessage(t, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version1, Capabilities: protocol.Capabilities{Features: caps.Features}})}},
 		{name: "wrong health type", messages: []protocol.Message{goodHello, goodHello}},
-		{name: "invalid health payload", messages: []protocol.Message{goodHello, protocol.Message{Version: protocol.Version1, Type: protocol.TypeHealth, Payload: json.RawMessage(`{"active_sessions":"bad"}`)}}},
+		{name: "invalid health payload", messages: []protocol.Message{goodHello, {Version: protocol.Version1, Type: protocol.TypeHealth, Payload: json.RawMessage(`{"active_sessions":"bad"}`)}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
