@@ -50,6 +50,20 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 		return store.Run{}, err
 	}
 
+	if input.RunStatus == "WAITING_FOR_INPUT" {
+		command, err := tx.Exec(ctx, `
+			UPDATE issues
+			SET status='BLOCKED', updated_at=now()
+			WHERE project_id=$1 AND id=$2 AND status <> 'DONE'
+		`, run.ProjectID, run.IssueID)
+		if err != nil {
+			return store.Run{}, err
+		}
+		if command.RowsAffected() != 1 {
+			return store.Run{}, store.ErrConflict
+		}
+	}
+
 	if release {
 		if _, err := tx.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, input.ProjectID, input.JobID); err != nil {
 			return store.Run{}, err

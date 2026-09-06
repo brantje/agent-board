@@ -92,7 +92,7 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		return scheduler.Result{}, err
 	}
 
-	instance, err := p.runtimes.Create(ctx, run.ProjectID, run.IssueID, safe.Runtime.ID)
+	instance, err := p.acquireRuntime(ctx, run.ProjectID, run.IssueID, safe.Runtime.ID)
 	if err != nil {
 		return failed(err), nil
 	}
@@ -139,7 +139,10 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		runtimeInstanceID: instance.ID,
 		scope:             evidence.RunScope{ProjectID: run.ProjectID, IssueID: run.IssueID, RunID: run.ID},
 	}
-	engineResult, engineErr := adapter.Execute(ctx, engine.Request{Context: safe, Launcher: launcher})
+	engineResult, engineErr := adapter.Execute(ctx, p.engineRequest(safe, launcher, instance.ID))
+	if errors.Is(engineErr, engine.ErrWaitingForInput) {
+		return p.finishWaitingForInput(ctx, safe, instance)
+	}
 
 	snapshot, snapshotErr := p.candidate.Snapshot(ctx, launcher.scope, safe.Workspace.Path)
 	if snapshotErr == nil {
