@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"sync"
@@ -94,17 +95,80 @@ type AuthorizedExecutionProcess struct {
 }
 
 type completionReader struct {
-	source io.Reader
-	onDone func()
-	once   sync.Once
+	mu       sync.Mutex
+	source   io.Reader
+	buffer   *bytes.Reader
+	settled  bool
+	finalErr error
+	onDone   func()
+	once     sync.Once
 }
 
 func (r *completionReader) Read(p []byte) (int, error) {
+	r.mu.Lock()
+	if r.buffer != nil {
+		n, err := r.buffer.Read(p)
+		if err == io.EOF {
+			r.buffer = nil
+			if r.finalErr != nil {
+				err = r.finalErr
+			}
+		}
+		r.mu.Unlock()
+		return n, err
+	}
+	if r.settled {
+		err := r.finalErr
+		if err == nil {
+			err = io.EOF
+		}
+		r.mu.Unlock()
+		return 0, err
+	}
 	n, err := r.source.Read(p)
+	if err != nil {
+		r.settled = true
+		if err != io.EOF {
+			r.finalErr = err
+		}
+	}
+	r.mu.Unlock()
 	if err != nil {
 		r.complete()
 	}
 	return n, err
+}
+
+func (r *completionReader) settle() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.settled {
+		r.mu.Unlock()
+		r.complete()
+		return
+	}
+	data, err := io.ReadAll(r.source)
+	r.settled = true
+	r.finalErr = err
+	if len(data) > 0 {
+		r.buffer = bytes.NewReader(data)
+	}
+	r.mu.Unlock()
+	r.complete()
+}
+
+func (r *completionReader) abandon() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.buffer = nil
+	r.settled = true
+	r.finalErr = nil
+	r.mu.Unlock()
+	r.complete()
 }
 
 func (r *completionReader) complete() {
@@ -147,14 +211,14 @@ func (p *AuthorizedExecutionProcess) Stdin() io.WriteCloser {
 func (p *AuthorizedExecutionProcess) AbandonStdout() error {
 	err := p.process.AbandonStdout()
 	if err == nil {
-		p.stdout.complete()
+		p.stdout.abandon()
 	}
 	return redaction.WrapError(err, p.redactionValues)
 }
 func (p *AuthorizedExecutionProcess) AbandonStderr() error {
 	err := p.process.AbandonStderr()
 	if err == nil {
-		p.stderr.complete()
+		p.stderr.abandon()
 	}
 	return redaction.WrapError(err, p.redactionValues)
 }
@@ -174,28 +238,8 @@ func (p *AuthorizedExecutionProcess) Kill(ctx context.Context) error {
 
 func (p *AuthorizedExecutionProcess) settleTerminalOutput() {
 	p.markTerminal()
-	if !p.isStdoutDone() {
-		if err := p.process.AbandonStdout(); err == nil {
-			p.stdout.complete()
-		}
-	}
-	if !p.isStderrDone() {
-		if err := p.process.AbandonStderr(); err == nil {
-			p.stderr.complete()
-		}
-	}
-}
-
-func (p *AuthorizedExecutionProcess) isStdoutDone() bool {
-	p.lifecycleMu.Lock()
-	defer p.lifecycleMu.Unlock()
-	return p.stdoutDone
-}
-
-func (p *AuthorizedExecutionProcess) isStderrDone() bool {
-	p.lifecycleMu.Lock()
-	defer p.lifecycleMu.Unlock()
-	return p.stderrDone
+	p.stdout.settle()
+	p.stderr.settle()
 }
 
 func (p *AuthorizedExecutionProcess) markTerminal() {

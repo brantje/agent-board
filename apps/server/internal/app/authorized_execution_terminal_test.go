@@ -2,7 +2,8 @@ package app
 
 import (
 	"context"
-	"sync"
+	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,35 +11,10 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-type abandoningExecutionTransport struct {
-	*fakeExecutionTransport
-	mu              sync.Mutex
-	stdoutAbandoned bool
-	stderrAbandoned bool
-}
-
-func (t *abandoningExecutionTransport) AbandonStdout() error {
-	t.mu.Lock()
-	t.stdoutAbandoned = true
-	t.mu.Unlock()
-	return nil
-}
-
-func (t *abandoningExecutionTransport) AbandonStderr() error {
-	t.mu.Lock()
-	t.stderrAbandoned = true
-	t.mu.Unlock()
-	return nil
-}
-
-func (t *abandoningExecutionTransport) abandoned() (bool, bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.stdoutAbandoned, t.stderrAbandoned
-}
-
-func TestAuthorizedExecutionSettlesUnreadTerminalOutputBeforeRelease(t *testing.T) {
-	transport := &abandoningExecutionTransport{fakeExecutionTransport: newFakeExecutionTransport("session-1")}
+func TestAuthorizedExecutionPreservesUnreadTerminalOutputBeforeRelease(t *testing.T) {
+	transport := newFakeExecutionTransport("session-1")
+	transport.stdout = "stdout before plain-secret after"
+	transport.stderr = "stderr before plain-secret after"
 	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
 	storeFake := &executionSessionStoreFake{
 		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
@@ -69,10 +45,23 @@ func TestAuthorizedExecutionSettlesUnreadTerminalOutputBeforeRelease(t *testing.
 	select {
 	case <-released:
 	case <-time.After(time.Second):
-		t.Fatal("redaction registration was not released after terminal unread output was settled")
+		t.Fatal("redaction registration was not released after terminal output was safely buffered")
 	}
-	stdoutAbandoned, stderrAbandoned := transport.abandoned()
-	if !stdoutAbandoned || !stderrAbandoned {
-		t.Fatalf("terminal output settlement stdout=%v stderr=%v", stdoutAbandoned, stderrAbandoned)
+
+	stdout, err := io.ReadAll(process.Stdout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := io.ReadAll(process.Stderr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, output := range map[string]string{"stdout": string(stdout), "stderr": string(stderr)} {
+		if strings.Contains(output, "plain-secret") {
+			t.Fatalf("%s leaked secret after Wait: %q", name, output)
+		}
+		if !strings.Contains(output, "before") || !strings.Contains(output, "after") {
+			t.Fatalf("%s lost queued terminal output: %q", name, output)
+		}
 	}
 }

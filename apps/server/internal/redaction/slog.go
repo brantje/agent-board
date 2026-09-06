@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"reflect"
 )
 
 type handlerSegment struct {
@@ -94,16 +95,28 @@ func (h *SlogHandler) redactAttr(attr slog.Attr) slog.Attr {
 		}
 		attr.Value = slog.GroupValue(group...)
 	case slog.KindAny:
-		switch typed := value.Any().(type) {
-		case []byte:
-			attr.Value = slog.StringValue(h.redactString(string(typed)))
-		default:
+		typed := value.Any()
+		if text, ok := byteSliceText(typed); ok {
+			attr.Value = slog.StringValue(h.redactString(text))
+		} else {
 			attr.Value = slog.StringValue(h.redactString(fmt.Sprint(typed)))
 		}
 	default:
 		attr.Value = value
 	}
 	return attr
+}
+
+func byteSliceText(value any) (string, bool) {
+	reflected := reflect.ValueOf(value)
+	if !reflected.IsValid() || reflected.Kind() != reflect.Slice || reflected.Type().Elem().Kind() != reflect.Uint8 {
+		return "", false
+	}
+	bytes := make([]byte, reflected.Len())
+	for index := range bytes {
+		bytes[index] = byte(reflected.Index(index).Uint())
+	}
+	return string(bytes), true
 }
 
 func (h *SlogHandler) redactString(value string) string {
