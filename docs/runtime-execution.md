@@ -74,6 +74,8 @@ type ProcessSession interface {
 
 Exact package/type names may differ; semantics are authoritative. The server-side execution client maps this interface onto the versioned runner WebSocket protocol.
 
+Callers that intentionally stop consuming stdout or stderr must explicitly abandon that stream through the provider-neutral execution API (`AbandonStdout` / `AbandonStderr` in the server implementation). Abandoning output releases only the local consumer; it does not terminate the Execution Session. The transport continues draining already-received output so the runner connection cannot deadlock on backpressure.
+
 Requirements:
 
 - explicit Execution Session identity
@@ -81,6 +83,7 @@ Requirements:
 - Workspace-bounded working directory
 - ephemeral environment/secrets
 - bounded/streamed stdout and stderr with channel identity
+- explicit output-stream abandonment without cancelling the process
 - exit status/result
 - context cancellation
 - graceful termination then forced containment

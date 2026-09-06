@@ -70,12 +70,20 @@ jobs:
           cache-dependency-path: apps/server/go.sum
       - name: Build lifecycle fixture image
         run: docker build --file apps/server/internal/runtime/docker/testdata/Dockerfile --tag agent-board-runtime-lifecycle-test:ci apps/server/internal/runtime/docker/testdata
+      - name: Build real runner image
+        run: docker build --file apps/agent-runner/Dockerfile --tag agent-board-agent-runner:ci .
       - name: Run real Docker lifecycle integration
         working-directory: apps/server
         env:
           AGENT_BOARD_TEST_DOCKER: "1"
           AGENT_BOARD_TEST_RUNTIME_IMAGE: agent-board-runtime-lifecycle-test:ci
         run: go test -count=1 -run '^TestDockerRuntimeIntegration$' -v ./internal/runtime/docker
+      - name: Run real Docker runner integration
+        working-directory: apps/server
+        env:
+          AGENT_BOARD_TEST_DOCKER: "1"
+          AGENT_BOARD_TEST_RUNNER_IMAGE: agent-board-agent-runner:ci
+        run: go test -count=1 -run '^TestDockerRunnerIntegration$' -v ./internal/runner
 
   agent-runner:
     name: Agent runner
@@ -88,6 +96,9 @@ jobs:
         with:
           go-version-file: apps/agent-runner/go.mod
           cache: false
+      - name: Test shared runner protocol
+        working-directory: packages/runnerprotocol
+        run: go test ./... && go vet ./... && go build ./...
       - name: Test and enforce coverage
         working-directory: apps/agent-runner
         run: |

@@ -29,7 +29,7 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	if !ok {
 		t.Fatalf("handler type = %T, want *applicationHandler", handler)
 	}
-	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil {
+	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil {
 		t.Fatalf("application services were not fully wired: %+v", application.services)
 	}
 }
@@ -37,6 +37,12 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 func TestReconcileRuntimeInstancesRejectsNonApplicationHandler(t *testing.T) {
 	if err := reconcileRuntimeInstances(context.Background(), http.NotFoundHandler()); err == nil {
 		t.Fatal("reconcileRuntimeInstances() unexpectedly accepted an unrelated handler")
+	}
+}
+
+func TestReconcileExecutionSessionsRejectsNonApplicationHandler(t *testing.T) {
+	if err := reconcileExecutionSessions(context.Background(), http.NotFoundHandler()); err == nil {
+		t.Fatal("reconcileExecutionSessions() unexpectedly accepted an unrelated handler")
 	}
 }
 

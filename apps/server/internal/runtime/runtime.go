@@ -69,6 +69,10 @@ type Inspection struct {
 	State      State
 }
 
+type RunnerEndpoint struct {
+	URL string
+}
+
 type StopReason string
 
 const (
@@ -92,12 +96,20 @@ type RecoveringImplementation interface {
 	Recover(context.Context, RuntimeSpec) (Handle, Inspection, error)
 }
 
+// RunnerEndpointProvider exposes only the execution-plane endpoint for a
+// materialized Runtime Instance. Callers never receive implementation-specific
+// handles such as Docker clients or container inspection objects.
+type RunnerEndpointProvider interface {
+	RunnerEndpoint(context.Context, Handle) (RunnerEndpoint, error)
+}
+
 var (
 	ErrInvalidSpec       = errors.New("runtime: invalid spec")
 	ErrInvalidTransition = errors.New("runtime: invalid lifecycle transition")
 	ErrNotFound          = errors.New("runtime: external instance not found")
 	ErrOwnershipMismatch = errors.New("runtime: external instance ownership mismatch")
 	ErrUnsupportedPolicy = errors.New("runtime: unsupported policy")
+	ErrRunnerUnavailable = errors.New("runtime: runner endpoint unavailable")
 )
 
 func ValidateSpec(spec RuntimeSpec) error {

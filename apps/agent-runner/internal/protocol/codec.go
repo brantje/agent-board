@@ -1,43 +1,11 @@
 package protocol
 
-import (
-	"bytes"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-)
+import runnerprotocol "github.com/brantje/agent-board/packages/runnerprotocol"
 
 func Encode(msg Message) ([]byte, error) {
-	if err := msg.Validate(); err != nil {
-		return nil, err
-	}
-	encoded, err := json.Marshal(msg)
-	if err != nil {
-		return nil, fmt.Errorf("encode protocol message: %w", err)
-	}
-	return encoded, nil
+	return runnerprotocol.Encode(msg)
 }
 
 func Decode(data []byte) (Message, error) {
-	trimmed := bytes.TrimSpace(data)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return Message{}, fmt.Errorf("%w: envelope must be a JSON object", ErrInvalidMessage)
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-
-	var msg Message
-	if err := decoder.Decode(&msg); err != nil {
-		return Message{}, fmt.Errorf("%w: decode envelope: %v", ErrInvalidMessage, err)
-	}
-	var extra any
-	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return Message{}, fmt.Errorf("%w: multiple JSON values", ErrInvalidMessage)
-	}
-	if err := msg.Validate(); err != nil {
-		return Message{}, err
-	}
-	return msg, nil
+	return runnerprotocol.Decode(data)
 }

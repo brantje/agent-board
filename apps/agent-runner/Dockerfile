@@ -1,7 +1,10 @@
 FROM golang:1.25-alpine AS build
 
+WORKDIR /src
+COPY packages/runnerprotocol/ ./packages/runnerprotocol/
+COPY apps/agent-runner/go.mod apps/agent-runner/go.sum ./apps/agent-runner/
 WORKDIR /src/apps/agent-runner
-COPY apps/agent-runner/go.mod ./
+RUN go mod download
 COPY apps/agent-runner/ ./
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/agent-runner ./cmd/agent-runner
 

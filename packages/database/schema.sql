@@ -229,6 +229,7 @@ CREATE TABLE runtime_instances (
     status text NOT NULL DEFAULT 'PROVISIONING' CHECK (status IN ('PROVISIONING', 'STARTING', 'RUNNING', 'STOPPING', 'FAILED', 'STOPPED', 'DESTROYED')),
     external_id text,
     runner_status text NOT NULL DEFAULT 'CONNECTING' CHECK (runner_status IN ('CONNECTING', 'READY', 'BUSY', 'DRAINING', 'UNAVAILABLE')),
+    runner_generation bigint NOT NULL DEFAULT 0 CHECK (runner_generation >= 0),
     safe_handle_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(safe_handle_metadata) = 'object'),
     created_at timestamptz NOT NULL DEFAULT now(),
     started_at timestamptz,
