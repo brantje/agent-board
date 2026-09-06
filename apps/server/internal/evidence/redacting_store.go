@@ -3,10 +3,21 @@ package evidence
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
+
+type runtimeRunnerStatusStore interface {
+	UpdateRuntimeInstanceRunnerStatusIfStatus(context.Context, string, string, string, string) (store.RuntimeInstance, error)
+}
+
+type runtimeRunnerGenerationStore interface {
+	ClaimRuntimeInstanceRunnerGeneration(context.Context, string, string) (int64, error)
+	UpdateRuntimeInstanceRunnerStatusGeneration(context.Context, string, string, string, int64) (store.RuntimeInstance, error)
+	UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(context.Context, string, string, string, int64, string) (store.RuntimeInstance, error)
+}
 
 // RedactingStore keeps the full control-plane store contract while overriding
 // every current durable evidence write with a final server-side sanitizer.
@@ -75,4 +86,40 @@ func (s *RedactingStore) CreateArtifact(ctx context.Context, input store.Artifac
 	}
 	input.SafeMetadata = redacted
 	return s.ControlPlaneStore.CreateArtifact(ctx, input)
+}
+
+// The runner ownership methods are intentionally not part of ControlPlaneStore:
+// they are optional capabilities used by RuntimeInstanceService for connection
+// fencing. Explicit forwarding keeps those capabilities visible through this
+// decorator without widening the store contract for unrelated implementations.
+func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusIfStatus(ctx context.Context, projectID, instanceID, status, expectedStatus string) (store.RuntimeInstance, error) {
+	base, ok := s.ControlPlaneStore.(runtimeRunnerStatusStore)
+	if !ok {
+		return store.RuntimeInstance{}, fmt.Errorf("redacting store base does not support lifecycle-fenced runner status updates")
+	}
+	return base.UpdateRuntimeInstanceRunnerStatusIfStatus(ctx, projectID, instanceID, status, expectedStatus)
+}
+
+func (s *RedactingStore) ClaimRuntimeInstanceRunnerGeneration(ctx context.Context, projectID, instanceID string) (int64, error) {
+	base, ok := s.ControlPlaneStore.(runtimeRunnerGenerationStore)
+	if !ok {
+		return 0, fmt.Errorf("redacting store base does not support runner connection generations")
+	}
+	return base.ClaimRuntimeInstanceRunnerGeneration(ctx, projectID, instanceID)
+}
+
+func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusGeneration(ctx context.Context, projectID, instanceID, status string, generation int64) (store.RuntimeInstance, error) {
+	base, ok := s.ControlPlaneStore.(runtimeRunnerGenerationStore)
+	if !ok {
+		return store.RuntimeInstance{}, fmt.Errorf("redacting store base does not support runner connection generations")
+	}
+	return base.UpdateRuntimeInstanceRunnerStatusGeneration(ctx, projectID, instanceID, status, generation)
+}
+
+func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx context.Context, projectID, instanceID, status string, generation int64, expectedStatus string) (store.RuntimeInstance, error) {
+	base, ok := s.ControlPlaneStore.(runtimeRunnerGenerationStore)
+	if !ok {
+		return store.RuntimeInstance{}, fmt.Errorf("redacting store base does not support runner connection generations")
+	}
+	return base.UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx, projectID, instanceID, status, generation, expectedStatus)
 }
