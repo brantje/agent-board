@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -56,6 +58,68 @@ func TestReconcileRestoresLiveSessionWithoutStartingDuplicate(t *testing.T) {
 	transport.result = runner.Result{ExitCode: 0}
 	close(transport.resultCh)
 	_, _ = process.Wait(context.Background())
+}
+
+type reconcileStatusFailureStore struct {
+	*executionSessionStoreFake
+	err error
+}
+
+func (s *reconcileStatusFailureStore) UpdateRuntimeInstanceRunnerStatus(context.Context, string, string, string) (store.RuntimeInstance, error) {
+	return s.instance, s.err
+}
+
+type readSignalReader struct {
+	once sync.Once
+	read chan struct{}
+}
+
+func newReadSignalReader() *readSignalReader {
+	return &readSignalReader{read: make(chan struct{})}
+}
+
+func (r *readSignalReader) Read([]byte) (int, error) {
+	r.once.Do(func() { close(r.read) })
+	return 0, io.EOF
+}
+
+type reconcileDrainTransport struct {
+	*fakeExecutionTransport
+	stdout *readSignalReader
+	stderr *readSignalReader
+}
+
+func (t *reconcileDrainTransport) Stdout() io.Reader { return t.stdout }
+func (t *reconcileDrainTransport) Stderr() io.Reader { return t.stderr }
+
+func TestReconcileDrainsAttachedOutputWhenBusyPersistenceFails(t *testing.T) {
+	statusErr := errors.New("persist BUSY failed")
+	base := &executionSessionStoreFake{
+		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
+		session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
+	}
+	storeWithFailure := &reconcileStatusFailureStore{executionSessionStoreFake: base, err: statusErr}
+	transport := &reconcileDrainTransport{
+		fakeExecutionTransport: newFakeExecutionTransport("session-1"),
+		stdout:                 newReadSignalReader(),
+		stderr:                 newReadSignalReader(),
+	}
+	service, err := NewExecutionSessionService(storeWithFailure, &reconcileExecutionManager{transport: transport, active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	process, err := service.Reconcile(context.Background(), "project-1", "session-1")
+	if err == nil || process != nil {
+		t.Fatalf("process=%v err=%v", process, err)
+	}
+	for name, drained := range map[string]<-chan struct{}{"stdout": transport.stdout.read, "stderr": transport.stderr.read} {
+		select {
+		case <-drained:
+		case <-time.After(time.Second):
+			t.Fatalf("%s was not drained after BUSY persistence failure", name)
+		}
+	}
 }
 
 func TestReconcileConsumesRetainedTerminalResultBeforeFailing(t *testing.T) {

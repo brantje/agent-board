@@ -55,8 +55,7 @@ func (s *ExecutionSessionService) ReconcileAllWithReporter(ctx context.Context, 
 				// #11 has no evidence sink yet. Drain recovered streams so an
 				// orphaned live process cannot deadlock on output backpressure;
 				// #13 replaces these drains with durable output/evidence sinks.
-				go func() { _, _ = io.Copy(io.Discard, process.Stdout()) }()
-				go func() { _, _ = io.Copy(io.Discard, process.Stderr()) }()
+				drainExecutionOutput(process.Stdout(), process.Stderr())
 			}
 		}
 	}
@@ -107,6 +106,7 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 			}
 		}
 		if _, err := s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, session.RuntimeInstanceID, "BUSY"); err != nil {
+			drainExecutionOutput(transport.Stdout(), transport.Stderr())
 			return nil, translateStoreError(err, "runtime_instance")
 		}
 		return newExecutionProcess(s, session, transport), nil
@@ -115,8 +115,7 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 	// Health says the process is no longer active, but retained terminal delivery
 	// is attached after handshake. Drain output and wait briefly for exit/error so
 	// a reconnect race cannot turn a real completion into a false failure.
-	go func() { _, _ = io.Copy(io.Discard, transport.Stdout()) }()
-	go func() { _, _ = io.Copy(io.Discard, transport.Stderr()) }()
+	drainExecutionOutput(transport.Stdout(), transport.Stderr())
 	waitCtx, cancel := context.WithTimeout(ctx, retainedTerminalDeliveryGrace)
 	defer cancel()
 	result, waitErr := transport.Wait(waitCtx)
@@ -146,4 +145,9 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 		_, transitionErr = s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, session.RuntimeInstanceID, "READY")
 	}
 	return nil, errors.Join(waitErr, transitionErr)
+}
+
+func drainExecutionOutput(stdout, stderr io.Reader) {
+	go func() { _, _ = io.Copy(io.Discard, stdout) }()
+	go func() { _, _ = io.Copy(io.Discard, stderr) }()
 }
