@@ -49,7 +49,7 @@ func TestRuntimeInstanceServiceAcquireReusesRunningWorkspaceRuntime(t *testing.T
 	}
 }
 
-func TestRuntimeInstanceServiceAcquireCreatesReplacementWhenNoReusableRuntime(t *testing.T) {
+func TestRuntimeInstanceServiceAcquireCreatesAndStartsReplacementWhenNoReusableRuntime(t *testing.T) {
 	_, baseStore, implementation, workspace := runtimeServiceFixture(t)
 	service, err := NewRuntimeInstanceService(&listingRuntimeStore{runtimeServiceStore: baseStore}, &runtimeWorkspaceEnsurer{workspace: workspace}, map[string]runtimepkg.Implementation{"docker": implementation})
 	if err != nil {
@@ -60,11 +60,11 @@ func TestRuntimeInstanceServiceAcquireCreatesReplacementWhenNoReusableRuntime(t 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if instance.ID != "instance-1" || instance.WorkspaceID != workspace.ID || instance.Status != "PROVISIONING" {
+	if instance.ID != "instance-1" || instance.WorkspaceID != workspace.ID || instance.Status != "RUNNING" {
 		t.Fatalf("Acquire() replacement=%+v", instance)
 	}
-	if implementation.createdSpec.RuntimeInstanceID != instance.ID || implementation.createdSpec.WorkspaceID != workspace.ID {
-		t.Fatalf("created spec=%+v", implementation.createdSpec)
+	if implementation.createdSpec.RuntimeInstanceID != instance.ID || implementation.createdSpec.WorkspaceID != workspace.ID || implementation.startCalls != 1 {
+		t.Fatalf("created spec=%+v startCalls=%d", implementation.createdSpec, implementation.startCalls)
 	}
 }
 
