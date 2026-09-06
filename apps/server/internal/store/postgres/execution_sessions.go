@@ -75,7 +75,7 @@ func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeIns
 }
 
 func (s *Store) TransitionExecutionSession(ctx context.Context, transition store.ExecutionSessionTransition) (store.ExecutionSession, error) {
-	if strings.TrimSpace(transition.ProjectID) == "" || strings.TrimSpace(transition.SessionID) == "" {
+	if strings.TrimSpace(transition.ProjectID) == "" || strings.TrimSpace(transition.SessionID) == "" || len(transition.FromStatuses) == 0 {
 		return store.ExecutionSession{}, store.ErrInvalidArgument
 	}
 	if _, ok := executionSessionStatuses[transition.Status]; !ok {
@@ -94,7 +94,7 @@ func (s *Store) TransitionExecutionSession(ctx context.Context, transition store
 		    completed_at = CASE WHEN $3 IN ('COMPLETED', 'FAILED', 'CANCELLED') AND completed_at IS NULL THEN now() ELSE completed_at END,
 		    updated_at = now()
 		WHERE project_id = $1 AND id = $2
-		  AND (coalesce(cardinality($5::text[]), 0) = 0 OR status = ANY($5::text[]))
+		  AND status = ANY($5::text[])
 		RETURNING id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
 	`, transition.ProjectID, transition.SessionID, transition.Status, transition.ExitCode, transition.FromStatuses))
 	if err == nil {
