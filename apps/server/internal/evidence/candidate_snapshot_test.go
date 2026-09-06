@@ -3,6 +3,7 @@ package evidence
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -68,6 +69,71 @@ func TestCandidateSnapshotChunksOversizedUntrackedFile(t *testing.T) {
 	}
 	if !bytes.Equal(restored.Bytes(), want) {
 		t.Fatalf("restored oversized candidate differs: got=%d bytes want=%d", restored.Len(), len(want))
+	}
+}
+
+func TestCandidateSnapshotChunksPostRedactionContent(t *testing.T) {
+	workspace := candidateSnapshotRepository(t)
+	writeFile(t, workspace, "redacted-untracked.txt", strings.Repeat("x", 100))
+
+	base, err := NewFileBlobStore(t.TempDir(), 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blobs, err := NewRedactingBlobStore(base, replacingRedactor{old: "x", replacement: "***"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshotter, err := NewCandidateSnapshotter(NewCandidateCollector(), &candidateArtifactMemoryStore{}, blobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := snapshotter.Snapshot(t.Context(), RunScope{ProjectID: "project", IssueID: "issue", RunID: "run"}, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var chunks []store.Artifact
+	for _, artifact := range snapshot.Artifacts {
+		if artifact.Kind == "candidate_file_chunk" {
+			chunks = append(chunks, artifact)
+		}
+	}
+	if len(chunks) != 3 {
+		t.Fatalf("candidate chunks=%d, want 3 post-redaction chunks", len(chunks))
+	}
+
+	want := []byte(strings.Repeat("***", 100))
+	var restored bytes.Buffer
+	for index, artifact := range chunks {
+		var metadata struct {
+			ChunkIndex int   `json:"chunkIndex"`
+			ChunkCount int   `json:"chunkCount"`
+			Offset     int64 `json:"offset"`
+		}
+		if err := json.Unmarshal(artifact.SafeMetadata, &metadata); err != nil {
+			t.Fatal(err)
+		}
+		if metadata.ChunkIndex != index || metadata.ChunkCount != len(chunks) || metadata.Offset != int64(index*128) {
+			t.Fatalf("chunk %d metadata=%+v", index, metadata)
+		}
+		reader, err := base.Open(t.Context(), artifact.StorageRef)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.Copy(&restored, reader); err != nil {
+			_ = reader.Close()
+			t.Fatal(err)
+		}
+		if err := reader.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !bytes.Equal(restored.Bytes(), want) {
+		t.Fatalf("restored redacted candidate=%d bytes, want %d", restored.Len(), len(want))
+	}
+	if bytes.Contains(restored.Bytes(), []byte("x")) {
+		t.Fatal("raw secret remained in persisted candidate chunks")
 	}
 }
 
@@ -166,8 +232,8 @@ func TestCandidateChunkCountValidation(t *testing.T) {
 		size  int64
 		limit int64
 	}{
-		"negative size": {size: -1, limit: 128},
-		"zero limit":    {size: 1, limit: 0},
+		"negative size":  {size: -1, limit: 128},
+		"zero limit":     {size: 1, limit: 0},
 		"negative limit": {size: 1, limit: -1},
 	} {
 		t.Run(name, func(t *testing.T) {

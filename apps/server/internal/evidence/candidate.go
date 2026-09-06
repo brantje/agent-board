@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -275,23 +276,42 @@ func (s *CandidateSnapshotter) Snapshot(ctx context.Context, scope RunScope, wor
 }
 
 func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope RunScope, workspace, relative string) ([]store.Artifact, error) {
-	file, info, err := openCandidateRegularFile(workspace, relative)
+	file, _, err := openCandidateRegularFile(workspace, relative)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 
-	limit := maxBlobBytes(s.blobs)
-	if limit <= 0 || info.Size() <= limit {
+	blobs, source := prepareCandidateBlobSource(s.blobs, scope.RunID, file)
+	limit := maxBlobBytes(blobs)
+	if limit <= 0 {
 		metadata, _ := json.Marshal(map[string]string{"path": relative})
-		artifact, err := s.createArtifact(ctx, scope, relative, "candidate_file", "application/octet-stream", file, metadata)
+		artifact, err := s.createArtifactWithBlobStore(ctx, scope, blobs, relative, "candidate_file", "application/octet-stream", source, metadata)
 		if err != nil {
 			return nil, err
 		}
 		return []store.Artifact{artifact}, nil
 	}
 
-	chunkCount, err := candidateChunkCount(info.Size(), limit)
+	prepared, size, err := spoolCandidateSource(ctx, source, limit)
+	if err != nil {
+		return nil, fmt.Errorf("evidence: snapshot untracked candidate %q: %w", relative, err)
+	}
+	defer func() {
+		_ = prepared.Close()
+		_ = os.Remove(prepared.Name())
+	}()
+
+	if size <= limit {
+		metadata, _ := json.Marshal(map[string]string{"path": relative})
+		artifact, err := s.createArtifactWithBlobStore(ctx, scope, blobs, relative, "candidate_file", "application/octet-stream", prepared, metadata)
+		if err != nil {
+			return nil, err
+		}
+		return []store.Artifact{artifact}, nil
+	}
+
+	chunkCount, err := candidateChunkCount(size, limit)
 	if err != nil {
 		return nil, fmt.Errorf("evidence: snapshot untracked candidate %q: %w", relative, err)
 	}
@@ -305,13 +325,62 @@ func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope 
 			"offset":     offset,
 		})
 		name := fmt.Sprintf("%s.part-%06d-of-%06d", relative, index+1, chunkCount)
-		artifact, err := s.createArtifact(ctx, scope, name, "candidate_file_chunk", "application/octet-stream", io.LimitReader(file, limit), metadata)
+		artifact, err := s.createArtifactWithBlobStore(ctx, scope, blobs, name, "candidate_file_chunk", "application/octet-stream", io.LimitReader(prepared, limit), metadata)
 		if err != nil {
 			return nil, fmt.Errorf("evidence: snapshot untracked candidate %q chunk %d/%d: %w", relative, index+1, chunkCount, err)
 		}
 		artifacts = append(artifacts, artifact)
 	}
 	return artifacts, nil
+}
+
+func prepareCandidateBlobSource(blobs BlobStore, runID string, source io.Reader) (BlobStore, io.Reader) {
+	for {
+		redacting, ok := blobs.(*RedactingBlobStore)
+		if !ok {
+			return blobs, source
+		}
+		source = redacting.redactor.Reader(runID, source)
+		blobs = redacting.base
+	}
+}
+
+func spoolCandidateSource(ctx context.Context, source io.Reader, limit int64) (*os.File, int64, error) {
+	if source == nil || limit <= 0 {
+		return nil, 0, fmt.Errorf("invalid candidate source or chunk limit")
+	}
+	maxBytes := int64(math.MaxInt64)
+	if limit <= math.MaxInt64/maxCandidateFileChunks {
+		maxBytes = limit * maxCandidateFileChunks
+	}
+
+	prepared, err := os.CreateTemp("", ".agent-board-candidate-*")
+	if err != nil {
+		return nil, 0, fmt.Errorf("create prepared candidate file: %w", err)
+	}
+	cleanup := func() {
+		_ = prepared.Close()
+		_ = os.Remove(prepared.Name())
+	}
+
+	bounded := source
+	if maxBytes < math.MaxInt64 {
+		bounded = io.LimitReader(source, maxBytes+1)
+	}
+	written, err := copyContext(ctx, prepared, bounded)
+	if err != nil {
+		cleanup()
+		return nil, 0, fmt.Errorf("prepare candidate content: %w", err)
+	}
+	if written > maxBytes {
+		cleanup()
+		return nil, 0, fmt.Errorf("candidate exceeds maximum of %d chunks", maxCandidateFileChunks)
+	}
+	if _, err := prepared.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, 0, fmt.Errorf("rewind prepared candidate content: %w", err)
+	}
+	return prepared, written, nil
 }
 
 func openCandidateRegularFile(workspace, relative string) (*os.File, os.FileInfo, error) {
@@ -346,7 +415,7 @@ func openCandidateRegularFile(workspace, relative string) (*os.File, os.FileInfo
 
 	file, err := root.Open(cleanRelative)
 	if err != nil {
-		return nil, nil, fmt.Errorf("evidence: open untracked candidate %q: %w", relative, err)
+		return nil, nil, fmt.Errorf("evidence: open untraced candidate %q: %w", relative, err)
 	}
 	opened, err := file.Stat()
 	if err != nil {
@@ -380,7 +449,11 @@ func candidateChunkCount(size, limit int64) (int, error) {
 }
 
 func (s *CandidateSnapshotter) createArtifact(ctx context.Context, scope RunScope, name, kind, mediaType string, source io.Reader, metadata json.RawMessage) (store.Artifact, error) {
-	blob, err := s.blobs.Put(ctx, scope.RunID, source)
+	return s.createArtifactWithBlobStore(ctx, scope, s.blobs, name, kind, mediaType, source, metadata)
+}
+
+func (s *CandidateSnapshotter) createArtifactWithBlobStore(ctx context.Context, scope RunScope, blobs BlobStore, name, kind, mediaType string, source io.Reader, metadata json.RawMessage) (store.Artifact, error) {
+	blob, err := blobs.Put(ctx, scope.RunID, source)
 	if err != nil {
 		return store.Artifact{}, err
 	}
