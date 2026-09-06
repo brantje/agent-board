@@ -254,23 +254,57 @@ func (s *CandidateSnapshotter) Snapshot(ctx context.Context, scope RunScope, wor
 		if !change.Untracked {
 			continue
 		}
-		path, err := candidateFilePath(workspace, change.Path)
+		artifacts, err := s.snapshotUntrackedFile(ctx, scope, workspace, change.Path)
 		if err != nil {
 			return CandidateSnapshot{}, err
 		}
-		file, err := os.Open(path)
-		if err != nil {
-			return CandidateSnapshot{}, fmt.Errorf("evidence: open untracked candidate %q: %w", change.Path, err)
-		}
-		metadata, _ := json.Marshal(map[string]string{"path": change.Path})
-		artifact, createErr := s.createArtifact(ctx, scope, change.Path, "candidate_file", "application/octet-stream", file, metadata)
-		_ = file.Close()
-		if createErr != nil {
-			return CandidateSnapshot{}, createErr
-		}
-		snapshot.Artifacts = append(snapshot.Artifacts, artifact)
+		snapshot.Artifacts = append(snapshot.Artifacts, artifacts...)
 	}
 	return snapshot, nil
+}
+
+func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope RunScope, workspace, relative string) ([]store.Artifact, error) {
+	path, err := candidateFilePath(workspace, relative)
+	if err != nil {
+		return nil, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("evidence: open untracked candidate %q: %w", relative, err)
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("evidence: inspect untracked candidate %q: %w", relative, err)
+	}
+	limit := maxBlobBytes(s.blobs)
+	if limit <= 0 || info.Size() <= limit {
+		metadata, _ := json.Marshal(map[string]string{"path": relative})
+		artifact, err := s.createArtifact(ctx, scope, relative, "candidate_file", "application/octet-stream", file, metadata)
+		if err != nil {
+			return nil, err
+		}
+		return []store.Artifact{artifact}, nil
+	}
+
+	chunkCount := int((info.Size() + limit - 1) / limit)
+	artifacts := make([]store.Artifact, 0, chunkCount)
+	for index := 0; index < chunkCount; index++ {
+		offset := int64(index) * limit
+		metadata, _ := json.Marshal(map[string]any{
+			"path":       relative,
+			"chunkIndex": index,
+			"chunkCount": chunkCount,
+			"offset":     offset,
+		})
+		name := fmt.Sprintf("%s.part-%06d-of-%06d", relative, index+1, chunkCount)
+		artifact, err := s.createArtifact(ctx, scope, name, "candidate_file_chunk", "application/octet-stream", io.LimitReader(file, limit), metadata)
+		if err != nil {
+			return nil, fmt.Errorf("evidence: snapshot untracked candidate %q chunk %d/%d: %w", relative, index+1, chunkCount, err)
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	return artifacts, nil
 }
 
 func (s *CandidateSnapshotter) createArtifact(ctx context.Context, scope RunScope, name, kind, mediaType string, source io.Reader, metadata json.RawMessage) (store.Artifact, error) {
