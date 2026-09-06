@@ -2,6 +2,7 @@ package evidence
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -51,5 +52,30 @@ func TestOutputRecorderChunksLargeStreams(t *testing.T) {
 	}
 	if len(more) != 1 || more[0].Sequence != 4 {
 		t.Fatalf("sequence did not continue: %+v", more)
+	}
+}
+
+func TestOutputRecorderReleasesCompletedStreamLocks(t *testing.T) {
+	blobs, err := NewFileBlobStore(t.TempDir(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := NewOutputRecorder(&memoryRawStore{}, blobs, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for index := 0; index < 64; index++ {
+		_, err := recorder.Capture(t.Context(), RunScope{ProjectID: "p", IssueID: "i", RunID: fmt.Sprintf("run-%d", index)}, "STDOUT", strings.NewReader("x"))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	recorder.locksMu.Lock()
+	remaining := len(recorder.locks)
+	recorder.locksMu.Unlock()
+	if remaining != 0 {
+		t.Fatalf("completed stream locks retained=%d, want 0", remaining)
 	}
 }

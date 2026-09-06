@@ -26,7 +26,12 @@ type OutputRecorder struct {
 	blobs     BlobStore
 	chunkSize int
 	locksMu   sync.Mutex
-	locks     map[string]*sync.Mutex
+	locks     map[string]*streamLockEntry
+}
+
+type streamLockEntry struct {
+	mu    sync.Mutex
+	users int
 }
 
 func NewOutputRecorder(store RawOutputStore, blobs BlobStore, chunkSize int) (*OutputRecorder, error) {
@@ -36,16 +41,15 @@ func NewOutputRecorder(store RawOutputStore, blobs BlobStore, chunkSize int) (*O
 	if chunkSize <= 0 {
 		return nil, fmt.Errorf("evidence: output chunk size must be positive")
 	}
-	return &OutputRecorder{store: store, blobs: blobs, chunkSize: chunkSize, locks: make(map[string]*sync.Mutex)}, nil
+	return &OutputRecorder{store: store, blobs: blobs, chunkSize: chunkSize, locks: make(map[string]*streamLockEntry)}, nil
 }
 
 func (r *OutputRecorder) Capture(ctx context.Context, scope RunScope, stream string, source io.Reader) ([]store.RawOutputChunk, error) {
 	if source == nil {
 		return nil, fmt.Errorf("evidence: output source is required")
 	}
-	lock := r.streamLock(scope.RunID, stream)
-	lock.Lock()
-	defer lock.Unlock()
+	key, lock := r.acquireStreamLock(scope.RunID, stream)
+	defer r.releaseStreamLock(key, lock)
 
 	existing, err := r.store.ListRawOutputChunks(ctx, scope.ProjectID, scope.RunID)
 	if err != nil {
@@ -92,14 +96,28 @@ func (r *OutputRecorder) Capture(ctx context.Context, scope RunScope, stream str
 	}
 }
 
-func (r *OutputRecorder) streamLock(runID, stream string) *sync.Mutex {
+func (r *OutputRecorder) acquireStreamLock(runID, stream string) (string, *streamLockEntry) {
 	key := runID + "\x00" + stream
 	r.locksMu.Lock()
-	defer r.locksMu.Unlock()
-	lock := r.locks[key]
-	if lock == nil {
-		lock = &sync.Mutex{}
-		r.locks[key] = lock
+	entry := r.locks[key]
+	if entry == nil {
+		entry = &streamLockEntry{}
+		r.locks[key] = entry
 	}
-	return lock
+	entry.users++
+	r.locksMu.Unlock()
+
+	entry.mu.Lock()
+	return key, entry
+}
+
+func (r *OutputRecorder) releaseStreamLock(key string, entry *streamLockEntry) {
+	entry.mu.Unlock()
+
+	r.locksMu.Lock()
+	defer r.locksMu.Unlock()
+	entry.users--
+	if entry.users == 0 && r.locks[key] == entry {
+		delete(r.locks, key)
+	}
 }
