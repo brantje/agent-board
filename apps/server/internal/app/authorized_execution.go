@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	sharedredact "github.com/brantje/agent-board/packages/redact"
 )
 
 type ExecutionPreparer interface {
@@ -36,7 +38,7 @@ func NewAuthorizedExecutionSessionService(sessions *ExecutionSessionService, pre
 	return &AuthorizedExecutionSessionService{sessions: sessions, preparer: preparer}, nil
 }
 
-func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID, runID, runtimeInstanceID string, request AuthorizedExecutionRequest) (*ExecutionProcess, error) {
+func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID, runID, runtimeInstanceID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
 	prepared, err := s.preparer.Prepare(ctx, projectID, runID, executioncontext.SecretRequest{
 		ProviderCredentialEnv: request.ProviderCredentialEnv,
 		RuntimeSecretRefs:     cloneMap(request.RuntimeSecretRefs),
@@ -60,8 +62,29 @@ func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID
 	if err != nil {
 		return nil, redaction.WrapError(err, prepared.RedactionValues)
 	}
-	return process, nil
+	return newAuthorizedExecutionProcess(process, prepared.RedactionValues), nil
 }
+
+// AuthorizedExecutionProcess preserves the low-level process lifecycle while
+// independently sanitizing runner output at the trusted server boundary. This
+// prevents a buggy or compromised runner from returning registered secret
+// plaintext to any downstream durable-output consumer.
+type AuthorizedExecutionProcess struct {
+	*ExecutionProcess
+	stdout io.Reader
+	stderr io.Reader
+}
+
+func newAuthorizedExecutionProcess(process *ExecutionProcess, redactionValues []string) *AuthorizedExecutionProcess {
+	return &AuthorizedExecutionProcess{
+		ExecutionProcess: process,
+		stdout:           sharedredact.NewReader(process.Stdout(), redactionValues),
+		stderr:           sharedredact.NewReader(process.Stderr(), redactionValues),
+	}
+}
+
+func (p *AuthorizedExecutionProcess) Stdout() io.Reader { return p.stdout }
+func (p *AuthorizedExecutionProcess) Stderr() io.Reader { return p.stderr }
 
 func (s *AuthorizedExecutionSessionService) ReconcileAll(ctx context.Context) error {
 	return s.sessions.ReconcileAll(ctx)
