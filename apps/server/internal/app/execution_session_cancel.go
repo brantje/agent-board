@@ -66,6 +66,13 @@ func (s *ExecutionSessionService) Cancel(ctx context.Context, projectID, session
 		}
 		return err
 	}
-	_, err := process.Wait(ctx)
-	return err
+	killWaitCtx, cancelKillWait := context.WithTimeout(ctx, grace)
+	defer cancelKillWait()
+	if _, err := process.Wait(killWaitCtx); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			return NewError("execution_session_cancel_uncertain", "the Execution Session did not exit after force-kill", err)
+		}
+		return err
+	}
+	return nil
 }
