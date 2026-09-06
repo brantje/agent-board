@@ -10,11 +10,14 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/runner"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
+
+const executionRecoveryTimeout = 5 * time.Second
 
 type ExecutionSessionStore interface {
 	GetRun(context.Context, string, string) (store.Run, error)
@@ -102,11 +105,11 @@ func (s *ExecutionSessionService) Start(ctx context.Context, projectID, runID, r
 		uncertainCause := err
 		if transport != nil {
 			// A start request may have reached the runner before the caller's
-			// context expired. Mark the runner BUSY before exposing the retained
-			// process, then keep exactly one observer attached so output cannot
-			// backpressure the connection and a later terminal result still
-			// updates durable state.
-			if _, statusErr := s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, runtimeInstanceID, "BUSY"); statusErr != nil {
+			// context expired. Mark the runner BUSY with an independent recovery
+			// context before exposing the retained process, then keep exactly one
+			// observer attached so output cannot backpressure the connection and a
+			// later terminal result still updates durable state.
+			if statusErr := s.updateRunnerStatusRecovery(projectID, runtimeInstanceID, "BUSY"); statusErr != nil {
 				uncertainCause = errors.Join(uncertainCause, fmt.Errorf("persist runner BUSY status: %w", statusErr))
 			}
 			process := newExecutionProcess(s, session, transport)
@@ -123,6 +126,13 @@ func (s *ExecutionSessionService) Start(ctx context.Context, projectID, runID, r
 		return nil, NewError("execution_session_uncertain", "Execution Session started but runner BUSY state could not be persisted", err)
 	}
 	return newExecutionProcess(s, session, transport), nil
+}
+
+func (s *ExecutionSessionService) updateRunnerStatusRecovery(projectID, runtimeInstanceID, status string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), executionRecoveryTimeout)
+	defer cancel()
+	_, err := s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, runtimeInstanceID, status)
+	return err
 }
 
 func validateExecutionRequest(projectID, runID, runtimeInstanceID string, request ExecutionRequest) (string, error) {
