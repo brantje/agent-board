@@ -17,8 +17,14 @@ func TestClientReturnsUncertainSessionWhenStartContextExpires(t *testing.T) {
 			return
 		}
 		<-release
-		writeProtocol(t, conn, protocol.TypeSessionStarted, msg.SessionID, nil)
-		writeProtocol(t, conn, protocol.TypeExit, msg.SessionID, protocol.ExitResult{ExitCode: 0})
+		if err := writeProtocol(conn, protocol.TypeSessionStarted, msg.SessionID, nil); err != nil {
+			t.Errorf("write session_started: %v", err)
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeExit, msg.SessionID, protocol.ExitResult{ExitCode: 0}); err != nil {
+			t.Errorf("write exit: %v", err)
+			return
+		}
 	})
 	defer server.Close()
 

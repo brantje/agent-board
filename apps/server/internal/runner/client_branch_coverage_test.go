@@ -170,7 +170,10 @@ func TestKillAndClosedStdinBranches(t *testing.T) {
 	server := newProtocolTestServer(t, requiredRunnerCapabilities(), func(conn *websocket.Conn, msg protocol.Message) {
 		received <- msg
 		if msg.Type == protocol.TypeStart {
-			writeProtocol(t, conn, protocol.TypeSessionStarted, msg.SessionID, nil)
+			if err := writeProtocol(conn, protocol.TypeSessionStarted, msg.SessionID, nil); err != nil {
+				t.Errorf("write session_started: %v", err)
+				return
+			}
 		}
 	})
 	defer server.Close()

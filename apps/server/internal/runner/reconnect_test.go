@@ -24,10 +24,22 @@ func TestAttachReplaysTerminalDeliveryThatArrivedBeforeRegistration(t *testing.T
 			return
 		}
 		caps := protocol.Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"}}
-		writeProtocol(t, conn, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version1, Capabilities: caps})
-		writeProtocol(t, conn, protocol.TypeHealth, "", protocol.Health{Status: "ok"})
-		writeProtocol(t, conn, protocol.TypeStdout, "session-recovered", protocol.StreamData{Data: []byte("retained")})
-		writeProtocol(t, conn, protocol.TypeExit, "session-recovered", protocol.ExitResult{ExitCode: 9})
+		if err := writeProtocol(conn, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version1, Capabilities: caps}); err != nil {
+			t.Errorf("write runner_hello: %v", err)
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeHealth, "", protocol.Health{Status: "ok"}); err != nil {
+			t.Errorf("write health: %v", err)
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeStdout, "session-recovered", protocol.StreamData{Data: []byte("retained")}); err != nil {
+			t.Errorf("write stdout: %v", err)
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeExit, "session-recovered", protocol.ExitResult{ExitCode: 9}); err != nil {
+			t.Errorf("write exit: %v", err)
+			return
+		}
 		time.Sleep(200 * time.Millisecond)
 	}))
 	defer server.Close()
