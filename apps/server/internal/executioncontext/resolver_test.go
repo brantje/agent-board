@@ -98,3 +98,36 @@ func TestResolveRejectsDisabledConfiguration(t *testing.T) {
 		t.Fatalf("err = %#v", err)
 	}
 }
+
+func TestResolverDefensiveHelpers(t *testing.T) {
+	if _, err := NewResolver(nil); err == nil {
+		t.Fatal("expected nil store to be rejected")
+	}
+	if got := (&Error{Message: "safe execution failure"}).Error(); got != "safe execution failure" {
+		t.Fatalf("Error() = %q", got)
+	}
+
+	intValue := 7
+	if got := cloneInt(&intValue); got == nil || *got != intValue || got == &intValue {
+		t.Fatalf("cloneInt() = %v", got)
+	}
+	if cloneInt(nil) != nil {
+		t.Fatal("cloneInt(nil) must remain nil")
+	}
+
+	int64Value := int64(9)
+	if got := cloneInt64(&int64Value); got == nil || *got != int64Value || got == &int64Value {
+		t.Fatalf("cloneInt64() = %v", got)
+	}
+	if cloneInt64(nil) != nil {
+		t.Fatal("cloneInt64(nil) must remain nil")
+	}
+
+	floatValue := 0.25
+	if got := cloneFloat64(&floatValue); got == nil || *got != floatValue || got == &floatValue {
+		t.Fatalf("cloneFloat64() = %v", got)
+	}
+	if cloneFloat64(nil) != nil {
+		t.Fatal("cloneFloat64(nil) must remain nil")
+	}
+}
