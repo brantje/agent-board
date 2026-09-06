@@ -164,7 +164,16 @@ func splitNUL(data []byte) []string {
 }
 
 func gitOutput(ctx context.Context, workspace string, args ...string) ([]byte, error) {
-	command := exec.CommandContext(ctx, "git", args...)
+	safeArgs := make([]string, 0, len(args)+8)
+	safeArgs = append(safeArgs, "-c", "core.fsmonitor=false", "-c", "diff.external=")
+	if len(args) > 0 && args[0] == "diff" {
+		safeArgs = append(safeArgs, "diff", "--no-ext-diff", "--no-textconv")
+		safeArgs = append(safeArgs, args[1:]...)
+	} else {
+		safeArgs = append(safeArgs, args...)
+	}
+
+	command := exec.CommandContext(ctx, "git", safeArgs...)
 	command.Dir = workspace
 	out, err := command.Output()
 	if err != nil {
