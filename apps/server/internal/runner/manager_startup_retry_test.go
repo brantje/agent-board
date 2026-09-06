@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestDialRunnerStartupRetriesConnectionRefused(t *testing.T) {
@@ -41,5 +42,27 @@ func TestDialRunnerStartupDoesNotRetryNonStartupFailure(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Fatalf("dial attempts = %d, want 1", calls.Load())
+	}
+}
+
+func TestDialRunnerStartupBoundsDialContext(t *testing.T) {
+	started := time.Now()
+	want := fmt.Errorf("protocol mismatch")
+	_, err := dialRunnerStartup(context.Background(), func(ctx context.Context, _ string) (Client, error) {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("dial context has no startup deadline")
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 || remaining > runnerStartupRetryWindow {
+			t.Fatalf("dial context remaining=%v, want within %v", remaining, runnerStartupRetryWindow)
+		}
+		if deadline.After(started.Add(runnerStartupRetryWindow + 100*time.Millisecond)) {
+			t.Fatalf("dial deadline=%v exceeds startup window from %v", deadline, started)
+		}
+		return nil, want
+	}, "ws://runner.test/v1/ws")
+	if err != want {
+		t.Fatalf("dialRunnerStartup() error = %v, want %v", err, want)
 	}
 }
