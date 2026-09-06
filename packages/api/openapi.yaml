@@ -10,6 +10,8 @@ paths:
     $ref: ./paths/projects.yaml#/path1
   /api/projects/{projectID}:
     $ref: ./paths/projects.yaml#/path2
+  /api/secrets:
+    $ref: ./paths/secrets.yaml#/path1
   /api/providers:
     $ref: ./paths/providers.yaml#/path1
   /api/providers/{resourceID}:
@@ -30,6 +32,8 @@ paths:
     $ref: ./paths/agents.yaml#/path1
   /api/agents/{resourceID}:
     $ref: ./paths/agents.yaml#/path2
+  /api/projects/{projectID}/secrets:
+    $ref: ./paths/secrets.yaml#/path2
   /api/projects/{projectID}/model-profiles:
     $ref: ./paths/model-profiles.yaml#/path3
   /api/projects/{projectID}/model-profiles/{resourceID}:
