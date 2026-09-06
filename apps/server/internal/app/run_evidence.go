@@ -21,7 +21,9 @@ type RunEvidenceStore interface {
 	ListExecutionSessionsByRun(context.Context, string, string, []string) ([]store.ExecutionSession, error)
 	GetRuntimeInstance(context.Context, string, string) (store.RuntimeInstance, error)
 	ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error)
+	GetRawOutputChunk(context.Context, string, string, string) (store.RawOutputChunk, error)
 	ListRawOutputChunks(context.Context, string, string) ([]store.RawOutputChunk, error)
+	GetArtifact(context.Context, string, string, string) (store.Artifact, error)
 	ListArtifacts(context.Context, string, string) ([]store.Artifact, error)
 }
 
@@ -100,21 +102,18 @@ func (s *RunEvidenceService) OpenRawOutput(ctx context.Context, projectID, runID
 	if strings.TrimSpace(chunkID) == "" {
 		return store.RawOutputChunk{}, nil, NewError("invalid_argument", "raw output chunk id is required", store.ErrInvalidArgument)
 	}
-	chunks, err := s.store.ListRawOutputChunks(ctx, projectID, runID)
+	chunk, err := s.store.GetRawOutputChunk(ctx, projectID, runID, chunkID)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.RawOutputChunk{}, nil, NewError("raw_output_not_found", "raw output chunk not found", store.ErrNotFound)
+	}
 	if err != nil {
-		return store.RawOutputChunk{}, nil, fmt.Errorf("list raw output: %w", err)
+		return store.RawOutputChunk{}, nil, fmt.Errorf("read raw output: %w", err)
 	}
-	for _, chunk := range chunks {
-		if chunk.ID != chunkID {
-			continue
-		}
-		reader, err := s.blobs.Open(ctx, chunk.StorageRef)
-		if err != nil {
-			return store.RawOutputChunk{}, nil, fmt.Errorf("open raw output blob: %w", err)
-		}
-		return chunk, reader, nil
+	reader, err := s.blobs.Open(ctx, chunk.StorageRef)
+	if err != nil {
+		return store.RawOutputChunk{}, nil, fmt.Errorf("open raw output blob: %w", err)
 	}
-	return store.RawOutputChunk{}, nil, NewError("raw_output_not_found", "raw output chunk not found", store.ErrNotFound)
+	return chunk, reader, nil
 }
 
 func (s *RunEvidenceService) OpenArtifact(ctx context.Context, projectID, runID, artifactID string) (store.Artifact, io.ReadCloser, error) {
@@ -124,21 +123,18 @@ func (s *RunEvidenceService) OpenArtifact(ctx context.Context, projectID, runID,
 	if strings.TrimSpace(artifactID) == "" {
 		return store.Artifact{}, nil, NewError("invalid_argument", "artifact id is required", store.ErrInvalidArgument)
 	}
-	artifacts, err := s.store.ListArtifacts(ctx, projectID, runID)
+	artifact, err := s.store.GetArtifact(ctx, projectID, runID, artifactID)
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Artifact{}, nil, NewError("artifact_not_found", "artifact not found", store.ErrNotFound)
+	}
 	if err != nil {
-		return store.Artifact{}, nil, fmt.Errorf("list artifacts: %w", err)
+		return store.Artifact{}, nil, fmt.Errorf("read artifact: %w", err)
 	}
-	for _, artifact := range artifacts {
-		if artifact.ID != artifactID {
-			continue
-		}
-		reader, err := s.blobs.Open(ctx, artifact.StorageRef)
-		if err != nil {
-			return store.Artifact{}, nil, fmt.Errorf("open artifact blob: %w", err)
-		}
-		return artifact, reader, nil
+	reader, err := s.blobs.Open(ctx, artifact.StorageRef)
+	if err != nil {
+		return store.Artifact{}, nil, fmt.Errorf("open artifact blob: %w", err)
 	}
-	return store.Artifact{}, nil, NewError("artifact_not_found", "artifact not found", store.ErrNotFound)
+	return artifact, reader, nil
 }
 
 func (s *RunEvidenceService) requireRun(ctx context.Context, projectID, runID string) (store.Run, error) {
