@@ -1,0 +1,128 @@
+RunEvidence:
+  type: object
+  additionalProperties: false
+  required: [run, provenance, runtimeInstances, commands, events, tests, fileChanges, rawOutput, artifacts]
+  properties:
+    run:
+      $ref: ./control-plane.yaml#/Run
+    provenance:
+      oneOf:
+      - type: object
+        additionalProperties: true
+      - type: 'null'
+    runtimeInstances:
+      type: array
+      items:
+        $ref: '#/RuntimeInstanceEvidence'
+    commands:
+      type: array
+      items:
+        $ref: '#/ExecutionSessionEvidence'
+    events:
+      type: array
+      items:
+        $ref: '#/EventEvidence'
+    tests:
+      type: array
+      description: Test-family Events extracted from the authoritative Event timeline.
+      items:
+        $ref: '#/EventEvidence'
+    fileChanges:
+      type: array
+      description: File-family Events extracted from the authoritative Event timeline.
+      items:
+        $ref: '#/EventEvidence'
+    rawOutput:
+      type: array
+      items:
+        $ref: '#/RawOutputChunkEvidence'
+    artifacts:
+      type: array
+      items:
+        $ref: '#/ArtifactEvidence'
+
+RuntimeInstanceEvidence:
+  type: object
+  additionalProperties: false
+  required: [id, runtimeId, status, runnerStatus, createdAt, startedAt, stoppedAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    runtimeId: {type: string, format: uuid}
+    status: {type: string}
+    runnerStatus: {type: string}
+    createdAt: {type: string, format: date-time}
+    startedAt: {type: [string, 'null'], format: date-time}
+    stoppedAt: {type: [string, 'null'], format: date-time}
+    updatedAt: {type: string, format: date-time}
+
+ExecutionSessionEvidence:
+  type: object
+  additionalProperties: false
+  required: [id, runtimeInstanceId, status, cwd, command, exitCode, createdAt, startedAt, completedAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    runtimeInstanceId: {type: string, format: uuid}
+    status: {type: string}
+    cwd: {type: string}
+    command:
+      type: array
+      items: {type: string}
+    exitCode: {type: [integer, 'null']}
+    createdAt: {type: string, format: date-time}
+    startedAt: {type: [string, 'null'], format: date-time}
+    completedAt: {type: [string, 'null'], format: date-time}
+    updatedAt: {type: string, format: date-time}
+
+EventEvidence:
+  type: object
+  additionalProperties: false
+  required: [id, schemaVersion, type, occurredAt, sequence, agentId, workspaceId, runtimeInstanceId, correlationId, parentEventId, actor, payload]
+  properties:
+    id: {type: string, format: uuid}
+    schemaVersion: {type: integer, minimum: 1}
+    type: {type: string, minLength: 1}
+    occurredAt: {type: string, format: date-time}
+    sequence: {type: [integer, 'null'], minimum: 1}
+    agentId: {type: [string, 'null'], format: uuid}
+    workspaceId: {type: [string, 'null'], format: uuid}
+    runtimeInstanceId: {type: [string, 'null'], format: uuid}
+    correlationId: {type: [string, 'null'], format: uuid}
+    parentEventId: {type: [string, 'null'], format: uuid}
+    actor:
+      type: object
+      additionalProperties: true
+    payload:
+      type: object
+      additionalProperties: true
+
+RawOutputChunkEvidence:
+  type: object
+  additionalProperties: false
+  required: [id, stream, sequence, sizeBytes, digest, contentPath, createdAt]
+  properties:
+    id: {type: string, format: uuid}
+    stream:
+      type: string
+      enum: [STDOUT, STDERR, PROTOCOL, RUNTIME, DIAGNOSTIC]
+    sequence: {type: integer, minimum: 1}
+    sizeBytes: {type: integer, minimum: 0}
+    digest: {type: [string, 'null']}
+    contentPath: {type: string, minLength: 1}
+    createdAt: {type: string, format: date-time}
+
+ArtifactEvidence:
+  type: object
+  additionalProperties: false
+  required: [id, name, kind, mediaType, sizeBytes, digest, safeMetadata, contentPath, createdAt]
+  properties:
+    id: {type: string, format: uuid}
+    name: {type: string, minLength: 1}
+    kind: {type: string, minLength: 1}
+    mediaType: {type: [string, 'null']}
+    sizeBytes: {type: integer, minimum: 0}
+    digest: {type: [string, 'null']}
+    safeMetadata:
+      type: object
+      additionalProperties: true
+    contentPath: {type: string, minLength: 1}
+    createdAt: {type: string, format: date-time}

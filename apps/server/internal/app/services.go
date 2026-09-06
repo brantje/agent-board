@@ -21,6 +21,7 @@ type Services struct {
 	RuntimeInstances  *RuntimeInstanceService
 	RunnerConnections *runner.Manager
 	ExecutionSessions *AuthorizedExecutionSessionService
+	RunEvidence       *RunEvidenceService
 	ExecutionStore    store.ControlPlaneStore
 	ExecutionContext  *executioncontext.Resolver
 	Scheduler         *scheduler.Coordinator

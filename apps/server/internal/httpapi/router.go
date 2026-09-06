@@ -13,6 +13,7 @@ import (
 
 type api struct {
 	service               *app.Service
+	runEvidence           *app.RunEvidenceService
 	secrets               app.SecretWriter
 	secretWriteAuthorizer SecretWriteAuthorizer
 }
@@ -26,7 +27,7 @@ func NewRouter(services ...*app.Service) http.Handler {
 	if len(services) > 0 {
 		service = services[0]
 	}
-	return newRouter(service, nil, nil)
+	return newRouter(service, nil, nil, nil)
 }
 
 func NewRouterWithSecrets(service *app.Service, secrets app.SecretWriter, authorizers ...SecretWriteAuthorizer) http.Handler {
@@ -34,19 +35,31 @@ func NewRouterWithSecrets(service *app.Service, secrets app.SecretWriter, author
 	if len(authorizers) > 0 {
 		authorizer = authorizers[0]
 	}
-	return newRouter(service, secrets, authorizer)
+	return newRouter(service, nil, secrets, authorizer)
 }
 
-func newRouter(service *app.Service, secretWriter app.SecretWriter, secretWriteAuthorizer SecretWriteAuthorizer) http.Handler {
+func NewRouterWithApplication(services *app.Services, authorizers ...SecretWriteAuthorizer) http.Handler {
+	if services == nil {
+		return newRouter(nil, nil, nil, nil)
+	}
+	var authorizer SecretWriteAuthorizer
+	if len(authorizers) > 0 {
+		authorizer = authorizers[0]
+	}
+	return newRouter(services.ControlPlane, services.RunEvidence, services.Secrets, authorizer)
+}
+
+func newRouter(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretWriteAuthorizer SecretWriteAuthorizer) http.Handler {
 	router := chi.NewRouter()
 	router.Get("/healthz", handleHealth)
 	if service == nil {
 		return router
 	}
-	a := &api{service: service, secrets: secretWriter, secretWriteAuthorizer: secretWriteAuthorizer}
+	a := &api{service: service, runEvidence: runEvidence, secrets: secretWriter, secretWriteAuthorizer: secretWriteAuthorizer}
 	router.Route("/api", func(r chi.Router) {
 		a.registerConfigurationRoutes(r)
 		a.registerIssueRunRoutes(r)
+		a.registerRunEvidenceRoutes(r)
 		if a.secrets != nil {
 			a.registerSecretRoutes(r)
 		}

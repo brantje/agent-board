@@ -117,7 +117,7 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 	}
 	return &applicationHandler{
-		Handler:  httpapi.NewRouterWithSecrets(services.ControlPlane, services.Secrets, secretWriteAuthorizer),
+		Handler:  httpapi.NewRouterWithApplication(services, secretWriteAuthorizer),
 		services: services,
 	}, closeApplication, nil
 }
@@ -205,6 +205,11 @@ func configureExecutionScheduler(services *app.Services) error {
 	if err != nil {
 		return err
 	}
+	runEvidence, err := app.NewRunEvidenceService(services.ExecutionStore, blobs)
+	if err != nil {
+		return err
+	}
+	services.RunEvidence = runEvidence
 	events, err := evidence.NewRecorder(services.ExecutionStore, nil)
 	if err != nil {
 		return err
