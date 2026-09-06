@@ -13,10 +13,10 @@ import (
 )
 
 const (
-	maxMessageSize             = 1 << 20
-	writeTimeout               = 10 * time.Second
-	maxPendingSessionMessages  = 64
-	maxPendingSessionBytes     = 2 << 20
+	maxMessageSize            = 1 << 20
+	writeTimeout              = 10 * time.Second
+	maxPendingSessionMessages = 32
+	maxPendingSessionBytes    = 2 << 20
 )
 
 var (
@@ -73,10 +73,10 @@ func dialWith(ctx context.Context, dialer *websocket.Dialer, endpoint string, he
 		return nil, fmt.Errorf("dial runner: %w", err)
 	}
 	c := &Connection{
-		conn: conn,
+		conn:     conn,
 		sessions: make(map[string]*Session),
-		pending: make(map[string]*pendingSessionMessages),
-		done: make(chan struct{}),
+		pending:  make(map[string]*pendingSessionMessages),
+		done:     make(chan struct{}),
 	}
 	conn.SetReadLimit(maxMessageSize)
 	if err := c.handshake(); err != nil {
@@ -111,6 +111,7 @@ func (c *Connection) handshake() error {
 	if err := validateFeatures(hello.Capabilities.Features); err != nil {
 		return err
 	}
+
 	healthMessage, err := c.readProtocolMessage()
 	if err != nil {
 		return fmt.Errorf("read runner health: %w", err)
@@ -128,7 +129,14 @@ func (c *Connection) handshake() error {
 }
 
 func validateFeatures(features []string) error {
-	required := map[string]bool{"stdin": false, "stdout": false, "stderr": false, "terminate": false, "kill": false, "health": false}
+	required := map[string]bool{
+		"stdin":     false,
+		"stdout":    false,
+		"stderr":    false,
+		"terminate": false,
+		"kill":      false,
+		"health":    false,
+	}
 	for _, feature := range features {
 		if _, ok := required[feature]; ok {
 			required[feature] = true
@@ -159,6 +167,7 @@ func (c *Connection) Health() protocol.Health {
 }
 
 func (c *Connection) Done() <-chan struct{} { return c.done }
+
 func (c *Connection) Err() error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -170,7 +179,12 @@ func (c *Connection) Start(ctx context.Context, sessionID string, request Reques
 	if err != nil {
 		return nil, err
 	}
-	if err := c.write(protocol.TypeStart, sessionID, protocol.StartRequest{Command: request.Command, Dir: request.Dir, Env: request.Env, Secrets: request.Secrets}); err != nil {
+	if err := c.write(protocol.TypeStart, sessionID, protocol.StartRequest{
+		Command: request.Command,
+		Dir:     request.Dir,
+		Env:     request.Env,
+		Secrets: request.Secrets,
+	}); err != nil {
 		c.unregister(sessionID, session)
 		session.fail(fmt.Errorf("start session: %w", err))
 		return nil, err
