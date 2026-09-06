@@ -71,7 +71,11 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer services.Close()
+	t.Cleanup(func() {
+		if err := services.Close(); err != nil {
+			t.Errorf("close services: %v", err)
+		}
+	})
 
 	project, run := createScriptedIntegrationRun(t, ctx, services.ControlPlane, repositoryPath, image)
 	baseBlobs, err := evidence.NewFileBlobStore(filepath.Join(t.TempDir(), "evidence"), 8<<20)
