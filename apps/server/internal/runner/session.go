@@ -29,6 +29,48 @@ type ProcessSession interface {
 	Kill(context.Context) error
 }
 
+// OutputAbandoner is an optional ProcessSession capability for callers that
+// intentionally stop consuming one of the process output streams.
+type OutputAbandoner interface {
+	AbandonStdout() error
+	AbandonStderr() error
+}
+
+var ErrOutputAbandonUnsupported = errors.New("runner: output abandonment unsupported")
+
+// AbandonStdout releases a ProcessSession stdout consumer without changing the
+// process/session lifecycle. Implementations can use this to unblock output
+// delivery while still draining already-received transport data.
+func AbandonStdout(session ProcessSession) error {
+	if session == nil {
+		return ErrOutputAbandonUnsupported
+	}
+	if abandoner, ok := session.(OutputAbandoner); ok {
+		return abandoner.AbandonStdout()
+	}
+	return abandonOutputReader(session.Stdout())
+}
+
+// AbandonStderr releases a ProcessSession stderr consumer without changing the
+// process/session lifecycle.
+func AbandonStderr(session ProcessSession) error {
+	if session == nil {
+		return ErrOutputAbandonUnsupported
+	}
+	if abandoner, ok := session.(OutputAbandoner); ok {
+		return abandoner.AbandonStderr()
+	}
+	return abandonOutputReader(session.Stderr())
+}
+
+func abandonOutputReader(reader io.Reader) error {
+	closer, ok := reader.(io.Closer)
+	if !ok {
+		return ErrOutputAbandonUnsupported
+	}
+	return closer.Close()
+}
+
 type waitResult struct {
 	result Result
 	err    error
@@ -67,6 +109,8 @@ func (s *Session) ID() string            { return s.id }
 func (s *Session) Stdout() io.Reader     { return s.stdout.reader }
 func (s *Session) Stderr() io.Reader     { return s.stderr.reader }
 func (s *Session) Stdin() io.WriteCloser { return s.stdin }
+func (s *Session) AbandonStdout() error  { return s.stdout.reader.Close() }
+func (s *Session) AbandonStderr() error  { return s.stderr.reader.Close() }
 
 func (s *Session) Wait(ctx context.Context) (Result, error) {
 	select {
