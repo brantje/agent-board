@@ -40,8 +40,8 @@ func NewServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 		return nil, err
 	}
 	services := &Services{ControlPlane: controlPlane, Workspaces: workspaces}
-	if questionStore, ok := controlPlaneStore.(store.QuestionStore); ok {
-		questions, err := NewQuestionService(questionStore)
+	if store.SupportsQuestionStore(controlPlaneStore) {
+		questions, err := NewQuestionService(controlPlaneStore.(store.QuestionStore))
 		if err != nil {
 			return nil, err
 		}

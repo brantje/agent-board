@@ -42,3 +42,26 @@ type QuestionStore interface {
 	GetOpenBlockingQuestion(context.Context, string, string) (Question, error)
 	AnswerQuestion(context.Context, AnswerQuestionCommand) (AnswerQuestionResult, error)
 }
+
+// QuestionStoreCapability lets decorators preserve whether their underlying
+// store can actually perform Question operations. A decorator may implement
+// QuestionStore to forward calls while still wrapping a base without that
+// optional capability.
+type QuestionStoreCapability interface {
+	SupportsQuestionStore() bool
+}
+
+// SupportsQuestionStore reports whether value both implements QuestionStore
+// and, when it exposes an explicit capability signal, currently supports it.
+func SupportsQuestionStore(value any) bool {
+	if value == nil {
+		return false
+	}
+	if _, ok := value.(QuestionStore); !ok {
+		return false
+	}
+	if capability, ok := value.(QuestionStoreCapability); ok {
+		return capability.SupportsQuestionStore()
+	}
+	return true
+}

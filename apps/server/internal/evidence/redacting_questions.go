@@ -8,12 +8,18 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+func (s *RedactingStore) SupportsQuestionStore() bool {
+	if s == nil {
+		return false
+	}
+	return store.SupportsQuestionStore(s.ControlPlaneStore)
+}
+
 func (s *RedactingStore) questionStore() (store.QuestionStore, error) {
-	questions, ok := s.ControlPlaneStore.(store.QuestionStore)
-	if !ok {
+	if s == nil || !store.SupportsQuestionStore(s.ControlPlaneStore) {
 		return nil, fmt.Errorf("redacting store base does not support Question operations")
 	}
-	return questions, nil
+	return s.ControlPlaneStore.(store.QuestionStore), nil
 }
 
 func (s *RedactingStore) CreateQuestion(ctx context.Context, input store.Question) (store.Question, error) {
@@ -98,3 +104,4 @@ func (s *RedactingStore) AnswerQuestion(ctx context.Context, input store.AnswerQ
 }
 
 var _ store.QuestionStore = (*RedactingStore)(nil)
+var _ store.QuestionStoreCapability = (*RedactingStore)(nil)

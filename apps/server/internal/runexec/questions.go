@@ -27,10 +27,10 @@ type runtimeAcquirer interface {
 
 func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string) (engine.Request, error) {
 	request := engine.Request{Context: safe, Launcher: launcher}
-	questions, ok := any(p.store).(store.QuestionStore)
-	if !ok {
+	if !store.SupportsQuestionStore(p.store) {
 		return request, nil
 	}
+	questions := any(p.store).(store.QuestionStore)
 	request.Questions = &questioner{store: questions, events: p.events, safe: safe, runtimeInstanceID: runtimeInstanceID}
 	continuation, err := loadContinuation(ctx, questions, safe)
 	if err != nil {
@@ -86,11 +86,11 @@ func (p *Processor) acquireRuntime(ctx context.Context, projectID, issueID, runt
 }
 
 func (p *Processor) finishWaitingForInput(ctx context.Context, safe executioncontext.SafeContext, instance store.RuntimeInstance) (scheduler.Result, error) {
-	questions, ok := any(p.store).(store.QuestionStore)
-	if !ok {
+	if !store.SupportsQuestionStore(p.store) {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 		return failed(errors.Join(fmt.Errorf("run execution: Question store capability is required for WAITING_FOR_INPUT"), cleanupErr)), nil
 	}
+	questions := any(p.store).(store.QuestionStore)
 	question, err := questions.GetOpenBlockingQuestion(ctx, safe.Project.ID, safe.Run.ID)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
