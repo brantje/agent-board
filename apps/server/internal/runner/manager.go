@@ -163,10 +163,11 @@ func (m *Manager) Connect(ctx context.Context, projectID, runtimeInstanceID stri
 }
 
 func dialRunnerStartup(ctx context.Context, dial DialFunc, endpoint string) (Client, error) {
-	deadline := time.NewTimer(runnerStartupRetryWindow)
-	defer deadline.Stop()
+	startupCtx, cancel := context.WithTimeout(ctx, runnerStartupRetryWindow)
+	defer cancel()
+
 	for {
-		client, err := dial(ctx, endpoint)
+		client, err := dial(startupCtx, endpoint)
 		if err == nil {
 			return client, nil
 		}
@@ -183,9 +184,12 @@ func dialRunnerStartup(ctx context.Context, dial DialFunc, endpoint string) (Cli
 				<-retry.C
 			}
 			return nil, errors.Join(err, ctx.Err())
-		case <-deadline.C:
+		case <-startupCtx.Done():
 			if !retry.Stop() {
 				<-retry.C
+			}
+			if ctx.Err() != nil {
+				return nil, errors.Join(err, ctx.Err())
 			}
 			return nil, err
 		}
