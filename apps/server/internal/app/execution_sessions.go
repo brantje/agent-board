@@ -237,6 +237,8 @@ func (p *ExecutionProcess) ID() string            { return p.transport.ID() }
 func (p *ExecutionProcess) Stdout() io.Reader     { return p.transport.Stdout() }
 func (p *ExecutionProcess) Stderr() io.Reader     { return p.transport.Stderr() }
 func (p *ExecutionProcess) Stdin() io.WriteCloser { return p.transport.Stdin() }
+func (p *ExecutionProcess) AbandonStdout() error  { return runner.AbandonStdout(p.transport) }
+func (p *ExecutionProcess) AbandonStderr() error  { return runner.AbandonStderr(p.transport) }
 
 func (p *ExecutionProcess) Record() store.ExecutionSession {
 	p.mu.RLock()
