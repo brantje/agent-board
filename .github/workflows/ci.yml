@@ -193,13 +193,15 @@ jobs:
         run: |
           sudo mkdir -p /var/lib/agent-board/workspaces
           sudo chmod 0777 /var/lib/agent-board/workspaces
-      - name: Verify repository mount override
+      - name: Verify compose overrides
         env:
           AGENT_BOARD_REPOSITORY_MOUNT_PATH: /mnt/repositories
+          AGENT_BOARD_SCHEDULER_OWNER_ID: scheduler-ci
         run: |
           set -eu
           docker compose config --format json > /tmp/agent-board-compose.json
           jq -e '.services.server.environment.AGENT_BOARD_REPOSITORY_ROOTS == "/mnt/repositories"' /tmp/agent-board-compose.json
+          jq -e '.services.server.environment.AGENT_BOARD_SCHEDULER_OWNER_ID == "scheduler-ci"' /tmp/agent-board-compose.json
           jq -e 'any(.services.server.volumes[]; .target == "/mnt/repositories")' /tmp/agent-board-compose.json
       - name: Build runner image
         run: docker build --file apps/agent-runner/Dockerfile --tag agent-board-agent-runner:ci .
