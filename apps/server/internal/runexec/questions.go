@@ -21,6 +21,10 @@ type questioner struct {
 	runtimeInstanceID string
 }
 
+type runtimeAcquirer interface {
+	Acquire(context.Context, string, string, string) (store.RuntimeInstance, error)
+}
+
 func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string) (engine.Request, error) {
 	request := engine.Request{Context: safe, Launcher: launcher}
 	questions, ok := any(p.store).(store.QuestionStore)
@@ -75,6 +79,9 @@ func loadContinuation(ctx context.Context, questions store.QuestionStore, safe e
 }
 
 func (p *Processor) acquireRuntime(ctx context.Context, projectID, issueID, runtimeID string) (store.RuntimeInstance, error) {
+	if acquirer, ok := p.runtimes.(runtimeAcquirer); ok {
+		return acquirer.Acquire(ctx, projectID, issueID, runtimeID)
+	}
 	return p.runtimes.Create(ctx, projectID, issueID, runtimeID)
 }
 
