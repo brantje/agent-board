@@ -1,0 +1,44 @@
+package evidence
+
+import (
+	"context"
+	"strings"
+	"testing"
+
+	"github.com/brantje/agent-board/apps/server/internal/store"
+)
+
+type memoryRawStore struct{ chunks []store.RawOutputChunk }
+
+func (s *memoryRawStore) CreateRawOutputChunk(_ context.Context, chunk store.RawOutputChunk) (store.RawOutputChunk, error) {
+	chunk.ID = "chunk"
+	s.chunks = append(s.chunks, chunk)
+	return chunk, nil
+}
+
+func TestOutputRecorderChunksLargeStreams(t *testing.T) {
+	blobs, err := NewFileBlobStore(t.TempDir(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := &memoryRawStore{}
+	recorder, err := NewOutputRecorder(metadata, blobs, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks, err := recorder.Capture(context.Background(), RunScope{ProjectID: "p", IssueID: "i", RunID: "r"}, "STDOUT", strings.NewReader("abcdefghij"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chunks) != 3 {
+		t.Fatalf("got %d chunks", len(chunks))
+	}
+	if chunks[0].SizeBytes != 4 || chunks[1].SizeBytes != 4 || chunks[2].SizeBytes != 2 {
+		t.Fatalf("unexpected sizes: %+v", chunks)
+	}
+	for i, chunk := range chunks {
+		if chunk.Sequence != int64(i+1) {
+			t.Fatalf("chunk %d sequence %d", i, chunk.Sequence)
+		}
+	}
+}
