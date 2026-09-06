@@ -4,7 +4,9 @@ import (
 	"errors"
 	"fmt"
 
+	evidencepkg "github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
+	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/runner"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -18,6 +20,7 @@ type Services struct {
 	RuntimeInstances  *RuntimeInstanceService
 	RunnerConnections *runner.Manager
 	ExecutionSessions *AuthorizedExecutionSessionService
+	Redaction         *redaction.Registry
 }
 
 func NewServices(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer) (*Services, error) {
@@ -33,11 +36,13 @@ func NewServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 }
 
 func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, implementations map[string]runtimepkg.Implementation, secretResolvers ...executioncontext.SecretResolver) (*Services, error) {
-	services, err := NewServices(controlPlaneStore, materializer)
+	registry := redaction.NewRegistry()
+	securedStore := evidencepkg.NewRedactingStore(controlPlaneStore, registry)
+	services, err := NewServices(securedStore, materializer)
 	if err != nil {
 		return nil, err
 	}
-	resolver, err := executioncontext.NewResolver(controlPlaneStore)
+	resolver, err := executioncontext.NewResolver(securedStore)
 	if err != nil {
 		return nil, err
 	}
@@ -45,11 +50,11 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	if len(secretResolvers) > 0 {
 		secretResolver = secretResolvers[0]
 	}
-	preparer, err := executioncontext.NewPreparer(resolver, secretResolver, controlPlaneStore)
+	preparer, err := executioncontext.NewPreparer(resolver, secretResolver, securedStore, registry)
 	if err != nil {
 		return nil, err
 	}
-	runtimeInstances, err := NewRuntimeInstanceService(controlPlaneStore, services.Workspaces, implementations)
+	runtimeInstances, err := NewRuntimeInstanceService(securedStore, services.Workspaces, implementations)
 	if err != nil {
 		return nil, err
 	}
@@ -58,7 +63,7 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 		_ = runtimeInstances.Close()
 		return nil, err
 	}
-	transportSessions, err := NewExecutionSessionService(controlPlaneStore, runnerConnections)
+	transportSessions, err := NewExecutionSessionService(securedStore, runnerConnections)
 	if err != nil {
 		_ = runnerConnections.Close()
 		_ = runtimeInstances.Close()
@@ -73,6 +78,7 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	services.RuntimeInstances = runtimeInstances
 	services.RunnerConnections = runnerConnections
 	services.ExecutionSessions = executionSessions
+	services.Redaction = registry
 	return services, nil
 }
 

@@ -18,17 +18,26 @@ type Prepared struct {
 	RedactionValues []string
 }
 
+type RedactionRegistrar interface {
+	Register(string, []string)
+}
+
 type Preparer struct {
 	resolver       *Resolver
 	secretResolver SecretResolver
 	provenance     ProvenanceStore
+	redaction      RedactionRegistrar
 }
 
-func NewPreparer(resolver *Resolver, secretResolver SecretResolver, provenance ProvenanceStore) (*Preparer, error) {
+func NewPreparer(resolver *Resolver, secretResolver SecretResolver, provenance ProvenanceStore, registrars ...RedactionRegistrar) (*Preparer, error) {
 	if resolver == nil || provenance == nil {
 		return nil, fmt.Errorf("execution resolver and provenance store are required")
 	}
-	return &Preparer{resolver: resolver, secretResolver: secretResolver, provenance: provenance}, nil
+	var registrar RedactionRegistrar
+	if len(registrars) > 0 {
+		registrar = registrars[0]
+	}
+	return &Preparer{resolver: resolver, secretResolver: secretResolver, provenance: provenance, redaction: registrar}, nil
 }
 
 func (p *Preparer) Prepare(ctx context.Context, projectID, runID string, request SecretRequest) (Prepared, error) {
@@ -56,6 +65,10 @@ func (p *Preparer) Prepare(ctx context.Context, projectID, runID string, request
 	if err != nil {
 		return Prepared{}, err
 	}
+	redactionValues := material.Values()
+	if p.redaction != nil {
+		p.redaction.Register(runID, redactionValues)
+	}
 	if err := EnsureProvenance(ctx, p.provenance, projectID, runID, resolved.Safe); err != nil {
 		return Prepared{}, err
 	}
@@ -76,7 +89,7 @@ func (p *Preparer) Prepare(ctx context.Context, projectID, runID string, request
 		Safe:            resolved.Safe,
 		RuntimeID:       resolved.Safe.Runtime.ID,
 		Secrets:         executionSecrets,
-		RedactionValues: material.Values(),
+		RedactionValues: redactionValues,
 	}, nil
 }
 

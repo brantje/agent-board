@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
+	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -50,12 +51,16 @@ func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID
 	if instance.RuntimeID != prepared.RuntimeID {
 		return nil, NewError("runtime_configuration_mismatch", "Runtime Instance does not match the resolved execution Runtime", store.ErrInvalidArgument)
 	}
-	return s.sessions.Start(ctx, projectID, runID, runtimeInstanceID, ExecutionRequest{
+	process, err := s.sessions.Start(ctx, projectID, runID, runtimeInstanceID, ExecutionRequest{
 		Command: append([]string(nil), request.Command...),
 		CWD:     request.CWD,
 		Env:     cloneMap(request.Env),
 		Secrets: cloneMap(prepared.Secrets),
 	})
+	if err != nil {
+		return nil, redaction.WrapError(err, prepared.RedactionValues)
+	}
+	return process, nil
 }
 
 func (s *AuthorizedExecutionSessionService) ReconcileAll(ctx context.Context) error {

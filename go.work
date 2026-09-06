@@ -3,5 +3,6 @@ go 1.25.0
 use (
 	./apps/server
 	./apps/agent-runner
+	./packages/redact
 	./packages/runnerprotocol
 )
