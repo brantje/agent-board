@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"strings"
 	"sync/atomic"
@@ -52,5 +53,40 @@ func TestCancelEscalatesTerminateToKillForExactSession(t *testing.T) {
 	}
 	if process.Record().Status != "CANCELLED" || storeFake.instance.RunnerStatus != "READY" {
 		t.Fatalf("record=%+v instance=%+v", process.Record(), storeFake.instance)
+	}
+}
+
+type stuckAfterKillTransport struct {
+	*escalatingTransport
+}
+
+func (t *stuckAfterKillTransport) Kill(context.Context) error {
+	t.killed.Store(true)
+	return nil
+}
+
+func TestCancelBoundsWaitAfterForceKill(t *testing.T) {
+	service, _, _ := executionServiceFixture(t)
+	base := newEscalatingTransport("session-1")
+	transport := &stuckAfterKillTransport{escalatingTransport: base}
+	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
+	service.runners = &fakeExecutionManager{client: client}
+	process, err := service.Start(context.Background(), "project-1", "run-1", "runtime-1", ExecutionRequest{Command: []string{"sleep", "30"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = service.Cancel(context.Background(), "project-1", "session-1", 5*time.Millisecond)
+	appErr, ok := AsError(err)
+	if !ok || appErr.Code != "execution_session_cancel_uncertain" || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Cancel() error=%v appErr=%+v", err, appErr)
+	}
+	if !transport.terminated.Load() || !transport.killed.Load() {
+		t.Fatalf("terminated=%v killed=%v", transport.terminated.Load(), transport.killed.Load())
+	}
+
+	close(base.result)
+	if _, waitErr := process.Wait(context.Background()); waitErr != nil {
+		t.Fatalf("cleanup Wait() error=%v", waitErr)
 	}
 }
