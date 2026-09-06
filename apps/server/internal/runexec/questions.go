@@ -96,11 +96,17 @@ func (p *Processor) finishWaitingForInput(ctx context.Context, safe executioncon
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 		return failed(errors.Join(fmt.Errorf("run execution: persisted blocking Question is required before WAITING_FOR_INPUT: %w", err), cleanupErr)), nil
 	}
-	_ = p.record(ctx, safe, "run.waiting_for_input", map[string]any{"questionId": question.ID}, &instance.ID, nil)
-	_ = p.cleanupRuntime(ctx, safe, instance)
+
+	cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
 	}
+	if cleanupErr != nil {
+		reason := safeFailure(fmt.Errorf("run execution: cleanup Runtime before waiting: %w", cleanupErr))
+		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, &instance.ID, nil)
+		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
+	}
+	_ = p.record(ctx, safe, "run.waiting_for_input", map[string]any{"questionId": question.ID}, &instance.ID, nil)
 	return scheduler.Result{RunStatus: "WAITING_FOR_INPUT"}, nil
 }
 
