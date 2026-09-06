@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -46,7 +47,11 @@ func main() {
 		os.Exit(1)
 	}
 	if application, ok := handler.(*applicationHandler); ok && application.services != nil && application.services.Redaction != nil {
-		slog.SetDefault(slog.New(redaction.NewSlogHandler(slog.Default().Handler(), application.services.Redaction)))
+		// Wrap a concrete sink rather than slog.Default().Handler(). The original
+		// default handler bridges through the standard logger, and SetDefault
+		// rewires that bridge; retaining it here would recurse on the first log.
+		baseHandler := slog.NewTextHandler(os.Stderr, nil)
+		slog.SetDefault(slog.New(redaction.NewSlogHandler(baseHandler, application.services.Redaction)))
 	}
 	if err := reconcileRuntimeInstances(ctx, handler); err != nil {
 		slog.Error("reconcile Runtime Instances", "error", err)
@@ -222,4 +227,8 @@ func serve(ctx context.Context, server *http.Server, listener net.Listener) erro
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
 	}
+}
+
+func normalizeAddress(address string) string {
+	return strings.TrimSpace(address)
 }
