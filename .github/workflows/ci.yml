@@ -60,6 +60,23 @@ jobs:
   docker-runtime:
     name: Docker runtime
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: agent_board_test
+          POSTGRES_USER: agent_board
+          POSTGRES_PASSWORD: agent_board
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent_board -d agent_board_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENT_BOARD_TEST_DATABASE_URL: postgres://agent_board:agent_board@127.0.0.1:5432/agent_board_test?sslmode=disable
+      AGENT_BOARD_TEST_DATABASE_RESET: "1"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -72,6 +89,8 @@ jobs:
         run: docker build --file apps/server/internal/runtime/docker/testdata/Dockerfile --tag agent-board-runtime-lifecycle-test:ci apps/server/internal/runtime/docker/testdata
       - name: Build real runner image
         run: docker build --file apps/agent-runner/Dockerfile --tag agent-board-agent-runner:ci .
+      - name: Build scripted runtime fixture image
+        run: docker build --build-arg AGENT_BOARD_UID="$(id -u)" --file apps/server/internal/runexec/testdata/Dockerfile --tag agent-board-scripted-runtime:ci .
       - name: Run real Docker lifecycle integration
         working-directory: apps/server
         env:
@@ -84,6 +103,12 @@ jobs:
           AGENT_BOARD_TEST_DOCKER: "1"
           AGENT_BOARD_TEST_RUNNER_IMAGE: agent-board-agent-runner:ci
         run: go test -count=1 -run '^TestDockerRunnerIntegration$' -v ./internal/runner
+      - name: Run scripted Engine walking skeleton
+        working-directory: apps/server
+        env:
+          AGENT_BOARD_TEST_DOCKER: "1"
+          AGENT_BOARD_TEST_SCRIPTED_RUNTIME_IMAGE: agent-board-scripted-runtime:ci
+        run: go test -count=1 -run '^TestScriptedEngineDockerWalkingSkeleton$' -v ./internal/runexec
 
   agent-runner:
     name: Agent runner
