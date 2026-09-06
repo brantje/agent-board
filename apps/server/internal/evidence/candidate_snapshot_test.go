@@ -123,6 +123,61 @@ func TestCandidateSnapshotRejectsUnboundedChunkCount(t *testing.T) {
 	}
 }
 
+func TestOpenCandidateRegularFileSafetyBoundaries(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "regular.txt"), []byte("safe\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(workspace, "directory"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	file, info, err := openCandidateRegularFile(workspace, "regular.txt")
+	if err != nil {
+		t.Fatalf("open regular candidate: %v", err)
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		t.Fatalf("opened mode=%s, want regular file", info.Mode())
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	for name, relative := range map[string]string{
+		"missing":   "missing.txt",
+		"directory": "directory",
+		"escape":    "../outside.txt",
+	} {
+		t.Run(name, func(t *testing.T) {
+			file, _, err := openCandidateRegularFile(workspace, relative)
+			if file != nil {
+				_ = file.Close()
+			}
+			if err == nil {
+				t.Fatalf("openCandidateRegularFile(%q) succeeded, want rejection", relative)
+			}
+		})
+	}
+}
+
+func TestCandidateChunkCountValidation(t *testing.T) {
+	for name, input := range map[string]struct {
+		size  int64
+		limit int64
+	}{
+		"negative size": {size: -1, limit: 128},
+		"zero limit":    {size: 1, limit: 0},
+		"negative limit": {size: 1, limit: -1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := candidateChunkCount(input.size, input.limit); err == nil {
+				t.Fatalf("candidateChunkCount(%d, %d) succeeded, want error", input.size, input.limit)
+			}
+		})
+	}
+}
+
 func TestCandidateChunkCountIsOverflowSafe(t *testing.T) {
 	if _, err := candidateChunkCount(math.MaxInt64, 128); err == nil {
 		t.Fatal("expected extreme candidate size to be rejected")
