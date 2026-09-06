@@ -65,6 +65,7 @@ type EvidenceStore interface {
 	AppendEvent(context.Context, Event) (Event, error)
 	ListRunEvents(context.Context, string, string, int64, int) ([]Event, error)
 	CreateRawOutputChunk(context.Context, RawOutputChunk) (RawOutputChunk, error)
+	ListRawOutputChunks(context.Context, string, string) ([]RawOutputChunk, error)
 	CreateArtifact(context.Context, Artifact) (Artifact, error)
 	ListArtifacts(context.Context, string, string) ([]Artifact, error)
 }
