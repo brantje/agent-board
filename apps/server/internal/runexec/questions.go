@@ -94,6 +94,9 @@ func (p *Processor) finishWaitingForInput(ctx context.Context, safe executioncon
 	question, err := questions.GetOpenBlockingQuestion(ctx, safe.Project.ID, safe.Run.ID)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
+		if ctx.Err() != nil {
+			return scheduler.Result{}, ctx.Err()
+		}
 		return failed(errors.Join(fmt.Errorf("run execution: persisted blocking Question is required before WAITING_FOR_INPUT: %w", err), cleanupErr)), nil
 	}
 
