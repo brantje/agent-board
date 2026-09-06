@@ -105,9 +105,9 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 				return nil, err
 			}
 		}
-		if _, err := s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, session.RuntimeInstanceID, "BUSY"); err != nil {
-			drainExecutionOutput(transport.Stdout(), transport.Stderr())
-			return nil, translateStoreError(err, "runtime_instance")
+		if statusErr := s.updateRunnerStatusRecovery(projectID, session.RuntimeInstanceID, "BUSY"); statusErr != nil {
+			s.retainExecutionProcess(session, transport)
+			return nil, translateStoreError(statusErr, "runtime_instance")
 		}
 		return newExecutionProcess(s, session, transport), nil
 	}
