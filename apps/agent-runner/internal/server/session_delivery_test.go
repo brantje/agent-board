@@ -25,9 +25,8 @@ func TestAttachDeliveriesDoesNotStealLiveWriter(t *testing.T) {
 	}
 }
 
-func TestCompletedDetachedDeliveryExpiresWithoutReconnect(t *testing.T) {
+func TestDetachedDeliveryExpiresWithoutReconnect(t *testing.T) {
 	delivery := newSessionDelivery(context.Background(), nil, 20*time.Millisecond)
-	delivery.complete()
 
 	done := make(chan error, 1)
 	go func() {
@@ -41,13 +40,12 @@ func TestCompletedDetachedDeliveryExpiresWithoutReconnect(t *testing.T) {
 			t.Fatalf("expected delivery expiry, got %v", err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("completed detached delivery did not expire")
+		t.Fatal("detached delivery did not expire")
 	}
 }
 
-func TestCompletedDetachedDeliveryCanReconnectBeforeExpiry(t *testing.T) {
+func TestDetachedDeliveryCanReconnectBeforeExpiry(t *testing.T) {
 	delivery := newSessionDelivery(context.Background(), nil, time.Second)
-	delivery.complete()
 
 	writer := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
 	done := make(chan error, 1)
@@ -66,7 +64,26 @@ func TestCompletedDetachedDeliveryCanReconnectBeforeExpiry(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("completed delivery did not resume after reconnect")
+		t.Fatal("delivery did not resume after reconnect")
+	}
+}
+
+func TestDetachRestartsReconnectWindow(t *testing.T) {
+	first := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
+	delivery := newSessionDelivery(context.Background(), first, 40*time.Millisecond)
+	delivery.detach(first)
+
+	time.Sleep(20 * time.Millisecond)
+	second := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
+	if !delivery.attachIfIdle(second) {
+		t.Fatal("delivery did not reconnect within retention window")
+	}
+	delivery.detach(second)
+
+	time.Sleep(25 * time.Millisecond)
+	third := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
+	if !delivery.attachIfIdle(third) {
+		t.Fatal("reconnect window was not restarted after a later detach")
 	}
 }
 
