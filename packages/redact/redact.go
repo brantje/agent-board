@@ -9,15 +9,17 @@ import (
 
 var replacementCandidates = []string{"***", "[REDACTED]", "<redacted>", "[masked]"}
 
-type Stream struct {
-	patterns      [][]byte
-	replacement   []byte
-	maxLen        int
-	pending       []byte
-	outputPending []byte
+// Matcher is an immutable compiled redaction configuration. It can be reused
+// safely across calls and creates independent Stream instances for stateful
+// chunk processing.
+type Matcher struct {
+	patterns    [][]byte
+	replacement []byte
+	maxLen      int
 }
 
-func New(values []string) *Stream {
+// Compile normalizes and compiles secret values once for repeated use.
+func Compile(values []string) *Matcher {
 	seen := make(map[string]struct{}, len(values))
 	patterns := make([][]byte, 0, len(values))
 	maxLen := 0
@@ -36,7 +38,45 @@ func New(values []string) *Stream {
 		}
 	}
 	sort.Slice(patterns, func(i, j int) bool { return len(patterns[i]) > len(patterns[j]) })
-	return &Stream{patterns: patterns, replacement: chooseReplacement(patterns), maxLen: maxLen}
+	return &Matcher{patterns: patterns, replacement: chooseReplacement(patterns), maxLen: maxLen}
+}
+
+func (m *Matcher) Empty() bool {
+	return m == nil || m.maxLen == 0
+}
+
+func (m *Matcher) NewStream() *Stream {
+	if m == nil {
+		m = &Matcher{}
+	}
+	return &Stream{matcher: m}
+}
+
+func (m *Matcher) Bytes(data []byte) []byte {
+	stream := m.NewStream()
+	output := stream.Push(data)
+	return append(output, stream.Flush()...)
+}
+
+func (m *Matcher) String(value string) string {
+	return string(m.Bytes([]byte(value)))
+}
+
+func (m *Matcher) Reader(source io.Reader) io.Reader {
+	if m.Empty() {
+		return source
+	}
+	return &reader{source: source, redactor: m.NewStream(), buffer: make([]byte, 32*1024)}
+}
+
+type Stream struct {
+	matcher       *Matcher
+	pending       []byte
+	outputPending []byte
+}
+
+func New(values []string) *Stream {
+	return Compile(values).NewStream()
 }
 
 func chooseReplacement(patterns [][]byte) []byte {
@@ -57,7 +97,7 @@ func chooseReplacement(patterns [][]byte) []byte {
 }
 
 func (s *Stream) Push(data []byte) []byte {
-	if s.maxLen == 0 {
+	if s == nil || s.matcher == nil || s.matcher.maxLen == 0 {
 		return append([]byte(nil), data...)
 	}
 	s.pending = append(s.pending, data...)
@@ -65,7 +105,7 @@ func (s *Stream) Push(data []byte) []byte {
 }
 
 func (s *Stream) Flush() []byte {
-	if s.maxLen == 0 {
+	if s == nil || s.matcher == nil || s.matcher.maxLen == 0 {
 		return nil
 	}
 	return s.consume(true)
@@ -73,24 +113,29 @@ func (s *Stream) Flush() []byte {
 
 func (s *Stream) consume(final bool) []byte {
 	var output []byte
-	for len(s.pending) > 0 {
-		matched := false
-		for _, pattern := range s.patterns {
-			if len(s.pending) >= len(pattern) && bytes.HasPrefix(s.pending, pattern) {
-				output = s.appendSanitized(output, s.replacement)
-				s.pending = s.pending[len(pattern):]
-				matched = true
-				break
+	literalStart := 0
+	position := 0
+	for position < len(s.pending) {
+		remaining := s.pending[position:]
+		if matchLen := s.matchPrefix(remaining); matchLen > 0 {
+			if position > literalStart {
+				output = s.appendSanitized(output, s.pending[literalStart:position])
 			}
-		}
-		if matched {
+			output = s.appendSanitized(output, s.matcher.replacement)
+			position += matchLen
+			literalStart = position
 			continue
 		}
-		if !final && s.pendingIsSecretPrefix() {
+		if !final && s.pendingIsSecretPrefix(remaining) {
 			break
 		}
-		output = s.appendSanitized(output, s.pending[:1])
-		s.pending = s.pending[1:]
+		position++
+	}
+	if position > literalStart {
+		output = s.appendSanitized(output, s.pending[literalStart:position])
+	}
+	if position > 0 {
+		s.pending = s.pending[position:]
 	}
 	if final {
 		output = s.flushSanitizedInto(output)
@@ -98,37 +143,57 @@ func (s *Stream) consume(final bool) []byte {
 	return output
 }
 
-func (s *Stream) pendingIsSecretPrefix() bool {
-	for _, pattern := range s.patterns {
-		if len(s.pending) < len(pattern) && bytes.HasPrefix(pattern, s.pending) {
+func (s *Stream) matchPrefix(data []byte) int {
+	for _, pattern := range s.matcher.patterns {
+		if len(data) >= len(pattern) && bytes.HasPrefix(data, pattern) {
+			return len(pattern)
+		}
+	}
+	return 0
+}
+
+func (s *Stream) pendingIsSecretPrefix(data []byte) bool {
+	for _, pattern := range s.matcher.patterns {
+		if len(data) < len(pattern) && bytes.HasPrefix(pattern, data) {
 			return true
 		}
 	}
 	return false
 }
 
+// appendSanitized processes contiguous safe data as one unit. The input parser
+// has already removed configured secrets from literal runs and replacements are
+// chosen not to contain configured secrets, so any remaining match can only be
+// introduced by joining output boundaries. Searching once per run/replacement
+// avoids the previous per-byte O(n*P*maxLen^2) suffix work.
 func (s *Stream) appendSanitized(output, data []byte) []byte {
-	for _, value := range data {
-		s.outputPending = append(s.outputPending, value)
-		s.removeSecretSuffixes()
-		output = s.emitSafePrefix(output)
+	if len(data) == 0 {
+		return output
 	}
-	return output
+	s.outputPending = append(s.outputPending, data...)
+	s.removeSecretOccurrences()
+	return s.emitSafePrefix(output)
 }
 
-func (s *Stream) removeSecretSuffixes() {
+func (s *Stream) removeSecretOccurrences() {
 	for {
-		matched := false
-		for _, pattern := range s.patterns {
-			if len(s.outputPending) >= len(pattern) && bytes.HasSuffix(s.outputPending, pattern) {
-				s.outputPending = s.outputPending[:len(s.outputPending)-len(pattern)]
-				matched = true
-				break
+		matchIndex := -1
+		matchLen := 0
+		for _, pattern := range s.matcher.patterns {
+			index := bytes.Index(s.outputPending, pattern)
+			if index < 0 {
+				continue
+			}
+			if matchIndex < 0 || index < matchIndex || (index == matchIndex && len(pattern) > matchLen) {
+				matchIndex = index
+				matchLen = len(pattern)
 			}
 		}
-		if !matched {
+		if matchIndex < 0 {
 			return
 		}
+		copy(s.outputPending[matchIndex:], s.outputPending[matchIndex+matchLen:])
+		s.outputPending = s.outputPending[:len(s.outputPending)-matchLen]
 	}
 }
 
@@ -146,7 +211,7 @@ func (s *Stream) emitSafePrefix(output []byte) []byte {
 
 func (s *Stream) longestSecretPrefixSuffix() int {
 	longest := 0
-	for _, pattern := range s.patterns {
+	for _, pattern := range s.matcher.patterns {
 		limit := len(s.outputPending)
 		if patternLimit := len(pattern) - 1; limit > patternLimit {
 			limit = patternLimit
@@ -168,13 +233,11 @@ func (s *Stream) flushSanitizedInto(output []byte) []byte {
 }
 
 func Bytes(data []byte, values []string) []byte {
-	stream := New(values)
-	output := stream.Push(data)
-	return append(output, stream.Flush()...)
+	return Compile(values).Bytes(data)
 }
 
 func String(value string, values []string) string {
-	return string(Bytes([]byte(value), values))
+	return Compile(values).String(value)
 }
 
 type reader struct {
@@ -186,11 +249,7 @@ type reader struct {
 }
 
 func NewReader(source io.Reader, values []string) io.Reader {
-	stream := New(values)
-	if stream.maxLen == 0 {
-		return source
-	}
-	return &reader{source: source, redactor: stream, buffer: make([]byte, 32*1024)}
+	return Compile(values).Reader(source)
 }
 
 func (r *reader) Read(p []byte) (int, error) {

@@ -77,6 +77,30 @@ func TestRegistryRedactsAcrossAllRunsAndHandlesJSONEdgeCases(t *testing.T) {
 	}
 }
 
+func TestRegistryReleaseIsReferenceCountedAndInvalidatesAllRunCache(t *testing.T) {
+	registry := NewRegistry()
+	registry.Register("run-1", []string{"secret-one"})
+	registry.Register("run-1", []string{"secret-one", "secret-two"})
+	if got := registry.RedactAllString("secret-one secret-two"); strings.Contains(got, "secret-one") || strings.Contains(got, "secret-two") {
+		t.Fatalf("initial all-run cache leaked: %q", got)
+	}
+
+	registry.Release("run-1")
+	if got := registry.RedactAllString("secret-one secret-two"); strings.Contains(got, "secret-one") || strings.Contains(got, "secret-two") {
+		t.Fatalf("first release removed an active registration: %q", got)
+	}
+
+	registry.Release("run-1")
+	if got := registry.RedactAllString("secret-one secret-two"); got != "secret-one secret-two" {
+		t.Fatalf("final release did not evict run values: %q", got)
+	}
+
+	registry.Register("run-2", []string{"secret-three"})
+	if got := registry.RedactAllString("secret-three"); strings.Contains(got, "secret-three") {
+		t.Fatalf("cache was not invalidated on re-registration: %q", got)
+	}
+}
+
 func TestRegistryKeepsRunScopesSeparateAndWrapsErrors(t *testing.T) {
 	registry := NewRegistry()
 	registry.Register("run-1", []string{"secret-one"})

@@ -6,15 +6,19 @@ import (
 	"log/slog"
 )
 
+type handlerSegment struct {
+	group string
+	attrs []slog.Attr
+}
+
 // SlogHandler applies the active execution redaction registry at the final
-// application logging boundary. It keeps contextual attributes/groups locally
-// so values registered after a logger is derived are still sanitized when a
-// record is emitted.
+// application logging boundary. Ordered segments preserve the interleaving of
+// WithAttrs and WithGroup calls while delaying sanitization until emission, so
+// secrets registered after a logger is derived are still removed.
 type SlogHandler struct {
 	next     slog.Handler
 	registry *Registry
-	attrs    []slog.Attr
-	groups   []string
+	segments []handlerSegment
 }
 
 func NewSlogHandler(next slog.Handler, registry *Registry) slog.Handler {
@@ -26,45 +30,63 @@ func (h *SlogHandler) Enabled(ctx context.Context, level slog.Level) bool {
 }
 
 func (h *SlogHandler) Handle(ctx context.Context, record slog.Record) error {
-	redacted := slog.NewRecord(record.Time, record.Level, h.registry.RedactAllString(record.Message), record.PC)
-	attrs := append([]slog.Attr(nil), h.attrs...)
+	redacted := slog.NewRecord(record.Time, record.Level, h.redactString(record.Message), record.PC)
+	segments := cloneSegments(h.segments)
+	var recordAttrs []slog.Attr
 	record.Attrs(func(attr slog.Attr) bool {
-		attrs = append(attrs, attr)
+		recordAttrs = append(recordAttrs, attr)
 		return true
 	})
-	for index := range attrs {
-		attrs[index] = h.redactAttr(attrs[index])
+	if len(recordAttrs) > 0 {
+		segments = append(segments, handlerSegment{attrs: recordAttrs})
 	}
-	for index := len(h.groups) - 1; index >= 0; index-- {
-		attrs = []slog.Attr{{
-			Key:   h.registry.RedactAllString(h.groups[index]),
-			Value: slog.GroupValue(attrs...),
-		}}
-	}
-	redacted.AddAttrs(attrs...)
+	redacted.AddAttrs(h.materialize(segments)...)
 	return h.next.Handle(ctx, redacted)
 }
 
 func (h *SlogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	if len(attrs) == 0 {
+		return h
+	}
 	clone := *h
-	clone.attrs = append(append([]slog.Attr(nil), h.attrs...), attrs...)
-	clone.groups = append([]string(nil), h.groups...)
+	clone.segments = cloneSegments(h.segments)
+	clone.segments = append(clone.segments, handlerSegment{attrs: append([]slog.Attr(nil), attrs...)})
 	return &clone
 }
 
 func (h *SlogHandler) WithGroup(name string) slog.Handler {
+	if name == "" {
+		return h
+	}
 	clone := *h
-	clone.attrs = append([]slog.Attr(nil), h.attrs...)
-	clone.groups = append(append([]string(nil), h.groups...), name)
+	clone.segments = cloneSegments(h.segments)
+	clone.segments = append(clone.segments, handlerSegment{group: name})
 	return &clone
 }
 
+func (h *SlogHandler) materialize(segments []handlerSegment) []slog.Attr {
+	attrs := make([]slog.Attr, 0)
+	for index, segment := range segments {
+		if segment.group != "" {
+			nested := h.materialize(segments[index+1:])
+			if len(nested) > 0 {
+				attrs = append(attrs, slog.Attr{Key: h.redactString(segment.group), Value: slog.GroupValue(nested...)})
+			}
+			return attrs
+		}
+		for _, attr := range segment.attrs {
+			attrs = append(attrs, h.redactAttr(attr))
+		}
+	}
+	return attrs
+}
+
 func (h *SlogHandler) redactAttr(attr slog.Attr) slog.Attr {
-	attr.Key = h.registry.RedactAllString(attr.Key)
+	attr.Key = h.redactString(attr.Key)
 	value := attr.Value.Resolve()
 	switch value.Kind() {
 	case slog.KindString:
-		attr.Value = slog.StringValue(h.registry.RedactAllString(value.String()))
+		attr.Value = slog.StringValue(h.redactString(value.String()))
 	case slog.KindGroup:
 		group := value.Group()
 		for index := range group {
@@ -72,9 +94,25 @@ func (h *SlogHandler) redactAttr(attr slog.Attr) slog.Attr {
 		}
 		attr.Value = slog.GroupValue(group...)
 	case slog.KindAny:
-		attr.Value = slog.StringValue(h.registry.RedactAllString(fmt.Sprint(value.Any())))
+		attr.Value = slog.StringValue(h.redactString(fmt.Sprint(value.Any())))
 	default:
 		attr.Value = value
 	}
 	return attr
+}
+
+func (h *SlogHandler) redactString(value string) string {
+	if h.registry == nil {
+		return value
+	}
+	return h.registry.RedactAllString(value)
+}
+
+func cloneSegments(segments []handlerSegment) []handlerSegment {
+	cloned := make([]handlerSegment, len(segments))
+	for index, segment := range segments {
+		cloned[index].group = segment.group
+		cloned[index].attrs = append([]slog.Attr(nil), segment.attrs...)
+	}
+	return cloned
 }

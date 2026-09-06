@@ -31,6 +31,49 @@ func TestStringAndReaderRedact(t *testing.T) {
 	}
 }
 
+func TestCompiledMatcherCanBeReused(t *testing.T) {
+	matcher := Compile([]string{"secret"})
+	if matcher.Empty() {
+		t.Fatal("compiled matcher unexpectedly empty")
+	}
+	for _, input := range []string{"secret", "x-secret-y", "secret twice secret"} {
+		if got := matcher.String(input); bytes.Contains([]byte(got), []byte("secret")) {
+			t.Fatalf("matcher leaked secret for %q: %q", input, got)
+		}
+	}
+	got, err := io.ReadAll(matcher.Reader(bytes.NewBufferString("reader-secret")))
+	if err != nil || bytes.Contains(got, []byte("secret")) {
+		t.Fatalf("matcher reader=%q err=%v", got, err)
+	}
+}
+
+func TestReplacementBoundariesCannotComposeAnotherSecret(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		input  string
+		values []string
+	}{
+		{name: "replacement then literal", input: "triggera", values: []string{"trigger", "*a"}},
+		{name: "literal then replacement", input: "atrigger", values: []string{"trigger", "a*"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			output := Bytes([]byte(test.input), test.values)
+			for _, secret := range test.values {
+				if bytes.Contains(output, []byte(secret)) {
+					t.Fatalf("output %q contains secret %q", output, secret)
+				}
+			}
+		})
+	}
+}
+
+func TestLargeSafeRunPassesThroughUnchanged(t *testing.T) {
+	input := bytes.Repeat([]byte("safe-output-"), 8192)
+	if got := Bytes(input, []string{"configured-secret-value"}); !bytes.Equal(got, input) {
+		t.Fatalf("large safe output changed: got=%d want=%d", len(got), len(input))
+	}
+}
+
 func TestReplacementCannotExposeConfiguredMarker(t *testing.T) {
 	for _, secret := range []string{"***", "*", "[REDACTED]", "<redacted>"} {
 		output := Bytes([]byte(secret), []string{secret})
