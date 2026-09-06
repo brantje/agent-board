@@ -99,6 +99,15 @@ func (s *ExecutionSessionService) Start(ctx context.Context, projectID, runID, r
 			_, failErr := s.transition(ctx, session, []string{"STARTING"}, "FAILED", nil)
 			return nil, errors.Join(err, failErr)
 		}
+		if transport != nil {
+			// A start request may have reached the runner before the caller's
+			// context expired. Keep exactly one observer attached to that
+			// uncertain session so output cannot backpressure the connection and
+			// a later terminal result still updates durable state.
+			process := newExecutionProcess(s, session, transport)
+			go func() { _, _ = io.Copy(io.Discard, process.Stdout()) }()
+			go func() { _, _ = io.Copy(io.Discard, process.Stderr()) }()
+		}
 		return nil, NewError("execution_session_uncertain", "runner transport was interrupted while starting the Execution Session; reconciliation is required", err)
 	}
 	session, err = s.transition(ctx, session, []string{"STARTING"}, "RUNNING", nil)

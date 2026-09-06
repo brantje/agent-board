@@ -78,6 +78,9 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 	default:
 		return nil, fmt.Errorf("unsupported Execution Session state %q", session.Status)
 	}
+	if process, ok := s.liveProcess(projectID, sessionID); ok {
+		return process, nil
+	}
 
 	instance, err := s.store.GetRuntimeInstance(ctx, projectID, session.RuntimeInstanceID)
 	if err != nil {

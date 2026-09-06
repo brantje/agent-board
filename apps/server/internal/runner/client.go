@@ -197,7 +197,10 @@ func (c *Connection) Start(ctx context.Context, sessionID string, request Reques
 		}
 		return session, nil
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		// The start request was already sent, so ownership is uncertain. Return
+		// the registered session with the context error so the service can keep
+		// observing it instead of losing the only same-connection consumer.
+		return session, ctx.Err()
 	case <-c.done:
 		return nil, c.connectionError()
 	}
