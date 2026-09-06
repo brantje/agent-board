@@ -83,7 +83,9 @@ func TestSessionWaitCleansRedirectedBackgroundProcessGroup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sequential session was not admitted after process-group cleanup: %v", err)
 	}
-	if _, err := next.Wait(ctx); err != nil {
+	nextCtx, nextCancel := context.WithTimeout(context.Background(), time.Second)
+	defer nextCancel()
+	if _, err := next.Wait(nextCtx); err != nil {
 		t.Fatal(err)
 	}
 }
