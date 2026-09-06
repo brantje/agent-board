@@ -37,7 +37,7 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	if !ok {
 		t.Fatalf("handler type = %T, want *applicationHandler", handler)
 	}
-	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil {
+	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.ExecutionStore == nil || application.services.ExecutionContext == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil {
 		t.Fatalf("application services were not fully wired: %+v", application.services)
 	}
 
@@ -64,6 +64,12 @@ func TestReconcileExecutionSessionsRejectsNonApplicationHandler(t *testing.T) {
 	}
 }
 
+func TestStartSchedulerRejectsNonApplicationHandler(t *testing.T) {
+	if _, err := startScheduler(context.Background(), http.NotFoundHandler()); err == nil {
+		t.Fatal("startScheduler() unexpectedly accepted an unrelated handler")
+	}
+}
+
 func TestConfiguredApplicationRejectsRelativeRepositoryRoot(t *testing.T) {
 	t.Setenv("AGENT_BOARD_REPOSITORY_ROOTS", "relative/repositories")
 	if _, err := configuredApplication(nil); err == nil {
@@ -75,5 +81,20 @@ func TestConfiguredApplicationRejectsMissingRepositoryRoots(t *testing.T) {
 	t.Setenv("AGENT_BOARD_REPOSITORY_ROOTS", "")
 	if _, err := configuredApplication(nil); !errors.Is(err, repository.ErrNoAuthorizedRoots) {
 		t.Fatalf("configuredApplication() error = %v, want ErrNoAuthorizedRoots", err)
+	}
+}
+
+func TestConfiguredEvidenceRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "evidence")
+	t.Setenv("AGENT_BOARD_EVIDENCE_ROOT", root)
+	if got := configuredEvidenceRoot(); got != root {
+		t.Fatalf("configuredEvidenceRoot()=%q want %q", got, root)
+	}
+}
+
+func TestConfiguredSchedulerOwnerIDUsesExplicitValue(t *testing.T) {
+	t.Setenv("AGENT_BOARD_SCHEDULER_OWNER_ID", "worker-a")
+	if got := configuredSchedulerOwnerID(); got != "worker-a" {
+		t.Fatalf("configuredSchedulerOwnerID()=%q", got)
 	}
 }
