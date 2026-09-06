@@ -46,6 +46,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-agent_board}
       AGENT_BOARD_WORKSPACE_ROOT: ${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}
       AGENT_BOARD_EVIDENCE_ROOT: ${AGENT_BOARD_EVIDENCE_ROOT:-/var/lib/agent-board/evidence}
+      AGENT_BOARD_SCHEDULER_OWNER_ID: ${AGENT_BOARD_SCHEDULER_OWNER_ID:-}
       AGENT_BOARD_REPOSITORY_ROOTS: ${AGENT_BOARD_REPOSITORY_ROOTS:-${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}}
     entrypoint:
       - /bin/sh
