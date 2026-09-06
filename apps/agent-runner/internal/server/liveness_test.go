@@ -42,7 +42,7 @@ func TestStaleWebSocketIsReclaimedWithoutCancelingExecution(t *testing.T) {
 }
 
 func TestReconnectReceivesRemainingOutputAndExit(t *testing.T) {
-	_, httpServer := newTestRunner(t)
+	runner, httpServer := newTestRunner(t)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	send(t, conn, protocol.TypeStart, "reconnect", protocol.StartRequest{
 		Command: []string{"sh", "-c", "read line; printf 'after:%s' \"$line\""},
@@ -51,6 +51,16 @@ func TestReconnectReceivesRemainingOutputAndExit(t *testing.T) {
 		t.Fatalf("unexpected start response %#v", msg)
 	}
 	_ = conn.Close()
+
+	// Delivery ownership intentionally does not let a second socket steal an
+	// active writer. Wait until the runner has observed the closed control
+	// connection before establishing the replacement so this test exercises the
+	// supported detach-then-reattach path rather than racing connection cleanup.
+	waitFor(t, 2*time.Second, func() bool {
+		runner.lifecycleMu.Lock()
+		defer runner.lifecycleMu.Unlock()
+		return len(runner.connections) == 0
+	})
 
 	reconnected := dialAndHandshakeExpectHealth(t, httpServer.URL, 1, "reconnect")
 	defer func() { _ = reconnected.Close() }()
