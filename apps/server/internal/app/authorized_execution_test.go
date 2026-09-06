@@ -2,6 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
@@ -22,8 +25,10 @@ func (f *fakeExecutionPreparer) Prepare(_ context.Context, _, _ string, request 
 	return f.prepared, f.err
 }
 
-func TestAuthorizedExecutionResolvesBeforeInjectingSecrets(t *testing.T) {
+func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput(t *testing.T) {
 	transport := newFakeExecutionTransport("session-1")
+	transport.stdout = "before plain-secret after"
+	transport.stderr = "runner-error plain-secret"
 	client := &requestCapturingClient{fakeExecutionClient: &fakeExecutionClient{transport: transport, done: make(chan struct{})}}
 	storeFake := &executionSessionStoreFake{
 		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
@@ -34,8 +39,9 @@ func TestAuthorizedExecutionResolvesBeforeInjectingSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	preparer := &fakeExecutionPreparer{prepared: executioncontext.Prepared{
-		RuntimeID: "runtime-config-1",
-		Secrets:   map[string]string{"TOKEN": "plain-secret"},
+		RuntimeID:       "runtime-config-1",
+		Secrets:         map[string]string{"TOKEN": "plain-secret"},
+		RedactionValues: []string{"plain-secret"},
 	}}
 	service, err := NewAuthorizedExecutionSessionService(lowLevel, preparer)
 	if err != nil {
@@ -55,8 +61,52 @@ func TestAuthorizedExecutionResolvesBeforeInjectingSecrets(t *testing.T) {
 	if client.request.Secrets["TOKEN"] != "plain-secret" || client.request.Env["SAFE"] != "value" {
 		t.Fatalf("runner request = %+v", client.request)
 	}
+	stdout, err := io.ReadAll(process.Stdout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := io.ReadAll(process.Stderr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(stdout), "plain-secret") || strings.Contains(string(stderr), "plain-secret") {
+		t.Fatalf("runner output leaked secret: stdout=%q stderr=%q", stdout, stderr)
+	}
 	close(transport.resultCh)
 	_, _ = process.Wait(context.Background())
+}
+
+func TestAuthorizedExecutionRedactsStartErrors(t *testing.T) {
+	transport := newFakeExecutionTransport("session-1")
+	client := &fakeExecutionClient{
+		transport: transport,
+		startErr:  errors.New("runner rejected plain-secret"),
+		done:      make(chan struct{}),
+	}
+	storeFake := &executionSessionStoreFake{
+		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
+		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-config-1", Status: "RUNNING", RunnerStatus: "READY"},
+	}
+	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparer := &fakeExecutionPreparer{prepared: executioncontext.Prepared{
+		RuntimeID:       "runtime-config-1",
+		Secrets:         map[string]string{"TOKEN": "plain-secret"},
+		RedactionValues: []string{"plain-secret"},
+	}}
+	service, err := NewAuthorizedExecutionSessionService(lowLevel, preparer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.Start(context.Background(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"true"}})
+	if err == nil {
+		t.Fatal("expected runner start failure")
+	}
+	if strings.Contains(err.Error(), "plain-secret") {
+		t.Fatalf("start error leaked secret: %v", err)
+	}
 }
 
 func TestAuthorizedExecutionRejectsRuntimeMismatchBeforeSessionCreation(t *testing.T) {
