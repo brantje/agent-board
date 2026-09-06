@@ -9,12 +9,12 @@ import (
 )
 
 type runnerStatusStore interface {
-	UpdateRuntimeInstanceRunnerStatus(context.Context, string, string, string) (store.RuntimeInstance, error)
+	UpdateRuntimeInstanceRunnerStatusIfStatus(context.Context, string, string, string, string) (store.RuntimeInstance, error)
 }
 
 type runnerGenerationStore interface {
 	ClaimRuntimeInstanceRunnerGeneration(context.Context, string, string) (int64, error)
-	UpdateRuntimeInstanceRunnerStatusGeneration(context.Context, string, string, string, int64) (store.RuntimeInstance, error)
+	UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(context.Context, string, string, string, int64, string) (store.RuntimeInstance, error)
 }
 
 // RunnerEndpoint resolves the execution-plane endpoint for a persisted Runtime
@@ -40,18 +40,19 @@ func (s *RuntimeInstanceService) RunnerEndpoint(ctx context.Context, projectID, 
 }
 
 // SetRunnerStatus persists execution-owned runner availability separately from
-// Runtime Instance lifecycle state. It intentionally leaves the connection
-// generation untouched.
+// Runtime Instance lifecycle state. The update is fenced by the lifecycle state
+// observed immediately before the write so a concurrent stop/destroy cannot be
+// followed by a stale runner-status mutation.
 func (s *RuntimeInstanceService) SetRunnerStatus(ctx context.Context, projectID, instanceID, status string) error {
 	statusStore, ok := s.store.(runnerStatusStore)
 	if !ok {
-		return fmt.Errorf("runtime instance store does not support runner status updates")
+		return fmt.Errorf("runtime instance store does not support lifecycle-fenced runner status updates")
 	}
 	before, err := s.getInstance(ctx, projectID, instanceID)
 	if err != nil {
 		return err
 	}
-	after, err := statusStore.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, instanceID, status)
+	after, err := statusStore.UpdateRuntimeInstanceRunnerStatusIfStatus(ctx, projectID, instanceID, status, before.Status)
 	if err != nil {
 		return translateStoreError(err, "runtime_instance")
 	}
@@ -80,7 +81,8 @@ func (s *RuntimeInstanceService) ClaimRunnerConnection(ctx context.Context, proj
 }
 
 // SetRunnerStatusGeneration persists connection-owned runner state only while
-// generation still owns the durable runner connection slot.
+// generation still owns the durable runner connection slot and the Runtime
+// Instance lifecycle state still matches the state observed before the write.
 func (s *RuntimeInstanceService) SetRunnerStatusGeneration(ctx context.Context, projectID, instanceID, status string, generation int64) error {
 	generationStore, ok := s.store.(runnerGenerationStore)
 	if !ok {
@@ -90,7 +92,7 @@ func (s *RuntimeInstanceService) SetRunnerStatusGeneration(ctx context.Context, 
 	if err != nil {
 		return err
 	}
-	after, err := generationStore.UpdateRuntimeInstanceRunnerStatusGeneration(ctx, projectID, instanceID, status, generation)
+	after, err := generationStore.UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx, projectID, instanceID, status, generation, before.Status)
 	if err != nil {
 		return translateStoreError(err, "runtime_instance")
 	}
