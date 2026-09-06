@@ -78,14 +78,46 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
-	code := exitCode(ctx, configuredAddress(), handler)
-	stop()
-	if schedulerErr := <-schedulerDone; schedulerErr != nil {
-		slog.Error("scheduler stopped", "error", schedulerErr)
-		code = 1
-	}
+	code := supervise(ctx, stop, func() int {
+		return exitCode(ctx, configuredAddress(), handler)
+	}, schedulerDone)
 	closeStore()
 	os.Exit(code)
+}
+
+func supervise(ctx context.Context, cancel context.CancelFunc, serve func() int, schedulerDone <-chan error) int {
+	serverDone := make(chan int, 1)
+	go func() {
+		serverDone <- serve()
+		close(serverDone)
+	}()
+
+	select {
+	case code := <-serverDone:
+		expectedShutdown := ctx.Err() != nil
+		cancel()
+		schedulerErr, ok := <-schedulerDone
+		if !ok {
+			schedulerErr = nil
+		}
+		if schedulerErr != nil && !expectedShutdown {
+			slog.Error("scheduler stopped", "error", schedulerErr)
+			return 1
+		}
+		return code
+	case schedulerErr, ok := <-schedulerDone:
+		if ctx.Err() != nil {
+			return <-serverDone
+		}
+		if !ok || schedulerErr == nil {
+			slog.Error("scheduler stopped unexpectedly")
+		} else {
+			slog.Error("scheduler stopped", "error", schedulerErr)
+		}
+		cancel()
+		<-serverDone
+		return 1
+	}
 }
 
 func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler, func(), error) {
