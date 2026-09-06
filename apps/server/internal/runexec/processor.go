@@ -96,11 +96,12 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	if err != nil {
 		return failed(err), nil
 	}
-	instance, err = p.runtimes.Start(ctx, run.ProjectID, instance.ID)
+	started, err := p.runtimes.Start(ctx, run.ProjectID, instance.ID)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 		return failed(errors.Join(err, cleanupErr)), nil
 	}
+	instance = started
 
 	// Runtime creation is also the boundary that materializes a placeholder
 	// Issue Workspace. Resolve again after that boundary so immutable provenance,
