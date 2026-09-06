@@ -15,6 +15,9 @@ import (
 const (
 	maxMessageSize            = 1 << 20
 	writeTimeout              = 10 * time.Second
+	handshakeTimeout          = 10 * time.Second
+	runnerReadTimeout         = 90 * time.Second
+	maxPendingSessions        = 8
 	maxPendingSessionMessages = 32
 	maxPendingSessionBytes    = 2 << 20
 )
@@ -79,7 +82,11 @@ func dialWith(ctx context.Context, dialer *websocket.Dialer, endpoint string, he
 		done:     make(chan struct{}),
 	}
 	conn.SetReadLimit(maxMessageSize)
-	if err := c.handshake(); err != nil {
+	if err := c.handshake(ctx); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if err := c.configureLiveness(); err != nil {
 		_ = conn.Close()
 		return nil, err
 	}
@@ -87,7 +94,16 @@ func dialWith(ctx context.Context, dialer *websocket.Dialer, endpoint string, he
 	return c, nil
 }
 
-func (c *Connection) handshake() error {
+func (c *Connection) handshake(ctx context.Context) error {
+	deadline := time.Now().Add(handshakeTimeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok {
+		deadline = ctxDeadline
+	}
+	if err := c.conn.SetReadDeadline(deadline); err != nil {
+		return fmt.Errorf("set runner handshake deadline: %w", err)
+	}
+	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
+
 	if err := c.write(protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{protocol.Version1}}); err != nil {
 		return fmt.Errorf("send runner hello: %w", err)
 	}
@@ -125,6 +141,20 @@ func (c *Connection) handshake() error {
 	}
 	c.caps = hello.Capabilities
 	c.health = health
+	return nil
+}
+
+func (c *Connection) configureLiveness() error {
+	if err := c.conn.SetReadDeadline(time.Now().Add(runnerReadTimeout)); err != nil {
+		return fmt.Errorf("set runner read deadline: %w", err)
+	}
+	defaultPingHandler := c.conn.PingHandler()
+	c.conn.SetPingHandler(func(message string) error {
+		if err := c.conn.SetReadDeadline(time.Now().Add(runnerReadTimeout)); err != nil {
+			return err
+		}
+		return defaultPingHandler(message)
+	})
 	return nil
 }
 
@@ -319,6 +349,9 @@ func (c *Connection) bufferPendingLocked(msg protocol.Message) error {
 	}
 	pending := c.pending[msg.SessionID]
 	if pending == nil {
+		if len(c.pending) >= maxPendingSessions {
+			return fmt.Errorf("runner: too many unattached sessions buffered")
+		}
 		pending = &pendingSessionMessages{}
 		c.pending[msg.SessionID] = pending
 	}
