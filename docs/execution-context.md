@@ -52,6 +52,14 @@ Provider credentials are decrypted only for authorized execution. The deployment
 
 The Engine receives safe Provider/model configuration plus only the narrow ephemeral secret material needed to configure its process.
 
+## Secret write capability
+
+Secret-write HTTP operations are privileged deployment administration surfaces. v0.1 does not invent the later users/groups/roles model for these operations; instead, when secret storage is configured, writes require the deployment-scoped `AGENT_BOARD_SECRET_WRITE_TOKEN` capability presented through `X-Agent-Board-Secret-Write-Token`.
+
+The capability grants secret-write authority across the deployment, including global and Project-scoped secrets. Project-scoped handlers still pass the target Project into the authorization boundary and validate that Project before persistence, so a future scoped authorizer can replace the deployment capability without changing handler semantics.
+
+The secret-write capability remains backend/operator-owned. It is never persisted in Agent Board data, injected into Runtime sessions, or treated as caller-supplied actor identity.
+
 ## Runtime secret references
 
 Runtime declares allowed secret references. Before resolving one:

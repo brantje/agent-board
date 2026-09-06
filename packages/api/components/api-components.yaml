@@ -1,3 +1,9 @@
+securitySchemes:
+  SecretWriteCapability:
+    type: apiKey
+    in: header
+    name: X-Agent-Board-Secret-Write-Token
+    description: Deployment-scoped v0.1 capability required for privileged secret writes. It is not a user identity token and must never be injected into Runtime sessions.
 parameters:
   ProjectID:
     name: projectID

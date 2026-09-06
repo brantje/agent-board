@@ -25,6 +25,9 @@ func (a *api) registerSecretRoutes(r chi.Router) {
 }
 
 func (a *api) putGlobalSecret(w http.ResponseWriter, r *http.Request) {
+	if !a.authorizeSecretWrite(w, r, nil) {
+		return
+	}
 	a.putSecret(w, r, nil)
 }
 
@@ -33,11 +36,22 @@ func (a *api) putProjectSecret(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if !a.authorizeSecretWrite(w, r, &projectID) {
+		return
+	}
 	if _, err := a.service.GetProject(r.Context(), projectID); err != nil {
 		writeAppError(w, err)
 		return
 	}
 	a.putSecret(w, r, &projectID)
+}
+
+func (a *api) authorizeSecretWrite(w http.ResponseWriter, r *http.Request, projectID *string) bool {
+	if a.secretWriteAuthorizer == nil || !a.secretWriteAuthorizer.AuthorizeSecretWrite(r, projectID) {
+		writeError(w, http.StatusUnauthorized, "secret_write_unauthorized", "secret write authorization is required")
+		return false
+	}
+	return true
 }
 
 func (a *api) putSecret(w http.ResponseWriter, r *http.Request, projectID *string) {

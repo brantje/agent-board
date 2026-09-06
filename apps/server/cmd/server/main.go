@@ -54,7 +54,7 @@ func main() {
 		slog.SetDefault(slog.New(redaction.NewSlogHandler(baseHandler, application.services.Redaction)))
 	}
 	if err := reconcileRuntimeInstances(ctx, handler); err != nil {
-		slog.Error("reconcile Runtime Instances", "error", err)
+		slog.Error("reconcile Runtime Instance", "error", err)
 		closeStore()
 		stop()
 		os.Exit(1)
@@ -84,6 +84,15 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 		return nil, nil, fmt.Errorf("configure application: %w", err)
 	}
+	var secretWriteAuthorizer httpapi.SecretWriteAuthorizer
+	if services.Secrets != nil {
+		secretWriteAuthorizer, err = httpapi.NewDeploymentSecretWriteAuthorizer(os.Getenv("AGENT_BOARD_SECRET_WRITE_TOKEN"))
+		if err != nil {
+			_ = services.Close()
+			database.Close()
+			return nil, nil, fmt.Errorf("configure secret write authorization: %w", err)
+		}
+	}
 	closeApplication := func() {
 		if err := services.Close(); err != nil {
 			slog.Error("close application services", "error", err)
@@ -91,7 +100,7 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 	}
 	return &applicationHandler{
-		Handler:  httpapi.NewRouterWithSecrets(services.ControlPlane, services.Secrets),
+		Handler:  httpapi.NewRouterWithSecrets(services.ControlPlane, services.Secrets, secretWriteAuthorizer),
 		services: services,
 	}, closeApplication, nil
 }

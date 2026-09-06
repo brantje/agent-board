@@ -5,6 +5,10 @@ info:
   description: Intentional public API for Agent Board v0.1. Database row shapes are not API contracts.
 servers:
 - url: /
+components:
+  securitySchemes:
+    SecretWriteCapability:
+      $ref: ./components/api-components.yaml#/securitySchemes/SecretWriteCapability
 paths:
   /api/projects:
     $ref: ./paths/projects.yaml#/path1
