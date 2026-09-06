@@ -22,6 +22,9 @@ func TestDockerRunnerIntegration(t *testing.T) {
 		image = "agent-board-agent-runner:ci"
 	}
 	workspace := t.TempDir()
+	if err := os.Chmod(workspace, 0o777); err != nil {
+		t.Fatalf("make test Workspace writable by non-root runner: %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
