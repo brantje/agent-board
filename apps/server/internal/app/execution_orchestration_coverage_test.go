@@ -305,7 +305,7 @@ func TestCancelFailureAndContextBranches(t *testing.T) {
 	terminateTransport := newCancelBranchTransport("session-1")
 	terminateTransport.terminateErr = errors.New("terminate failed")
 	terminateService, terminateProcess := startCancelBranchProcess(t, terminateTransport)
-	if err := terminateService.Cancel(context.Background(), "project-1", "session-1", time.Millisecond); err == nil {
+	if err := terminateService.cancel(context.Background(), "project-1", "session-1", time.Millisecond, 5*time.Millisecond); err == nil {
 		t.Fatal("expected terminate uncertainty")
 	}
 	terminateTransport.finish()
