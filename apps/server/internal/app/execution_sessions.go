@@ -40,13 +40,16 @@ type ExecutionRequest struct {
 type ExecutionSessionService struct {
 	store   ExecutionSessionStore
 	runners RunnerConnectionManager
+
+	liveMu sync.RWMutex
+	live   map[string]*ExecutionProcess
 }
 
 func NewExecutionSessionService(sessionStore ExecutionSessionStore, runners RunnerConnectionManager) (*ExecutionSessionService, error) {
 	if sessionStore == nil || runners == nil {
 		return nil, fmt.Errorf("execution session store and runner manager are required")
 	}
-	return &ExecutionSessionService{store: sessionStore, runners: runners}, nil
+	return &ExecutionSessionService{store: sessionStore, runners: runners, live: make(map[string]*ExecutionProcess)}, nil
 }
 
 func (s *ExecutionSessionService) Start(ctx context.Context, projectID, runID, runtimeInstanceID string, request ExecutionRequest) (*ExecutionProcess, error) {
@@ -150,27 +153,56 @@ func (s *ExecutionSessionService) transition(ctx context.Context, session store.
 	return updated, nil
 }
 
+func liveProcessKey(projectID, sessionID string) string {
+	return projectID + "/" + sessionID
+}
+
+func (s *ExecutionSessionService) trackProcess(process *ExecutionProcess) {
+	record := process.Record()
+	s.liveMu.Lock()
+	s.live[liveProcessKey(record.ProjectID, record.ID)] = process
+	s.liveMu.Unlock()
+}
+
+func (s *ExecutionSessionService) untrackProcess(process *ExecutionProcess) {
+	record := process.Record()
+	key := liveProcessKey(record.ProjectID, record.ID)
+	s.liveMu.Lock()
+	if s.live[key] == process {
+		delete(s.live, key)
+	}
+	s.liveMu.Unlock()
+}
+
+func (s *ExecutionSessionService) liveProcess(projectID, sessionID string) (*ExecutionProcess, bool) {
+	s.liveMu.RLock()
+	defer s.liveMu.RUnlock()
+	process, ok := s.live[liveProcessKey(projectID, sessionID)]
+	return process, ok
+}
+
 type ExecutionProcess struct {
 	service   *ExecutionSessionService
 	transport runner.ProcessSession
 
-	mu      sync.RWMutex
-	record  store.ExecutionSession
-	result  runner.Result
-	err     error
-	done    chan struct{}
-	cancel  atomic.Bool
+	mu     sync.RWMutex
+	record store.ExecutionSession
+	result runner.Result
+	err    error
+	done   chan struct{}
+	cancel atomic.Bool
 }
 
 func newExecutionProcess(service *ExecutionSessionService, record store.ExecutionSession, transport runner.ProcessSession) *ExecutionProcess {
 	process := &ExecutionProcess{service: service, transport: transport, record: record, done: make(chan struct{})}
+	service.trackProcess(process)
 	go process.observe()
 	return process
 }
 
-func (p *ExecutionProcess) ID() string { return p.transport.ID() }
-func (p *ExecutionProcess) Stdout() io.Reader { return p.transport.Stdout() }
-func (p *ExecutionProcess) Stderr() io.Reader { return p.transport.Stderr() }
+func (p *ExecutionProcess) ID() string            { return p.transport.ID() }
+func (p *ExecutionProcess) Stdout() io.Reader     { return p.transport.Stdout() }
+func (p *ExecutionProcess) Stderr() io.Reader     { return p.transport.Stderr() }
 func (p *ExecutionProcess) Stdin() io.WriteCloser { return p.transport.Stdin() }
 
 func (p *ExecutionProcess) Record() store.ExecutionSession {
@@ -191,16 +223,23 @@ func (p *ExecutionProcess) Wait(ctx context.Context) (runner.Result, error) {
 }
 
 func (p *ExecutionProcess) Terminate(ctx context.Context) error {
+	if err := p.transport.Terminate(ctx); err != nil {
+		return err
+	}
 	p.cancel.Store(true)
-	return p.transport.Terminate(ctx)
+	return nil
 }
 
 func (p *ExecutionProcess) Kill(ctx context.Context) error {
+	if err := p.transport.Kill(ctx); err != nil {
+		return err
+	}
 	p.cancel.Store(true)
-	return p.transport.Kill(ctx)
+	return nil
 }
 
 func (p *ExecutionProcess) observe() {
+	defer p.service.untrackProcess(p)
 	result, waitErr := p.transport.Wait(context.Background())
 	record := p.Record()
 	var finalErr error
