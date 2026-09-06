@@ -17,6 +17,14 @@ var runtimeInstanceStatuses = map[string]struct{}{
 	"DESTROYED":    {},
 }
 
+var runnerStatuses = map[string]struct{}{
+	"CONNECTING":  {},
+	"READY":       {},
+	"BUSY":        {},
+	"DRAINING":    {},
+	"UNAVAILABLE": {},
+}
+
 func (s *Store) GetRuntimeInstance(ctx context.Context, projectID, instanceID string) (store.RuntimeInstance, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(instanceID) == "" {
 		return store.RuntimeInstance{}, store.ErrInvalidArgument
@@ -62,4 +70,19 @@ func (s *Store) ListRuntimeInstances(ctx context.Context, projectID string, stat
 		return nil, err
 	}
 	return instances, nil
+}
+
+func (s *Store) UpdateRuntimeInstanceRunnerStatus(ctx context.Context, projectID, instanceID, runnerStatus string) (store.RuntimeInstance, error) {
+	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(instanceID) == "" {
+		return store.RuntimeInstance{}, store.ErrInvalidArgument
+	}
+	if _, ok := runnerStatuses[runnerStatus]; !ok {
+		return store.RuntimeInstance{}, store.ErrInvalidArgument
+	}
+	return scanRuntimeInstance(s.pool.QueryRow(ctx, `
+		UPDATE runtime_instances
+		SET runner_status = $3, updated_at = now()
+		WHERE project_id = $1 AND id = $2
+		RETURNING id::text, project_id::text, workspace_id::text, runtime_id::text, status, external_id, runner_status, safe_handle_metadata, created_at, started_at, stopped_at, updated_at
+	`, projectID, instanceID, runnerStatus))
 }
