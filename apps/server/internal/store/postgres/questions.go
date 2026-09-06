@@ -24,7 +24,7 @@ func (s *Store) ListQuestions(ctx context.Context, projectID string, filter stor
 		WHERE project_id = $1
 		  AND ($2::uuid IS NULL OR issue_id = $2)
 		  AND ($3::uuid IS NULL OR run_id = $3)
-		  AND (cardinality($4::text[]) = 0 OR status = ANY($4::text[]))
+		  AND (coalesce(cardinality($4::text[]), 0) = 0 OR status = ANY($4::text[]))
 		ORDER BY created_at, id
 	`, projectID, filter.IssueID, filter.RunID, filter.Statuses)
 	if err != nil {
