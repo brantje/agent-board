@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
+	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
+	"github.com/brantje/agent-board/apps/server/internal/secrets"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
@@ -126,12 +128,37 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime})
+	secretResolver, err := configuredSecretResolver(database)
+	if err != nil {
+		_ = dockerRuntime.Close()
+		return nil, err
+	}
+	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime}, secretResolver)
 	if err != nil {
 		_ = dockerRuntime.Close()
 		return nil, err
 	}
 	return services, nil
+}
+
+func configuredSecretResolver(database *postgres.Store) (executioncontext.SecretResolver, error) {
+	rawKey := os.Getenv("AGENT_BOARD_SECRET_ENCRYPTION_KEY")
+	if rawKey == "" {
+		return nil, nil
+	}
+	key, err := secrets.ParseKey(rawKey)
+	if err != nil {
+		return nil, fmt.Errorf("secret encryption key: %w", err)
+	}
+	cipher, err := secrets.NewAESGCM(1, map[int][]byte{1: key})
+	if err != nil {
+		return nil, fmt.Errorf("secret encryption cipher: %w", err)
+	}
+	service, err := secrets.NewService(database, cipher)
+	if err != nil {
+		return nil, fmt.Errorf("secret resolver: %w", err)
+	}
+	return service, nil
 }
 
 func configuredWorkspaceRoot() string {

@@ -19,7 +19,7 @@ func (f *fakeSecretResolver) Resolve(_ context.Context, _ secretstore.Scope, ref
 
 func TestUnauthorizedRuntimeSecretFailsBeforeResolution(t *testing.T) {
 	resolver := &fakeSecretResolver{values: map[string][]byte{"forged": []byte("do-not-read")}}
-	_, err := ResolveSecretMaterial(context.Background(), resolver, "p1", Resolved{AllowedSecretRefs: []string{"allowed"}}, []string{"forged"})
+	_, err := ResolveSecretMaterial(context.Background(), resolver, "p1", Resolved{AllowedSecretRefs: []string{"allowed"}}, false, []string{"forged"})
 	apiErr, ok := AsError(err)
 	if !ok || apiErr.Code != "execution_secret_unauthorized" {
 		t.Fatalf("err = %#v", err)
@@ -38,7 +38,7 @@ func TestAuthorizedSecretsResolveAfterPolicyCheck(t *testing.T) {
 	material, err := ResolveSecretMaterial(context.Background(), resolver, "p1", Resolved{
 		ProviderCredentialRef: &credentialRef,
 		AllowedSecretRefs:     []string{"runtime-token"},
-	}, []string{"runtime-token", "runtime-token"})
+	}, true, []string{"runtime-token", "runtime-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,5 +51,15 @@ func TestAuthorizedSecretsResolveAfterPolicyCheck(t *testing.T) {
 	values := material.Values()
 	if len(values) != 2 {
 		t.Fatalf("redaction values = %v", values)
+	}
+}
+
+func TestNoRequestedSecretsDoesNotRequireResolver(t *testing.T) {
+	material, err := ResolveSecretMaterial(context.Background(), nil, "p1", Resolved{}, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(material.Runtime) != 0 || len(material.ProviderCredential) != 0 {
+		t.Fatalf("material = %+v", material)
 	}
 }

@@ -30,10 +30,7 @@ func (m SecretMaterial) Values() []string {
 	return values
 }
 
-func ResolveSecretMaterial(ctx context.Context, resolver SecretResolver, projectID string, resolved Resolved, requestedRuntimeRefs []string) (SecretMaterial, error) {
-	if resolver == nil {
-		return SecretMaterial{}, fmt.Errorf("secret resolver is required")
-	}
+func ResolveSecretMaterial(ctx context.Context, resolver SecretResolver, projectID string, resolved Resolved, includeProviderCredential bool, requestedRuntimeRefs []string) (SecretMaterial, error) {
 	allowed := make(map[string]struct{}, len(resolved.AllowedSecretRefs))
 	for _, ref := range resolved.AllowedSecretRefs {
 		ref = strings.TrimSpace(ref)
@@ -59,9 +56,19 @@ func ResolveSecretMaterial(ctx context.Context, resolver SecretResolver, project
 		requested = append(requested, ref)
 	}
 
+	if !includeProviderCredential && len(requested) == 0 {
+		return SecretMaterial{Runtime: map[string][]byte{}}, nil
+	}
+	if resolver == nil {
+		return SecretMaterial{}, fail("execution_secret_resolver_unavailable", "Execution secret resolver is unavailable", fmt.Errorf("secret resolver is not configured"))
+	}
+
 	scope := secretstore.Scope{ProjectID: &projectID}
 	material := SecretMaterial{Runtime: make(map[string][]byte, len(requested))}
-	if resolved.ProviderCredentialRef != nil {
+	if includeProviderCredential {
+		if resolved.ProviderCredentialRef == nil || strings.TrimSpace(*resolved.ProviderCredentialRef) == "" {
+			return SecretMaterial{}, fail("execution_provider_credential_unavailable", "Provider credential is unavailable for execution", nil)
+		}
 		credential, err := resolver.Resolve(ctx, scope, *resolved.ProviderCredentialRef)
 		if err != nil {
 			return SecretMaterial{}, fail("execution_provider_credential_unavailable", "Provider credential is unavailable for execution", err)
