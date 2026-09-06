@@ -21,6 +21,7 @@ type Services struct {
 	RunnerConnections *runner.Manager
 	ExecutionSessions *AuthorizedExecutionSessionService
 	Redaction         *redaction.Registry
+	Secrets           SecretWriter
 }
 
 func NewServices(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer) (*Services, error) {
@@ -49,6 +50,9 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	var secretResolver executioncontext.SecretResolver
 	if len(secretResolvers) > 0 {
 		secretResolver = secretResolvers[0]
+		if writer, ok := secretResolver.(SecretWriter); ok {
+			services.Secrets = writer
+		}
 	}
 	preparer, err := executioncontext.NewPreparer(resolver, secretResolver, securedStore, registry)
 	if err != nil {
