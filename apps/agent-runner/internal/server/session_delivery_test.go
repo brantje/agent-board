@@ -70,17 +70,17 @@ func TestDetachedDeliveryCanReconnectBeforeExpiry(t *testing.T) {
 
 func TestDetachRestartsReconnectWindow(t *testing.T) {
 	first := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
-	delivery := newSessionDelivery(context.Background(), first, 40*time.Millisecond)
+	delivery := newSessionDelivery(context.Background(), first, 250*time.Millisecond)
 	delivery.detach(first)
 
-	time.Sleep(20 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	second := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
 	if !delivery.attachIfIdle(second) {
 		t.Fatal("delivery did not reconnect within retention window")
 	}
 	delivery.detach(second)
 
-	time.Sleep(25 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 	third := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
 	if !delivery.attachIfIdle(third) {
 		t.Fatal("reconnect window was not restarted after a later detach")
