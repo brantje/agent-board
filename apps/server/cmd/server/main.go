@@ -9,14 +9,18 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
+	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
+	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
+	"github.com/brantje/agent-board/apps/server/internal/secrets"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
@@ -42,14 +46,21 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
+	if application, ok := handler.(*applicationHandler); ok && application.services != nil && application.services.Redaction != nil {
+		// Wrap a concrete sink rather than slog.Default().Handler(). The original
+		// default handler bridges through the standard logger, and SetDefault
+		// rewires that bridge; retaining it here would recurse on the first log.
+		baseHandler := slog.NewTextHandler(os.Stderr, nil)
+		slog.SetDefault(slog.New(redaction.NewSlogHandler(baseHandler, application.services.Redaction)))
+	}
 	if err := reconcileRuntimeInstances(ctx, handler); err != nil {
-		slog.Error("reconcile Runtime Instances", "error", err)
+		slog.Error("reconcile Runtime Instance", "error", err)
 		closeStore()
 		stop()
 		os.Exit(1)
 	}
 	if err := reconcileExecutionSessions(ctx, handler); err != nil {
-		slog.Error("reconcile Execution Sessions", "error", err)
+		slog.Error("reconcile Execution Session", "error", err)
 		closeStore()
 		stop()
 		os.Exit(1)
@@ -73,6 +84,15 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 		return nil, nil, fmt.Errorf("configure application: %w", err)
 	}
+	var secretWriteAuthorizer httpapi.SecretWriteAuthorizer
+	if services.Secrets != nil {
+		secretWriteAuthorizer, err = httpapi.NewDeploymentSecretWriteAuthorizer(os.Getenv("AGENT_BOARD_SECRET_WRITE_TOKEN"))
+		if err != nil {
+			_ = services.Close()
+			database.Close()
+			return nil, nil, fmt.Errorf("configure secret write authorization: %w", err)
+		}
+	}
 	closeApplication := func() {
 		if err := services.Close(); err != nil {
 			slog.Error("close application services", "error", err)
@@ -80,7 +100,7 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 	}
 	return &applicationHandler{
-		Handler:  httpapi.NewRouter(services.ControlPlane),
+		Handler:  httpapi.NewRouterWithSecrets(services.ControlPlane, services.Secrets, secretWriteAuthorizer),
 		services: services,
 	}, closeApplication, nil
 }
@@ -126,12 +146,37 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime})
+	secretResolver, err := configuredSecretResolver(database)
+	if err != nil {
+		_ = dockerRuntime.Close()
+		return nil, err
+	}
+	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime}, secretResolver)
 	if err != nil {
 		_ = dockerRuntime.Close()
 		return nil, err
 	}
 	return services, nil
+}
+
+func configuredSecretResolver(database *postgres.Store) (executioncontext.SecretResolver, error) {
+	rawKey := os.Getenv("AGENT_BOARD_SECRET_ENCRYPTION_KEY")
+	if rawKey == "" {
+		return nil, nil
+	}
+	key, err := secrets.ParseKey(rawKey)
+	if err != nil {
+		return nil, fmt.Errorf("secret encryption key: %w", err)
+	}
+	cipher, err := secrets.NewAESGCM(1, map[int][]byte{1: key})
+	if err != nil {
+		return nil, fmt.Errorf("secret encryption cipher: %w", err)
+	}
+	service, err := secrets.NewService(database, cipher)
+	if err != nil {
+		return nil, fmt.Errorf("secret resolver: %w", err)
+	}
+	return service, nil
 }
 
 func configuredWorkspaceRoot() string {
@@ -150,10 +195,11 @@ func exitCode(ctx context.Context, address string, handlers ...http.Handler) int
 }
 
 func configuredAddress() string {
-	if address := os.Getenv("AGENT_BOARD_SERVER_ADDR"); address != "" {
-		return address
+	address := normalizeAddress(os.Getenv("AGENT_BOARD_SERVER_ADDR"))
+	if address == "" {
+		return defaultAddress
 	}
-	return defaultAddress
+	return address
 }
 
 func newHTTPServer(address string, handlers ...http.Handler) *http.Server {
@@ -191,4 +237,8 @@ func serve(ctx context.Context, server *http.Server, listener net.Listener) erro
 		defer cancel()
 		return server.Shutdown(shutdownCtx)
 	}
+}
+
+func normalizeAddress(address string) string {
+	return strings.TrimSpace(address)
 }

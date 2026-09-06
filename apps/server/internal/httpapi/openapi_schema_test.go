@@ -30,6 +30,52 @@ func TestScopedResourceSchemasRequireProjectID(t *testing.T) {
 	}
 }
 
+func TestSecretOpenAPIMarksPlaintextWriteOnlyAndRequiresCapability(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "..", "packages", "api")
+	schemaData, err := os.ReadFile(filepath.Join(root, "schemas", "control-plane.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(schemaData)
+	input := topLevelYAMLBlock(doc, "SecretUpsertInput")
+	if input == "" || !strings.Contains(input, "value: {type: string, minLength: 1, writeOnly: true}") {
+		t.Fatalf("SecretUpsertInput must mark plaintext value writeOnly: %s", input)
+	}
+	metadata := topLevelYAMLBlock(doc, "SecretMetadata")
+	if metadata == "" || strings.Contains(metadata, "value:") {
+		t.Fatalf("SecretMetadata must not expose plaintext value: %s", metadata)
+	}
+
+	openAPIData, err := os.ReadFile(filepath.Join(root, "openapi.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAPI := string(openAPIData)
+	for _, route := range []string{"/api/secrets:", "/api/projects/{projectID}/secrets:"} {
+		if !strings.Contains(openAPI, route) {
+			t.Fatalf("OpenAPI missing secret route %s", route)
+		}
+	}
+	if !strings.Contains(openAPI, "SecretWriteCapability:") {
+		t.Fatal("OpenAPI must register the secret-write security scheme")
+	}
+
+	pathsData, err := os.ReadFile(filepath.Join(root, "paths", "secrets.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count := strings.Count(string(pathsData), "- SecretWriteCapability: []"); count != 2 {
+		t.Fatalf("secret operations security requirement count=%d, want 2", count)
+	}
+	componentsData, err := os.ReadFile(filepath.Join(root, "components", "api-components.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(componentsData), "name: X-Agent-Board-Secret-Write-Token") {
+		t.Fatal("secret-write capability header is missing from OpenAPI components")
+	}
+}
+
 func topLevelYAMLBlock(doc, name string) string {
 	start := strings.Index(doc, "\n"+name+":\n")
 	if start < 0 {

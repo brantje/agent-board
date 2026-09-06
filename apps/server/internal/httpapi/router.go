@@ -11,22 +11,45 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-type api struct{ service *app.Service }
+type api struct {
+	service               *app.Service
+	secrets               app.SecretWriter
+	secretWriteAuthorizer SecretWriteAuthorizer
+}
 
 type healthResponse struct {
 	Status string `json:"status"`
 }
 
 func NewRouter(services ...*app.Service) http.Handler {
+	var service *app.Service
+	if len(services) > 0 {
+		service = services[0]
+	}
+	return newRouter(service, nil, nil)
+}
+
+func NewRouterWithSecrets(service *app.Service, secrets app.SecretWriter, authorizers ...SecretWriteAuthorizer) http.Handler {
+	var authorizer SecretWriteAuthorizer
+	if len(authorizers) > 0 {
+		authorizer = authorizers[0]
+	}
+	return newRouter(service, secrets, authorizer)
+}
+
+func newRouter(service *app.Service, secretWriter app.SecretWriter, secretWriteAuthorizer SecretWriteAuthorizer) http.Handler {
 	router := chi.NewRouter()
 	router.Get("/healthz", handleHealth)
-	if len(services) == 0 || services[0] == nil {
+	if service == nil {
 		return router
 	}
-	a := &api{service: services[0]}
+	a := &api{service: service, secrets: secretWriter, secretWriteAuthorizer: secretWriteAuthorizer}
 	router.Route("/api", func(r chi.Router) {
 		a.registerConfigurationRoutes(r)
 		a.registerIssueRunRoutes(r)
+		if a.secrets != nil {
+			a.registerSecretRoutes(r)
+		}
 	})
 	return router
 }

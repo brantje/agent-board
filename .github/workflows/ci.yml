@@ -99,6 +99,9 @@ jobs:
       - name: Test shared runner protocol
         working-directory: packages/runnerprotocol
         run: go test ./... && go vet ./... && go build ./...
+      - name: Test shared redaction
+        working-directory: packages/redact
+        run: go test ./... && go vet ./... && go build ./...
       - name: Test and enforce coverage
         working-directory: apps/agent-runner
         run: |

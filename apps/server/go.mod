@@ -3,6 +3,7 @@ module github.com/brantje/agent-board/apps/server
 go 1.25.0
 
 require (
+	github.com/brantje/agent-board/packages/redact v0.0.0
 	github.com/brantje/agent-board/packages/runnerprotocol v0.0.0
 	github.com/containerd/errdefs v1.0.0
 	github.com/go-chi/chi/v5 v5.3.2
@@ -12,6 +13,7 @@ require (
 	github.com/moby/moby/client v0.5.1
 )
 
+replace github.com/brantje/agent-board/packages/redact => ../../packages/redact
 replace github.com/brantje/agent-board/packages/runnerprotocol => ../../packages/runnerprotocol
 
 require (

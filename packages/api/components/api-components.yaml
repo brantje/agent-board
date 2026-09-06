@@ -1,3 +1,9 @@
+securitySchemes:
+  SecretWriteCapability:
+    type: apiKey
+    in: header
+    name: X-Agent-Board-Secret-Write-Token
+    description: Deployment-scoped v0.1 capability required for privileged secret writes. It is not a user identity token and must never be injected into Runtime sessions.
 parameters:
   ProjectID:
     name: projectID
@@ -40,6 +46,12 @@ requestBodies:
       application/json:
         schema:
           $ref: ../schemas/control-plane.yaml#/ProjectUpdate
+  SecretUpsert:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/SecretUpsertInput
   ProviderInput:
     required: true
     content:
@@ -109,6 +121,12 @@ responses:
           type: array
           items:
             $ref: ../schemas/control-plane.yaml#/Project
+  SecretMetadata:
+    description: Safe secret reference metadata. Plaintext is never returned.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/SecretMetadata
   Provider:
     description: Provider response.
     content:

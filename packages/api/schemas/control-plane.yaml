@@ -36,6 +36,20 @@ ProjectUpdate:
     repositoryPath: {type: string}
     defaultBranch: {type: string}
     workflowSettings: {$ref: '#/JSONMap'}
+SecretUpsertInput:
+  type: object
+  additionalProperties: false
+  required: [ref, value]
+  properties:
+    ref: {type: string, minLength: 1}
+    value: {type: string, minLength: 1, writeOnly: true}
+SecretMetadata:
+  type: object
+  description: Safe metadata for a stored secret. Plaintext is never returned.
+  required: [ref, projectId]
+  properties:
+    ref: {type: string}
+    projectId: {type: [string, 'null'], format: uuid}
 Provider:
   type: object
   description: Credential references are write-only and are never returned.

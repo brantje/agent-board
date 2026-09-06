@@ -33,6 +33,16 @@ func TestConfiguredAddress(t *testing.T) {
 	if got := configuredAddress(); got != configured {
 		t.Fatalf("expected configured address %q, got %q", configured, got)
 	}
+
+	t.Setenv("AGENT_BOARD_SERVER_ADDR", "  "+configured+" \t")
+	if got := configuredAddress(); got != configured {
+		t.Fatalf("expected normalized address %q, got %q", configured, got)
+	}
+
+	t.Setenv("AGENT_BOARD_SERVER_ADDR", " \t ")
+	if got := configuredAddress(); got != defaultAddress {
+		t.Fatalf("expected whitespace-only address to use default %q, got %q", defaultAddress, got)
+	}
 }
 
 func TestNewHTTPServerUsesBoundedTimeouts(t *testing.T) {

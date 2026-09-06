@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/brantje/agent-board/apps/server/internal/httpapi"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
 )
 
@@ -19,6 +23,9 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	repositoryRoot := t.TempDir()
 	t.Setenv("AGENT_BOARD_REPOSITORY_ROOTS", repositoryRoot)
 	t.Setenv("AGENT_BOARD_WORKSPACE_ROOT", filepath.Join(t.TempDir(), "workspaces"))
+	t.Setenv("AGENT_BOARD_SECRET_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
+	secretWriteToken := strings.Repeat("w", 32)
+	t.Setenv("AGENT_BOARD_SECRET_WRITE_TOKEN", secretWriteToken)
 
 	handler, closeStore, err := controlPlaneHandler(context.Background(), databaseURL)
 	if err != nil {
@@ -29,8 +36,18 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	if !ok {
 		t.Fatalf("handler type = %T, want *applicationHandler", handler)
 	}
-	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil {
+	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.Redaction == nil || application.services.Secrets == nil {
 		t.Fatalf("application services were not fully wired: %+v", application.services)
+	}
+
+	// An authorized invalid request is rejected before persistence, so this
+	// verifies the production secret route and capability gate are both wired.
+	req := httptest.NewRequest(http.MethodPut, "/api/secrets", strings.NewReader(`{}`))
+	req.Header.Set(httpapi.SecretWriteCapabilityHeader, secretWriteToken)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("secret route status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 
