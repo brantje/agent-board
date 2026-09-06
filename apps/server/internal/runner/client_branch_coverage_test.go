@@ -178,7 +178,11 @@ func TestKillAndClosedStdinBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			t.Errorf("close client connection: %v", err)
+		}
+	}()
 	session, err := conn.Start(context.Background(), "session-kill", Request{Command: []string{"sleep", "1"}})
 	if err != nil {
 		t.Fatal(err)
@@ -254,7 +258,11 @@ func newHandshakeSequenceServer(t *testing.T, messages []protocol.Message) *http
 			t.Errorf("upgrade: %v", err)
 			return
 		}
-		defer conn.Close()
+		defer func() {
+			if err := conn.Close(); err != nil {
+				t.Errorf("close server connection: %v", err)
+			}
+		}()
 		if _, _, err := conn.ReadMessage(); err != nil {
 			return
 		}
