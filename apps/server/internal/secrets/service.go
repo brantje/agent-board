@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -62,11 +63,16 @@ func (s *Service) Put(ctx context.Context, scope Scope, ref string, plaintext []
 	if ref == "" || len(plaintext) == 0 {
 		return Metadata{}, ErrInvalidSecret
 	}
-	ciphertext, keyVersion, err := s.cipher.Encrypt(plaintext)
+	projectID := cloneString(scope.ProjectID)
+	payload, err := encodeSecretPayload(projectID, ref, plaintext)
+	if err != nil {
+		return Metadata{}, fmt.Errorf("encode secret payload: %w", err)
+	}
+	ciphertext, keyVersion, err := s.cipher.Encrypt(payload)
 	if err != nil {
 		return Metadata{}, fmt.Errorf("encrypt secret: %w", err)
 	}
-	record, err := s.store.PutSecret(ctx, Record{ProjectID: cloneString(scope.ProjectID), Ref: ref, Ciphertext: ciphertext, KeyVersion: keyVersion})
+	record, err := s.store.PutSecret(ctx, Record{ProjectID: projectID, Ref: ref, Ciphertext: ciphertext, KeyVersion: keyVersion})
 	if err != nil {
 		return Metadata{}, fmt.Errorf("persist secret: %w", err)
 	}
@@ -89,11 +95,43 @@ func (s *Service) Resolve(ctx context.Context, scope Scope, ref string) ([]byte,
 		}
 		return nil, fmt.Errorf("load secret: %w", err)
 	}
-	plaintext, err := s.cipher.Decrypt(record.Ciphertext, record.KeyVersion)
+	payload, err := s.cipher.Decrypt(record.Ciphertext, record.KeyVersion)
+	if err != nil {
+		return nil, ErrDecrypt
+	}
+	plaintext, err := decodeSecretPayload(payload, record.ProjectID, record.Ref)
 	if err != nil {
 		return nil, ErrDecrypt
 	}
 	return plaintext, nil
+}
+
+type secretPayload struct {
+	ProjectID *string `json:"projectId"`
+	Ref       string  `json:"ref"`
+	Value     []byte  `json:"value"`
+}
+
+func encodeSecretPayload(projectID *string, ref string, plaintext []byte) ([]byte, error) {
+	return json.Marshal(secretPayload{ProjectID: cloneString(projectID), Ref: ref, Value: append([]byte(nil), plaintext...)})
+}
+
+func decodeSecretPayload(payload []byte, projectID *string, ref string) ([]byte, error) {
+	var decoded secretPayload
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return nil, err
+	}
+	if decoded.Ref != ref || !sameProjectID(decoded.ProjectID, projectID) || len(decoded.Value) == 0 {
+		return nil, ErrDecrypt
+	}
+	return append([]byte(nil), decoded.Value...), nil
+}
+
+func sameProjectID(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func cloneString(value *string) *string {

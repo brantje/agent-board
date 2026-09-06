@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/big"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -56,12 +58,74 @@ func EnsureProvenance(ctx context.Context, evidence ProvenanceStore, projectID, 
 }
 
 func sameJSON(left, right []byte) bool {
-	var leftValue any
-	var rightValue any
-	if json.Unmarshal(left, &leftValue) != nil || json.Unmarshal(right, &rightValue) != nil {
+	leftValue, leftErr := decodeJSONLosslessly(left)
+	rightValue, rightErr := decodeJSONLosslessly(right)
+	if leftErr != nil || rightErr != nil {
 		return bytes.Equal(left, right)
 	}
-	leftCanonical, _ := json.Marshal(leftValue)
-	rightCanonical, _ := json.Marshal(rightValue)
-	return bytes.Equal(leftCanonical, rightCanonical)
+	return sameJSONValue(leftValue, rightValue)
+}
+
+func decodeJSONLosslessly(data []byte) (any, error) {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("multiple JSON values")
+		}
+		return nil, err
+	}
+	return value, nil
+}
+
+func sameJSONValue(left, right any) bool {
+	switch leftValue := left.(type) {
+	case nil:
+		return right == nil
+	case bool:
+		rightValue, ok := right.(bool)
+		return ok && leftValue == rightValue
+	case string:
+		rightValue, ok := right.(string)
+		return ok && leftValue == rightValue
+	case json.Number:
+		rightValue, ok := right.(json.Number)
+		return ok && sameJSONNumber(leftValue, rightValue)
+	case []any:
+		rightValue, ok := right.([]any)
+		if !ok || len(leftValue) != len(rightValue) {
+			return false
+		}
+		for index := range leftValue {
+			if !sameJSONValue(leftValue[index], rightValue[index]) {
+				return false
+			}
+		}
+		return true
+	case map[string]any:
+		rightValue, ok := right.(map[string]any)
+		if !ok || len(leftValue) != len(rightValue) {
+			return false
+		}
+		for key, value := range leftValue {
+			rightEntry, exists := rightValue[key]
+			if !exists || !sameJSONValue(value, rightEntry) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+func sameJSONNumber(left, right json.Number) bool {
+	leftValue, leftOK := new(big.Rat).SetString(left.String())
+	rightValue, rightOK := new(big.Rat).SetString(right.String())
+	return leftOK && rightOK && leftValue.Cmp(rightValue) == 0
 }

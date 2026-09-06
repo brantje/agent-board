@@ -94,7 +94,12 @@ func (h *SlogHandler) redactAttr(attr slog.Attr) slog.Attr {
 		}
 		attr.Value = slog.GroupValue(group...)
 	case slog.KindAny:
-		attr.Value = slog.StringValue(h.redactString(fmt.Sprint(value.Any())))
+		switch typed := value.Any().(type) {
+		case []byte:
+			attr.Value = slog.StringValue(h.redactString(string(typed)))
+		default:
+			attr.Value = slog.StringValue(h.redactString(fmt.Sprint(typed)))
+		}
 	default:
 		attr.Value = value
 	}

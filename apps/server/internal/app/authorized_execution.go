@@ -133,7 +133,7 @@ func newAuthorizedExecutionProcess(process *ExecutionProcess, redactionValues []
 	authorized.stderr = &completionReader{source: sharedredact.NewReader(process.Stderr(), values), onDone: authorized.markStderrDone}
 	go func() {
 		_, _ = process.Wait(context.Background())
-		authorized.markTerminal()
+		authorized.settleTerminalOutput()
 	}()
 	return authorized
 }
@@ -170,6 +170,32 @@ func (p *AuthorizedExecutionProcess) Terminate(ctx context.Context) error {
 }
 func (p *AuthorizedExecutionProcess) Kill(ctx context.Context) error {
 	return redaction.WrapError(p.process.Kill(ctx), p.redactionValues)
+}
+
+func (p *AuthorizedExecutionProcess) settleTerminalOutput() {
+	p.markTerminal()
+	if !p.isStdoutDone() {
+		if err := p.process.AbandonStdout(); err == nil {
+			p.stdout.complete()
+		}
+	}
+	if !p.isStderrDone() {
+		if err := p.process.AbandonStderr(); err == nil {
+			p.stderr.complete()
+		}
+	}
+}
+
+func (p *AuthorizedExecutionProcess) isStdoutDone() bool {
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
+	return p.stdoutDone
+}
+
+func (p *AuthorizedExecutionProcess) isStderrDone() bool {
+	p.lifecycleMu.Lock()
+	defer p.lifecycleMu.Unlock()
+	return p.stderrDone
 }
 
 func (p *AuthorizedExecutionProcess) markTerminal() {
