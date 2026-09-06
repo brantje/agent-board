@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
@@ -18,7 +19,10 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-const cleanupTimeout = 30 * time.Second
+const (
+	cleanupTimeout                    = 30 * time.Second
+	processCancellationCleanupTimeout = 5 * time.Second
+)
 
 type ContextResolver interface {
 	Resolve(context.Context, string, string) (executioncontext.Resolved, error)
@@ -317,7 +321,13 @@ func (l *processLauncher) Start(ctx context.Context, request engine.ProcessReque
 	if err != nil {
 		return nil, err
 	}
-	process, err := l.sessions.Start(ctx, l.scope.ProjectID, l.scope.RunID, l.runtimeInstanceID, app.AuthorizedExecutionRequest{Command: append([]string(nil), request.Command...), CWD: request.CWD, Env: cloneMap(request.Env)})
+	process, err := l.sessions.Start(ctx, l.scope.ProjectID, l.scope.RunID, l.runtimeInstanceID, app.AuthorizedExecutionRequest{
+		Command:               append([]string(nil), request.Command...),
+		CWD:                   request.CWD,
+		Env:                   cloneMap(request.Env),
+		ProviderCredentialEnv: request.ProviderCredentialEnv,
+		RuntimeSecretRefs:     cloneMap(request.RuntimeSecretRefs),
+	})
 	if err != nil {
 		_ = l.recordFailure(ctx, request, &started.ID, nil, err)
 		return nil, err
@@ -376,13 +386,45 @@ type captureResult struct {
 	err    error
 }
 
+type captureStream struct {
+	reader  *io.PipeReader
+	claimed atomic.Bool
+}
+
+func (s *captureStream) Reader() io.Reader {
+	s.claimed.Store(true)
+	return s.reader
+}
+
+func (s *captureStream) CloseIfUnclaimed() {
+	if !s.claimed.Load() {
+		_ = s.reader.Close()
+	}
+}
+
+func (s *captureStream) Close() {
+	_ = s.reader.Close()
+}
+
+type engineStreamWriter struct {
+	writer *io.PipeWriter
+}
+
+func (w engineStreamWriter) Write(data []byte) (int, error) {
+	written, err := w.writer.Write(data)
+	if errors.Is(err, io.ErrClosedPipe) {
+		return len(data), nil
+	}
+	return written, err
+}
+
 type capturingProcess struct {
 	process       *app.AuthorizedExecutionProcess
 	launcher      *processLauncher
 	request       engine.ProcessRequest
 	parentEventID string
-	stdout        io.ReadCloser
-	stderr        io.ReadCloser
+	stdout        *captureStream
+	stderr        *captureStream
 	stdoutDone    <-chan captureResult
 	stderrDone    <-chan captureResult
 	waitOnce      sync.Once
@@ -396,28 +438,41 @@ func newCapturingProcess(ctx context.Context, process *app.AuthorizedExecutionPr
 	return &capturingProcess{process: process, launcher: launcher, request: request, parentEventID: parentEventID, stdout: stdout, stderr: stderr, stdoutDone: stdoutDone, stderrDone: stderrDone}
 }
 
-func startCapture(ctx context.Context, recorder *evidence.OutputRecorder, scope evidence.RunScope, stream string, source io.Reader) (io.ReadCloser, <-chan captureResult) {
+func startCapture(ctx context.Context, recorder *evidence.OutputRecorder, scope evidence.RunScope, stream string, source io.Reader) (*captureStream, <-chan captureResult) {
 	reader, writer := io.Pipe()
+	streamReader := &captureStream{reader: reader}
 	done := make(chan captureResult, 1)
 	go func() {
-		chunks, err := recorder.Capture(ctx, scope, stream, io.TeeReader(source, writer))
+		chunks, err := recorder.Capture(ctx, scope, stream, io.TeeReader(source, engineStreamWriter{writer: writer}))
 		_ = writer.CloseWithError(err)
 		done <- captureResult{chunks: chunks, err: err}
 		close(done)
 	}()
-	return reader, done
+	return streamReader, done
 }
 
-func (p *capturingProcess) ID() string                          { return p.process.ID() }
-func (p *capturingProcess) Stdout() io.Reader                   { return p.stdout }
-func (p *capturingProcess) Stderr() io.Reader                   { return p.stderr }
-func (p *capturingProcess) Stdin() io.WriteCloser               { return p.process.Stdin() }
-func (p *capturingProcess) Terminate(ctx context.Context) error { return p.process.Terminate(ctx) }
-func (p *capturingProcess) Kill(ctx context.Context) error      { return p.process.Kill(ctx) }
+func (p *capturingProcess) ID() string            { return p.process.ID() }
+func (p *capturingProcess) Stdout() io.Reader     { return p.stdout.Reader() }
+func (p *capturingProcess) Stderr() io.Reader     { return p.stderr.Reader() }
+func (p *capturingProcess) Stdin() io.WriteCloser { return p.process.Stdin() }
+func (p *capturingProcess) Terminate(ctx context.Context) error {
+	return p.process.Terminate(ctx)
+}
+func (p *capturingProcess) Kill(ctx context.Context) error { return p.process.Kill(ctx) }
 
 func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, error) {
 	p.waitOnce.Do(func() {
+		// If an Engine never requested a stream, detach that presentation pipe
+		// before waiting. Evidence capture continues because closed presentation
+		// pipes are ignored by engineStreamWriter while the source is still read.
+		p.stdout.CloseIfUnclaimed()
+		p.stderr.CloseIfUnclaimed()
 		result, waitErr := p.process.Wait(ctx)
+		if waitErr != nil && ctx.Err() != nil {
+			p.stdout.Close()
+			p.stderr.Close()
+			p.releaseCancelledTransport(ctx)
+		}
 		stdout := <-p.stdoutDone
 		stderr := <-p.stderrDone
 		chunks := append(append([]store.RawOutputChunk(nil), stdout.chunks...), stderr.chunks...)
@@ -446,6 +501,13 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 		}
 	})
 	return p.waitResult, p.waitErr
+}
+
+func (p *capturingProcess) releaseCancelledTransport(parent context.Context) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), processCancellationCleanupTimeout)
+	defer cancel()
+	_ = p.process.Terminate(cleanupCtx)
+	_ = p.process.Kill(cleanupCtx)
 }
 
 func chunkIDs(chunks []store.RawOutputChunk) []string {

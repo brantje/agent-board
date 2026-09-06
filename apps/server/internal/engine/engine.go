@@ -15,11 +15,13 @@ type ProcessLauncher interface {
 }
 
 type ProcessRequest struct {
-	Command []string
-	CWD     string
-	Env     map[string]string
-	Kind    string
-	Name    string
+	Command               []string
+	CWD                   string
+	Env                   map[string]string
+	ProviderCredentialEnv string
+	RuntimeSecretRefs     map[string]string
+	Kind                  string
+	Name                  string
 }
 
 type Process interface {
