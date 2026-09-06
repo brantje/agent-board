@@ -108,7 +108,24 @@ jobs:
         env:
           AGENT_BOARD_TEST_DOCKER: "1"
           AGENT_BOARD_TEST_SCRIPTED_RUNTIME_IMAGE: agent-board-scripted-runtime:ci
-        run: go test -count=1 -run '^TestScriptedEngineDockerWalkingSkeleton$' -v ./internal/runexec
+        run: |
+          set -eu
+          if go test -count=1 -run '^TestScriptedEngineDockerWalkingSkeleton$' -v ./internal/runexec; then
+            exit 0
+          fi
+          postgres_id="$(docker ps -q --filter ancestor=pgvector/pgvector:pg18 | head -n 1)"
+          if [ -n "$postgres_id" ]; then
+            echo '--- scripted Run diagnostics ---'
+            docker exec "$postgres_id" psql -U agent_board -d agent_board_test -x -c \
+              'SELECT id, status, failure_reason FROM runs ORDER BY created_at DESC LIMIT 1' || true
+            echo '--- Execution Sessions ---'
+            docker exec "$postgres_id" psql -U agent_board -d agent_board_test -x -c \
+              'SELECT status, cwd, command_argv, exit_code FROM execution_sessions ORDER BY created_at' || true
+            echo '--- Run Events ---'
+            docker exec "$postgres_id" psql -U agent_board -d agent_board_test -x -c \
+              'SELECT sequence, type, payload FROM events ORDER BY sequence' || true
+          fi
+          exit 1
 
   agent-runner:
     name: Agent runner
