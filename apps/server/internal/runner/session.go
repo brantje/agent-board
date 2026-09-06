@@ -175,35 +175,77 @@ type outputStream struct {
 	reader *io.PipeReader
 	writer *io.PipeWriter
 	queue  chan []byte
+	done   chan struct{}
 	once   sync.Once
+
+	mu       sync.Mutex
+	closed   bool
+	closeErr error
+	pushes   sync.WaitGroup
 }
 
 func newOutputStream() *outputStream {
 	reader, writer := io.Pipe()
-	stream := &outputStream{reader: reader, writer: writer, queue: make(chan []byte, 32)}
+	stream := &outputStream{
+		reader: reader,
+		writer: writer,
+		queue:  make(chan []byte, 32),
+		done:   make(chan struct{}),
+	}
 	go stream.run()
 	return stream
 }
 
 func (s *outputStream) run() {
+	failed := false
 	for chunk := range s.queue {
-		if _, err := s.writer.Write(chunk); err != nil {
-			return
+		if failed {
+			continue
 		}
+		if _, err := s.writer.Write(chunk); err != nil {
+			failed = true
+		}
+	}
+
+	s.mu.Lock()
+	closeErr := s.closeErr
+	s.mu.Unlock()
+	if closeErr != nil && !errors.Is(closeErr, io.EOF) {
+		_ = s.writer.CloseWithError(closeErr)
+		return
 	}
 	_ = s.writer.Close()
 }
 
 func (s *outputStream) push(data []byte) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.pushes.Add(1)
+	s.mu.Unlock()
+	defer s.pushes.Done()
+
 	chunk := append([]byte(nil), data...)
-	s.queue <- chunk
+	select {
+	case s.queue <- chunk:
+	case <-s.done:
+	}
 }
 
 func (s *outputStream) close(err error) {
 	s.once.Do(func() {
-		if err != nil && !errors.Is(err, io.EOF) {
-			_ = s.writer.CloseWithError(err)
-		}
+		s.mu.Lock()
+		s.closed = true
+		s.closeErr = err
+		close(s.done)
+		s.mu.Unlock()
+
+		// No producer can register after closed becomes true. Waiting here lets
+		// in-flight producers either enqueue their already-received chunk or
+		// observe done before the queue is closed, avoiding send-on-closed races.
+		s.pushes.Wait()
 		close(s.queue)
 	})
 }
