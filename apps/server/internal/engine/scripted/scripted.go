@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 )
 
 const Name = "scripted"
+
+const cancellationCleanupTimeout = 5 * time.Second
 
 type Engine struct{}
 
@@ -54,6 +57,9 @@ func executeStep(ctx context.Context, launcher engine.ProcessLauncher, request e
 		}(source)
 	}
 	result, waitErr := process.Wait(ctx)
+	if waitErr != nil && ctx.Err() != nil {
+		releaseCancelledProcess(ctx, process)
+	}
 	wg.Wait()
 	close(drainErrs)
 	for drainErr := range drainErrs {
@@ -68,4 +74,11 @@ func executeStep(ctx context.Context, launcher engine.ProcessLauncher, request e
 		return fmt.Errorf("process exited with code %d", result.ExitCode)
 	}
 	return nil
+}
+
+func releaseCancelledProcess(ctx context.Context, process engine.Process) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cancellationCleanupTimeout)
+	defer cancel()
+	_ = process.Terminate(cleanupCtx)
+	_ = process.Kill(cleanupCtx)
 }
