@@ -44,8 +44,11 @@ func EnsureProvenance(ctx context.Context, evidence ProvenanceStore, projectID, 
 	if err := evidence.PutRunProvenance(ctx, projectID, runID, snapshot); err != nil {
 		// Handle a concurrent writer without making provenance mutable.
 		existing, getErr := evidence.GetRunProvenance(ctx, projectID, runID)
-		if getErr == nil && sameJSON(existing, snapshot) {
-			return nil
+		if getErr == nil {
+			if sameJSON(existing, snapshot) {
+				return nil
+			}
+			return fail("execution_provenance_conflict", "Run already has different immutable execution provenance", store.ErrConflict)
 		}
 		return fmt.Errorf("persist execution provenance: %w", err)
 	}

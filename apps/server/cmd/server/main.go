@@ -60,7 +60,7 @@ func main() {
 		os.Exit(1)
 	}
 	if err := reconcileExecutionSessions(ctx, handler); err != nil {
-		slog.Error("reconcile Execution Sessions", "error", err)
+		slog.Error("reconcile Execution Session", "error", err)
 		closeStore()
 		stop()
 		os.Exit(1)
@@ -186,10 +186,11 @@ func exitCode(ctx context.Context, address string, handlers ...http.Handler) int
 }
 
 func configuredAddress() string {
-	if address := os.Getenv("AGENT_BOARD_SERVER_ADDR"); address != "" {
-		return address
+	address := normalizeAddress(os.Getenv("AGENT_BOARD_SERVER_ADDR"))
+	if address == "" {
+		return defaultAddress
 	}
-	return defaultAddress
+	return address
 }
 
 func newHTTPServer(address string, handlers ...http.Handler) *http.Server {

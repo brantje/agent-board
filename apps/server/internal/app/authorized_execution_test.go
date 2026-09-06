@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -97,6 +98,17 @@ func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput
 	}
 	close(transport.resultCh)
 	_, _ = process.Wait(context.Background())
+}
+
+func TestAuthorizedExecutionProcessDoesNotExposeRawProcess(t *testing.T) {
+	processType := reflect.TypeOf(AuthorizedExecutionProcess{})
+	rawType := reflect.TypeOf((*ExecutionProcess)(nil))
+	for index := 0; index < processType.NumField(); index++ {
+		field := processType.Field(index)
+		if field.Type == rawType && field.PkgPath == "" {
+			t.Fatalf("raw ExecutionProcess is exported through field %q", field.Name)
+		}
+	}
 }
 
 func TestAuthorizedExecutionRedactsStartErrors(t *testing.T) {

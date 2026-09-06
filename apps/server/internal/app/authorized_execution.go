@@ -7,6 +7,7 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/redaction"
+	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	sharedredact "github.com/brantje/agent-board/packages/redact"
 )
@@ -65,26 +66,45 @@ func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID
 	return newAuthorizedExecutionProcess(process, prepared.RedactionValues), nil
 }
 
-// AuthorizedExecutionProcess preserves the low-level process lifecycle while
-// independently sanitizing runner output at the trusted server boundary. This
-// prevents a buggy or compromised runner from returning registered secret
-// plaintext to any downstream durable-output consumer.
+// AuthorizedExecutionProcess exposes only lifecycle operations that preserve
+// the trusted redaction boundary. The raw ExecutionProcess is intentionally
+// private so callers cannot bypass sanitized stdout/stderr readers.
 type AuthorizedExecutionProcess struct {
-	*ExecutionProcess
-	stdout io.Reader
-	stderr io.Reader
+	process         *ExecutionProcess
+	stdout          io.Reader
+	stderr          io.Reader
+	redactionValues []string
 }
 
 func newAuthorizedExecutionProcess(process *ExecutionProcess, redactionValues []string) *AuthorizedExecutionProcess {
+	values := append([]string(nil), redactionValues...)
 	return &AuthorizedExecutionProcess{
-		ExecutionProcess: process,
-		stdout:           sharedredact.NewReader(process.Stdout(), redactionValues),
-		stderr:           sharedredact.NewReader(process.Stderr(), redactionValues),
+		process:         process,
+		stdout:          sharedredact.NewReader(process.Stdout(), values),
+		stderr:          sharedredact.NewReader(process.Stderr(), values),
+		redactionValues: values,
 	}
 }
 
-func (p *AuthorizedExecutionProcess) Stdout() io.Reader { return p.stdout }
-func (p *AuthorizedExecutionProcess) Stderr() io.Reader { return p.stderr }
+func (p *AuthorizedExecutionProcess) ID() string            { return p.process.ID() }
+func (p *AuthorizedExecutionProcess) Stdout() io.Reader     { return p.stdout }
+func (p *AuthorizedExecutionProcess) Stderr() io.Reader     { return p.stderr }
+func (p *AuthorizedExecutionProcess) Stdin() io.WriteCloser { return p.process.Stdin() }
+func (p *AuthorizedExecutionProcess) AbandonStdout() error  { return p.process.AbandonStdout() }
+func (p *AuthorizedExecutionProcess) AbandonStderr() error  { return p.process.AbandonStderr() }
+func (p *AuthorizedExecutionProcess) Record() store.ExecutionSession {
+	return p.process.Record()
+}
+func (p *AuthorizedExecutionProcess) Wait(ctx context.Context) (runner.Result, error) {
+	result, err := p.process.Wait(ctx)
+	return result, redaction.WrapError(err, p.redactionValues)
+}
+func (p *AuthorizedExecutionProcess) Terminate(ctx context.Context) error {
+	return redaction.WrapError(p.process.Terminate(ctx), p.redactionValues)
+}
+func (p *AuthorizedExecutionProcess) Kill(ctx context.Context) error {
+	return redaction.WrapError(p.process.Kill(ctx), p.redactionValues)
+}
 
 func (s *AuthorizedExecutionSessionService) ReconcileAll(ctx context.Context) error {
 	return s.sessions.ReconcileAll(ctx)

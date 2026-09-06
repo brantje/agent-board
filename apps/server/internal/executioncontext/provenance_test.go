@@ -30,6 +30,23 @@ func (f *fakeProvenanceStore) GetRunProvenance(context.Context, string, string) 
 	return append(json.RawMessage(nil), f.snapshot...), nil
 }
 
+type racingProvenanceStore struct {
+	reads    int
+	snapshot json.RawMessage
+}
+
+func (f *racingProvenanceStore) GetRunProvenance(context.Context, string, string) (json.RawMessage, error) {
+	f.reads++
+	if f.reads == 1 {
+		return nil, store.ErrNotFound
+	}
+	return append(json.RawMessage(nil), f.snapshot...), nil
+}
+
+func (f *racingProvenanceStore) PutRunProvenance(context.Context, string, string, json.RawMessage) error {
+	return store.ErrConflict
+}
+
 func TestEnsureProvenancePersistsSafeContextOnce(t *testing.T) {
 	evidence := &fakeProvenanceStore{}
 	safe := SafeContext{Run: RunContext{ID: "run-1", Attempt: 1}, Provider: ProviderContext{ID: "provider-1", Name: "provider"}}
@@ -60,6 +77,23 @@ func TestEnsureProvenanceRejectsDifferentHistoricalContext(t *testing.T) {
 	second := first
 	second.Runtime.Image = "runtime:v2"
 	err := EnsureProvenance(context.Background(), evidence, "project-1", "run-1", second)
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "execution_provenance_conflict" || !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("err = %#v", err)
+	}
+}
+
+func TestEnsureProvenancePreservesConflictFromConcurrentDifferentWriter(t *testing.T) {
+	winner := SafeContext{Run: RunContext{ID: "run-1", Attempt: 1}, Runtime: RuntimeContext{Image: "runtime:winner"}}
+	winnerSnapshot, err := json.Marshal(Provenance{SchemaVersion: ProvenanceSchemaVersion, Context: winner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence := &racingProvenanceStore{snapshot: winnerSnapshot}
+	loser := winner
+	loser.Runtime.Image = "runtime:loser"
+
+	err = EnsureProvenance(context.Background(), evidence, "project-1", "run-1", loser)
 	apiErr, ok := AsError(err)
 	if !ok || apiErr.Code != "execution_provenance_conflict" || !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("err = %#v", err)
