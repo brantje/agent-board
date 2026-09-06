@@ -61,11 +61,11 @@ func TestBlockingQuestionAnswerRejectsActiveSchedulerWork(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create question: %v", err)
 	}
-	if _, err := s.pool.Exec(ctx, `
-		UPDATE runs SET status='WAITING_FOR_INPUT' WHERE project_id=$1 AND id=$2;
-		UPDATE issues SET status='BLOCKED' WHERE project_id=$1 AND id=$3;
-	`, f.project.ID, f.run.ID, f.issue.ID); err != nil {
-		t.Fatalf("prepare waiting state: %v", err)
+	if _, err := s.pool.Exec(ctx, `UPDATE runs SET status='WAITING_FOR_INPUT' WHERE project_id=$1 AND id=$2`, f.project.ID, f.run.ID); err != nil {
+		t.Fatalf("prepare waiting run: %v", err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE issues SET status='BLOCKED' WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID); err != nil {
+		t.Fatalf("prepare blocked issue: %v", err)
 	}
 
 	answer := "continue"
