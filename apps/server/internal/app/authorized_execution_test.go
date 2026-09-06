@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/runner"
@@ -62,10 +63,12 @@ func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput
 	if err != nil {
 		t.Fatal(err)
 	}
+	released := make(chan struct{})
 	preparer := &fakeExecutionPreparer{prepared: executioncontext.Prepared{
-		RuntimeID:       "runtime-config-1",
-		Secrets:         map[string]string{"TOKEN": "plain-secret"},
-		RedactionValues: []string{"plain-secret"},
+		RuntimeID:        "runtime-config-1",
+		Secrets:          map[string]string{"TOKEN": "plain-secret"},
+		RedactionValues:  []string{"plain-secret"},
+		ReleaseRedaction: func() { close(released) },
 	}}
 	service, err := NewAuthorizedExecutionSessionService(lowLevel, preparer)
 	if err != nil {
@@ -98,6 +101,11 @@ func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput
 	}
 	close(transport.resultCh)
 	_, _ = process.Wait(context.Background())
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("redaction registration was not released after terminal drained process")
+	}
 }
 
 func TestAuthorizedExecutionProcessDoesNotExposeRawProcess(t *testing.T) {
@@ -111,7 +119,7 @@ func TestAuthorizedExecutionProcessDoesNotExposeRawProcess(t *testing.T) {
 	}
 }
 
-func TestAuthorizedExecutionRedactsStartErrors(t *testing.T) {
+func TestAuthorizedExecutionRedactsStartErrorsAndReleasesRegistration(t *testing.T) {
 	transport := newFakeExecutionTransport("session-1")
 	client := &fakeExecutionClient{
 		transport: transport,
@@ -126,10 +134,12 @@ func TestAuthorizedExecutionRedactsStartErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	releases := 0
 	preparer := &fakeExecutionPreparer{prepared: executioncontext.Prepared{
-		RuntimeID:       "runtime-config-1",
-		Secrets:         map[string]string{"TOKEN": "plain-secret"},
-		RedactionValues: []string{"plain-secret"},
+		RuntimeID:        "runtime-config-1",
+		Secrets:          map[string]string{"TOKEN": "plain-secret"},
+		RedactionValues:  []string{"plain-secret"},
+		ReleaseRedaction: func() { releases++ },
 	}}
 	service, err := NewAuthorizedExecutionSessionService(lowLevel, preparer)
 	if err != nil {
@@ -142,6 +152,9 @@ func TestAuthorizedExecutionRedactsStartErrors(t *testing.T) {
 	if strings.Contains(err.Error(), "plain-secret") {
 		t.Fatalf("start error leaked secret: %v", err)
 	}
+	if releases != 1 {
+		t.Fatalf("redaction releases=%d, want 1", releases)
+	}
 }
 
 func TestAuthorizedExecutionRejectsRuntimeMismatchBeforeSessionCreation(t *testing.T) {
@@ -153,7 +166,8 @@ func TestAuthorizedExecutionRejectsRuntimeMismatchBeforeSessionCreation(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{prepared: executioncontext.Prepared{RuntimeID: "runtime-b"}})
+	releases := 0
+	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{prepared: executioncontext.Prepared{RuntimeID: "runtime-b", ReleaseRedaction: func() { releases++ }}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,6 +176,9 @@ func TestAuthorizedExecutionRejectsRuntimeMismatchBeforeSessionCreation(t *testi
 	}
 	if storeFake.session.ID != "" {
 		t.Fatalf("execution session persisted before preflight completed: %+v", storeFake.session)
+	}
+	if releases != 1 {
+		t.Fatalf("redaction releases=%d, want 1", releases)
 	}
 }
 

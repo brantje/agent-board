@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
@@ -47,6 +48,14 @@ func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID
 	if err != nil {
 		return nil, translateExecutionPreparationError(err)
 	}
+	releaseRedaction := prepared.ReleaseRedaction
+	releaseTransferred := false
+	defer func() {
+		if !releaseTransferred && releaseRedaction != nil {
+			releaseRedaction()
+		}
+	}()
+
 	instance, err := s.sessions.store.GetRuntimeInstance(ctx, projectID, runtimeInstanceID)
 	if err != nil {
 		return nil, translateStoreError(err, "runtime_instance")
@@ -63,7 +72,9 @@ func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID
 	if err != nil {
 		return nil, redaction.WrapError(err, prepared.RedactionValues)
 	}
-	return newAuthorizedExecutionProcess(process, prepared.RedactionValues), nil
+	authorized := newAuthorizedExecutionProcess(process, prepared.RedactionValues, releaseRedaction)
+	releaseTransferred = true
+	return authorized, nil
 }
 
 // AuthorizedExecutionProcess exposes only lifecycle operations that preserve
@@ -71,27 +82,82 @@ func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID
 // private so callers cannot bypass sanitized stdout/stderr readers.
 type AuthorizedExecutionProcess struct {
 	process         *ExecutionProcess
-	stdout          io.Reader
-	stderr          io.Reader
+	stdout          *completionReader
+	stderr          *completionReader
 	redactionValues []string
+
+	lifecycleMu sync.Mutex
+	terminal    bool
+	stdoutDone  bool
+	stderrDone  bool
+	release     func()
 }
 
-func newAuthorizedExecutionProcess(process *ExecutionProcess, redactionValues []string) *AuthorizedExecutionProcess {
-	values := append([]string(nil), redactionValues...)
-	return &AuthorizedExecutionProcess{
-		process:         process,
-		stdout:          sharedredact.NewReader(process.Stdout(), values),
-		stderr:          sharedredact.NewReader(process.Stderr(), values),
-		redactionValues: values,
+type completionReader struct {
+	source io.Reader
+	onDone func()
+	once   sync.Once
+}
+
+func (r *completionReader) Read(p []byte) (int, error) {
+	n, err := r.source.Read(p)
+	if err != nil {
+		r.complete()
 	}
+	return n, err
 }
 
-func (p *AuthorizedExecutionProcess) ID() string            { return p.process.ID() }
-func (p *AuthorizedExecutionProcess) Stdout() io.Reader     { return p.stdout }
-func (p *AuthorizedExecutionProcess) Stderr() io.Reader     { return p.stderr }
-func (p *AuthorizedExecutionProcess) Stdin() io.WriteCloser { return p.process.Stdin() }
-func (p *AuthorizedExecutionProcess) AbandonStdout() error  { return p.process.AbandonStdout() }
-func (p *AuthorizedExecutionProcess) AbandonStderr() error  { return p.process.AbandonStderr() }
+func (r *completionReader) complete() {
+	if r == nil {
+		return
+	}
+	r.once.Do(func() {
+		if r.onDone != nil {
+			r.onDone()
+		}
+	})
+}
+
+func newAuthorizedExecutionProcess(process *ExecutionProcess, redactionValues []string, releases ...func()) *AuthorizedExecutionProcess {
+	values := append([]string(nil), redactionValues...)
+	var release func()
+	if len(releases) > 0 {
+		release = releases[0]
+	}
+	authorized := &AuthorizedExecutionProcess{
+		process:         process,
+		redactionValues: values,
+		release:         release,
+	}
+	authorized.stdout = &completionReader{source: sharedredact.NewReader(process.Stdout(), values), onDone: authorized.markStdoutDone}
+	authorized.stderr = &completionReader{source: sharedredact.NewReader(process.Stderr(), values), onDone: authorized.markStderrDone}
+	go func() {
+		_, _ = process.Wait(context.Background())
+		authorized.markTerminal()
+	}()
+	return authorized
+}
+
+func (p *AuthorizedExecutionProcess) ID() string        { return p.process.ID() }
+func (p *AuthorizedExecutionProcess) Stdout() io.Reader { return p.stdout }
+func (p *AuthorizedExecutionProcess) Stderr() io.Reader { return p.stderr }
+func (p *AuthorizedExecutionProcess) Stdin() io.WriteCloser {
+	return p.process.Stdin()
+}
+func (p *AuthorizedExecutionProcess) AbandonStdout() error {
+	err := p.process.AbandonStdout()
+	if err == nil {
+		p.stdout.complete()
+	}
+	return redaction.WrapError(err, p.redactionValues)
+}
+func (p *AuthorizedExecutionProcess) AbandonStderr() error {
+	err := p.process.AbandonStderr()
+	if err == nil {
+		p.stderr.complete()
+	}
+	return redaction.WrapError(err, p.redactionValues)
+}
 func (p *AuthorizedExecutionProcess) Record() store.ExecutionSession {
 	return p.process.Record()
 }
@@ -104,6 +170,45 @@ func (p *AuthorizedExecutionProcess) Terminate(ctx context.Context) error {
 }
 func (p *AuthorizedExecutionProcess) Kill(ctx context.Context) error {
 	return redaction.WrapError(p.process.Kill(ctx), p.redactionValues)
+}
+
+func (p *AuthorizedExecutionProcess) markTerminal() {
+	p.lifecycleMu.Lock()
+	p.terminal = true
+	release := p.takeReleaseLocked()
+	p.lifecycleMu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+func (p *AuthorizedExecutionProcess) markStdoutDone() {
+	p.lifecycleMu.Lock()
+	p.stdoutDone = true
+	release := p.takeReleaseLocked()
+	p.lifecycleMu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+func (p *AuthorizedExecutionProcess) markStderrDone() {
+	p.lifecycleMu.Lock()
+	p.stderrDone = true
+	release := p.takeReleaseLocked()
+	p.lifecycleMu.Unlock()
+	if release != nil {
+		release()
+	}
+}
+
+func (p *AuthorizedExecutionProcess) takeReleaseLocked() func() {
+	if !p.terminal || !p.stdoutDone || !p.stderrDone || p.release == nil {
+		return nil
+	}
+	release := p.release
+	p.release = nil
+	return release
 }
 
 func (s *AuthorizedExecutionSessionService) ReconcileAll(ctx context.Context) error {

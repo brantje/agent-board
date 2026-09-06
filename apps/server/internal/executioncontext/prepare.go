@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 type SecretRequest struct {
@@ -12,14 +13,19 @@ type SecretRequest struct {
 }
 
 type Prepared struct {
-	Safe            SafeContext
-	RuntimeID       string
-	Secrets         map[string]string
-	RedactionValues []string
+	Safe             SafeContext
+	RuntimeID        string
+	Secrets          map[string]string
+	RedactionValues  []string
+	ReleaseRedaction func()
 }
 
 type RedactionRegistrar interface {
 	Register(string, []string)
+}
+
+type RedactionReleaser interface {
+	Release(string)
 }
 
 type Preparer struct {
@@ -66,12 +72,6 @@ func (p *Preparer) Prepare(ctx context.Context, projectID, runID string, request
 		return Prepared{}, err
 	}
 	redactionValues := material.Values()
-	if p.redaction != nil {
-		p.redaction.Register(runID, redactionValues)
-	}
-	if err := EnsureProvenance(ctx, p.provenance, projectID, runID, resolved.Safe); err != nil {
-		return Prepared{}, err
-	}
 
 	executionSecrets := make(map[string]string, len(request.RuntimeSecretRefs)+1)
 	if providerEnv != "" {
@@ -85,11 +85,27 @@ func (p *Preparer) Prepare(ctx context.Context, projectID, runID string, request
 		executionSecrets[envName] = string(value)
 	}
 
+	if err := EnsureProvenance(ctx, p.provenance, projectID, runID, resolved.Safe); err != nil {
+		return Prepared{}, err
+	}
+
+	var releaseRedaction func()
+	if p.redaction != nil && len(redactionValues) > 0 {
+		p.redaction.Register(runID, redactionValues)
+		if releaser, ok := p.redaction.(RedactionReleaser); ok {
+			var once sync.Once
+			releaseRedaction = func() {
+				once.Do(func() { releaser.Release(runID) })
+			}
+		}
+	}
+
 	return Prepared{
-		Safe:            resolved.Safe,
-		RuntimeID:       resolved.Safe.Runtime.ID,
-		Secrets:         executionSecrets,
-		RedactionValues: redactionValues,
+		Safe:             resolved.Safe,
+		RuntimeID:        resolved.Safe.Runtime.ID,
+		Secrets:          executionSecrets,
+		RedactionValues:  redactionValues,
+		ReleaseRedaction: releaseRedaction,
 	}, nil
 }
 

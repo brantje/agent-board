@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+type fakeRedactionRegistrar struct {
+	registeredRun string
+	registered    []string
+	releases      int
+}
+
+func (f *fakeRedactionRegistrar) Register(runID string, values []string) {
+	f.registeredRun = runID
+	f.registered = append([]string(nil), values...)
+}
+
+func (f *fakeRedactionRegistrar) Release(string) {
+	f.releases++
+}
+
 func TestPrepareBuildsOnlyRequestedExecutionSecretsAndProvenance(t *testing.T) {
 	values := validStore()
 	resolver, err := NewResolver(values)
@@ -16,7 +31,8 @@ func TestPrepareBuildsOnlyRequestedExecutionSecretsAndProvenance(t *testing.T) {
 		"runtime-token":  []byte("runtime-plain"),
 	}}
 	provenance := &fakeProvenanceStore{}
-	preparer, err := NewPreparer(resolver, secretResolver, provenance)
+	redaction := &fakeRedactionRegistrar{}
+	preparer, err := NewPreparer(resolver, secretResolver, provenance, redaction)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -41,6 +57,14 @@ func TestPrepareBuildsOnlyRequestedExecutionSecretsAndProvenance(t *testing.T) {
 	}
 	if provenance.puts != 1 {
 		t.Fatalf("provenance writes = %d", provenance.puts)
+	}
+	if redaction.registeredRun != "r1" || len(redaction.registered) != 2 || prepared.ReleaseRedaction == nil {
+		t.Fatalf("redaction registration=%+v prepared=%+v", redaction, prepared)
+	}
+	prepared.ReleaseRedaction()
+	prepared.ReleaseRedaction()
+	if redaction.releases != 1 {
+		t.Fatalf("redaction releases=%d, want 1", redaction.releases)
 	}
 }
 
