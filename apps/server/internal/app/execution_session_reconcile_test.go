@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -81,6 +82,21 @@ func TestReconcileTransportFailureLeavesSessionNonTerminal(t *testing.T) {
 	service, _ := NewExecutionSessionService(base, &reconcileExecutionManager{err: runner.ErrDisconnected})
 	_, err := service.Reconcile(context.Background(), "project-1", "session-1")
 	if err == nil || base.session.Status != "RUNNING" {
+		t.Fatalf("session=%+v err=%v", base.session, err)
+	}
+}
+
+func TestReconcileCallerDeadlineLeavesSessionNonTerminal(t *testing.T) {
+	transport := newFakeExecutionTransport("session-1")
+	base := &executionSessionStoreFake{
+		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING"},
+		session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
+	}
+	service, _ := NewExecutionSessionService(base, &reconcileExecutionManager{transport: transport, active: false})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	_, err := service.Reconcile(ctx, "project-1", "session-1")
+	if !errors.Is(err, context.DeadlineExceeded) || base.session.Status != "RUNNING" {
 		t.Fatalf("session=%+v err=%v", base.session, err)
 	}
 }

@@ -125,7 +125,7 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 		}
 		return nil, err
 	}
-	if errors.Is(waitErr, context.Canceled) && ctx.Err() != nil {
+	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 	if errors.Is(waitErr, runner.ErrDisconnected) || errors.Is(waitErr, runner.ErrClosed) || errors.Is(waitErr, runner.ErrManagerClosed) {
