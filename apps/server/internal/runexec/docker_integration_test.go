@@ -46,7 +46,7 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	}
 	defer database.Close()
 
-	repositoryPath := createScriptedFixtureRepository(t)
+	repositoryPath := createScriptedFixtureRepository(t, ctx)
 	repositoryPolicy, err := repository.NewPolicy([]string{filepath.Dir(repositoryPath)})
 	if err != nil {
 		t.Fatal(err)
@@ -242,28 +242,28 @@ func createScriptedIntegrationRun(t *testing.T, ctx context.Context, control *ap
 	return project, run
 }
 
-func createScriptedFixtureRepository(t *testing.T) string {
+func createScriptedFixtureRepository(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	repositoryPath := filepath.Join(t.TempDir(), "fixture")
 	if err := os.MkdirAll(repositoryPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, command := range [][]string{{"git", "init", "-q", "-b", "main"}, {"git", "config", "user.email", "integration@example.invalid"}, {"git", "config", "user.name", "Agent Board Integration"}} {
-		runIntegrationCommand(t, repositoryPath, command...)
+		runIntegrationCommand(t, ctx, repositoryPath, command...)
 	}
 	for _, name := range []string{"staged.txt", "unstaged.txt", "delete.txt", "rename.txt"} {
 		if err := os.WriteFile(filepath.Join(repositoryPath, name), []byte("baseline\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	runIntegrationCommand(t, repositoryPath, "git", "add", ".")
-	runIntegrationCommand(t, repositoryPath, "git", "commit", "-qm", "baseline")
+	runIntegrationCommand(t, ctx, repositoryPath, "git", "add", ".")
+	runIntegrationCommand(t, ctx, repositoryPath, "git", "commit", "-qm", "baseline")
 	return repositoryPath
 }
 
-func runIntegrationCommand(t *testing.T, dir string, command ...string) {
+func runIntegrationCommand(t *testing.T, ctx context.Context, dir string, command ...string) {
 	t.Helper()
-	cmd := exec.Command(command[0], command[1:]...)
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
 	cmd.Dir = dir
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%v: %v: %s", command, err, output)
