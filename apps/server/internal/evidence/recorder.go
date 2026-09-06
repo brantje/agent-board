@@ -16,28 +16,36 @@ type EventPublisher interface {
 	Publish(context.Context, store.Event) error
 }
 
+type PublishErrorHandler func(error)
+
 type Recorder struct {
-	store     EventAppender
-	publisher EventPublisher
+	store              EventAppender
+	publisher          EventPublisher
+	reportPublishError PublishErrorHandler
 }
 
-func NewRecorder(store EventAppender, publisher EventPublisher) (*Recorder, error) {
+func NewRecorder(store EventAppender, publisher EventPublisher, publishErrorHandlers ...PublishErrorHandler) (*Recorder, error) {
 	if store == nil {
 		return nil, fmt.Errorf("evidence: event store is required")
 	}
-	return &Recorder{store: store, publisher: publisher}, nil
+	var report PublishErrorHandler
+	if len(publishErrorHandlers) > 0 {
+		report = publishErrorHandlers[0]
+	}
+	return &Recorder{store: store, publisher: publisher, reportPublishError: report}, nil
 }
 
-// Record persists before publication. The durable Event is the publication
-// payload so sequence/id assignment from the database is authoritative.
+// Record persists before publication. Once the durable Event exists, live
+// publication is only a notification and must not turn the committed write into
+// a retryable error: subscribers recover from the authoritative Event sequence.
 func (r *Recorder) Record(ctx context.Context, event store.Event) (store.Event, error) {
 	persisted, err := r.store.AppendEvent(ctx, event)
 	if err != nil {
 		return store.Event{}, err
 	}
 	if r.publisher != nil {
-		if err := r.publisher.Publish(ctx, persisted); err != nil {
-			return persisted, fmt.Errorf("evidence: publish persisted event: %w", err)
+		if err := r.publisher.Publish(ctx, persisted); err != nil && r.reportPublishError != nil {
+			r.reportPublishError(fmt.Errorf("evidence: publish persisted event: %w", err))
 		}
 	}
 	return persisted, nil
