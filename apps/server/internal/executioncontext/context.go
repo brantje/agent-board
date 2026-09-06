@@ -79,13 +79,13 @@ type RuntimeContext struct {
 }
 
 type WorkspaceContext struct {
-	ID             string  `json:"id"`
-	Path           string  `json:"path"`
-	RepositoryPath *string `json:"repositoryPath,omitempty"`
-	BaseBranch     *string `json:"baseBranch,omitempty"`
-	BaseRevision   *string `json:"baseRevision,omitempty"`
-	WorkingBranch  string  `json:"workingBranch"`
-	BootstrapStatus string `json:"bootstrapStatus"`
+	ID              string  `json:"id"`
+	Path            string  `json:"path"`
+	RepositoryPath  *string `json:"repositoryPath,omitempty"`
+	BaseBranch      *string `json:"baseBranch,omitempty"`
+	BaseRevision    *string `json:"baseRevision,omitempty"`
+	WorkingBranch   string  `json:"workingBranch"`
+	BootstrapStatus string  `json:"bootstrapStatus"`
 }
 
 type Resolved struct {
