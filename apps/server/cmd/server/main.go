@@ -9,28 +9,37 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
+	"github.com/brantje/agent-board/apps/server/internal/engine"
+	"github.com/brantje/agent-board/apps/server/internal/engine/scripted"
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
 	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
+	"github.com/brantje/agent-board/apps/server/internal/runexec"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
+	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/secrets"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
 const (
-	defaultAddress       = ":3001"
-	defaultWorkspaceRoot = "/var/lib/agent-board/workspaces"
-	shutdownTimeout      = 10 * time.Second
-	serverReadTimeout    = 30 * time.Second
-	serverIdleTimeout    = 60 * time.Second
+	defaultAddress           = ":3001"
+	defaultWorkspaceRoot     = "/var/lib/agent-board/workspaces"
+	defaultEvidenceRoot      = "/var/lib/agent-board/evidence"
+	defaultEvidenceBlobLimit = 8 << 20
+	defaultOutputChunkSize   = 64 << 10
+	shutdownTimeout          = 10 * time.Second
+	serverReadTimeout        = 30 * time.Second
+	serverIdleTimeout        = 60 * time.Second
 )
 
 type applicationHandler struct {
@@ -47,9 +56,6 @@ func main() {
 		os.Exit(1)
 	}
 	if application, ok := handler.(*applicationHandler); ok && application.services != nil && application.services.Redaction != nil {
-		// Wrap a concrete sink rather than slog.Default().Handler(). The original
-		// default handler bridges through the standard logger, and SetDefault
-		// rewires that bridge; retaining it here would recurse on the first log.
 		baseHandler := slog.NewTextHandler(os.Stderr, nil)
 		slog.SetDefault(slog.New(redaction.NewSlogHandler(baseHandler, application.services.Redaction)))
 	}
@@ -65,10 +71,53 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
-	code := exitCode(ctx, configuredAddress(), handler)
+	schedulerDone, err := startScheduler(ctx, handler)
+	if err != nil {
+		slog.Error("start scheduler", "error", err)
+		closeStore()
+		stop()
+		os.Exit(1)
+	}
+	code := supervise(ctx, stop, func() int {
+		return exitCode(ctx, configuredAddress(), handler)
+	}, schedulerDone)
 	closeStore()
-	stop()
 	os.Exit(code)
+}
+
+func supervise(ctx context.Context, cancel context.CancelFunc, serve func() int, schedulerDone <-chan error) int {
+	serverDone := make(chan int, 1)
+	go func() {
+		serverDone <- serve()
+		close(serverDone)
+	}()
+
+	select {
+	case code := <-serverDone:
+		expectedShutdown := ctx.Err() != nil
+		cancel()
+		schedulerErr, ok := <-schedulerDone
+		if !ok {
+			schedulerErr = nil
+		}
+		if schedulerErr != nil && !expectedShutdown {
+			slog.Error("scheduler stopped", "error", schedulerErr)
+			return 1
+		}
+		return code
+	case schedulerErr, ok := <-schedulerDone:
+		if ctx.Err() != nil {
+			return <-serverDone
+		}
+		if !ok || schedulerErr == nil {
+			slog.Error("scheduler stopped unexpectedly")
+		} else {
+			slog.Error("scheduler stopped", "error", schedulerErr)
+		}
+		cancel()
+		<-serverDone
+		return 1
+	}
 }
 
 func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler, func(), error) {
@@ -100,7 +149,7 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 	}
 	return &applicationHandler{
-		Handler:  httpapi.NewRouterWithSecrets(services.ControlPlane, services.Secrets, secretWriteAuthorizer),
+		Handler:  httpapi.NewRouterWithApplication(services, secretWriteAuthorizer),
 		services: services,
 	}, closeApplication, nil
 }
@@ -123,6 +172,19 @@ func reconcileExecutionSessions(ctx context.Context, handler http.Handler) error
 	return application.services.ExecutionSessions.ReconcileAllWithReporter(ctx, func(err error) {
 		slog.Error("reconcile Execution Session", "error", err)
 	})
+}
+
+func startScheduler(ctx context.Context, handler http.Handler) (<-chan error, error) {
+	application, ok := handler.(*applicationHandler)
+	if !ok || application.services == nil || application.services.Scheduler == nil {
+		return nil, fmt.Errorf("scheduler service is unavailable")
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- application.services.Scheduler.Run(ctx)
+		close(done)
+	}()
+	return done, nil
 }
 
 func configuredApplication(database *postgres.Store) (*app.Services, error) {
@@ -156,7 +218,58 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 		_ = dockerRuntime.Close()
 		return nil, err
 	}
+	if err := configureExecutionScheduler(services); err != nil {
+		_ = services.Close()
+		return nil, err
+	}
 	return services, nil
+}
+
+func configureExecutionScheduler(services *app.Services) error {
+	if services == nil || services.ExecutionStore == nil || services.ExecutionContext == nil || services.RuntimeInstances == nil || services.ExecutionSessions == nil || services.Redaction == nil {
+		return fmt.Errorf("execution services are incomplete")
+	}
+	baseBlobs, err := evidence.NewFileBlobStore(configuredEvidenceRoot(), defaultEvidenceBlobLimit)
+	if err != nil {
+		return err
+	}
+	blobs, err := evidence.NewRedactingBlobStore(baseBlobs, services.Redaction)
+	if err != nil {
+		return err
+	}
+	runEvidence, err := app.NewRunEvidenceService(services.ExecutionStore, blobs)
+	if err != nil {
+		return err
+	}
+	services.RunEvidence = runEvidence
+	events, err := evidence.NewRecorder(services.ExecutionStore, nil)
+	if err != nil {
+		return err
+	}
+	output, err := evidence.NewOutputRecorder(services.ExecutionStore, blobs, defaultOutputChunkSize)
+	if err != nil {
+		return err
+	}
+	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), services.ExecutionStore, blobs)
+	if err != nil {
+		return err
+	}
+	engines, err := engine.NewRegistry(scripted.New())
+	if err != nil {
+		return err
+	}
+	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, candidate)
+	if err != nil {
+		return err
+	}
+	config := scheduler.DefaultConfig(configuredSchedulerOwnerID())
+	config.ReportError = func(err error) { slog.Error("scheduler execution", "error", err) }
+	coordinator, err := scheduler.New(services.ExecutionStore, processor, processor, config)
+	if err != nil {
+		return err
+	}
+	services.Scheduler = coordinator
+	return nil
 }
 
 func configuredSecretResolver(database *postgres.Store) (executioncontext.SecretResolver, error) {
@@ -184,6 +297,27 @@ func configuredWorkspaceRoot() string {
 		return root
 	}
 	return defaultWorkspaceRoot
+}
+
+func configuredEvidenceRoot() string {
+	if root := strings.TrimSpace(os.Getenv("AGENT_BOARD_EVIDENCE_ROOT")); root != "" {
+		return root
+	}
+	if workspaceRoot := strings.TrimSpace(os.Getenv("AGENT_BOARD_WORKSPACE_ROOT")); workspaceRoot != "" {
+		return filepath.Join(filepath.Dir(workspaceRoot), "evidence")
+	}
+	return defaultEvidenceRoot
+}
+
+func configuredSchedulerOwnerID() string {
+	if value := strings.TrimSpace(os.Getenv("AGENT_BOARD_SCHEDULER_OWNER_ID")); value != "" {
+		return value
+	}
+	hostname, err := os.Hostname()
+	if err != nil || strings.TrimSpace(hostname) == "" {
+		hostname = "agent-board-server"
+	}
+	return fmt.Sprintf("%s:%d", hostname, os.Getpid())
 }
 
 func exitCode(ctx context.Context, address string, handlers ...http.Handler) int {

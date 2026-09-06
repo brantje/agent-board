@@ -43,6 +43,7 @@ type ExecutionStore interface {
 	CreateExecutionSession(context.Context, ExecutionSession) (ExecutionSession, error)
 	GetExecutionSession(context.Context, string, string) (ExecutionSession, error)
 	ListExecutionSessions(context.Context, string, []string) ([]ExecutionSession, error)
+	ListExecutionSessionsByRun(context.Context, string, string, []string) ([]ExecutionSession, error)
 	ListExecutionSessionsByRuntimeInstance(context.Context, string, string, []string) ([]ExecutionSession, error)
 	TransitionExecutionSession(context.Context, ExecutionSessionTransition) (ExecutionSession, error)
 	CreateQuestion(context.Context, Question) (Question, error)
@@ -65,6 +66,9 @@ type EvidenceStore interface {
 	AppendEvent(context.Context, Event) (Event, error)
 	ListRunEvents(context.Context, string, string, int64, int) ([]Event, error)
 	CreateRawOutputChunk(context.Context, RawOutputChunk) (RawOutputChunk, error)
+	GetRawOutputChunk(context.Context, string, string, string) (RawOutputChunk, error)
+	ListRawOutputChunks(context.Context, string, string) ([]RawOutputChunk, error)
 	CreateArtifact(context.Context, Artifact) (Artifact, error)
+	GetArtifact(context.Context, string, string, string) (Artifact, error)
 	ListArtifacts(context.Context, string, string) ([]Artifact, error)
 }

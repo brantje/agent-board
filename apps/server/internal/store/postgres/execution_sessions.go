@@ -29,17 +29,24 @@ func (s *Store) GetExecutionSession(ctx context.Context, projectID, sessionID st
 }
 
 func (s *Store) ListExecutionSessions(ctx context.Context, projectID string, statuses []string) ([]store.ExecutionSession, error) {
-	return s.listExecutionSessions(ctx, projectID, "", statuses)
+	return s.listExecutionSessions(ctx, projectID, "", "", statuses)
+}
+
+func (s *Store) ListExecutionSessionsByRun(ctx context.Context, projectID, runID string, statuses []string) ([]store.ExecutionSession, error) {
+	if strings.TrimSpace(runID) == "" {
+		return nil, store.ErrInvalidArgument
+	}
+	return s.listExecutionSessions(ctx, projectID, "", runID, statuses)
 }
 
 func (s *Store) ListExecutionSessionsByRuntimeInstance(ctx context.Context, projectID, runtimeInstanceID string, statuses []string) ([]store.ExecutionSession, error) {
 	if strings.TrimSpace(runtimeInstanceID) == "" {
 		return nil, store.ErrInvalidArgument
 	}
-	return s.listExecutionSessions(ctx, projectID, runtimeInstanceID, statuses)
+	return s.listExecutionSessions(ctx, projectID, runtimeInstanceID, "", statuses)
 }
 
-func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeInstanceID string, statuses []string) ([]store.ExecutionSession, error) {
+func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeInstanceID, runID string, statuses []string) ([]store.ExecutionSession, error) {
 	if strings.TrimSpace(projectID) == "" {
 		return nil, store.ErrInvalidArgument
 	}
@@ -53,9 +60,10 @@ func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeIns
 		FROM execution_sessions
 		WHERE project_id = $1
 		  AND (nullif($2, '')::uuid IS NULL OR runtime_instance_id = nullif($2, '')::uuid)
-		  AND (coalesce(cardinality($3::text[]), 0) = 0 OR status = ANY($3::text[]))
+		  AND (nullif($3, '')::uuid IS NULL OR run_id = nullif($3, '')::uuid)
+		  AND (coalesce(cardinality($4::text[]), 0) = 0 OR status = ANY($4::text[]))
 		ORDER BY created_at, id
-	`, projectID, runtimeInstanceID, statuses)
+	`, projectID, runtimeInstanceID, runID, statuses)
 	if err != nil {
 		return nil, notFound(err)
 	}

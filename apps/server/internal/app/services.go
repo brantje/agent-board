@@ -9,6 +9,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/runner"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
+	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -20,6 +21,10 @@ type Services struct {
 	RuntimeInstances  *RuntimeInstanceService
 	RunnerConnections *runner.Manager
 	ExecutionSessions *AuthorizedExecutionSessionService
+	RunEvidence       *RunEvidenceService
+	ExecutionStore    store.ControlPlaneStore
+	ExecutionContext  *executioncontext.Resolver
+	Scheduler         *scheduler.Coordinator
 	Redaction         *redaction.Registry
 	Secrets           SecretWriter
 }
@@ -82,6 +87,8 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	services.RuntimeInstances = runtimeInstances
 	services.RunnerConnections = runnerConnections
 	services.ExecutionSessions = executionSessions
+	services.ExecutionStore = securedStore
+	services.ExecutionContext = resolver
 	services.Redaction = registry
 	return services, nil
 }

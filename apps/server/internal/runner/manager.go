@@ -5,13 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"syscall"
 	"time"
 
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
 )
 
-const runnerStatusRecoveryTimeout = 5 * time.Second
+const (
+	runnerStatusRecoveryTimeout = 5 * time.Second
+	runnerStartupRetryWindow    = 10 * time.Second
+	runnerStartupRetryDelay     = 100 * time.Millisecond
+)
 
 var ErrManagerClosed = errors.New("runner: connection manager closed")
 
@@ -118,7 +123,7 @@ func (m *Manager) Connect(ctx context.Context, projectID, runtimeInstanceID stri
 				if endpoint.URL == "" {
 					err = fmt.Errorf("runner endpoint URL is empty")
 				} else {
-					client, err = m.dial(ctx, endpoint.URL)
+					client, err = dialRunnerStartup(ctx, m.dial, endpoint.URL)
 				}
 			}
 		}
@@ -154,6 +159,40 @@ func (m *Manager) Connect(ctx context.Context, projectID, runtimeInstanceID stri
 		m.reportRecovery(projectID, runtimeInstanceID, status, generation)
 		go m.watch(key, projectID, runtimeInstanceID, client, generation)
 		return client, nil
+	}
+}
+
+func dialRunnerStartup(ctx context.Context, dial DialFunc, endpoint string) (Client, error) {
+	startupCtx, cancel := context.WithTimeout(ctx, runnerStartupRetryWindow)
+	defer cancel()
+
+	for {
+		client, err := dial(startupCtx, endpoint)
+		if err == nil {
+			return client, nil
+		}
+		if !errors.Is(err, syscall.ECONNREFUSED) {
+			return nil, err
+		}
+
+		retry := time.NewTimer(runnerStartupRetryDelay)
+		select {
+		case <-retry.C:
+			continue
+		case <-ctx.Done():
+			if !retry.Stop() {
+				<-retry.C
+			}
+			return nil, errors.Join(err, ctx.Err())
+		case <-startupCtx.Done():
+			if !retry.Stop() {
+				<-retry.C
+			}
+			if ctx.Err() != nil {
+				return nil, errors.Join(err, ctx.Err())
+			}
+			return nil, err
+		}
 	}
 }
 
