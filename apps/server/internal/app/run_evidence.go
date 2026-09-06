@@ -18,7 +18,7 @@ const runEvidenceEventPageSize = 500
 type RunEvidenceStore interface {
 	GetRun(context.Context, string, string) (store.Run, error)
 	GetRunProvenance(context.Context, string, string) (json.RawMessage, error)
-	ListExecutionSessions(context.Context, string, []string) ([]store.ExecutionSession, error)
+	ListExecutionSessionsByRun(context.Context, string, string, []string) ([]store.ExecutionSession, error)
 	GetRuntimeInstance(context.Context, string, string) (store.RuntimeInstance, error)
 	ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error)
 	ListRawOutputChunks(context.Context, string, string) ([]store.RawOutputChunk, error)
@@ -60,15 +60,9 @@ func (s *RunEvidenceService) Inspect(ctx context.Context, projectID, runID strin
 		return RunEvidence{}, fmt.Errorf("read run provenance: %w", err)
 	}
 
-	allSessions, err := s.store.ListExecutionSessions(ctx, projectID, nil)
+	sessions, err := s.store.ListExecutionSessionsByRun(ctx, projectID, runID, nil)
 	if err != nil {
 		return RunEvidence{}, fmt.Errorf("list execution sessions: %w", err)
-	}
-	sessions := make([]store.ExecutionSession, 0)
-	for _, session := range allSessions {
-		if session.RunID == runID {
-			sessions = append(sessions, session)
-		}
 	}
 
 	events, err := s.listAllRunEvents(ctx, projectID, runID)
