@@ -207,6 +207,8 @@ type CandidateSnapshotter struct {
 	blobs     BlobStore
 }
 
+const maxCandidateFileChunks int64 = 4096
+
 func NewCandidateSnapshotter(collector *CandidateCollector, store ArtifactStore, blobs BlobStore) (*CandidateSnapshotter, error) {
 	if collector == nil || store == nil || blobs == nil {
 		return nil, fmt.Errorf("evidence: candidate collector, artifact store and blob store are required")
@@ -264,19 +266,12 @@ func (s *CandidateSnapshotter) Snapshot(ctx context.Context, scope RunScope, wor
 }
 
 func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope RunScope, workspace, relative string) ([]store.Artifact, error) {
-	path, err := candidateFilePath(workspace, relative)
+	file, info, err := openCandidateRegularFile(workspace, relative)
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("evidence: open untracked candidate %q: %w", relative, err)
-	}
 	defer file.Close()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, fmt.Errorf("evidence: inspect untracked candidate %q: %w", relative, err)
-	}
+
 	limit := maxBlobBytes(s.blobs)
 	if limit <= 0 || info.Size() <= limit {
 		metadata, _ := json.Marshal(map[string]string{"path": relative})
@@ -287,7 +282,10 @@ func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope 
 		return []store.Artifact{artifact}, nil
 	}
 
-	chunkCount := int((info.Size() + limit - 1) / limit)
+	chunkCount, err := candidateChunkCount(info.Size(), limit)
+	if err != nil {
+		return nil, fmt.Errorf("evidence: snapshot untracked candidate %q: %w", relative, err)
+	}
 	artifacts := make([]store.Artifact, 0, chunkCount)
 	for index := 0; index < chunkCount; index++ {
 		offset := int64(index) * limit
@@ -305,6 +303,57 @@ func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope 
 		artifacts = append(artifacts, artifact)
 	}
 	return artifacts, nil
+}
+
+func openCandidateRegularFile(workspace, relative string) (*os.File, os.FileInfo, error) {
+	path, err := candidateFilePath(workspace, relative)
+	if err != nil {
+		return nil, nil, err
+	}
+	before, err := os.Lstat(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("evidence: inspect untracked candidate %q: %w", relative, err)
+	}
+	if before.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, fmt.Errorf("evidence: untracked candidate %q is a symbolic link", relative)
+	}
+	if !before.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("evidence: untracked candidate %q is not a regular file", relative)
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("evidence: open untracked candidate %q: %w", relative, err)
+	}
+	opened, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("evidence: inspect opened candidate %q: %w", relative, err)
+	}
+	after, err := os.Lstat(path)
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("evidence: re-inspect untracked candidate %q: %w", relative, err)
+	}
+	if after.Mode()&os.ModeSymlink != 0 || !after.Mode().IsRegular() || !os.SameFile(before, after) || !os.SameFile(after, opened) {
+		_ = file.Close()
+		return nil, nil, fmt.Errorf("evidence: untracked candidate %q changed while opening", relative)
+	}
+	return file, opened, nil
+}
+
+func candidateChunkCount(size, limit int64) (int, error) {
+	if size < 0 || limit <= 0 {
+		return 0, fmt.Errorf("invalid candidate size or chunk limit")
+	}
+	count := size / limit
+	if size%limit != 0 {
+		count++
+	}
+	if count > maxCandidateFileChunks {
+		return 0, fmt.Errorf("candidate requires %d chunks; maximum is %d", count, maxCandidateFileChunks)
+	}
+	return int(count), nil
 }
 
 func (s *CandidateSnapshotter) createArtifact(ctx context.Context, scope RunScope, name, kind, mediaType string, source io.Reader, metadata json.RawMessage) (store.Artifact, error) {
