@@ -105,3 +105,73 @@ func TestManagerStaleWatcherCannotOverwriteReplacementStatus(t *testing.T) {
 		t.Fatalf("stale watcher overwrote replacement: generation=%d status=%q", generation, status)
 	}
 }
+
+type cancelAfterClaimReporter struct {
+	cancel context.CancelFunc
+
+	mu           sync.Mutex
+	status       string
+	statusCtxErr error
+}
+
+func (r *cancelAfterClaimReporter) ClaimRunnerConnection(context.Context, string, string) (int64, error) {
+	r.cancel()
+	return 1, nil
+}
+
+func (r *cancelAfterClaimReporter) SetRunnerStatusGeneration(ctx context.Context, _, _, status string, _ int64) error {
+	r.mu.Lock()
+	r.status = status
+	r.statusCtxErr = ctx.Err()
+	r.mu.Unlock()
+	return ctx.Err()
+}
+
+func (r *cancelAfterClaimReporter) snapshot() (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.status, r.statusCtxErr
+}
+
+func TestManagerReportsReadyWithRecoveryContextAfterCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	reporter := &cancelAfterClaimReporter{cancel: cancel}
+	client := newFakeManagerClient()
+	manager, err := newManager(&fakeEndpointResolver{}, reporter, func(context.Context, string) (Client, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	got, err := manager.Connect(ctx, "project-1", "runtime-1")
+	if err != nil || got != client {
+		t.Fatalf("Connect() client=%v err=%v", got, err)
+	}
+	status, statusCtxErr := reporter.snapshot()
+	if status != "READY" || statusCtxErr != nil {
+		t.Fatalf("status=%q report context error=%v", status, statusCtxErr)
+	}
+}
+
+func TestManagerReportsUnavailableWithRecoveryContextAfterCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	reporter := &cancelAfterClaimReporter{cancel: cancel}
+	dialErr := errors.New("dial failed")
+	manager, err := newManager(&fakeEndpointResolver{}, reporter, func(context.Context, string) (Client, error) {
+		return nil, dialErr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Close()
+
+	if _, err := manager.Connect(ctx, "project-1", "runtime-1"); !errors.Is(err, dialErr) {
+		t.Fatalf("Connect() error=%v", err)
+	}
+	status, statusCtxErr := reporter.snapshot()
+	if status != "UNAVAILABLE" || statusCtxErr != nil {
+		t.Fatalf("status=%q report context error=%v", status, statusCtxErr)
+	}
+}

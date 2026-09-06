@@ -11,6 +11,8 @@ import (
 	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
 )
 
+const runnerStatusRecoveryTimeout = 5 * time.Second
+
 var ErrManagerClosed = errors.New("runner: connection manager closed")
 
 type EndpointResolver interface {
@@ -141,7 +143,7 @@ func (m *Manager) Connect(ctx context.Context, projectID, runtimeInstanceID stri
 		}
 		if err != nil {
 			if claimed {
-				m.report(ctx, projectID, runtimeInstanceID, "UNAVAILABLE", generation)
+				m.reportRecovery(projectID, runtimeInstanceID, "UNAVAILABLE", generation)
 			}
 			return nil, err
 		}
@@ -149,7 +151,7 @@ func (m *Manager) Connect(ctx context.Context, projectID, runtimeInstanceID stri
 		if client.Health().ActiveSessions > 0 {
 			status = "BUSY"
 		}
-		m.report(ctx, projectID, runtimeInstanceID, status, generation)
+		m.reportRecovery(projectID, runtimeInstanceID, status, generation)
 		go m.watch(key, projectID, runtimeInstanceID, client, generation)
 		return client, nil
 	}
@@ -225,9 +227,16 @@ func (m *Manager) watch(key, projectID, runtimeInstanceID string, client Client,
 	if closed || !owned {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	m.reportRecovery(projectID, runtimeInstanceID, "UNAVAILABLE", generation)
+}
+
+func (m *Manager) reportRecovery(projectID, runtimeInstanceID, status string, generation int64) {
+	if m.reporter == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), runnerStatusRecoveryTimeout)
 	defer cancel()
-	m.report(ctx, projectID, runtimeInstanceID, "UNAVAILABLE", generation)
+	m.report(ctx, projectID, runtimeInstanceID, status, generation)
 }
 
 func (m *Manager) report(ctx context.Context, projectID, runtimeInstanceID, status string, generation int64) {
