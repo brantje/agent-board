@@ -19,6 +19,16 @@ type Result struct {
 	Signaled bool
 }
 
+type ProcessSession interface {
+	ID() string
+	Stdout() io.Reader
+	Stderr() io.Reader
+	Stdin() io.WriteCloser
+	Wait(context.Context) (Result, error)
+	Terminate(context.Context) error
+	Kill(context.Context) error
+}
+
 type waitResult struct {
 	result Result
 	err    error
@@ -53,9 +63,9 @@ func newSession(id string, conn *Connection) *Session {
 	return s
 }
 
-func (s *Session) ID() string         { return s.id }
-func (s *Session) Stdout() io.Reader  { return s.stdout.reader }
-func (s *Session) Stderr() io.Reader  { return s.stderr.reader }
+func (s *Session) ID() string            { return s.id }
+func (s *Session) Stdout() io.Reader     { return s.stdout.reader }
+func (s *Session) Stderr() io.Reader     { return s.stderr.reader }
 func (s *Session) Stdin() io.WriteCloser { return s.stdin }
 
 func (s *Session) Wait(ctx context.Context) (Result, error) {

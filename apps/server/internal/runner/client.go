@@ -39,13 +39,13 @@ func (e *ProtocolError) Error() string {
 type Connection struct {
 	conn *websocket.Conn
 
-	writeMu sync.Mutex
-	mu      sync.RWMutex
-	sessions map[string]*Session
-	health   protocol.Health
-	caps     protocol.Capabilities
-	err      error
-	done     chan struct{}
+	writeMu   sync.Mutex
+	mu        sync.RWMutex
+	sessions  map[string]*Session
+	health    protocol.Health
+	caps      protocol.Capabilities
+	err       error
+	done      chan struct{}
 	closeOnce sync.Once
 }
 
@@ -78,7 +78,6 @@ func (c *Connection) handshake() error {
 	if err := c.write(protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{protocol.Version1}}); err != nil {
 		return fmt.Errorf("send runner hello: %w", err)
 	}
-
 	msg, err := c.readProtocolMessage()
 	if err != nil {
 		return fmt.Errorf("read runner hello: %w", err)
@@ -99,7 +98,6 @@ func (c *Connection) handshake() error {
 	if err := validateFeatures(hello.Capabilities.Features); err != nil {
 		return err
 	}
-
 	healthMessage, err := c.readProtocolMessage()
 	if err != nil {
 		return fmt.Errorf("read runner health: %w", err)
@@ -148,14 +146,13 @@ func (c *Connection) Health() protocol.Health {
 }
 
 func (c *Connection) Done() <-chan struct{} { return c.done }
-
 func (c *Connection) Err() error {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.err
 }
 
-func (c *Connection) Start(ctx context.Context, sessionID string, request Request) (*Session, error) {
+func (c *Connection) Start(ctx context.Context, sessionID string, request Request) (ProcessSession, error) {
 	session, err := c.register(sessionID)
 	if err != nil {
 		return nil, err
@@ -179,9 +176,7 @@ func (c *Connection) Start(ctx context.Context, sessionID string, request Reques
 	}
 }
 
-// Attach registers a server-side consumer for a session the runner reports as
-// already active after a reconnect. It does not send another start request.
-func (c *Connection) Attach(sessionID string) (*Session, error) {
+func (c *Connection) Attach(sessionID string) (ProcessSession, error) {
 	session, err := c.register(sessionID)
 	if err != nil {
 		return nil, err
@@ -243,15 +238,12 @@ func (c *Connection) handleMessage(msg protocol.Message) error {
 	if msg.Type == protocol.TypeError && msg.SessionID == "" {
 		return protocolErrorFromMessage(msg)
 	}
-
 	c.mu.RLock()
 	session := c.sessions[msg.SessionID]
 	c.mu.RUnlock()
 	if session == nil {
-		// A late terminal message for a session already reconciled is harmless.
 		return nil
 	}
-
 	switch msg.Type {
 	case protocol.TypeSessionStarted:
 		session.markStarted(nil)

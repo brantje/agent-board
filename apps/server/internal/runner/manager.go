@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
+	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
 )
 
 var ErrManagerClosed = errors.New("runner: connection manager closed")
@@ -24,8 +24,8 @@ type StatusReporter interface {
 type Client interface {
 	Capabilities() protocol.Capabilities
 	Health() protocol.Health
-	Start(context.Context, string, Request) (*Session, error)
-	Attach(string) (*Session, error)
+	Start(context.Context, string, Request) (ProcessSession, error)
+	Attach(string) (ProcessSession, error)
 	Done() <-chan struct{}
 	Err() error
 	Close() error
@@ -34,9 +34,9 @@ type Client interface {
 type DialFunc func(context.Context, string) (Client, error)
 
 type managerEntry struct {
-	client     Client
+	client      Client
 	connecting chan struct{}
-	lastErr    error
+	lastErr     error
 }
 
 type Manager struct {
@@ -137,10 +137,7 @@ func (m *Manager) Connect(ctx context.Context, projectID, runtimeInstanceID stri
 	}
 }
 
-// Reconcile reconnects to the Runtime Instance and compares a durable expected
-// session with the runner's advertised active session IDs. If it is still
-// active, Attach binds a new transport consumer without sending another start.
-func (m *Manager) Reconcile(ctx context.Context, projectID, runtimeInstanceID, expectedSessionID string) (*Session, bool, error) {
+func (m *Manager) Reconcile(ctx context.Context, projectID, runtimeInstanceID, expectedSessionID string) (ProcessSession, bool, error) {
 	client, err := m.Connect(ctx, projectID, runtimeInstanceID)
 	if err != nil {
 		return nil, false, err
@@ -216,7 +213,6 @@ func (m *Manager) Close() error {
 		}
 	}
 	m.mu.Unlock()
-
 	var closeErrors []error
 	for _, client := range clients {
 		if err := client.Close(); err != nil {
