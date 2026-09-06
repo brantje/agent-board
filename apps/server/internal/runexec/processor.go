@@ -85,7 +85,11 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		return failed(err), nil
 	}
 	safe := resolved.Safe
-	if err := p.record(ctx, safe, "run.started", nil, nil, nil); err != nil {
+	runEventType := "run.started"
+	if claim.Job.Kind == "RESUME" {
+		runEventType = "run.resumed"
+	}
+	if err := p.record(ctx, safe, runEventType, nil, nil, nil); err != nil {
 		return scheduler.Result{}, err
 	}
 	if err := p.record(ctx, safe, "runtime.provisioning", map[string]any{"runtimeId": safe.Runtime.ID}, nil, nil); err != nil {
@@ -139,7 +143,12 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		runtimeInstanceID: instance.ID,
 		scope:             evidence.RunScope{ProjectID: run.ProjectID, IssueID: run.IssueID, RunID: run.ID},
 	}
-	engineResult, engineErr := adapter.Execute(ctx, p.engineRequest(safe, launcher, instance.ID))
+	request, err := p.engineRequest(ctx, safe, launcher, instance.ID)
+	if err != nil {
+		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
+		return failed(errors.Join(err, cleanupErr)), nil
+	}
+	engineResult, engineErr := adapter.Execute(ctx, request)
 	if errors.Is(engineErr, engine.ErrWaitingForInput) {
 		return p.finishWaitingForInput(ctx, safe, instance)
 	}

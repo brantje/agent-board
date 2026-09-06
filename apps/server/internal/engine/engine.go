@@ -56,6 +56,19 @@ type Question struct {
 	Blocking bool
 }
 
+type QuestionAnswer struct {
+	Kind      string
+	Text      *string
+	OptionIDs []string
+}
+
+type Continuation struct {
+	QuestionID string
+	DecisionID string
+	Prompt     string
+	Answer     QuestionAnswer
+}
+
 // Questioner is the narrow human-input capability available to Engine adapters.
 // Durable Question persistence and Run lifecycle changes remain server-owned.
 type Questioner interface {
@@ -63,9 +76,10 @@ type Questioner interface {
 }
 
 type Request struct {
-	Context   executioncontext.SafeContext
-	Launcher  ProcessLauncher
-	Questions Questioner
+	Context      executioncontext.SafeContext
+	Launcher     ProcessLauncher
+	Questions    Questioner
+	Continuation *Continuation
 }
 
 type Result struct {

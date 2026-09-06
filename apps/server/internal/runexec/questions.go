@@ -21,13 +21,57 @@ type questioner struct {
 	runtimeInstanceID string
 }
 
-func (p *Processor) engineRequest(safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string) engine.Request {
+func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string) (engine.Request, error) {
 	request := engine.Request{Context: safe, Launcher: launcher}
 	questions, ok := any(p.store).(store.QuestionStore)
-	if ok {
-		request.Questions = &questioner{store: questions, events: p.events, safe: safe, runtimeInstanceID: runtimeInstanceID}
+	if !ok {
+		return request, nil
 	}
-	return request
+	request.Questions = &questioner{store: questions, events: p.events, safe: safe, runtimeInstanceID: runtimeInstanceID}
+	continuation, err := loadContinuation(ctx, questions, safe)
+	if err != nil {
+		return engine.Request{}, err
+	}
+	request.Continuation = continuation
+	return request, nil
+}
+
+func loadContinuation(ctx context.Context, questions store.QuestionStore, safe executioncontext.SafeContext) (*engine.Continuation, error) {
+	runID := safe.Run.ID
+	answered, err := questions.ListQuestions(ctx, safe.Project.ID, store.QuestionFilter{RunID: &runID, Statuses: []string{"ANSWERED"}})
+	if err != nil {
+		return nil, err
+	}
+	for i := len(answered) - 1; i >= 0; i-- {
+		question := answered[i]
+		if !question.Blocking {
+			continue
+		}
+		decision, err := questions.GetDecisionByQuestion(ctx, safe.Project.ID, question.ID)
+		if err != nil {
+			return nil, fmt.Errorf("run execution: answered blocking Question %s has no Decision: %w", question.ID, err)
+		}
+		if decision.QuestionID == nil || *decision.QuestionID != question.ID || decision.RunID == nil || *decision.RunID != safe.Run.ID {
+			return nil, fmt.Errorf("run execution: Decision binding does not match continuation Question")
+		}
+		var details struct {
+			QuestionAnswer store.QuestionAnswer `json:"questionAnswer"`
+		}
+		if err := json.Unmarshal(decision.SafeDetails, &details); err != nil {
+			return nil, fmt.Errorf("run execution: decode Question continuation: %w", err)
+		}
+		return &engine.Continuation{
+			QuestionID: question.ID,
+			DecisionID: decision.ID,
+			Prompt:     question.Prompt,
+			Answer: engine.QuestionAnswer{
+				Kind:      details.QuestionAnswer.Kind,
+				Text:      details.QuestionAnswer.Text,
+				OptionIDs: append([]string(nil), details.QuestionAnswer.OptionIDs...),
+			},
+		}, nil
+	}
+	return nil, nil
 }
 
 func (p *Processor) acquireRuntime(ctx context.Context, projectID, issueID, runtimeID string) (store.RuntimeInstance, error) {
