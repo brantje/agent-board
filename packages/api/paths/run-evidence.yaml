@@ -55,7 +55,7 @@ path3:
       '200':
         description: Artifact content. The response Content-Type is taken from validated Artifact metadata when available.
         content:
-          application/octet-stream:
+          '*/*':
             schema:
               type: string
               format: binary

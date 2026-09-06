@@ -27,8 +27,12 @@ func TestRunEvidenceOpenAPIPathsAndSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Count(string(pathsData), "operationId:") != 3 {
+	pathsDoc := string(pathsData)
+	if strings.Count(pathsDoc, "operationId:") != 3 {
 		t.Fatalf("run evidence path document must define three operations: %s", pathsData)
+	}
+	if !strings.Contains(pathsDoc, "'*/*':") {
+		t.Fatalf("artifact download must document its validated dynamic response media type: %s", pathsData)
 	}
 	schemaData, err := os.ReadFile(filepath.Join(root, "schemas", "execution-evidence.yaml"))
 	if err != nil {
