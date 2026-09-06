@@ -20,6 +20,11 @@ func Encode(msg Message) ([]byte, error) {
 }
 
 func Decode(data []byte) (Message, error) {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return Message{}, fmt.Errorf("%w: envelope must be a JSON object", ErrInvalidMessage)
+	}
+
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
 

@@ -13,6 +13,13 @@ func TestDecodeRejectsMultipleJSONValues(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsNullEnvelope(t *testing.T) {
+	_, err := Decode([]byte(`null`))
+	if !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("expected invalid-message error for null envelope, got %v", err)
+	}
+}
+
 func TestEncodeRejectsInvalidMessage(t *testing.T) {
 	_, err := Encode(Message{Version: Version1, Type: TypeStart})
 	if !errors.Is(err, ErrInvalidMessage) {
@@ -24,6 +31,14 @@ func TestDecodePayloadRejectsWrongShape(t *testing.T) {
 	msg := Message{Version: Version1, Type: TypeStart, SessionID: "session", Payload: []byte(`{"command":"wrong"}`)}
 	if _, err := DecodePayload[StartRequest](msg); err == nil {
 		t.Fatal("expected payload shape error")
+	}
+}
+
+func TestDecodePayloadRejectsNullObject(t *testing.T) {
+	msg := Message{Version: Version1, Type: TypeStart, SessionID: "session", Payload: []byte(`null`)}
+	_, err := DecodePayload[StartRequest](msg)
+	if !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("expected invalid-message error for null payload, got %v", err)
 	}
 }
 

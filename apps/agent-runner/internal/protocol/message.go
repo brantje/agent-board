@@ -122,6 +122,10 @@ func DecodePayload[T any](m Message) (T, error) {
 	if len(m.Payload) == 0 {
 		return value, fmt.Errorf("%w: %s requires payload", ErrInvalidMessage, m.Type)
 	}
+	trimmed := bytes.TrimSpace(m.Payload)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return value, fmt.Errorf("%w: %s payload must be a JSON object", ErrInvalidMessage, m.Type)
+	}
 
 	decoder := json.NewDecoder(bytes.NewReader(m.Payload))
 	decoder.DisallowUnknownFields()
