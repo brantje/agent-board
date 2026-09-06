@@ -69,18 +69,39 @@ func TestDetachedDeliveryCanReconnectBeforeExpiry(t *testing.T) {
 }
 
 func TestDetachRestartsReconnectWindow(t *testing.T) {
-	first := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
-	delivery := newSessionDelivery(context.Background(), first, 250*time.Millisecond)
-	delivery.detach(first)
+	const retention = 2 * time.Second
 
-	time.Sleep(50 * time.Millisecond)
+	first := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
+	delivery := newSessionDelivery(context.Background(), first, retention)
+	delivery.detach(first)
+	originalDeadline := currentDeliveryDeadline(delivery)
+
+	// Create a clear gap between the original and restarted deadlines.
+	time.Sleep(500 * time.Millisecond)
 	second := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
 	if !delivery.attachIfIdle(second) {
 		t.Fatal("delivery did not reconnect within retention window")
 	}
 	delivery.detach(second)
+	restartedDeadline := currentDeliveryDeadline(delivery)
+	if !restartedDeadline.After(originalDeadline) {
+		t.Fatalf("reconnect deadline was not restarted: original=%v restarted=%v", originalDeadline, restartedDeadline)
+	}
 
-	time.Sleep(50 * time.Millisecond)
+	// Cross the original deadline while keeping a generous margin before the
+	// restarted deadline. A delivery that failed to restart expires here.
+	crossOriginalAt := originalDeadline.Add(100 * time.Millisecond)
+	if delay := time.Until(crossOriginalAt); delay > 0 {
+		time.Sleep(delay)
+	}
+	now := time.Now()
+	if now.Before(originalDeadline) {
+		t.Fatalf("test did not cross original deadline: now=%v original=%v", now, originalDeadline)
+	}
+	if !now.Before(restartedDeadline) {
+		t.Fatalf("test exceeded restarted deadline: now=%v restarted=%v", now, restartedDeadline)
+	}
+
 	third := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
 	if !delivery.attachIfIdle(third) {
 		t.Fatal("reconnect window was not restarted after a later detach")
@@ -91,4 +112,10 @@ func currentDeliveryWriter(delivery *sessionDelivery) *connectionWriter {
 	delivery.mu.Lock()
 	defer delivery.mu.Unlock()
 	return delivery.writer
+}
+
+func currentDeliveryDeadline(delivery *sessionDelivery) time.Time {
+	delivery.mu.Lock()
+	defer delivery.mu.Unlock()
+	return delivery.expiresAt
 }
