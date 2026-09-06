@@ -99,16 +99,21 @@ func (s *ExecutionSessionService) Start(ctx context.Context, projectID, runID, r
 			_, failErr := s.transition(ctx, session, []string{"STARTING"}, "FAILED", nil)
 			return nil, errors.Join(err, failErr)
 		}
+		uncertainCause := err
 		if transport != nil {
 			// A start request may have reached the runner before the caller's
-			// context expired. Keep exactly one observer attached to that
-			// uncertain session so output cannot backpressure the connection and
-			// a later terminal result still updates durable state.
+			// context expired. Mark the runner BUSY before exposing the retained
+			// process, then keep exactly one observer attached so output cannot
+			// backpressure the connection and a later terminal result still
+			// updates durable state.
+			if _, statusErr := s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, runtimeInstanceID, "BUSY"); statusErr != nil {
+				uncertainCause = errors.Join(uncertainCause, fmt.Errorf("persist runner BUSY status: %w", statusErr))
+			}
 			process := newExecutionProcess(s, session, transport)
 			go func() { _, _ = io.Copy(io.Discard, process.Stdout()) }()
 			go func() { _, _ = io.Copy(io.Discard, process.Stderr()) }()
 		}
-		return nil, NewError("execution_session_uncertain", "runner transport was interrupted while starting the Execution Session; reconciliation is required", err)
+		return nil, NewError("execution_session_uncertain", "runner transport was interrupted while starting the Execution Session; reconciliation is required", uncertainCause)
 	}
 	session, err = s.transition(ctx, session, []string{"STARTING"}, "RUNNING", nil)
 	if err != nil {
@@ -232,18 +237,28 @@ func (p *ExecutionProcess) Wait(ctx context.Context) (runner.Result, error) {
 }
 
 func (p *ExecutionProcess) Terminate(ctx context.Context) error {
+	p.cancel.Store(true)
 	if err := p.transport.Terminate(ctx); err != nil {
+		select {
+		case <-p.done:
+		default:
+			p.cancel.Store(false)
+		}
 		return err
 	}
-	p.cancel.Store(true)
 	return nil
 }
 
 func (p *ExecutionProcess) Kill(ctx context.Context) error {
+	p.cancel.Store(true)
 	if err := p.transport.Kill(ctx); err != nil {
+		select {
+		case <-p.done:
+		default:
+			p.cancel.Store(false)
+		}
 		return err
 	}
-	p.cancel.Store(true)
 	return nil
 }
 
