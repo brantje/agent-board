@@ -138,9 +138,11 @@ func (c *launcherClient) Start(_ context.Context, sessionID string, _ runner.Req
 		waitErr: c.waitErr,
 	}, nil
 }
-func (c *launcherClient) Attach(string) (runner.ProcessSession, error) { return nil, runner.ErrSessionNotFound }
-func (c *launcherClient) Done() <-chan struct{}                    { return c.done }
-func (*launcherClient) Err() error                                 { return nil }
+func (*launcherClient) Attach(string) (runner.ProcessSession, error) {
+	return nil, errors.New("attach unsupported")
+}
+func (c *launcherClient) Done() <-chan struct{} { return c.done }
+func (*launcherClient) Err() error              { return nil }
 func (c *launcherClient) Close() error {
 	select {
 	case <-c.done:
@@ -182,11 +184,11 @@ func (failingLauncherSessions) ReconcileAll(context.Context) error { return nil 
 
 func TestProcessLauncherCapturesAuthorizedProcessEvidence(t *testing.T) {
 	cases := []struct {
-		name       string
-		exitCode   int
-		waitErr    error
-		wantEvent  string
-		wantErr    bool
+		name        string
+		exitCode    int
+		waitErr     error
+		wantEvent   string
+		wantErr     bool
 		requestKind string
 	}{
 		{name: "test success", exitCode: 0, wantEvent: "test.completed", requestKind: "test"},
@@ -211,7 +213,7 @@ func TestProcessLauncherCapturesAuthorizedProcessEvidence(t *testing.T) {
 			}
 
 			sessionStore := &launcherSessionStore{
-				run: store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
+				run:      store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
 				instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, RuntimeID: safe.Runtime.ID, Status: "RUNNING"},
 			}
 			client := newLauncherClient(strings.Repeat("stdout-", 8), "stderr-data", tc.exitCode, tc.waitErr)
@@ -224,12 +226,12 @@ func TestProcessLauncherCapturesAuthorizedProcessEvidence(t *testing.T) {
 				t.Fatal(err)
 			}
 			launcher := &processLauncher{
-				sessions: authorized,
-				events: recorder,
-				output: output,
-				safe: safe,
+				sessions:          authorized,
+				events:            recorder,
+				output:            output,
+				safe:              safe,
 				runtimeInstanceID: "runtime-instance",
-				scope: evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+				scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
 			}
 			process, err := launcher.Start(t.Context(), engine.ProcessRequest{Kind: tc.requestKind, Name: "fixture", Command: []string{"fixture"}, CWD: "/workspace"})
 			if err != nil {
@@ -290,12 +292,12 @@ func TestProcessLauncherRecordsStartFailure(t *testing.T) {
 	}
 	want := errors.New("launch unavailable")
 	launcher := &processLauncher{
-		sessions: failingLauncherSessions{err: want},
-		events: recorder,
-		output: output,
-		safe: safe,
+		sessions:          failingLauncherSessions{err: want},
+		events:            recorder,
+		output:            output,
+		safe:              safe,
 		runtimeInstanceID: "runtime-instance",
-		scope: evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+		scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
 	}
 	if _, err := launcher.Start(t.Context(), engine.ProcessRequest{Kind: "tool", Name: "fixture", Command: []string{"fixture"}}); !errors.Is(err, want) {
 		t.Fatalf("Start() error=%v want=%v", err, want)
