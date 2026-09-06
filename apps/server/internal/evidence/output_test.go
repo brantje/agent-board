@@ -79,3 +79,29 @@ func TestOutputRecorderReleasesCompletedStreamLocks(t *testing.T) {
 		t.Fatalf("completed stream locks retained=%d, want 0", remaining)
 	}
 }
+
+func TestOutputRecorderValidatesConstructionAndSource(t *testing.T) {
+	blobs, err := NewFileBlobStore(t.TempDir(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata := &memoryRawStore{}
+
+	if _, err := NewOutputRecorder(nil, blobs, 4); err == nil {
+		t.Fatal("expected nil raw output store to be rejected")
+	}
+	if _, err := NewOutputRecorder(metadata, nil, 4); err == nil {
+		t.Fatal("expected nil blob store to be rejected")
+	}
+	if _, err := NewOutputRecorder(metadata, blobs, 0); err == nil {
+		t.Fatal("expected non-positive chunk size to be rejected")
+	}
+
+	recorder, err := NewOutputRecorder(metadata, blobs, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := recorder.Capture(t.Context(), RunScope{ProjectID: "p", IssueID: "i", RunID: "r"}, "STDOUT", nil); err == nil {
+		t.Fatal("expected nil output source to be rejected")
+	}
+}
