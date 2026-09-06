@@ -19,10 +19,21 @@ func TestClientExecutesSessionAndPreservesStreams(t *testing.T) {
 		if msg.Type != protocol.TypeStart {
 			return
 		}
-		writeProtocol(t, conn, protocol.TypeSessionStarted, msg.SessionID, nil)
-		writeProtocol(t, conn, protocol.TypeStdout, msg.SessionID, protocol.StreamData{Data: []byte("hello")})
-		writeProtocol(t, conn, protocol.TypeStderr, msg.SessionID, protocol.StreamData{Data: []byte("warning")})
-		writeProtocol(t, conn, protocol.TypeExit, msg.SessionID, protocol.ExitResult{ExitCode: 7})
+		if err := writeProtocol(conn, protocol.TypeSessionStarted, msg.SessionID, nil); err != nil {
+			t.Errorf("write session_started: %v", err)
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeStdout, msg.SessionID, protocol.StreamData{Data: []byte("hello")}); err != nil {
+			t.Errorf("write stdout: %v", err)
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeStderr, msg.SessionID, protocol.StreamData{Data: []byte("warning")}); err != nil {
+			t.Errorf("write stderr: %v", err)
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeExit, msg.SessionID, protocol.ExitResult{ExitCode: 7}); err != nil {
+			t.Errorf("write exit: %v", err)
+		}
 	})
 	defer server.Close()
 
@@ -57,7 +68,10 @@ func TestClientForwardsStdinAndSignals(t *testing.T) {
 	server := newProtocolTestServer(t, protocol.Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"}}, func(conn *websocket.Conn, msg protocol.Message) {
 		received <- msg
 		if msg.Type == protocol.TypeStart {
-			writeProtocol(t, conn, protocol.TypeSessionStarted, msg.SessionID, nil)
+			if err := writeProtocol(conn, protocol.TypeSessionStarted, msg.SessionID, nil); err != nil {
+				t.Errorf("write session_started: %v", err)
+				return
+			}
 		}
 	})
 	defer server.Close()
@@ -109,7 +123,10 @@ func TestClientRejectsIncompatibleCapabilities(t *testing.T) {
 func TestClientReportsDisconnectWithoutInventingExit(t *testing.T) {
 	server := newProtocolTestServer(t, protocol.Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"}}, func(conn *websocket.Conn, msg protocol.Message) {
 		if msg.Type == protocol.TypeStart {
-			writeProtocol(t, conn, protocol.TypeSessionStarted, msg.SessionID, nil)
+			if err := writeProtocol(conn, protocol.TypeSessionStarted, msg.SessionID, nil); err != nil {
+				t.Errorf("write session_started: %v", err)
+				return
+			}
 			_ = conn.Close()
 		}
 	})
@@ -147,8 +164,14 @@ func newProtocolTestServer(t *testing.T, caps protocol.Capabilities, handle func
 			t.Errorf("server hello: msg=%+v err=%v", hello, err)
 			return
 		}
-		writeProtocol(t, conn, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version1, Capabilities: caps})
-		writeProtocol(t, conn, protocol.TypeHealth, "", protocol.Health{Status: "ok"})
+		if err := writeProtocol(conn, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version1, Capabilities: caps}); err != nil {
+			t.Errorf("write runner_hello: %v", err)
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeHealth, "", protocol.Health{Status: "ok"}); err != nil {
+			t.Errorf("write health: %v", err)
+			return
+		}
 		for {
 			_, data, err := conn.ReadMessage()
 			if err != nil {
@@ -166,19 +189,16 @@ func newProtocolTestServer(t *testing.T, caps protocol.Capabilities, handle func
 	}))
 }
 
-func writeProtocol(t *testing.T, conn *websocket.Conn, typ protocol.MessageType, sessionID string, payload any) {
-	t.Helper()
+func writeProtocol(conn *websocket.Conn, typ protocol.MessageType, sessionID string, payload any) error {
 	msg, err := protocol.NewMessage(protocol.Version1, typ, sessionID, payload)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	data, err := protocol.Encode(msg)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
-	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		t.Fatal(err)
-	}
+	return conn.WriteMessage(websocket.TextMessage, data)
 }
 
 func wsURL(httpURL string) string {
