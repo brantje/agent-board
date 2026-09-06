@@ -117,15 +117,19 @@ func (s *ExecutionSessionService) Start(ctx context.Context, projectID, runID, r
 		return nil, NewError("execution_session_uncertain", "runner transport was interrupted while starting the Execution Session; reconciliation is required", uncertainCause)
 	}
 
-	runningSession, err := s.transition(ctx, session, []string{"STARTING"}, "RUNNING", nil)
-	if err != nil {
+	runningSession, transitionErr := s.transition(ctx, session, []string{"STARTING"}, "RUNNING", nil)
+	if transitionErr != nil {
+		uncertainCause := transitionErr
+		if statusErr := s.updateRunnerStatusRecovery(projectID, runtimeInstanceID, "BUSY"); statusErr != nil {
+			uncertainCause = errors.Join(uncertainCause, fmt.Errorf("persist runner BUSY status: %w", statusErr))
+		}
 		s.retainExecutionProcess(session, transport)
-		return nil, NewError("execution_session_uncertain", "Execution Session started but durable RUNNING state could not be confirmed", err)
+		return nil, NewError("execution_session_uncertain", "Execution Session started but durable RUNNING state could not be confirmed", uncertainCause)
 	}
 	session = runningSession
-	if _, err := s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, runtimeInstanceID, "BUSY"); err != nil {
+	if statusErr := s.updateRunnerStatusRecovery(projectID, runtimeInstanceID, "BUSY"); statusErr != nil {
 		s.retainExecutionProcess(session, transport)
-		return nil, NewError("execution_session_uncertain", "Execution Session started but runner BUSY state could not be persisted", err)
+		return nil, NewError("execution_session_uncertain", "Execution Session started but runner BUSY state could not be persisted", statusErr)
 	}
 	return newExecutionProcess(s, session, transport), nil
 }
