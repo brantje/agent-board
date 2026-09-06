@@ -15,6 +15,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
+	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
@@ -43,6 +44,9 @@ func main() {
 		slog.Error("initialize control plane", "error", err)
 		stop()
 		os.Exit(1)
+	}
+	if application, ok := handler.(*applicationHandler); ok && application.services != nil && application.services.Redaction != nil {
+		slog.SetDefault(slog.New(redaction.NewSlogHandler(slog.Default().Handler(), application.services.Redaction)))
 	}
 	if err := reconcileRuntimeInstances(ctx, handler); err != nil {
 		slog.Error("reconcile Runtime Instances", "error", err)
@@ -82,7 +86,7 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		database.Close()
 	}
 	return &applicationHandler{
-		Handler:  httpapi.NewRouter(services.ControlPlane),
+		Handler:  httpapi.NewRouterWithSecrets(services.ControlPlane, services.Secrets),
 		services: services,
 	}, closeApplication, nil
 }
