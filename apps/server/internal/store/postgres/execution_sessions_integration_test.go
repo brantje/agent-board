@@ -72,6 +72,15 @@ func TestExecutionSessionLifecycleAndSequentialReuse(t *testing.T) {
 	}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale transition error=%v, want ErrConflict", err)
 	}
+	if _, err := s.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
+		ProjectID: fixture.project.ID, SessionID: second.ID, Status: "RUNNING",
+	}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("empty transition precondition error=%v, want ErrInvalidArgument", err)
+	}
+	unchanged, err := s.GetExecutionSession(ctx, fixture.project.ID, second.ID)
+	if err != nil || unchanged.Status != "PENDING" {
+		t.Fatalf("session after rejected empty precondition=%+v err=%v", unchanged, err)
+	}
 	if _, err := s.GetExecutionSession(ctx, other.project.ID, second.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-project get error=%v", err)
 	}
