@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	maxMessageSize = 1 << 20
-	writeTimeout   = 10 * time.Second
+	maxMessageSize             = 1 << 20
+	writeTimeout               = 10 * time.Second
+	maxPendingSessionMessages  = 64
+	maxPendingSessionBytes     = 2 << 20
 )
 
 var (
@@ -36,12 +38,18 @@ func (e *ProtocolError) Error() string {
 	return fmt.Sprintf("runner protocol error %s: %s", e.Code, e.Message)
 }
 
+type pendingSessionMessages struct {
+	messages []protocol.Message
+	bytes    int
+}
+
 type Connection struct {
 	conn *websocket.Conn
 
 	writeMu   sync.Mutex
 	mu        sync.RWMutex
 	sessions  map[string]*Session
+	pending   map[string]*pendingSessionMessages
 	health    protocol.Health
 	caps      protocol.Capabilities
 	err       error
@@ -64,7 +72,12 @@ func dialWith(ctx context.Context, dialer *websocket.Dialer, endpoint string, he
 		}
 		return nil, fmt.Errorf("dial runner: %w", err)
 	}
-	c := &Connection{conn: conn, sessions: make(map[string]*Session), done: make(chan struct{})}
+	c := &Connection{
+		conn: conn,
+		sessions: make(map[string]*Session),
+		pending: make(map[string]*pendingSessionMessages),
+		done: make(chan struct{}),
+	}
 	conn.SetReadLimit(maxMessageSize)
 	if err := c.handshake(); err != nil {
 		_ = conn.Close()
@@ -176,6 +189,9 @@ func (c *Connection) Start(ctx context.Context, sessionID string, request Reques
 	}
 }
 
+// Attach registers the server-side consumer for a session that may already be
+// executing, or whose retained terminal delivery may already have arrived on a
+// freshly reconnected WebSocket.
 func (c *Connection) Attach(sessionID string) (ProcessSession, error) {
 	session, err := c.register(sessionID)
 	if err != nil {
@@ -199,6 +215,21 @@ func (c *Connection) register(sessionID string) (*Session, error) {
 	}
 	session := newSession(sessionID, c)
 	c.sessions[sessionID] = session
+	if pending := c.pending[sessionID]; pending != nil {
+		delete(c.pending, sessionID)
+		for _, msg := range pending.messages {
+			terminal, err := deliverSessionMessage(session, msg)
+			if err != nil {
+				session.fail(err)
+				delete(c.sessions, sessionID)
+				break
+			}
+			if terminal {
+				delete(c.sessions, sessionID)
+				break
+			}
+		}
+	}
 	return session, nil
 }
 
@@ -238,43 +269,81 @@ func (c *Connection) handleMessage(msg protocol.Message) error {
 	if msg.Type == protocol.TypeError && msg.SessionID == "" {
 		return protocolErrorFromMessage(msg)
 	}
-	c.mu.RLock()
+
+	c.mu.Lock()
 	session := c.sessions[msg.SessionID]
-	c.mu.RUnlock()
 	if session == nil {
+		err := c.bufferPendingLocked(msg)
+		c.mu.Unlock()
+		return err
+	}
+	c.mu.Unlock()
+
+	terminal, err := deliverSessionMessage(session, msg)
+	if err != nil {
+		session.fail(err)
+		c.unregister(msg.SessionID, session)
 		return nil
 	}
+	if terminal {
+		c.unregister(msg.SessionID, session)
+	}
+	return nil
+}
+
+func (c *Connection) bufferPendingLocked(msg protocol.Message) error {
+	switch msg.Type {
+	case protocol.TypeSessionStarted, protocol.TypeStdout, protocol.TypeStderr, protocol.TypeExit, protocol.TypeError:
+	default:
+		return fmt.Errorf("runner: unexpected message type %s", msg.Type)
+	}
+	if msg.SessionID == "" {
+		return fmt.Errorf("runner: session-scoped message missing session id")
+	}
+	pending := c.pending[msg.SessionID]
+	if pending == nil {
+		pending = &pendingSessionMessages{}
+		c.pending[msg.SessionID] = pending
+	}
+	size := len(msg.Payload) + len(msg.SessionID) + 64
+	if len(pending.messages) >= maxPendingSessionMessages || pending.bytes+size > maxPendingSessionBytes {
+		return fmt.Errorf("runner: pending messages exceed reconnect buffer for session %s", msg.SessionID)
+	}
+	pending.messages = append(pending.messages, msg)
+	pending.bytes += size
+	return nil
+}
+
+func deliverSessionMessage(session *Session, msg protocol.Message) (bool, error) {
 	switch msg.Type {
 	case protocol.TypeSessionStarted:
 		session.markStarted(nil)
+		return false, nil
 	case protocol.TypeStdout, protocol.TypeStderr:
 		stream, err := protocol.DecodePayload[protocol.StreamData](msg)
 		if err != nil {
-			session.fail(err)
-			c.unregister(msg.SessionID, session)
-			return nil
+			return false, err
 		}
 		if msg.Type == protocol.TypeStdout {
 			session.stdout.push(stream.Data)
 		} else {
 			session.stderr.push(stream.Data)
 		}
+		return false, nil
 	case protocol.TypeExit:
 		exit, err := protocol.DecodePayload[protocol.ExitResult](msg)
 		if err != nil {
-			session.fail(err)
-		} else {
-			session.finish(Result{ExitCode: exit.ExitCode, Signaled: exit.Signaled}, nil)
+			return true, err
 		}
-		c.unregister(msg.SessionID, session)
+		session.finish(Result{ExitCode: exit.ExitCode, Signaled: exit.Signaled}, nil)
+		return true, nil
 	case protocol.TypeError:
 		err := protocolErrorFromMessage(msg)
 		session.fail(err)
-		c.unregister(msg.SessionID, session)
+		return true, nil
 	default:
-		return fmt.Errorf("runner: unexpected message type %s", msg.Type)
+		return false, fmt.Errorf("runner: unexpected message type %s", msg.Type)
 	}
-	return nil
 }
 
 func protocolErrorFromMessage(msg protocol.Message) error {
@@ -325,6 +394,7 @@ func (c *Connection) fail(err error) {
 			sessions = append(sessions, session)
 		}
 		c.sessions = make(map[string]*Session)
+		c.pending = make(map[string]*pendingSessionMessages)
 		c.mu.Unlock()
 		for _, session := range sessions {
 			session.fail(err)

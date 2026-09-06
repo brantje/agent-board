@@ -137,6 +137,9 @@ func (m *Manager) Connect(ctx context.Context, projectID, runtimeInstanceID stri
 	}
 }
 
+// Reconcile always attaches the expected durable session locally. The runner
+// reattaches retained delivery immediately after handshake, so terminal output
+// may arrive even when health no longer lists the session as active.
 func (m *Manager) Reconcile(ctx context.Context, projectID, runtimeInstanceID, expectedSessionID string) (ProcessSession, bool, error) {
 	client, err := m.Connect(ctx, projectID, runtimeInstanceID)
 	if err != nil {
@@ -145,16 +148,18 @@ func (m *Manager) Reconcile(ctx context.Context, projectID, runtimeInstanceID, e
 	if expectedSessionID == "" {
 		return nil, false, nil
 	}
-	active := containsSession(client.Health().ActiveSessionIDs, expectedSessionID)
-	if !active {
-		return nil, false, nil
-	}
+	health := client.Health()
+	active := containsSession(health.ActiveSessionIDs, expectedSessionID)
 	session, err := client.Attach(expectedSessionID)
 	if err != nil {
-		return nil, true, err
+		return nil, active, err
 	}
-	m.report(ctx, projectID, runtimeInstanceID, "BUSY")
-	return session, true, nil
+	status := "READY"
+	if health.ActiveSessions > 0 {
+		status = "BUSY"
+	}
+	m.report(ctx, projectID, runtimeInstanceID, status)
+	return session, active, nil
 }
 
 func containsSession(ids []string, target string) bool {
