@@ -19,6 +19,20 @@ CREATE TABLE projects (
 
 CREATE UNIQUE INDEX projects_name_uq ON projects (lower(name));
 
+CREATE TABLE secrets (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+    ref text NOT NULL CHECK (btrim(ref) <> ''),
+    ciphertext bytea NOT NULL CHECK (octet_length(ciphertext) > 0),
+    key_version integer NOT NULL CHECK (key_version >= 1),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, id)
+);
+
+CREATE UNIQUE INDEX secrets_global_ref_uq ON secrets (ref) WHERE project_id IS NULL;
+CREATE UNIQUE INDEX secrets_project_ref_uq ON secrets (project_id, ref) WHERE project_id IS NOT NULL;
+
 CREATE TABLE providers (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL CHECK (btrim(name) <> ''),
