@@ -129,7 +129,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 	}
 
 	if question.Blocking {
-		if run.Status != "WAITING_FOR_INPUT" || issueStatus != "BLOCKED" {
+		if run.Status != "WAITING_FOR_INPUT" || (issueStatus != "BLOCKED" && issueStatus != "DONE") {
 			return store.AnswerQuestionResult{}, store.ErrConflict
 		}
 		var activeJob bool
