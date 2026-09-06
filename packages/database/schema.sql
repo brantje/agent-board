@@ -26,8 +26,7 @@ CREATE TABLE secrets (
     ciphertext bytea NOT NULL CHECK (octet_length(ciphertext) > 0),
     key_version integer NOT NULL CHECK (key_version >= 1),
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (project_id, id)
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE UNIQUE INDEX secrets_global_ref_uq ON secrets (ref) WHERE project_id IS NULL;
