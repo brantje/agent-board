@@ -222,12 +222,13 @@ type ExecutionProcess struct {
 	service   *ExecutionSessionService
 	transport runner.ProcessSession
 
-	mu     sync.RWMutex
-	record store.ExecutionSession
-	result runner.Result
-	err    error
-	done   chan struct{}
-	cancel atomic.Bool
+	mu       sync.RWMutex
+	cancelMu sync.Mutex
+	record   store.ExecutionSession
+	result   runner.Result
+	err      error
+	done     chan struct{}
+	cancel   atomic.Bool
 }
 
 func newExecutionProcess(service *ExecutionSessionService, record store.ExecutionSession, transport runner.ProcessSession) *ExecutionProcess {
@@ -262,25 +263,26 @@ func (p *ExecutionProcess) Wait(ctx context.Context) (runner.Result, error) {
 }
 
 func (p *ExecutionProcess) Terminate(ctx context.Context) error {
-	p.cancel.Store(true)
-	if err := p.transport.Terminate(ctx); err != nil {
-		select {
-		case <-p.done:
-		default:
-			p.cancel.Store(false)
-		}
-		return err
-	}
-	return nil
+	return p.signalCancellation(ctx, p.transport.Terminate)
 }
 
 func (p *ExecutionProcess) Kill(ctx context.Context) error {
+	return p.signalCancellation(ctx, p.transport.Kill)
+}
+
+func (p *ExecutionProcess) signalCancellation(ctx context.Context, signal func(context.Context) error) error {
+	p.cancelMu.Lock()
+	defer p.cancelMu.Unlock()
+
+	alreadyRequested := p.cancel.Load()
 	p.cancel.Store(true)
-	if err := p.transport.Kill(ctx); err != nil {
-		select {
-		case <-p.done:
-		default:
-			p.cancel.Store(false)
+	if err := signal(ctx); err != nil {
+		if !alreadyRequested {
+			select {
+			case <-p.done:
+			default:
+				p.cancel.Store(false)
+			}
 		}
 		return err
 	}
@@ -315,7 +317,7 @@ func (p *ExecutionProcess) observe() {
 		finalErr = transitionErr
 	}
 	if record.Status == "COMPLETED" || record.Status == "FAILED" || record.Status == "CANCELLED" {
-		if _, statusErr := p.service.store.UpdateRuntimeInstanceRunnerStatus(context.Background(), record.ProjectID, record.RuntimeInstanceID, "READY"); statusErr != nil {
+		if statusErr := p.service.updateRunnerStatusRecovery(record.ProjectID, record.RuntimeInstanceID, "READY"); statusErr != nil {
 			finalErr = errors.Join(finalErr, statusErr)
 		}
 	}
