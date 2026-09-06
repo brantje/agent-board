@@ -38,18 +38,43 @@ type ProcessResult struct {
 	ExitCode int
 }
 
+type QuestionOption struct {
+	ID    string
+	Label string
+}
+
+type QuestionRequest struct {
+	Prompt         string
+	Kind           string
+	Options        []QuestionOption
+	Recommendation *string
+	Blocking       bool
+}
+
+type Question struct {
+	ID       string
+	Blocking bool
+}
+
+// Questioner is the narrow human-input capability available to Engine adapters.
+// Durable Question persistence and Run lifecycle changes remain server-owned.
+type Questioner interface {
+	Ask(context.Context, QuestionRequest) (Question, error)
+}
+
 type Request struct {
-	Context  executioncontext.SafeContext
-	Launcher ProcessLauncher
+	Context   executioncontext.SafeContext
+	Launcher  ProcessLauncher
+	Questions Questioner
 }
 
 type Result struct {
 	Summary string
 }
 
-// Engine executes one Run attempt using only the resolved safe context and a
-// narrow process launcher. Adapters never receive database, Docker, or raw
-// runner/WebSocket access.
+// Engine executes one Run attempt using only the resolved safe context and
+// narrow server-owned capabilities. Adapters never receive database, Docker,
+// scheduler, or raw runner/WebSocket access.
 type Engine interface {
 	Name() string
 	Execute(context.Context, Request) (Result, error)
