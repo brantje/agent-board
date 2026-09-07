@@ -93,3 +93,55 @@ func TestExecutionSessionServiceRejectsInvalidSessionDialBindings(t *testing.T) 
 		})
 	}
 }
+
+func TestAuthorizedExecutionSessionServiceForwardsSessionDial(t *testing.T) {
+	local, remote := net.Pipe()
+	t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
+	storeFake := &executionSessionStoreFake{session: store.ExecutionSession{
+		ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING",
+	}}
+	client := &sessionDialExecutionClient{
+		fakeExecutionClient: &fakeExecutionClient{done: make(chan struct{})},
+		conn:                local,
+	}
+	service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized := &AuthorizedExecutionSessionService{sessions: service}
+
+	conn, err := authorized.DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096")
+	if err != nil {
+		t.Fatalf("authorized dial: %v", err)
+	}
+	if conn != local || client.sessionID != "session-1" || client.network != "tcp" || client.address != "127.0.0.1:4096" {
+		t.Fatalf("conn=%v session=%q network=%q address=%q", conn, client.sessionID, client.network, client.address)
+	}
+}
+
+func TestAuthorizedExecutionSessionServiceRejectsUnavailableService(t *testing.T) {
+	var nilService *AuthorizedExecutionSessionService
+	if _, err := nilService.DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
+		t.Fatal("nil authorized service unexpectedly dialed")
+	}
+	if _, err := (&AuthorizedExecutionSessionService{}).DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
+		t.Fatal("authorized service without sessions unexpectedly dialed")
+	}
+}
+
+func TestExecutionSessionServiceRejectsMissingDialIdentity(t *testing.T) {
+	var service *ExecutionSessionService
+	if _, err := service.DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
+		t.Fatal("nil execution session service unexpectedly dialed")
+	}
+	storeFake := &executionSessionStoreFake{}
+	valid, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: &fakeExecutionClient{done: make(chan struct{})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][3]string{{"", "runtime-1", "session-1"}, {"project-1", "", "session-1"}, {"project-1", "runtime-1", ""}} {
+		if _, err := valid.DialSession(context.Background(), args[0], args[1], args[2], "tcp", "127.0.0.1:4096"); err == nil {
+			t.Fatalf("missing identity %+v unexpectedly accepted", args)
+		}
+	}
+}
