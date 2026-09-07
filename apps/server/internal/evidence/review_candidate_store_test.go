@@ -20,6 +20,9 @@ func TestPrivateReviewCandidatePinsExactBytesWhilePublicEvidenceIsRedacted(t *te
 		runID  = "run-review-private"
 		secret = "super-secret-review-token"
 	)
+	if err := os.MkdirAll(filepath.Join(workspace, "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, workspace, "tracked.txt", "tracked="+secret+"\n")
 	writeFile(t, workspace, "bin/run.sh", "#!/bin/sh\necho "+secret+"\n")
 	if err := os.Chmod(filepath.Join(workspace, "bin/run.sh"), 0o755); err != nil {
