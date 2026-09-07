@@ -2,7 +2,6 @@ package evidence
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"os"
@@ -12,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/redaction"
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 func TestPrivateReviewCandidatePinsExactBytesWhilePublicEvidenceIsRedacted(t *testing.T) {
@@ -69,7 +69,7 @@ func TestPrivateReviewCandidatePinsExactBytesWhilePublicEvidenceIsRedacted(t *te
 		t.Fatalf("private candidate file lost exact bytes: %q", fileBytes)
 	}
 
-	assertPublicCandidateRedacted(t, baseBlobs, append([]storeArtifactForTest{{artifact: first.Manifest}}, artifactsForTest(first.Artifacts)...), secret)
+	assertPublicCandidateRedacted(t, baseBlobs, append([]store.Artifact{first.Manifest}, first.Artifacts...), secret)
 
 	// A retry for the same Run must keep projecting the already-pinned candidate,
 	// even if the mutable Issue Workspace changed after the first snapshot.
@@ -87,8 +87,8 @@ func TestPrivateReviewCandidatePinsExactBytesWhilePublicEvidenceIsRedacted(t *te
 	if !reflect.DeepEqual(first.Candidate, second.Candidate) {
 		t.Fatalf("retry candidate changed: first=%+v second=%+v", first.Candidate, second.Candidate)
 	}
-	for _, artifact := range append([]storeArtifactForTest{{artifact: second.Manifest}}, artifactsForTest(second.Artifacts)...) {
-		data := readPublicArtifact(t, baseBlobs, artifact.artifact.StorageRef)
+	for _, artifact := range append([]store.Artifact{second.Manifest}, second.Artifacts...) {
+		data := readPublicArtifact(t, baseBlobs, artifact.StorageRef)
 		if bytes.Contains(data, []byte("changed-after-capture")) {
 			t.Fatalf("retry public evidence reread mutable Workspace: %q", data)
 		}
@@ -106,24 +106,10 @@ func TestPrivateReviewCandidatePinsExactBytesWhilePublicEvidenceIsRedacted(t *te
 	}
 }
 
-type storeArtifactForTest struct {
-	artifact struct {
-		StorageRef string
-	}
-}
-
-func artifactsForTest(values []store.Artifact) []storeArtifactForTest {
-	result := make([]storeArtifactForTest, 0, len(values))
-	for _, artifact := range values {
-		result = append(result, storeArtifactForTest{artifact: struct{ StorageRef string }{StorageRef: artifact.StorageRef}})
-	}
-	return result
-}
-
-func assertPublicCandidateRedacted(t *testing.T, blobs BlobStore, artifacts []storeArtifactForTest, secret string) {
+func assertPublicCandidateRedacted(t *testing.T, blobs BlobStore, artifacts []store.Artifact, secret string) {
 	t.Helper()
-	for _, value := range artifacts {
-		data := readPublicArtifact(t, blobs, value.artifact.StorageRef)
+	for _, artifact := range artifacts {
+		data := readPublicArtifact(t, blobs, artifact.StorageRef)
 		if bytes.Contains(data, []byte(secret)) {
 			t.Fatalf("public candidate evidence leaked secret: %q", data)
 		}
@@ -281,5 +267,3 @@ func TestReviewCandidateSourceRejectsEscapesAndSymlinks(t *testing.T) {
 		t.Fatal("symlink storage should fail")
 	}
 }
-
-var _ = context.Background
