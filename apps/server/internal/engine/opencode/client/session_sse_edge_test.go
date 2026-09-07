@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -94,6 +95,45 @@ func TestEventStreamParsesMultilineDataAndEOF(t *testing.T) {
 	}
 	if _, err := stream.Next(); !errors.Is(err, io.EOF) {
 		t.Fatalf("second Next() error=%v want EOF", err)
+	}
+}
+
+func TestEventStreamNormalizesOpenCodeV2DataPayload(t *testing.T) {
+	stream := eventStreamForTest("data: {\"id\":\"evt_question\",\"type\":\"question.v2.asked\",\"data\":{\"id\":\"req_1\",\"sessionID\":\"ses_1\"}}\n\n")
+	defer stream.Close()
+
+	event, err := stream.Next()
+	if err != nil {
+		t.Fatalf("Next() error=%v", err)
+	}
+	if event.ID != "evt_question" || event.Type != "question.v2.asked" {
+		t.Fatalf("event=%+v", event)
+	}
+	var payload struct {
+		ID        string `json:"id"`
+		SessionID string `json:"sessionID"`
+	}
+	if err := json.Unmarshal(event.Properties, &payload); err != nil {
+		t.Fatalf("decode normalized payload: %v", err)
+	}
+	if payload.ID != "req_1" || payload.SessionID != "ses_1" {
+		t.Fatalf("payload=%+v", payload)
+	}
+}
+
+func TestEventStreamPrefersV2DataOverCompatibilityProperties(t *testing.T) {
+	event, err := decodeSSEEvent(`{"id":"evt_1","type":"session.error","data":{"sessionID":"ses_data"},"properties":{"sessionID":"ses_properties"}}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		SessionID string `json:"sessionID"`
+	}
+	if err := json.Unmarshal(event.Properties, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.SessionID != "ses_data" {
+		t.Fatalf("sessionID=%q want V2 data payload", payload.SessionID)
 	}
 }
 

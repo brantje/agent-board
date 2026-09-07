@@ -40,6 +40,7 @@ func TestHandleSessionErrorDoesNotExposeUnneededNativeFields(t *testing.T) {
 				"message":      "request failed",
 				"responseBody": "sensitive upstream body",
 			},
+		},
 	})
 	err := state.handleSessionError(properties)
 	if err == nil || !strings.Contains(err.Error(), "request failed") {
