@@ -42,7 +42,6 @@ func TestClientNativeSessionAndQuestionRoutes(t *testing.T) {
 		}
 		writeJSON(t, w, http.StatusOK, map[string]any{"data": map[string]any{"id": "input_1"}})
 	})
-	mux.HandleFunc("POST /api/session/ses_1/wait", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("POST /api/session/ses_1/interrupt", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /api/session/ses_1/question", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{map[string]any{
@@ -92,9 +91,6 @@ func TestClientNativeSessionAndQuestionRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := client.RejectQuestion(context.Background(), session.ID, "que_1"); err != nil {
-		t.Fatal(err)
-	}
-	if err := client.WaitSession(context.Background(), session.ID); err != nil {
 		t.Fatal(err)
 	}
 	if err := client.InterruptSession(context.Background(), session.ID); err != nil {
