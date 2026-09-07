@@ -75,16 +75,20 @@ func (q *interactiveQuestioner) OpenBatch(ctx context.Context, requests []engine
 		return nil, fmt.Errorf("run execution: interactive Question batch returned %d Questions for %d requests", len(batch.Questions), len(requests))
 	}
 
+	// Stores that return durable lifecycle events own canonical evidence
+	// delivery. Only use the recorder as a compatibility fallback for stores
+	// that do not persist those events themselves.
+	storeOwnsEvidence := len(batch.Events) != 0
 	opened := make([]engine.Question, len(batch.Questions))
 	for index, result := range batch.Questions {
-		if result.Created {
+		if result.Created && !storeOwnsEvidence {
 			if err := q.recordCreated(ctx, result.Question); err != nil {
 				return nil, err
 			}
 		}
 		opened[index] = engine.Question{ID: result.Question.ID, Blocking: true}
 	}
-	if batch.EnteredWaiting {
+	if batch.EnteredWaiting && !storeOwnsEvidence {
 		questionID := batch.Questions[0].Question.ID
 		for _, result := range batch.Questions {
 			if result.EnteredWaiting {
@@ -130,12 +134,16 @@ func (q *interactiveQuestioner) prepareOpenCommand(correlationKey string, reques
 			Blocking:       true,
 			Status:         "OPEN",
 		},
-		Engine:         q.engine,
-		CorrelationKey: correlationKey,
+		Engine:            q.engine,
+		CorrelationKey:    correlationKey,
+		RuntimeInstanceID: q.runtimeInstanceID,
 	}, options, nil
 }
 
 func (q *interactiveQuestioner) recordOpenResult(ctx context.Context, result store.OpenInteractiveQuestionResult) error {
+	if len(result.Events) != 0 {
+		return nil
+	}
 	if result.Created {
 		if err := q.recordCreated(ctx, result.Question); err != nil {
 			return err
