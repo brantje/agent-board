@@ -72,8 +72,22 @@ func (s *reviewServiceStore) ListExecutionSessionsByRun(context.Context, string,
 func (s *reviewServiceStore) GetRuntimeInstance(context.Context, string, string) (store.RuntimeInstance, error) {
 	return store.RuntimeInstance{}, store.ErrNotFound
 }
-func (s *reviewServiceStore) ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error) {
-	return append([]store.Event(nil), s.events...), nil
+func (s *reviewServiceStore) ListRunEvents(_ context.Context, _, _ string, after int64, limit int) ([]store.Event, error) {
+	values := make([]store.Event, 0, len(s.events))
+	for index, event := range s.events {
+		sequence := int64(index + 1)
+		if event.Sequence == nil {
+			event.Sequence = &sequence
+		}
+		if *event.Sequence <= after {
+			continue
+		}
+		values = append(values, event)
+		if limit > 0 && len(values) >= limit {
+			break
+		}
+	}
+	return values, nil
 }
 func (s *reviewServiceStore) GetRawOutputChunk(context.Context, string, string, string) (store.RawOutputChunk, error) {
 	return store.RawOutputChunk{}, store.ErrNotFound
