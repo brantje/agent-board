@@ -100,6 +100,23 @@ func TestEventStreamParsesMultilineDataAndEOF(t *testing.T) {
 	}
 }
 
+func TestEventStreamRejectsOversizedAggregatePayload(t *testing.T) {
+	const chunkSize = 64 << 10
+	chunk := strings.Repeat("x", chunkSize)
+	var input strings.Builder
+	for input.Len() <= maxSSEEventSize+chunkSize {
+		input.WriteString("data: ")
+		input.WriteString(chunk)
+		input.WriteByte('\n')
+	}
+	stream := eventStreamForTest(input.String())
+	defer stream.Close()
+
+	if _, err := stream.Next(); err == nil || !strings.Contains(err.Error(), "event payload exceeds") {
+		t.Fatalf("Next() error=%v want aggregate payload limit", err)
+	}
+}
+
 func TestEventStreamNormalizesOpenCodeV2DataPayload(t *testing.T) {
 	stream := eventStreamForTest("data: {\"id\":\"evt_question\",\"type\":\"question.v2.asked\",\"data\":{\"id\":\"req_1\",\"sessionID\":\"ses_1\"}}\n\n")
 	defer stream.Close()
