@@ -300,6 +300,23 @@ CREATE TABLE questions (
 CREATE INDEX questions_open_idx ON questions (project_id, status, created_at) WHERE status = 'OPEN';
 CREATE INDEX questions_run_idx ON questions (run_id, created_at);
 
+CREATE TABLE engine_question_bindings (
+    question_id uuid NOT NULL,
+    project_id uuid NOT NULL,
+    run_id uuid NOT NULL,
+    engine text NOT NULL CHECK (btrim(engine) <> ''),
+    correlation_key text NOT NULL CHECK (btrim(correlation_key) <> ''),
+    state text NOT NULL DEFAULT 'OPEN' CHECK (state IN ('OPEN', 'ANSWERED', 'RESOLVED', 'CANCELLED')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT engine_question_bindings_question_fk FOREIGN KEY (project_id, question_id) REFERENCES questions(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT engine_question_bindings_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
+    PRIMARY KEY (question_id),
+    UNIQUE (project_id, run_id, engine, correlation_key)
+);
+
+CREATE INDEX engine_question_bindings_run_state_idx ON engine_question_bindings (project_id, run_id, state);
+
 CREATE TABLE decisions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
