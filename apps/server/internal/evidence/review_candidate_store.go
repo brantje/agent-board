@@ -102,9 +102,11 @@ func (s *ReviewCandidateStore) Capture(ctx context.Context, runID, workspace str
 	} else if !os.IsNotExist(statErr) {
 		return fmt.Errorf("inspect review candidate archive: %w", statErr)
 	}
-	if err := cleanupReviewCandidateTemps(s.root, runID); err != nil {
-		return fmt.Errorf("cleanup review candidate archive: %w", err)
-	}
+
+	// Temporary directories are unique per writer and intentionally are not
+	// swept here: removing another writer's in-flight directory would turn a
+	// harmless same-Run capture race into corruption. Each writer removes its
+	// own unpublished temporary directory; interrupted leftovers are inert.
 	temporary, err := os.MkdirTemp(s.root, "."+runID+".candidate-")
 	if err != nil {
 		return fmt.Errorf("create review candidate archive: %w", err)
@@ -377,20 +379,4 @@ func reviewCandidateSource(root, relative string, expectedSize int64) (ReviewCan
 		}
 		return file, nil
 	}, nil
-}
-
-func cleanupReviewCandidateTemps(root, runID string) error {
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return err
-	}
-	prefix := "." + runID + ".candidate-"
-	for _, entry := range entries {
-		if strings.HasPrefix(entry.Name(), prefix) {
-			if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
