@@ -72,10 +72,10 @@ func TestInteractiveQuestionerOpenPersistsCanonicalLifecycleEvidence(t *testing.
 		EnteredWaiting: true,
 	}}
 	q := &interactiveQuestioner{
-		store:       &interactiveQuestionReadStore{},
-		interactive: lifecycle,
-		events:      recorder,
-		safe:        interactiveSafeContext(),
+		store:             &interactiveQuestionReadStore{},
+		interactive:       lifecycle,
+		events:            recorder,
+		safe:              interactiveSafeContext(),
 		runtimeInstanceID: "runtime-instance-1",
 		engine:            "opencode",
 	}
@@ -178,15 +178,18 @@ func TestInteractiveQuestionerResolveRecordsResumeOnlyWhenRunResumes(t *testing.
 		if len(lifecycle.resolved) != 1 || lifecycle.resolved[0] != "question-1" {
 			t.Fatalf("resolved=%v", lifecycle.resolved)
 		}
-		wantEvents := 0
+		wantEvents := 1
 		if resumed {
-			wantEvents = 1
+			wantEvents = 2
 		}
 		if len(eventStore.events) != wantEvents {
 			t.Fatalf("resumed=%v events=%+v", resumed, eventStore.events)
 		}
-		if resumed && eventStore.events[0].Type != "run.resumed" {
-			t.Fatalf("event=%+v", eventStore.events[0])
+		if eventStore.events[0].Type != interactiveQuestionResolvedEvent {
+			t.Fatalf("resolution event=%+v", eventStore.events[0])
+		}
+		if resumed && eventStore.events[1].Type != "run.resumed" {
+			t.Fatalf("resume event=%+v", eventStore.events[1])
 		}
 	}
 }
