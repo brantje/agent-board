@@ -114,7 +114,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	if err != nil {
 		return engine.Result{}, fmt.Errorf("opencode engine: subscribe native events: %w", err)
 	}
-	defer stream.Close()
+	defer func() { _ = stream.Close() }()
+	eventCtx, cancelEventReads := context.WithCancel(ctx)
+	defer cancelEventReads()
 
 	state := newRunState(session.ID, request.InteractiveQuestions, activitySink(request.Launcher))
 	if err := native.Prompt(ctx, session.ID, initialTaskPrompt(request.Context)); err != nil {
@@ -122,7 +124,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	}
 
 	waitCh := waitSession(ctx, native, session.ID)
-	events := readEvents(stream)
+	events := readEvents(eventCtx, stream)
 	for {
 		select {
 		case <-ctx.Done():
@@ -172,7 +174,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				if err != nil {
 					return engine.Result{}, errors.Join(fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err), err)
 				}
-				events = readEvents(stream)
+				events = readEvents(eventCtx, stream)
 				continue
 			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
@@ -299,12 +301,16 @@ type eventReadResult struct {
 	err   error
 }
 
-func readEvents(stream *client.EventStream) <-chan eventReadResult {
+func readEvents(ctx context.Context, stream *client.EventStream) <-chan eventReadResult {
 	reads := make(chan eventReadResult, 1)
 	go func() {
 		for {
 			event, err := stream.Next()
-			reads <- eventReadResult{event: event, err: err}
+			select {
+			case reads <- eventReadResult{event: event, err: err}:
+			case <-ctx.Done():
+				return
+			}
 			if err != nil {
 				return
 			}
