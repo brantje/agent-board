@@ -164,7 +164,7 @@ func (h *nativeServerHarness) handler(t *testing.T) http.Handler {
 			t.Error("response writer does not flush")
 			return
 		}
-		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"data\":{}}\n\n")
+		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"properties\":{}}\n\n")
 		flusher.Flush()
 		for {
 			select {
@@ -188,7 +188,7 @@ func (h *nativeServerHarness) handler(t *testing.T) http.Handler {
 		h.promptText = payload.Prompt.Text
 		h.mu.Unlock()
 		question, _ := json.Marshal(h.questionRequest)
-		event, _ := json.Marshal(map[string]any{"id": "evt_question", "type": "question.v2.asked", "data": json.RawMessage(question)})
+		event, _ := json.Marshal(map[string]any{"id": "evt_question", "type": "question.v2.asked", "properties": json.RawMessage(question)})
 		h.events <- string(event)
 		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "input_native"}})
 	})
