@@ -394,6 +394,7 @@ CREATE UNIQUE INDEX events_run_sequence_uq ON events (run_id, sequence) WHERE ru
 CREATE INDEX events_run_timeline_idx ON events (run_id, sequence) WHERE run_id IS NOT NULL;
 CREATE INDEX events_project_timeline_idx ON events (project_id, created_at, id);
 CREATE INDEX events_correlation_idx ON events (correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX events_question_id_lookup_idx ON events (project_id, run_id, type, (payload->>'questionId'));
 
 CREATE TABLE raw_output_chunks (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
