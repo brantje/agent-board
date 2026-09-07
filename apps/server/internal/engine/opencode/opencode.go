@@ -24,6 +24,8 @@ const (
 	startupRetryDelay            = 100 * time.Millisecond
 	reconnectRetryDelay          = 200 * time.Millisecond
 	reconnectAttempts            = 10
+	nativeStatePollInterval      = 250 * time.Millisecond
+	inactivePollsBeforeComplete  = 2
 	serviceStopTimeout           = 5 * time.Second
 )
 
@@ -123,58 +125,77 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, fmt.Errorf("opencode engine: send initial task: %w", err)
 	}
 
-	waitCh := waitSession(ctx, native, session.ID)
+	finish := func() (engine.Result, error) {
+		_ = stream.Close()
+		if err := stopService(ctx, process); err != nil {
+			return engine.Result{}, err
+		}
+		stopped = true
+		drainWG.Wait()
+		if state.activity != nil {
+			return engine.Result{}, nil
+		}
+		return engine.Result{Summary: state.lastVisibleMessage}, nil
+	}
+
 	events := readEvents(eventCtx, stream)
+	statePoll := time.NewTicker(nativeStatePollInterval)
+	defer statePoll.Stop()
+	inactivePolls := 0
 	for {
 		select {
 		case <-ctx.Done():
 			cancelNativeSession(ctx, native, session.ID, state)
 			return engine.Result{}, ctx.Err()
-		case waitErr := <-waitCh:
-			if waitErr != nil {
-				return engine.Result{}, fmt.Errorf("opencode engine: wait native session: %w", waitErr)
-			}
-			pending, err := native.ListQuestions(ctx, session.ID)
+		case <-statePoll.C:
+			hadPending, err := reconcilePendingQuestions(ctx, native, session.ID, state)
 			if err != nil {
-				return engine.Result{}, fmt.Errorf("opencode engine: reconcile pending Questions at idle: %w", err)
-			}
-			if len(pending) != 0 {
-				if err := state.handlePending(ctx, native, pending); err != nil {
-					return engine.Result{}, err
-				}
-				waitCh = waitSession(ctx, native, session.ID)
-				continue
-			}
-			if err := stream.Close(); err != nil {
-				return engine.Result{}, fmt.Errorf("opencode engine: close native event stream: %w", err)
-			}
-			if err := stopService(ctx, process); err != nil {
 				return engine.Result{}, err
 			}
-			stopped = true
-			drainWG.Wait()
-			if state.activity != nil {
-				return engine.Result{}, nil
+			if hadPending {
+				inactivePolls = 0
+				continue
 			}
-			return engine.Result{Summary: state.lastVisibleMessage}, nil
+			active, err := native.SessionActive(ctx, session.ID)
+			if err != nil {
+				return engine.Result{}, fmt.Errorf("opencode engine: query native session activity: %w", err)
+			}
+			if active {
+				inactivePolls = 0
+				continue
+			}
+			inactivePolls++
+			if inactivePolls >= inactivePollsBeforeComplete {
+				return finish()
+			}
 		case eventRead := <-events:
 			if eventRead.err != nil {
 				_ = stream.Close()
-				pending, reconcileErr := native.ListQuestions(ctx, session.ID)
-				if reconcileErr != nil {
+				if _, reconcileErr := reconcilePendingQuestions(ctx, native, session.ID, state); reconcileErr != nil {
 					return engine.Result{}, errors.Join(
 						fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
-						fmt.Errorf("reconcile pending Questions: %w", reconcileErr),
+						reconcileErr,
 					)
-				}
-				if err := state.handlePending(ctx, native, pending); err != nil {
-					return engine.Result{}, err
 				}
 				stream, err = reconnectEvents(ctx, native)
 				if err != nil {
 					return engine.Result{}, errors.Join(fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err), err)
 				}
 				events = readEvents(eventCtx, stream)
+				continue
+			}
+			idle, err := isSessionIdleEvent(eventRead.event, session.ID)
+			if err != nil {
+				return engine.Result{}, err
+			}
+			if idle {
+				hadPending, err := reconcilePendingQuestions(ctx, native, session.ID, state)
+				if err != nil {
+					return engine.Result{}, err
+				}
+				if !hadPending {
+					return finish()
+				}
 				continue
 			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
@@ -290,10 +311,31 @@ func reconnectEvents(ctx context.Context, native *client.Client) (*client.EventS
 	return nil, fmt.Errorf("opencode engine: reconnect native event stream: %w", lastErr)
 }
 
-func waitSession(ctx context.Context, native *client.Client, sessionID string) <-chan error {
-	done := make(chan error, 1)
-	go func() { done <- native.WaitSession(ctx, sessionID) }()
-	return done
+func reconcilePendingQuestions(ctx context.Context, native *client.Client, sessionID string, state *runState) (bool, error) {
+	pending, err := native.ListQuestions(ctx, sessionID)
+	if err != nil {
+		return false, fmt.Errorf("opencode engine: reconcile pending Questions: %w", err)
+	}
+	if len(pending) == 0 {
+		return false, nil
+	}
+	if err := state.handlePending(ctx, native, pending); err != nil {
+		return true, err
+	}
+	return true, nil
+}
+
+func isSessionIdleEvent(event client.Event, sessionID string) (bool, error) {
+	if event.Type != "session.idle" {
+		return false, nil
+	}
+	var properties struct {
+		SessionID string `json:"sessionID"`
+	}
+	if err := json.Unmarshal(event.Properties, &properties); err != nil {
+		return false, fmt.Errorf("opencode engine: decode session idle event: %w", err)
+	}
+	return properties.SessionID == sessionID, nil
 }
 
 type eventReadResult struct {
