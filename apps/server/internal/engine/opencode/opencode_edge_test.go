@@ -152,7 +152,7 @@ func (p *lifecycleProcess) Wait(context.Context) (engine.ProcessResult, error) {
 	return engine.ProcessResult{ExitCode: 0}, nil
 }
 
-func TestStopServiceTerminatesThenFallsBackToKill(t *testing.T) {
+func TestStopServiceHandlesImmediateProcessResult(t *testing.T) {
 	clean := &lifecycleProcess{}
 	if err := stopService(context.Background(), clean); err != nil {
 		t.Fatalf("clean stop error=%v", err)
@@ -161,19 +161,13 @@ func TestStopServiceTerminatesThenFallsBackToKill(t *testing.T) {
 		t.Fatalf("clean lifecycle terminate=%d kill=%d wait=%d", clean.terminateCalls, clean.killCalls, clean.waitCalls)
 	}
 
-	firstWaitErr := errors.New("still running")
-	fallback := &lifecycleProcess{waitErrors: []error{firstWaitErr, nil}}
-	if err := stopService(context.Background(), fallback); err != nil {
-		t.Fatalf("fallback stop error=%v", err)
-	}
-	if fallback.terminateCalls != 1 || fallback.killCalls != 1 || fallback.waitCalls != 2 {
-		t.Fatalf("fallback lifecycle terminate=%d kill=%d wait=%d", fallback.terminateCalls, fallback.killCalls, fallback.waitCalls)
-	}
-
-	secondWaitErr := errors.New("wait after kill failed")
-	failed := &lifecycleProcess{waitErrors: []error{firstWaitErr, secondWaitErr}}
+	waitErr := errors.New("wait failed")
+	failed := &lifecycleProcess{waitErrors: []error{waitErr}}
 	if err := stopService(context.Background(), failed); err == nil || !strings.Contains(err.Error(), "stop native server") {
 		t.Fatalf("failed stop error=%v", err)
+	}
+	if failed.terminateCalls != 1 || failed.killCalls != 0 || failed.waitCalls != 1 {
+		t.Fatalf("failed lifecycle terminate=%d kill=%d wait=%d", failed.terminateCalls, failed.killCalls, failed.waitCalls)
 	}
 }
 
