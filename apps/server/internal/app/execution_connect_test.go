@@ -1,0 +1,95 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"net"
+	"testing"
+
+	"github.com/brantje/agent-board/apps/server/internal/runner"
+	"github.com/brantje/agent-board/apps/server/internal/store"
+)
+
+type sessionDialExecutionClient struct {
+	*fakeExecutionClient
+	conn      net.Conn
+	err       error
+	sessionID string
+	network   string
+	address   string
+}
+
+func (c *sessionDialExecutionClient) DialSession(_ context.Context, sessionID, network, address string) (net.Conn, error) {
+	c.sessionID = sessionID
+	c.network = network
+	c.address = address
+	return c.conn, c.err
+}
+
+func TestExecutionSessionServiceDialsOnlyThroughBoundRunningSession(t *testing.T) {
+	local, remote := net.Pipe()
+	t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
+
+	storeFake := &executionSessionStoreFake{session: store.ExecutionSession{
+		ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING",
+	}}
+	client := &sessionDialExecutionClient{
+		fakeExecutionClient: &fakeExecutionClient{done: make(chan struct{})},
+		conn:                local,
+	}
+	service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	conn, err := service.DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096")
+	if err != nil {
+		t.Fatalf("dial session: %v", err)
+	}
+	if conn != local || client.sessionID != "session-1" || client.network != "tcp" || client.address != "127.0.0.1:4096" {
+		t.Fatalf("conn=%v session=%q network=%q address=%q", conn, client.sessionID, client.network, client.address)
+	}
+}
+
+func TestExecutionSessionServiceRejectsInvalidSessionDialBindings(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		session   store.ExecutionSession
+		runtimeID string
+		client    runner.Client
+	}{
+		{
+			name:      "runtime mismatch",
+			session:   store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
+			runtimeID: "runtime-2",
+			client:    &fakeExecutionClient{done: make(chan struct{})},
+		},
+		{
+			name:      "not running",
+			session:   store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RuntimeInstanceID: "runtime-1", Status: "COMPLETED"},
+			runtimeID: "runtime-1",
+			client:    &fakeExecutionClient{done: make(chan struct{})},
+		},
+		{
+			name:      "runner capability missing",
+			session:   store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
+			runtimeID: "runtime-1",
+			client:    &fakeExecutionClient{done: make(chan struct{})},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storeFake := &executionSessionStoreFake{session: tc.session}
+			service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: tc.client})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = service.DialSession(context.Background(), "project-1", tc.runtimeID, "session-1", "tcp", "127.0.0.1:4096")
+			if err == nil {
+				t.Fatal("expected dial rejection")
+			}
+			if tc.name == "runner capability missing" && !errors.Is(err, runner.ErrSessionConnectUnsupported) {
+				t.Fatalf("err=%v want ErrSessionConnectUnsupported", err)
+			}
+		})
+	}
+}
