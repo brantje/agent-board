@@ -17,7 +17,7 @@ import (
 type candidateErrorReader struct{ err error }
 
 func (r candidateErrorReader) Read([]byte) (int, error) { return 0, r.err }
-func (r candidateErrorReader) Close() error               { return nil }
+func (r candidateErrorReader) Close() error              { return nil }
 
 type candidateCloseErrorReader struct {
 	io.Reader
@@ -127,7 +127,7 @@ func TestCopyCandidateChunksHandlesFailureBoundaries(t *testing.T) {
 
 func TestAcceptedCandidatePathRejectsUnsafePaths(t *testing.T) {
 	root := t.TempDir()
-	for _, relative := range []string{"", ".", "..", filepath.Join("..", "escape"), filepath.Join(root, "absolute") } {
+	for _, relative := range []string{"", ".", "..", filepath.Join("..", "escape"), filepath.Join(root, "absolute")} {
 		if _, err := acceptedCandidatePath(root, relative); err == nil {
 			t.Fatalf("path %q should fail", relative)
 		}
@@ -185,22 +185,20 @@ func TestCandidateApplierValidatesDependenciesAndEarlyFailures(t *testing.T) {
 	git := requireGit(t).GitCLI
 	projectSource := candidateProjectSource{workspace: store.ProjectWorkspace{Path: t.TempDir()}}
 	lockStore := candidateLockStore{}
-	for name, locks, projects, candidateGit := range map[string]struct {
+	for name, dependencies := range map[string]struct {
 		locks    ProjectWorkspaceLockStore
 		projects ProjectWorkspaceSource
 		git      *GitCLI
 	}{
-		"locks":    {locks: nil, projects: projectSource, git: git},
-		"projects": {locks: lockStore, projects: nil, git: git},
-		"git":      {locks: lockStore, projects: projectSource, git: nil},
+		"locks":    {projects: projectSource, git: git},
+		"projects": {locks: lockStore, git: git},
+		"git":      {locks: lockStore, projects: projectSource},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := NewCandidateApplier(locks.locks, locks.projects, locks.git); err == nil {
+			if _, err := NewCandidateApplier(dependencies.locks, dependencies.projects, dependencies.git); err == nil {
 				t.Fatal("missing dependency should fail")
 			}
 		})
-		_ = projects
-		_ = candidateGit
 	}
 
 	applier, err := NewCandidateApplier(lockStore, projectSource, git)
