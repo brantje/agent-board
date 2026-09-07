@@ -10,7 +10,8 @@ on:
       - apps/server/go.mod
       - apps/server/go.sum
       - apps/server/internal/app/execution_connect.go
-      - apps/server/internal/engine/opencode/**
+      - apps/server/internal/engine/**
+      - apps/server/internal/evidence/**
       - apps/server/internal/runexec/**
       - apps/server/internal/runner/**
       - apps/server/internal/store/**
@@ -26,7 +27,8 @@ on:
       - apps/server/go.mod
       - apps/server/go.sum
       - apps/server/internal/app/execution_connect.go
-      - apps/server/internal/engine/opencode/**
+      - apps/server/internal/engine/**
+      - apps/server/internal/evidence/**
       - apps/server/internal/runexec/**
       - apps/server/internal/runner/**
       - apps/server/internal/store/**
