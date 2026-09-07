@@ -68,8 +68,8 @@ type QuestionAnswer struct {
 }
 
 type AcceptedInteractiveQuestionReply struct {
-	QuestionID     string
-	CorrelationKey string
+	QuestionID     string `json:"questionId"`
+	CorrelationKey string `json:"correlationKey"`
 }
 
 type Continuation struct {
@@ -101,12 +101,11 @@ type InteractiveQuestionBatcher interface {
 	OpenBatch(context.Context, []CorrelatedQuestionRequest) ([]Question, error)
 }
 
-// InteractiveQuestionReplyTracker durably records that a native engine has
-// accepted a reply before canonical bindings are resolved. The accepted list is
-// recovery state: engines can finish any ANSWERED bindings after the native
-// request disappears, including after partial local resolution progress.
+// InteractiveQuestionReplyTracker durably journals that a native engine has
+// accepted a reply before canonical bindings are resolved. ListReplyAccepted
+// returns journaled bindings that still need a durable resolution marker.
 type InteractiveQuestionReplyTracker interface {
-	MarkReplyAccepted(context.Context, []string) error
+	MarkReplyAccepted(context.Context, []AcceptedInteractiveQuestionReply) error
 	ListReplyAccepted(context.Context) ([]AcceptedInteractiveQuestionReply, error)
 }
 
