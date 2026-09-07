@@ -62,7 +62,7 @@ func (s *httpReviewStore) BeginReviewApproval(ctx context.Context, command store
 	if err != nil {
 		return store.BeginReviewApprovalResult{}, err
 	}
-	return store.BeginReviewApprovalResult{Review: review, Run: run, Issue: store.Issue{ID: issueID, ProjectID: projectID, Status: "REVIEW"}}, nil
+	return store.BeginReviewApprovalResult{Review: review, Run: run}, nil
 }
 
 func (s *httpReviewStore) CompleteReviewApproval(_ context.Context, command store.CompleteReviewApprovalCommand) (store.CompleteReviewApprovalResult, error) {
