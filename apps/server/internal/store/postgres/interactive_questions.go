@@ -10,16 +10,40 @@ import (
 )
 
 func (s *Store) OpenInteractiveQuestion(ctx context.Context, input store.OpenInteractiveQuestionCommand) (store.OpenInteractiveQuestionResult, error) {
-	questionInput := input.Question
-	if strings.TrimSpace(questionInput.ProjectID) == "" || strings.TrimSpace(questionInput.IssueID) == "" ||
-		strings.TrimSpace(questionInput.RunID) == "" || strings.TrimSpace(questionInput.Prompt) == "" ||
-		strings.TrimSpace(input.Engine) == "" || strings.TrimSpace(input.CorrelationKey) == "" || !questionInput.Blocking {
-		return store.OpenInteractiveQuestionResult{}, store.ErrInvalidArgument
-	}
-
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	batch, err := s.OpenInteractiveQuestions(ctx, []store.OpenInteractiveQuestionCommand{input})
 	if err != nil {
 		return store.OpenInteractiveQuestionResult{}, err
+	}
+	if len(batch.Questions) != 1 {
+		return store.OpenInteractiveQuestionResult{}, store.ErrConflict
+	}
+	return batch.Questions[0], nil
+}
+
+func (s *Store) OpenInteractiveQuestions(ctx context.Context, inputs []store.OpenInteractiveQuestionCommand) (store.OpenInteractiveQuestionsResult, error) {
+	if len(inputs) == 0 {
+		return store.OpenInteractiveQuestionsResult{}, store.ErrInvalidArgument
+	}
+	first := inputs[0]
+	seenCorrelations := make(map[string]struct{}, len(inputs))
+	for _, input := range inputs {
+		if err := validateOpenInteractiveQuestion(input); err != nil {
+			return store.OpenInteractiveQuestionsResult{}, err
+		}
+		if input.Question.ProjectID != first.Question.ProjectID || input.Question.IssueID != first.Question.IssueID ||
+			input.Question.RunID != first.Question.RunID || input.Engine != first.Engine {
+			return store.OpenInteractiveQuestionsResult{}, store.ErrInvalidArgument
+		}
+		if _, duplicate := seenCorrelations[input.CorrelationKey]; duplicate {
+			return store.OpenInteractiveQuestionsResult{}, store.ErrInvalidArgument
+		}
+		seenCorrelations[input.CorrelationKey] = struct{}{}
+	}
+
+	questionInput := first.Question
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return store.OpenInteractiveQuestionsResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
@@ -30,107 +54,132 @@ func (s *Store) OpenInteractiveQuestion(ctx context.Context, input store.OpenInt
 		FOR UPDATE
 	`, questionInput.ProjectID, questionInput.RunID))
 	if err != nil {
-		return store.OpenInteractiveQuestionResult{}, err
+		return store.OpenInteractiveQuestionsResult{}, err
 	}
 	if run.IssueID != questionInput.IssueID {
-		return store.OpenInteractiveQuestionResult{}, store.ErrConflict
+		return store.OpenInteractiveQuestionsResult{}, store.ErrConflict
 	}
 
-	binding, err := scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
-		SELECT question_id::text, project_id::text, run_id::text, engine, correlation_key, state, created_at, updated_at
-		FROM engine_question_bindings
-		WHERE project_id=$1 AND run_id=$2 AND engine=$3 AND correlation_key=$4
-	`, questionInput.ProjectID, questionInput.RunID, input.Engine, input.CorrelationKey))
-	if err == nil {
-		question, getErr := scanQuestion(tx.QueryRow(ctx, `
-			SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
-			FROM questions
-			WHERE project_id=$1 AND id=$2
-		`, binding.ProjectID, binding.QuestionID))
-		if getErr != nil {
-			return store.OpenInteractiveQuestionResult{}, getErr
+	results := make([]store.OpenInteractiveQuestionResult, len(inputs))
+	missing := make([]int, 0, len(inputs))
+	for index, input := range inputs {
+		binding, bindingErr := scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
+			SELECT question_id::text, project_id::text, run_id::text, engine, correlation_key, state, created_at, updated_at
+			FROM engine_question_bindings
+			WHERE project_id=$1 AND run_id=$2 AND engine=$3 AND correlation_key=$4
+		`, input.Question.ProjectID, input.Question.RunID, input.Engine, input.CorrelationKey))
+		if bindingErr == nil {
+			question, getErr := scanQuestion(tx.QueryRow(ctx, `
+				SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+				FROM questions
+				WHERE project_id=$1 AND id=$2
+			`, binding.ProjectID, binding.QuestionID))
+			if getErr != nil {
+				return store.OpenInteractiveQuestionsResult{}, getErr
+			}
+			results[index] = store.OpenInteractiveQuestionResult{Question: question, Binding: binding}
+			continue
 		}
-		if err := tx.Commit(ctx); err != nil {
-			return store.OpenInteractiveQuestionResult{}, err
+		if !errors.Is(bindingErr, store.ErrNotFound) {
+			return store.OpenInteractiveQuestionsResult{}, bindingErr
 		}
-		return store.OpenInteractiveQuestionResult{Question: question, Binding: binding, Run: run}, nil
-	}
-	if !errors.Is(err, store.ErrNotFound) {
-		return store.OpenInteractiveQuestionResult{}, err
+		missing = append(missing, index)
 	}
 
-	if run.Status != "RUNNING" && run.Status != "WAITING_FOR_INPUT" {
-		return store.OpenInteractiveQuestionResult{}, store.ErrConflict
-	}
-	live, err := hasLiveClaim(ctx, tx, questionInput.ProjectID, questionInput.RunID)
-	if err != nil {
-		return store.OpenInteractiveQuestionResult{}, err
-	}
-	if !live {
-		return store.OpenInteractiveQuestionResult{}, store.ErrConflict
+	if len(missing) > 0 {
+		if run.Status != "RUNNING" && run.Status != "WAITING_FOR_INPUT" {
+			return store.OpenInteractiveQuestionsResult{}, store.ErrConflict
+		}
+		live, liveErr := hasLiveClaim(ctx, tx, questionInput.ProjectID, questionInput.RunID)
+		if liveErr != nil {
+			return store.OpenInteractiveQuestionsResult{}, liveErr
+		}
+		if !live {
+			return store.OpenInteractiveQuestionsResult{}, store.ErrConflict
+		}
+
+		for _, index := range missing {
+			input := inputs[index]
+			kind := input.Question.Kind
+			if kind == "" {
+				kind = "TEXT"
+			}
+			status := input.Question.Status
+			if status == "" {
+				status = "OPEN"
+			}
+			question, insertErr := scanQuestion(tx.QueryRow(ctx, `
+				INSERT INTO questions (project_id, issue_id, run_id, prompt, kind, options, recommendation, blocking, status)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
+				RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+			`, input.Question.ProjectID, input.Question.IssueID, input.Question.RunID, input.Question.Prompt, kind, arrayJSON(input.Question.Options), input.Question.Recommendation, status))
+			if insertErr != nil {
+				return store.OpenInteractiveQuestionsResult{}, insertErr
+			}
+
+			binding, insertErr := scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
+				INSERT INTO engine_question_bindings (question_id, project_id, run_id, engine, correlation_key, state)
+				VALUES ($1, $2, $3, $4, $5, 'OPEN')
+				RETURNING question_id::text, project_id::text, run_id::text, engine, correlation_key, state, created_at, updated_at
+			`, question.ID, question.ProjectID, question.RunID, input.Engine, input.CorrelationKey))
+			if insertErr != nil {
+				return store.OpenInteractiveQuestionsResult{}, insertErr
+			}
+			results[index] = store.OpenInteractiveQuestionResult{
+				Question: question,
+				Binding:  binding,
+				Created:  true,
+			}
+		}
 	}
 
-	kind := questionInput.Kind
-	if kind == "" {
-		kind = "TEXT"
-	}
-	status := questionInput.Status
-	if status == "" {
-		status = "OPEN"
-	}
-	question, err := scanQuestion(tx.QueryRow(ctx, `
-		INSERT INTO questions (project_id, issue_id, run_id, prompt, kind, options, recommendation, blocking, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
-	`, questionInput.ProjectID, questionInput.IssueID, questionInput.RunID, questionInput.Prompt, kind, arrayJSON(questionInput.Options), questionInput.Recommendation, status))
-	if err != nil {
-		return store.OpenInteractiveQuestionResult{}, err
-	}
-
-	binding, err = scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
-		INSERT INTO engine_question_bindings (question_id, project_id, run_id, engine, correlation_key, state)
-		VALUES ($1, $2, $3, $4, $5, 'OPEN')
-		RETURNING question_id::text, project_id::text, run_id::text, engine, correlation_key, state, created_at, updated_at
-	`, question.ID, question.ProjectID, question.RunID, input.Engine, input.CorrelationKey))
-	if err != nil {
-		return store.OpenInteractiveQuestionResult{}, err
-	}
-
-	enteredWaiting := run.Status == "RUNNING"
+	enteredWaiting := len(missing) > 0 && run.Status == "RUNNING"
 	if enteredWaiting {
 		run, err = scanRun(tx.QueryRow(ctx, `
 			UPDATE runs
 			SET status='WAITING_FOR_INPUT', queue_reason=NULL, updated_at=now()
 			WHERE project_id=$1 AND id=$2 AND status='RUNNING'
 			RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-		`, question.ProjectID, question.RunID))
+		`, questionInput.ProjectID, questionInput.RunID))
 		if err != nil {
-			return store.OpenInteractiveQuestionResult{}, err
+			return store.OpenInteractiveQuestionsResult{}, err
 		}
-		command, err := tx.Exec(ctx, `
+		command, execErr := tx.Exec(ctx, `
 			UPDATE issues
 			SET status=CASE WHEN status='DONE' THEN status ELSE 'BLOCKED' END,
 			    updated_at=CASE WHEN status='DONE' THEN updated_at ELSE now() END
 			WHERE project_id=$1 AND id=$2
-		`, question.ProjectID, question.IssueID)
-		if err != nil {
-			return store.OpenInteractiveQuestionResult{}, err
+		`, questionInput.ProjectID, questionInput.IssueID)
+		if execErr != nil {
+			return store.OpenInteractiveQuestionsResult{}, execErr
 		}
 		if command.RowsAffected() != 1 {
-			return store.OpenInteractiveQuestionResult{}, store.ErrConflict
+			return store.OpenInteractiveQuestionsResult{}, store.ErrConflict
 		}
+		results[missing[0]].EnteredWaiting = true
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return store.OpenInteractiveQuestionResult{}, err
+	for index := range results {
+		results[index].Run = run
 	}
-	return store.OpenInteractiveQuestionResult{
-		Question:       question,
-		Binding:        binding,
+	if err := tx.Commit(ctx); err != nil {
+		return store.OpenInteractiveQuestionsResult{}, err
+	}
+	return store.OpenInteractiveQuestionsResult{
+		Questions:      results,
 		Run:            run,
-		Created:        true,
 		EnteredWaiting: enteredWaiting,
 	}, nil
+}
+
+func validateOpenInteractiveQuestion(input store.OpenInteractiveQuestionCommand) error {
+	questionInput := input.Question
+	if strings.TrimSpace(questionInput.ProjectID) == "" || strings.TrimSpace(questionInput.IssueID) == "" ||
+		strings.TrimSpace(questionInput.RunID) == "" || strings.TrimSpace(questionInput.Prompt) == "" ||
+		strings.TrimSpace(input.Engine) == "" || strings.TrimSpace(input.CorrelationKey) == "" || !questionInput.Blocking {
+		return store.ErrInvalidArgument
+	}
+	return nil
 }
 
 func (s *Store) ResolveInteractiveQuestion(ctx context.Context, projectID, questionID string) (store.ResolveInteractiveQuestionResult, error) {
@@ -267,3 +316,4 @@ func scanInteractiveQuestionBinding(row pgx.Row) (store.InteractiveQuestionBindi
 }
 
 var _ store.InteractiveQuestionStore = (*Store)(nil)
+var _ store.InteractiveQuestionBatchStore = (*Store)(nil)
