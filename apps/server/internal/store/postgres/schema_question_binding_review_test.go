@@ -2,7 +2,10 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestSchemaRejectsQuestionBindingToDifferentRun(t *testing.T) {
@@ -37,10 +40,12 @@ func TestSchemaRejectsQuestionBindingToDifferentRun(t *testing.T) {
 		t.Fatalf("insert Question: %v", err)
 	}
 
-	if _, err := pool.Exec(ctx, `
+	_, err := pool.Exec(ctx, `
 		INSERT INTO engine_question_bindings (question_id, project_id, run_id, engine, correlation_key)
 		VALUES ($1, $2, $3, 'opencode', 'cross-run-binding')
-	`, questionID, projectID, secondRunID); err == nil {
-		t.Fatal("expected cross-Run Question binding to be rejected")
+	`, questionID, projectID, secondRunID)
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("expected cross-Run Question binding to be rejected by a foreign-key violation, got %v", err)
 	}
 }
