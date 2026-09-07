@@ -12,6 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/agent-r
 FROM alpine:3.22
 
 ARG OPENCODE_VERSION=1.18.29
+ENV SHELL=/bin/sh
 
 RUN apk add --no-cache bash curl git tar \
     && curl -fsSL https://opencode.ai/install | bash -s -- --version "${OPENCODE_VERSION}" --no-modify-path \
