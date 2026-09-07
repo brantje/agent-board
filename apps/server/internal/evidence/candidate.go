@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -239,6 +240,16 @@ func newCandidateSnapshotter(collector *CandidateCollector, store ArtifactStore,
 }
 
 func (s *CandidateSnapshotter) Snapshot(ctx context.Context, scope RunScope, workspace string) (CandidateSnapshot, error) {
+	if s.reviewCandidates != nil {
+		pinned, err := s.reviewCandidates.Open(ctx, scope.RunID)
+		if err == nil {
+			return s.snapshotPrivateCandidate(ctx, scope, pinned)
+		}
+		if !errors.Is(err, ErrReviewCandidateNotFound) {
+			return CandidateSnapshot{}, fmt.Errorf("evidence: open private review candidate: %w", err)
+		}
+	}
+
 	candidate, err := s.collector.Collect(ctx, workspace)
 	if err != nil {
 		return CandidateSnapshot{}, err
