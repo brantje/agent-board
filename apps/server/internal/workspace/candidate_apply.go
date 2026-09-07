@@ -17,8 +17,9 @@ const maxCandidatePatchBytes = 64 << 20
 type CandidateBlobSource func(context.Context) (io.ReadCloser, error)
 
 type CandidateFileSource struct {
-	Path   string
-	Chunks []CandidateBlobSource
+	Path       string
+	Chunks     []CandidateBlobSource
+	Executable bool
 }
 
 type AcceptedCandidate struct {
@@ -141,9 +142,17 @@ func writeCandidateFiles(ctx context.Context, root string, files []CandidateFile
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return fmt.Errorf("create accepted candidate parent: %w", err)
 		}
-		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+		mode := os.FileMode(0o644)
+		if source.Executable {
+			mode = 0o755
+		}
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 		if err != nil {
 			return fmt.Errorf("create accepted candidate %q: %w", source.Path, err)
+		}
+		if err := file.Chmod(mode); err != nil {
+			_ = file.Close()
+			return fmt.Errorf("set accepted candidate mode %q: %w", source.Path, err)
 		}
 		writeErr := copyCandidateChunks(ctx, file, source.Chunks)
 		closeErr := file.Close()
