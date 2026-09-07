@@ -44,10 +44,22 @@ func TestWorkspaceServiceReviewDeliveryBoundary(t *testing.T) {
 }
 
 func TestWorkspaceServiceReviewDeliveryRejectsUnavailableMaterializer(t *testing.T) {
-	var nilService *WorkspaceService
-	if _, err := nilService.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", workspacepkg.AcceptedCandidate{}); err == nil {
-		t.Fatal("nil service should fail")
+	assertInternalUnavailable := func(t *testing.T, err error) {
+		t.Helper()
+		if err == nil {
+			t.Fatal("review delivery should fail")
+		}
+		if _, ok := AsError(err); ok {
+			t.Fatalf("review delivery capability errors must remain internal: %v", err)
+		}
+		if err.Error() != "workspace review delivery is unavailable" {
+			t.Fatalf("error=%q", err)
+		}
 	}
+
+	var nilService *WorkspaceService
+	_, err := nilService.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", workspacepkg.AcceptedCandidate{})
+	assertInternalUnavailable(t, err)
 
 	service, err := NewWorkspaceService(&workspaceLookupFake{}, workspaceMaterializerFunc(func(context.Context, store.Project, store.Issue, store.Workspace) (store.Workspace, error) {
 		return store.Workspace{}, nil
@@ -55,9 +67,6 @@ func TestWorkspaceServiceReviewDeliveryRejectsUnavailableMaterializer(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", workspacepkg.AcceptedCandidate{}); err == nil {
-		t.Fatal("unsupported materializer should fail")
-	} else if appErr, ok := AsError(err); !ok || appErr.Code != "review_delivery_unsupported" {
-		t.Fatalf("error=%v", err)
-	}
+	_, err = service.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", workspacepkg.AcceptedCandidate{})
+	assertInternalUnavailable(t, err)
 }
