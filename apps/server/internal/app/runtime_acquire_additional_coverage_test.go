@@ -24,6 +24,20 @@ func (s *releaseFailRuntimeStore) AcquireRuntimeAcquisitionLock(context.Context,
 	return failingReleaseRuntimeLock{err: s.err}, nil
 }
 
+type failingListAndReleaseRuntimeStore struct {
+	*runtimeServiceStore
+	listErr    error
+	releaseErr error
+}
+
+func (s *failingListAndReleaseRuntimeStore) ListRuntimeInstances(context.Context, string, []string) ([]store.RuntimeInstance, error) {
+	return nil, s.listErr
+}
+
+func (s *failingListAndReleaseRuntimeStore) AcquireRuntimeAcquisitionLock(context.Context, string, string) (store.RuntimeAcquisitionLock, error) {
+	return failingReleaseRuntimeLock{err: s.releaseErr}, nil
+}
+
 type stoppedRecoveringRuntime struct {
 	fakeRuntimeImplementation
 	recoverCalls int
@@ -43,6 +57,19 @@ type missingRecoveringRuntime struct {
 func (r *missingRecoveringRuntime) Recover(context.Context, runtimepkg.RuntimeSpec) (runtimepkg.Handle, runtimepkg.Inspection, error) {
 	r.recoverCalls++
 	return runtimepkg.Handle{}, runtimepkg.Inspection{}, runtimepkg.ErrNotFound
+}
+
+type disappearingRunningRuntime struct {
+	fakeRuntimeImplementation
+	inspectCalls int
+}
+
+func (r *disappearingRunningRuntime) Inspect(ctx context.Context, handle runtimepkg.Handle) (runtimepkg.Inspection, error) {
+	r.inspectCalls++
+	if r.inspectCalls <= 2 {
+		return runtimepkg.Inspection{}, runtimepkg.ErrNotFound
+	}
+	return r.fakeRuntimeImplementation.Inspect(ctx, handle)
 }
 
 func TestRuntimeInstanceServiceAcquireWithoutListerCreatesAndStartsRuntime(t *testing.T) {
@@ -89,6 +116,27 @@ func TestRuntimeInstanceServiceAcquireReportsLockReleaseFailure(t *testing.T) {
 	}
 	if instance.ID != "" {
 		t.Fatalf("Acquire() must discard result when lock release fails: %+v", instance)
+	}
+}
+
+func TestRuntimeInstanceServiceAcquireJoinsOperationAndLockReleaseFailures(t *testing.T) {
+	_, baseStore, implementation, workspace := runtimeServiceFixture(t)
+	releaseErr := errors.New("unlock failed")
+	service, err := NewRuntimeInstanceService(
+		&failingListAndReleaseRuntimeStore{runtimeServiceStore: baseStore, listErr: store.ErrNotFound, releaseErr: releaseErr},
+		&runtimeWorkspaceEnsurer{workspace: workspace},
+		map[string]runtimepkg.Implementation{"docker": implementation},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.Acquire(t.Context(), workspace.ProjectID, workspace.IssueID, baseStore.runtime.ID)
+	if !errors.Is(err, store.ErrNotFound) || !errors.Is(err, releaseErr) {
+		t.Fatalf("Acquire() joined error=%v", err)
+	}
+	if !strings.Contains(err.Error(), "release Runtime acquisition lock") {
+		t.Fatalf("Acquire() missing release context: %v", err)
 	}
 }
 
@@ -143,5 +191,33 @@ func TestRuntimeInstanceServiceAcquireReplacesRecoveredMissingRuntime(t *testing
 	}
 	if implementation.recoverCalls != 1 || implementation.startCalls != 1 || implementation.createdSpec.RuntimeInstanceID != instance.ID {
 		t.Fatalf("recoverCalls=%d startCalls=%d created=%+v", implementation.recoverCalls, implementation.startCalls, implementation.createdSpec)
+	}
+}
+
+func TestRuntimeInstanceServiceAcquireReplacesDisappearedRunningRuntime(t *testing.T) {
+	projectID := "project-1"
+	workspace := store.Workspace{ID: "workspace-1", ProjectID: projectID, IssueID: "issue-1", Path: "/workspaces/one", BootstrapStatus: "READY"}
+	runtimeConfig := store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runtime:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Enabled: true}
+	externalID := "container-disappeared"
+	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{
+		ID: "instance-running", ProjectID: projectID, WorkspaceID: workspace.ID, RuntimeID: runtimeConfig.ID,
+		Status: string(runtimepkg.StateRunning), ExternalID: &externalID, RunnerStatus: "READY", SafeHandleMetadata: json.RawMessage(`{"safe":true}`),
+	}}
+	rs := &reconcileStore{runtimeServiceStore: base, workspace: workspace}
+	implementation := &disappearingRunningRuntime{}
+	service, err := NewRuntimeInstanceService(rs, &runtimeWorkspaceEnsurer{workspace: workspace}, map[string]runtimepkg.Implementation{"docker": implementation})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	instance, err := service.Acquire(t.Context(), projectID, workspace.IssueID, runtimeConfig.ID)
+	if err != nil {
+		t.Fatalf("Acquire() error=%v", err)
+	}
+	if instance.Status != string(runtimepkg.StateRunning) || instance.WorkspaceID != workspace.ID {
+		t.Fatalf("Acquire() replacement=%+v", instance)
+	}
+	if implementation.inspectCalls != 3 || implementation.startCalls != 1 || implementation.createdSpec.RuntimeInstanceID != instance.ID {
+		t.Fatalf("inspectCalls=%d startCalls=%d created=%+v", implementation.inspectCalls, implementation.startCalls, implementation.createdSpec)
 	}
 }
