@@ -128,19 +128,21 @@ func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) err
 	if _, duplicate := s.seenTextParts[part.ID]; duplicate {
 		return nil
 	}
+	if s.activity != nil {
+		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{
+			Type: "agent.message",
+			Payload: map[string]any{
+				"message": part.Text,
+				"kind":    "message",
+				"source":  "opencode",
+			},
+		}); err != nil {
+			return err
+		}
+	}
 	s.seenTextParts[part.ID] = struct{}{}
 	s.lastVisibleMessage = part.Text
-	if s.activity == nil {
-		return nil
-	}
-	return s.activity.RecordActivity(ctx, engine.ActivityEvent{
-		Type: "agent.message",
-		Payload: map[string]any{
-			"message": part.Text,
-			"kind":    "message",
-			"source":  "opencode",
-		},
-	})
+	return nil
 }
 
 func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) error {
@@ -174,10 +176,6 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 	if _, duplicate := s.seenToolStates[key]; duplicate {
 		return nil
 	}
-	s.seenToolStates[key] = struct{}{}
-	if s.activity == nil {
-		return nil
-	}
 	payload := map[string]any{
 		"name":   part.Tool,
 		"source": "opencode",
@@ -188,5 +186,11 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 	if eventType == "tool.failed" && strings.TrimSpace(part.State.Error) != "" {
 		payload["reason"] = part.State.Error
 	}
-	return s.activity.RecordActivity(ctx, engine.ActivityEvent{Type: eventType, Payload: payload})
+	if s.activity != nil {
+		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{Type: eventType, Payload: payload}); err != nil {
+			return err
+		}
+	}
+	s.seenToolStates[key] = struct{}{}
+	return nil
 }
