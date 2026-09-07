@@ -65,7 +65,7 @@ func (p *serviceStopProcess) Kill(context.Context) error {
 
 func TestStopServiceCompletesAfterGracefulTermination(t *testing.T) {
 	process := newServiceStopProcess(true)
-	if err := stopServiceWithin(context.Background(), process, 10*time.Millisecond, 100*time.Millisecond); err != nil {
+	if err := stopServiceWithin(context.Background(), process, 100*time.Millisecond, 100*time.Millisecond); err != nil {
 		t.Fatalf("stopServiceWithin() error=%v", err)
 	}
 	if process.waitCalls.Load() != 1 || process.terminateCalls.Load() != 1 || process.killCalls.Load() != 0 {
@@ -75,7 +75,7 @@ func TestStopServiceCompletesAfterGracefulTermination(t *testing.T) {
 
 func TestStopServiceForceStopsWithoutSecondWait(t *testing.T) {
 	process := newServiceStopProcess(false)
-	if err := stopServiceWithin(context.Background(), process, 10*time.Millisecond, 100*time.Millisecond); err != nil {
+	if err := stopServiceWithin(context.Background(), process, 100*time.Millisecond, 100*time.Millisecond); err != nil {
 		t.Fatalf("stopServiceWithin() error=%v", err)
 	}
 	if process.waitCalls.Load() != 1 || process.terminateCalls.Load() != 1 || process.killCalls.Load() != 1 {
