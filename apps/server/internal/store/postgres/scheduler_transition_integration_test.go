@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestSchedulerTransitionKeepsCapacityWhileRunning(t *testing.T) {
@@ -96,6 +97,105 @@ func TestSchedulerTransitionReleasesCapacityOnInactiveStates(t *testing.T) {
 				t.Fatalf("job state=%s want %s", jobState, tc.jobState)
 			}
 		})
+	}
+}
+
+func TestSchedulerReadyForReviewPreservesDoneIssueAndReleasesOwnership(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "ready-review-done-issue")
+	enqueueFixtureRun(t, s, f, f.run, "ready-review-done-issue")
+	admission := mustAdmit(t, s, "worker-ready-review-done-issue")
+
+	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID:  f.project.ID,
+		JobID:      admission.Job.ID,
+		RunID:      f.run.ID,
+		LeaseToken: admission.Lease.LeaseToken,
+		RunStatus:  "RUNNING",
+	}); err != nil {
+		t.Fatalf("transition running: %v", err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE issues SET status='DONE' WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID); err != nil {
+		t.Fatalf("mark issue done: %v", err)
+	}
+
+	run, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID:  f.project.ID,
+		JobID:      admission.Job.ID,
+		RunID:      f.run.ID,
+		LeaseToken: admission.Lease.LeaseToken,
+		RunStatus:  "READY_FOR_REVIEW",
+	})
+	if err != nil {
+		t.Fatalf("transition ready for review: %v", err)
+	}
+	if run.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("run status=%s want READY_FOR_REVIEW", run.Status)
+	}
+	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 0, 0)
+
+	var issueStatus, jobState string
+	if err := s.pool.QueryRow(ctx, `SELECT status FROM issues WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID).Scan(&issueStatus); err != nil {
+		t.Fatalf("read issue status: %v", err)
+	}
+	if issueStatus != "DONE" {
+		t.Fatalf("issue status=%s want DONE", issueStatus)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT state FROM scheduler_jobs WHERE id=$1`, admission.Job.ID).Scan(&jobState); err != nil {
+		t.Fatalf("read job state: %v", err)
+	}
+	if jobState != "DONE" {
+		t.Fatalf("job state=%s want DONE", jobState)
+	}
+
+	var reviewStatus string
+	if err := s.pool.QueryRow(ctx, `SELECT status FROM reviews WHERE run_id=$1`, f.run.ID).Scan(&reviewStatus); err != nil {
+		t.Fatalf("read review: %v", err)
+	}
+	if reviewStatus != "PENDING" {
+		t.Fatalf("review status=%s want PENDING", reviewStatus)
+	}
+}
+
+func TestCreatePendingReviewIsIdempotentAndRejectsConflictingExistingReview(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "pending-review-idempotency")
+
+	create := func() error {
+		t.Helper()
+		tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		if err != nil {
+			t.Fatalf("begin transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if err := createPendingReview(ctx, tx, f.run); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+
+	if err := create(); err != nil {
+		t.Fatalf("first createPendingReview() error=%v", err)
+	}
+	if err := create(); err != nil {
+		t.Fatalf("idempotent createPendingReview() error=%v", err)
+	}
+
+	var count int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM reviews WHERE run_id=$1`, f.run.ID).Scan(&count); err != nil {
+		t.Fatalf("count reviews: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("review count=%d want 1", count)
+	}
+
+	if _, err := s.pool.Exec(ctx, `UPDATE reviews SET status='APPROVED' WHERE run_id=$1`, f.run.ID); err != nil {
+		t.Fatalf("corrupt review status: %v", err)
+	}
+	if err := create(); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("conflicting createPendingReview() error=%v want ErrConflict", err)
 	}
 }
 

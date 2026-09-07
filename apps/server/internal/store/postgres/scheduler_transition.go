@@ -65,6 +65,24 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 		}
 	}
 
+	if input.RunStatus == "READY_FOR_REVIEW" {
+		if err := createPendingReview(ctx, tx, run); err != nil {
+			return store.Run{}, err
+		}
+		command, err := tx.Exec(ctx, `
+			UPDATE issues
+			SET status=CASE WHEN status='DONE' THEN status ELSE 'REVIEW' END,
+			    updated_at=CASE WHEN status='DONE' THEN updated_at ELSE now() END
+			WHERE project_id=$1 AND id=$2
+		`, run.ProjectID, run.IssueID)
+		if err != nil {
+			return store.Run{}, err
+		}
+		if command.RowsAffected() != 1 {
+			return store.Run{}, store.ErrConflict
+		}
+	}
+
 	if release {
 		if _, err := tx.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, input.ProjectID, input.JobID); err != nil {
 			return store.Run{}, err
@@ -85,6 +103,33 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 		return store.Run{}, err
 	}
 	return run, nil
+}
+
+func createPendingReview(ctx context.Context, tx pgx.Tx, run store.Run) error {
+	command, err := tx.Exec(ctx, `
+		INSERT INTO reviews (project_id, issue_id, run_id, status)
+		VALUES ($1, $2, $3, 'PENDING')
+		ON CONFLICT (run_id) DO NOTHING
+	`, run.ProjectID, run.IssueID, run.ID)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() == 1 {
+		return nil
+	}
+
+	var projectID, issueID, status string
+	if err := tx.QueryRow(ctx, `
+		SELECT project_id::text, issue_id::text, status
+		FROM reviews
+		WHERE run_id=$1
+	`, run.ID).Scan(&projectID, &issueID, &status); err != nil {
+		return notFound(err)
+	}
+	if projectID != run.ProjectID || issueID != run.IssueID || status != "PENDING" {
+		return store.ErrConflict
+	}
+	return nil
 }
 
 func lockFencedRun(ctx context.Context, tx pgx.Tx, projectID, jobID, runID, leaseToken string) (store.Run, error) {

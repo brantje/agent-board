@@ -70,3 +70,11 @@ paths:
     $ref: ./paths/run-evidence.yaml#/path2
   /api/projects/{projectID}/runs/{runID}/artifacts/{artifactID}:
     $ref: ./paths/run-evidence.yaml#/path3
+  /api/projects/{projectID}/reviews:
+    $ref: ./paths/reviews.yaml#/path1
+  /api/projects/{projectID}/reviews/{reviewID}:
+    $ref: ./paths/reviews.yaml#/path2
+  /api/projects/{projectID}/reviews/{reviewID}/approve:
+    $ref: ./paths/reviews.yaml#/path3
+  /api/projects/{projectID}/reviews/{reviewID}/request-changes:
+    $ref: ./paths/reviews.yaml#/path4

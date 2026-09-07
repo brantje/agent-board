@@ -30,6 +30,10 @@ type StateStore interface {
 	store.WorkspaceBootstrapStore
 }
 
+type exactRevisionGit interface {
+	CheckoutRevision(context.Context, string, string) error
+}
+
 type Materializer struct {
 	store         StateStore
 	repositories  RepositoryResolver
@@ -89,6 +93,7 @@ func (m *Materializer) Ensure(ctx context.Context, project store.Project, issue 
 	}
 
 	repositoryPath, baseBranch := workspaceRepository(current, project)
+	expectedBaseRevision := workspaceBaseRevision(current)
 	source, err := m.repositories.Resolve(repositoryPath)
 	if err != nil {
 		return m.fail(ctx, current, fmt.Errorf("validate repository source: %w", err))
@@ -112,7 +117,7 @@ func (m *Materializer) Ensure(ctx context.Context, project store.Project, issue 
 		return m.fail(ctx, current, fmt.Errorf("cleanup interrupted bootstrap: %w", err))
 	}
 
-	if recovered, ok, recoverErr := m.recoverPublished(ctx, current, finalPath, source, baseBranch); recoverErr != nil {
+	if recovered, ok, recoverErr := m.recoverPublished(ctx, current, finalPath, source, baseBranch, expectedBaseRevision); recoverErr != nil {
 		return store.Workspace{}, recoverErr
 	} else if ok {
 		return recovered, nil
@@ -121,7 +126,7 @@ func (m *Materializer) Ensure(ctx context.Context, project store.Project, issue 
 		return m.fail(ctx, current, fmt.Errorf("reset invalid workspace checkout: %w", err))
 	}
 
-	pending, err := m.store.MarkWorkspaceBootstrapPending(ctx, project.ID, issue.ID, current.ID, finalPath, source, baseBranch, current.WorkingBranch)
+	pending, err := m.store.MarkWorkspaceBootstrapPending(ctx, project.ID, issue.ID, current.ID, finalPath, source, baseBranch, expectedBaseRevision, current.WorkingBranch)
 	if err != nil {
 		return store.Workspace{}, fmt.Errorf("mark workspace pending: %w", err)
 	}
@@ -141,12 +146,24 @@ func (m *Materializer) Ensure(ctx context.Context, project store.Project, issue 
 	if err := m.git.Clone(ctx, source, temporary, baseBranch); err != nil {
 		return m.fail(ctx, current, fmt.Errorf("clone repository: %w", err))
 	}
+	if expectedBaseRevision != "" {
+		revisionGit, ok := m.git.(exactRevisionGit)
+		if !ok {
+			return m.fail(ctx, current, fmt.Errorf("pin base revision: exact revision checkout is unavailable: %w", ErrInvalidMetadata))
+		}
+		if err := revisionGit.CheckoutRevision(ctx, temporary, expectedBaseRevision); err != nil {
+			return m.fail(ctx, current, fmt.Errorf("pin base revision: %w", err))
+		}
+	}
 	if err := m.git.CheckoutNewBranch(ctx, temporary, current.WorkingBranch); err != nil {
 		return m.fail(ctx, current, fmt.Errorf("create working branch: %w", err))
 	}
 	baseRevision, err := m.git.HeadRevision(ctx, temporary)
 	if err != nil {
 		return m.fail(ctx, current, fmt.Errorf("resolve base revision: %w", err))
+	}
+	if expectedBaseRevision != "" && baseRevision != expectedBaseRevision {
+		return m.fail(ctx, current, fmt.Errorf("%w: workspace base revision does not match pinned accepted revision", ErrBootstrapFailed))
 	}
 	if err := os.Rename(temporary, finalPath); err != nil {
 		return m.fail(ctx, current, fmt.Errorf("publish workspace checkout: %w", err))
@@ -203,7 +220,7 @@ func (m *Materializer) validateReadyCheckout(ctx context.Context, current store.
 	return nil
 }
 
-func (m *Materializer) recoverPublished(ctx context.Context, current store.Workspace, finalPath, source, baseBranch string) (store.Workspace, bool, error) {
+func (m *Materializer) recoverPublished(ctx context.Context, current store.Workspace, finalPath, source, baseBranch, expectedBaseRevision string) (store.Workspace, bool, error) {
 	info, err := os.Stat(finalPath)
 	if os.IsNotExist(err) {
 		return store.Workspace{}, false, nil
@@ -242,6 +259,9 @@ func (m *Materializer) recoverPublished(ctx context.Context, current store.Works
 	baseRevision, err := m.git.HeadRevision(ctx, finalPath)
 	if err != nil {
 		return store.Workspace{}, false, fmt.Errorf("inspect published workspace revision: %w", err)
+	}
+	if expectedBaseRevision != "" && baseRevision != expectedBaseRevision {
+		return store.Workspace{}, false, nil
 	}
 	ready, err := m.store.MarkWorkspaceBootstrapReady(ctx, current.ProjectID, current.IssueID, current.ID, finalPath, source, baseBranch, baseRevision, current.WorkingBranch)
 	if err != nil {
@@ -327,6 +347,13 @@ func workspaceRepository(current store.Workspace, project store.Project) (string
 		baseBranch = *current.BaseBranch
 	}
 	return repositoryPath, baseBranch
+}
+
+func workspaceBaseRevision(current store.Workspace) string {
+	if current.BaseRevision == nil {
+		return ""
+	}
+	return strings.TrimSpace(*current.BaseRevision)
 }
 
 func validateIdentity(project store.Project, issue store.Issue, current store.Workspace) error {

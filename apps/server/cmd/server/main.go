@@ -148,10 +148,7 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		}
 		database.Close()
 	}
-	return &applicationHandler{
-		Handler:  httpapi.NewRouterWithApplication(services, secretWriteAuthorizer),
-		services: services,
-	}, closeApplication, nil
+	return &applicationHandler{Handler: httpapi.NewRouterWithApplication(services, secretWriteAuthorizer), services: services}, closeApplication, nil
 }
 
 func reconcileRuntimeInstances(ctx context.Context, handler http.Handler) error {
@@ -200,7 +197,16 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	materializer, err := workspace.NewMaterializer(database, policy, git, configuredWorkspaceRoot())
+	workspaceRoot := configuredWorkspaceRoot()
+	projectMaterializer, err := workspace.NewProjectMaterializer(database, policy, git, workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	issueMaterializer, err := workspace.NewMaterializer(database, policy, git, workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	materializer, err := workspace.NewProjectBackedMaterializer(issueMaterializer, projectMaterializer)
 	if err != nil {
 		return nil, err
 	}
@@ -237,6 +243,11 @@ func configureExecutionScheduler(services *app.Services) error {
 	if err != nil {
 		return err
 	}
+	reviewCandidates, err := evidence.NewReviewCandidateStore(configuredReviewCandidateRoot())
+	if err != nil {
+		return err
+	}
+	services.ReviewCandidates = reviewCandidates
 	runEvidence, err := app.NewRunEvidenceService(services.ExecutionStore, blobs)
 	if err != nil {
 		return err
@@ -250,7 +261,7 @@ func configureExecutionScheduler(services *app.Services) error {
 	if err != nil {
 		return err
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), services.ExecutionStore, blobs)
+	candidate, err := evidence.NewCandidateSnapshotterWithReviewCandidates(evidence.NewCandidateCollector(), services.ExecutionStore, blobs, reviewCandidates)
 	if err != nil {
 		return err
 	}
@@ -307,6 +318,10 @@ func configuredEvidenceRoot() string {
 		return filepath.Join(filepath.Dir(workspaceRoot), "evidence")
 	}
 	return defaultEvidenceRoot
+}
+
+func configuredReviewCandidateRoot() string {
+	return filepath.Join(configuredWorkspaceRoot(), ".review-candidates")
 }
 
 func configuredSchedulerOwnerID() string {

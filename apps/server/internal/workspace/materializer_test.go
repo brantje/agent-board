@@ -36,7 +36,7 @@ func (s *memoryStateStore) GetWorkspaceByIssue(context.Context, string, string) 
 	defer s.mu.Unlock()
 	return s.workspace, nil
 }
-func (s *memoryStateStore) MarkWorkspaceBootstrapPending(_ context.Context, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, workingBranch string) (store.Workspace, error) {
+func (s *memoryStateStore) MarkWorkspaceBootstrapPending(_ context.Context, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, baseRevision, workingBranch string) (store.Workspace, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.workspace.ProjectID = projectID
@@ -45,7 +45,11 @@ func (s *memoryStateStore) MarkWorkspaceBootstrapPending(_ context.Context, proj
 	s.workspace.Path = path
 	s.workspace.RepositoryPath = ptr(repositoryPath)
 	s.workspace.BaseBranch = ptr(baseBranch)
-	s.workspace.BaseRevision = nil
+	if strings.TrimSpace(baseRevision) == "" {
+		s.workspace.BaseRevision = nil
+	} else {
+		s.workspace.BaseRevision = ptr(strings.TrimSpace(baseRevision))
+	}
 	s.workspace.WorkingBranch = workingBranch
 	s.workspace.BootstrapStatus = "PENDING"
 	return s.workspace, nil

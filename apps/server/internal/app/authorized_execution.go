@@ -32,6 +32,9 @@ type AuthorizedExecutionRequest struct {
 type AuthorizedExecutionSessionService struct {
 	sessions *ExecutionSessionService
 	preparer ExecutionPreparer
+
+	redactionMu   sync.Mutex
+	runRedactions map[string]func()
 }
 
 func NewAuthorizedExecutionSessionService(sessions *ExecutionSessionService, preparer ExecutionPreparer) (*AuthorizedExecutionSessionService, error) {
@@ -73,9 +76,48 @@ func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID
 	if err != nil {
 		return nil, redaction.WrapError(err, prepared.RedactionValues)
 	}
-	authorized := newAuthorizedExecutionProcess(process, prepared.RedactionValues, releaseRedaction)
+
+	// Keep one registration for the whole Run so Events and candidate evidence
+	// emitted after the last subprocess still use the same redaction values. All
+	// later subprocess registrations retain their normal process-scoped release.
+	processRelease := releaseRedaction
+	if s.retainRunRedaction(runID, releaseRedaction) {
+		processRelease = nil
+	}
+	authorized := newAuthorizedExecutionProcess(process, prepared.RedactionValues, processRelease)
 	releaseTransferred = true
 	return authorized, nil
+}
+
+func (s *AuthorizedExecutionSessionService) retainRunRedaction(runID string, release func()) bool {
+	if s == nil || runID == "" || release == nil {
+		return false
+	}
+	s.redactionMu.Lock()
+	defer s.redactionMu.Unlock()
+	if s.runRedactions == nil {
+		s.runRedactions = make(map[string]func())
+	}
+	if _, exists := s.runRedactions[runID]; exists {
+		return false
+	}
+	s.runRedactions[runID] = release
+	return true
+}
+
+// ReleaseRunRedaction drops the Run-scoped redaction lease after all execution
+// evidence and terminal Run Events have been persisted.
+func (s *AuthorizedExecutionSessionService) ReleaseRunRedaction(runID string) {
+	if s == nil || runID == "" {
+		return
+	}
+	s.redactionMu.Lock()
+	release := s.runRedactions[runID]
+	delete(s.runRedactions, runID)
+	s.redactionMu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 // AuthorizedExecutionProcess exposes only lifecycle operations that preserve

@@ -38,6 +38,10 @@ type SessionService interface {
 	ReconcileAll(context.Context) error
 }
 
+type runRedactionReleaser interface {
+	ReleaseRunRedaction(string)
+}
+
 type RuntimeService interface {
 	Create(context.Context, string, string, string) (store.RuntimeInstance, error)
 	Start(context.Context, string, string) (store.RuntimeInstance, error)
@@ -79,6 +83,9 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	run, err := lifecycle.Running(ctx)
 	if err != nil {
 		return scheduler.Result{}, err
+	}
+	if redactions, ok := p.sessions.(runRedactionReleaser); ok {
+		defer redactions.ReleaseRunRedaction(run.ID)
 	}
 	resolved, err := p.resolver.Resolve(ctx, run.ProjectID, run.ID)
 	if err != nil {
