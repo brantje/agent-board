@@ -39,7 +39,9 @@ func (d *redirectDialer) lastCall() string {
 func TestNewSessionRoutesHTTPThroughExecutionSessionDialer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/health" {
-			t.Fatalf("path=%q", r.URL.Path)
+			t.Errorf("path=%q", r.URL.Path)
+			http.Error(w, "unexpected path", http.StatusNotFound)
+			return
 		}
 		writeJSON(t, w, http.StatusOK, Health{Healthy: true, Version: "test"})
 	}))
