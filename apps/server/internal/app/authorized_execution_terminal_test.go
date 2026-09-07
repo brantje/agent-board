@@ -5,7 +5,6 @@ import (
 	"io"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -49,11 +48,7 @@ func TestAuthorizedExecutionPreservesUnreadTerminalOutputBeforeRelease(t *testin
 	if _, err := process.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("redaction registration was not released after terminal output was safely buffered")
-	}
+	assertRunRedactionRetainedAndRelease(t, service, "run-1", released)
 
 	stdout, err := io.ReadAll(process.Stdout())
 	if err != nil {
@@ -114,9 +109,5 @@ func TestAuthorizedExecutionExplicitAbandonCompletesLifecycle(t *testing.T) {
 	if _, err := process.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("redaction registration was not released after explicit output abandonment")
-	}
+	assertRunRedactionRetainedAndRelease(t, service, "run-1", released)
 }
