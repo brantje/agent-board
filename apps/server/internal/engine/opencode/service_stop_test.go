@@ -15,6 +15,7 @@ import (
 
 type serviceStopProcess struct {
 	done            chan struct{}
+	waitExited      chan struct{}
 	closeOnce       sync.Once
 	waitCalls       atomic.Int32
 	terminateCalls  atomic.Int32
@@ -27,6 +28,7 @@ type serviceStopProcess struct {
 func newServiceStopProcess(exitOnTerminate bool) *serviceStopProcess {
 	return &serviceStopProcess{
 		done:            make(chan struct{}),
+		waitExited:      make(chan struct{}),
 		exitOnTerminate: exitOnTerminate,
 		exitOnKill:      true,
 	}
@@ -38,6 +40,7 @@ func (p *serviceStopProcess) Stderr() io.Reader     { return bytes.NewReader(nil
 func (p *serviceStopProcess) Stdin() io.WriteCloser { return nopWriteCloser{Writer: io.Discard} }
 func (p *serviceStopProcess) Wait(ctx context.Context) (engine.ProcessResult, error) {
 	p.waitCalls.Add(1)
+	defer close(p.waitExited)
 	select {
 	case <-p.done:
 		if p.waitErr != nil {
@@ -99,9 +102,13 @@ func TestStopServiceFailsBoundedlyWhenProcessIgnoresSignals(t *testing.T) {
 	process := newServiceStopProcess(false)
 	process.exitOnKill = false
 	err := stopServiceWithin(context.Background(), process, 5*time.Millisecond, 20*time.Millisecond)
-	process.closeOnce.Do(func() { close(process.done) })
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("stopServiceWithin() error=%v want deadline exceeded", err)
+	}
+	select {
+	case <-process.waitExited:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("process waiter did not exit after bounded stop returned")
 	}
 	if process.waitCalls.Load() != 1 || process.terminateCalls.Load() != 1 || process.killCalls.Load() != 1 {
 		t.Fatalf("wait=%d terminate=%d kill=%d", process.waitCalls.Load(), process.terminateCalls.Load(), process.killCalls.Load())
