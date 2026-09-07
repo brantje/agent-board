@@ -20,14 +20,11 @@ type reconnectHarness struct {
 	promptCalls   int
 	replied       bool
 	replyAnswers  [][]string
-	replyDone     chan struct{}
-	closeReply    sync.Once
 	question      map[string]any
 }
 
 func newReconnectHarness() *reconnectHarness {
 	return &reconnectHarness{
-		replyDone: make(chan struct{}),
 		question: map[string]any{
 			"id":        "que_missed",
 			"sessionID": "ses_native",
@@ -81,6 +78,16 @@ func (h *reconnectHarness) handler(t *testing.T) http.Handler {
 		h.mu.Unlock()
 		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "input_native"}})
 	})
+	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
+		h.mu.Lock()
+		active := !h.replied || h.subscriptions < 2
+		h.mu.Unlock()
+		if active {
+			writeNativeJSON(t, w, map[string]any{"data": map[string]any{"ses_native": map[string]any{"type": "running"}}})
+			return
+		}
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{}})
+	})
 	mux.HandleFunc("GET /api/session/ses_native/question", func(w http.ResponseWriter, _ *http.Request) {
 		h.mu.Lock()
 		replied := h.replied
@@ -103,16 +110,7 @@ func (h *reconnectHarness) handler(t *testing.T) http.Handler {
 		h.replied = true
 		h.replyAnswers = payload.Answers
 		h.mu.Unlock()
-		h.closeReply.Do(func() { close(h.replyDone) })
 		w.WriteHeader(http.StatusNoContent)
-	})
-	mux.HandleFunc("POST /api/session/ses_native/wait", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-h.replyDone:
-			w.WriteHeader(http.StatusNoContent)
-		}
 	})
 	mux.HandleFunc("POST /api/session/ses_native/interrupt", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
