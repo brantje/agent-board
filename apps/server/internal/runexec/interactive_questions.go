@@ -62,7 +62,14 @@ func (q *interactiveQuestioner) OpenBatch(ctx context.Context, requests []engine
 		return nil, fmt.Errorf("run execution: interactive Question batch is empty")
 	}
 	batchStore, ok := any(q.interactive).(store.InteractiveQuestionBatchStore)
-	if !ok {
+	if !ok || !store.SupportsInteractiveQuestionBatchStore(q.interactive) {
+		if len(requests) == 1 {
+			opened, err := q.Open(ctx, requests[0].CorrelationKey, requests[0].Question)
+			if err != nil {
+				return nil, err
+			}
+			return []engine.Question{opened}, nil
+		}
 		return nil, fmt.Errorf("run execution: interactive Question batch capability is unavailable")
 	}
 
