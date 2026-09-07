@@ -66,7 +66,7 @@ func (h *reconnectHarness) handler(t *testing.T) http.Handler {
 			t.Error("response writer does not flush")
 			return
 		}
-		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"data\":{}}\n\n")
+		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"properties\":{}}\n\n")
 		flusher.Flush()
 		if subscription == 1 {
 			// Simulate a transport loss before question.v2.asked reaches Agent Board.
