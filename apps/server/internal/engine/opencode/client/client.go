@@ -11,14 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 )
 
 const (
-	defaultBaseURL             = "http://opencode.local"
-	defaultSessionAddress      = "127.0.0.1:4096"
-	maxErrorBody               = 4 << 10
-	waitAvailabilityRetryDelay = 100 * time.Millisecond
+	defaultBaseURL        = "http://opencode.local"
+	defaultSessionAddress = "127.0.0.1:4096"
+	maxErrorBody          = 4 << 10
 )
 
 type Dialer interface {
@@ -139,44 +137,6 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) error {
 	// a second synthetic user turn later.
 	payload.Delivery = "steer"
 	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt", payload, nil)
-}
-
-func (c *Client) WaitSession(ctx context.Context, sessionID string) error {
-	if strings.TrimSpace(sessionID) == "" {
-		return fmt.Errorf("opencode: session id is required")
-	}
-	path := "/api/session/" + url.PathEscape(sessionID) + "/wait"
-	for {
-		err := c.doJSON(ctx, http.MethodPost, path, nil, nil)
-		if err == nil || !isWaitOperationUnavailable(err) {
-			return err
-		}
-
-		timer := time.NewTimer(waitAvailabilityRetryDelay)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-}
-
-func isWaitOperationUnavailable(err error) bool {
-	var httpErr *HTTPError
-	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusServiceUnavailable {
-		return false
-	}
-	var body struct {
-		Tag     string `json:"_tag"`
-		Service string `json:"service"`
-	}
-	if json.Unmarshal([]byte(httpErr.Body), &body) != nil {
-		return false
-	}
-	return body.Tag == "ServiceUnavailableError" && body.Service == "session.wait"
 }
 
 func (c *Client) InterruptSession(ctx context.Context, sessionID string) error {
