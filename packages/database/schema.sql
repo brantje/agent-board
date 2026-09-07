@@ -294,7 +294,8 @@ CREATE TABLE questions (
     answered_at timestamptz,
     CONSTRAINT questions_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
     CONSTRAINT questions_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
-    UNIQUE (project_id, id)
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, run_id, id)
 );
 
 CREATE INDEX questions_open_idx ON questions (project_id, status, created_at) WHERE status = 'OPEN';
@@ -309,7 +310,7 @@ CREATE TABLE engine_question_bindings (
     state text NOT NULL DEFAULT 'OPEN' CHECK (state IN ('OPEN', 'ANSWERED', 'RESOLVED', 'CANCELLED')),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT engine_question_bindings_question_fk FOREIGN KEY (project_id, question_id) REFERENCES questions(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT engine_question_bindings_question_fk FOREIGN KEY (project_id, run_id, question_id) REFERENCES questions(project_id, run_id, id) ON DELETE CASCADE,
     CONSTRAINT engine_question_bindings_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
     PRIMARY KEY (question_id),
     UNIQUE (project_id, run_id, engine, correlation_key)
