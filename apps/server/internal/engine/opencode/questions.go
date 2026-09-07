@@ -72,22 +72,31 @@ func (s *runState) handleQuestion(ctx context.Context, native *client.Client, re
 	}
 
 	if len(state.bindings) == 0 {
-		state.bindings = make([]nativeQuestionBinding, 0, len(request.Questions))
+		openRequests := make([]engine.CorrelatedQuestionRequest, len(request.Questions))
+		bindings := make([]nativeQuestionBinding, len(request.Questions))
 		for index, nativeQuestion := range request.Questions {
 			mapped, labels, err := mapNativeQuestion(nativeQuestion)
 			if err != nil {
 				return fmt.Errorf("opencode engine: map native Question %s[%d]: %w", request.ID, index, err)
 			}
-			question, err := s.questions.Open(ctx, nativeCorrelationKey(s.sessionID, request.ID, index), mapped)
-			if err != nil {
-				return fmt.Errorf("opencode engine: open Question %s[%d]: %w", request.ID, index, err)
+			openRequests[index] = engine.CorrelatedQuestionRequest{
+				CorrelationKey: nativeCorrelationKey(s.sessionID, request.ID, index),
+				Question:       mapped,
 			}
-			state.bindings = append(state.bindings, nativeQuestionBinding{
-				questionID: question.ID,
-				kind:       mapped.Kind,
-				labels:     labels,
-			})
+			bindings[index] = nativeQuestionBinding{kind: mapped.Kind, labels: labels}
 		}
+
+		opened, err := s.openQuestionBatch(ctx, openRequests)
+		if err != nil {
+			return fmt.Errorf("opencode engine: open native Question %s: %w", request.ID, err)
+		}
+		if len(opened) != len(bindings) {
+			return fmt.Errorf("opencode engine: native Question %s opened %d bindings for %d Questions", request.ID, len(opened), len(bindings))
+		}
+		for index, question := range opened {
+			bindings[index].questionID = question.ID
+		}
+		state.bindings = bindings
 	}
 	if len(state.bindings) != len(request.Questions) {
 		return fmt.Errorf("opencode engine: native Question %s changed shape during reconciliation", request.ID)
@@ -117,6 +126,20 @@ func (s *runState) handleQuestion(ctx context.Context, native *client.Client, re
 	}
 	state.replied = true
 	return nil
+}
+
+func (s *runState) openQuestionBatch(ctx context.Context, requests []engine.CorrelatedQuestionRequest) ([]engine.Question, error) {
+	if batcher, ok := s.questions.(engine.InteractiveQuestionBatcher); ok {
+		return batcher.OpenBatch(ctx, requests)
+	}
+	if len(requests) != 1 {
+		return nil, fmt.Errorf("interactive Question batch capability is required for %d Questions", len(requests))
+	}
+	question, err := s.questions.Open(ctx, requests[0].CorrelationKey, requests[0].Question)
+	if err != nil {
+		return nil, err
+	}
+	return []engine.Question{question}, nil
 }
 
 func mapNativeQuestion(native client.QuestionInfo) (engine.QuestionRequest, map[string]string, error) {
