@@ -232,30 +232,22 @@ func appendInteractiveQuestionEvent(ctx context.Context, tx pgx.Tx, run store.Ru
 	if err != nil {
 		return store.Event{}, err
 	}
-	var sequence int64
-	if err := tx.QueryRow(ctx, `
-		UPDATE runs
-		SET event_sequence=event_sequence+1
-		WHERE project_id=$1 AND id=$2
-		RETURNING event_sequence
-	`, run.ProjectID, run.ID).Scan(&sequence); err != nil {
-		return store.Event{}, notFound(err)
-	}
-	issueID, workspaceID := run.IssueID, run.WorkspaceID
+	issueID, runID, workspaceID := run.IssueID, run.ID, run.WorkspaceID
 	var runtimeID *string
 	if strings.TrimSpace(runtimeInstanceID) != "" {
 		runtimeID = &runtimeInstanceID
 	}
-	return scanEvent(tx.QueryRow(ctx, `
-		INSERT INTO events (
-			schema_version, type, project_id, issue_id, run_id, agent_id,
-			workspace_id, runtime_instance_id, sequence, actor, payload
-		)
-		VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		RETURNING id::text, schema_version, type, occurred_at, project_id::text, issue_id::text,
-		          run_id::text, agent_id::text, workspace_id::text, runtime_instance_id::text,
-		          correlation_id::text, parent_event_id::text, sequence, actor, payload, created_at
-	`, eventType, run.ProjectID, &issueID, &run.ID, run.AgentID, &workspaceID, runtimeID, sequence, objectJSON(store.EmptyObject), objectJSON(encoded)))
+	return appendEventTx(ctx, tx, store.Event{
+		Type:              eventType,
+		ProjectID:         run.ProjectID,
+		IssueID:           &issueID,
+		RunID:             &runID,
+		AgentID:           run.AgentID,
+		WorkspaceID:       &workspaceID,
+		RuntimeInstanceID: runtimeID,
+		Actor:             store.EmptyObject,
+		Payload:           encoded,
+	})
 }
 
 func validateOpenInteractiveQuestion(input store.OpenInteractiveQuestionCommand) error {
