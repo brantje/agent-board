@@ -21,7 +21,8 @@ const reviewNextRunID = "15151515-1515-4515-8515-151515151515"
 
 type httpReviewStore struct {
 	*httpRunEvidenceStore
-	feedback string
+	feedback   string
+	decisionID *string
 }
 
 func (s *httpReviewStore) GetProject(_ context.Context, id string) (store.Project, error) {
@@ -35,7 +36,7 @@ func (s *httpReviewStore) GetReview(_ context.Context, pid, id string) (store.Re
 	if pid != projectID || id != reviewID {
 		return store.Review{}, store.ErrNotFound
 	}
-	return store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "PENDING"}, nil
+	return store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "PENDING", DecisionID: s.decisionID}, nil
 }
 
 func (s *httpReviewStore) ListReviews(_ context.Context, pid string, _ store.ReviewFilter) ([]store.Review, error) {
@@ -80,6 +81,9 @@ func (s *httpReviewStore) FailReviewApproval(context.Context, store.FailReviewAp
 }
 
 func (s *httpReviewStore) RequestReviewChanges(_ context.Context, command store.RequestReviewChangesCommand) (store.RequestReviewChangesResult, error) {
+	if command.ProjectID != projectID || command.ReviewID != reviewID {
+		return store.RequestReviewChangesResult{}, store.ErrNotFound
+	}
 	feedback := strings.TrimSpace(command.Feedback)
 	if feedback == "" {
 		return store.RequestReviewChangesResult{}, store.ErrInvalidArgument
@@ -135,6 +139,15 @@ func TestReviewRoutesExposeEvidenceAndCommands(t *testing.T) {
 		}
 	})
 
+	t.Run("list by issue", func(t *testing.T) {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/projects/"+projectID+"/reviews?issueId="+issueID, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), reviewID) {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+		}
+	})
+
 	t.Run("detail", func(t *testing.T) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/projects/"+projectID+"/reviews/"+reviewID, nil)
 		rec := httptest.NewRecorder()
@@ -147,6 +160,18 @@ func TestReviewRoutesExposeEvidenceAndCommands(t *testing.T) {
 			if !strings.Contains(body, want) {
 				t.Fatalf("detail missing %s: %s", want, body)
 			}
+		}
+	})
+
+	t.Run("detail with decision", func(t *testing.T) {
+		decisionID := reviewDecisionID
+		reviewStore.decisionID = &decisionID
+		defer func() { reviewStore.decisionID = nil }()
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/projects/"+projectID+"/reviews/"+reviewID, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"outcome":"APPROVED"`) {
+			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 		}
 	})
 
@@ -172,27 +197,41 @@ func TestReviewRoutesExposeEvidenceAndCommands(t *testing.T) {
 	})
 }
 
-func TestReviewRoutesValidateInputs(t *testing.T) {
+func TestReviewRoutesValidateInputsAndMissingResources(t *testing.T) {
 	router, _ := reviewRouter(t)
 	cases := []struct {
-		name   string
-		method string
-		path   string
-		body   string
+		name       string
+		method     string
+		path       string
+		body       string
+		wantStatus int
 	}{
-		{name: "invalid status", method: http.MethodGet, path: "/api/projects/" + projectID + "/reviews?status=BOGUS"},
-		{name: "invalid review id", method: http.MethodGet, path: "/api/projects/" + projectID + "/reviews/not-a-uuid"},
-		{name: "unknown request field", method: http.MethodPost, path: "/api/projects/" + projectID + "/reviews/" + reviewID + "/request-changes", body: `{"feedback":"fix","extra":true}`},
-		{name: "missing feedback", method: http.MethodPost, path: "/api/projects/" + projectID + "/reviews/" + reviewID + "/request-changes", body: `{}`},
+		{name: "invalid project id", method: http.MethodGet, path: "/api/projects/not-a-uuid/reviews", wantStatus: http.StatusBadRequest},
+		{name: "unknown project", method: http.MethodGet, path: "/api/projects/" + otherID + "/reviews", wantStatus: http.StatusNotFound},
+		{name: "invalid issue id", method: http.MethodGet, path: "/api/projects/" + projectID + "/reviews?issueId=not-a-uuid", wantStatus: http.StatusBadRequest},
+		{name: "invalid status", method: http.MethodGet, path: "/api/projects/" + projectID + "/reviews?status=BOGUS", wantStatus: http.StatusBadRequest},
+		{name: "invalid review id", method: http.MethodGet, path: "/api/projects/" + projectID + "/reviews/not-a-uuid", wantStatus: http.StatusBadRequest},
+		{name: "missing review detail", method: http.MethodGet, path: "/api/projects/" + projectID + "/reviews/" + otherID, wantStatus: http.StatusNotFound},
+		{name: "missing review approval", method: http.MethodPost, path: "/api/projects/" + projectID + "/reviews/" + otherID + "/approve", wantStatus: http.StatusNotFound},
+		{name: "unknown request field", method: http.MethodPost, path: "/api/projects/" + projectID + "/reviews/" + reviewID + "/request-changes", body: `{"feedback":"fix","extra":true}`, wantStatus: http.StatusBadRequest},
+		{name: "missing feedback", method: http.MethodPost, path: "/api/projects/" + projectID + "/reviews/" + reviewID + "/request-changes", body: `{}`, wantStatus: http.StatusBadRequest},
+		{name: "missing review changes", method: http.MethodPost, path: "/api/projects/" + projectID + "/reviews/" + otherID + "/request-changes", body: `{"feedback":"fix"}`, wantStatus: http.StatusNotFound},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequestWithContext(t.Context(), tc.method, tc.path, strings.NewReader(tc.body))
 			rec := httptest.NewRecorder()
 			router.ServeHTTP(rec, req)
-			if rec.Code != http.StatusBadRequest {
-				t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status=%d want=%d body=%s", rec.Code, tc.wantStatus, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestReviewDecisionDTODefaultsSafeDetails(t *testing.T) {
+	dto := reviewDecisionDTO(store.Decision{ID: reviewDecisionID, Outcome: "APPROVED", ActorType: "HUMAN"})
+	if string(dto.SafeDetails) != `{}` {
+		t.Fatalf("safeDetails=%s", dto.SafeDetails)
 	}
 }
