@@ -49,6 +49,7 @@ type QuestionRequest struct {
 	Options        []QuestionOption
 	Recommendation *string
 	Blocking       bool
+	Custom         bool
 }
 
 type CorrelatedQuestionRequest struct {
