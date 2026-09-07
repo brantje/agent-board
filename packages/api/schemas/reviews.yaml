@@ -1,0 +1,91 @@
+Review:
+  type: object
+  additionalProperties: false
+  required: [id, projectId, issueId, runId, status, requestedAt, decidedAt, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: string, format: uuid}
+    issueId: {type: string, format: uuid}
+    runId: {type: string, format: uuid}
+    status:
+      type: string
+      enum: [PENDING, APPROVED, CHANGES_REQUESTED, CANCELLED]
+    requestedAt: {type: string, format: date-time}
+    decidedAt: {type: [string, 'null'], format: date-time}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+
+ReviewDecision:
+  type: object
+  additionalProperties: false
+  required: [id, outcome, actorType, actorId, safeDetails, createdAt]
+  properties:
+    id: {type: string, format: uuid}
+    outcome:
+      type: string
+      enum: [APPROVED, CHANGES_REQUESTED]
+    actorType:
+      type: string
+      enum: [HUMAN, SYSTEM, AGENT]
+    actorId: {type: [string, 'null']}
+    safeDetails:
+      type: object
+      additionalProperties: true
+    createdAt: {type: string, format: date-time}
+
+ReviewDetail:
+  type: object
+  additionalProperties: false
+  required: [review, decision, testStatus, evidence]
+  properties:
+    review:
+      $ref: '#/Review'
+    decision:
+      oneOf:
+      - $ref: '#/ReviewDecision'
+      - type: 'null'
+    testStatus:
+      type: string
+      description: Explicit aggregate test state. NOT_RUN means no test evidence exists and is never equivalent to PASSED.
+      enum: [NOT_RUN, PASSED, FAILED, UNKNOWN]
+    evidence:
+      $ref: ./execution-evidence.yaml#/RunEvidence
+
+ReviewApprovalResponse:
+  type: object
+  additionalProperties: false
+  required: [review, decision, run, issue]
+  properties:
+    review:
+      $ref: '#/Review'
+    decision:
+      $ref: '#/ReviewDecision'
+    run:
+      $ref: ./control-plane.yaml#/Run
+    issue:
+      $ref: ./control-plane.yaml#/Issue
+
+ReviewRequestChangesRequest:
+  type: object
+  additionalProperties: false
+  required: [feedback]
+  properties:
+    feedback:
+      type: string
+      minLength: 1
+      maxLength: 32768
+
+ReviewRequestChangesResponse:
+  type: object
+  additionalProperties: false
+  required: [review, decision, run, issue, jobId]
+  properties:
+    review:
+      $ref: '#/Review'
+    decision:
+      $ref: '#/ReviewDecision'
+    run:
+      $ref: ./control-plane.yaml#/Run
+    issue:
+      $ref: ./control-plane.yaml#/Issue
+    jobId: {type: string, format: uuid}

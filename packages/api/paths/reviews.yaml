@@ -1,0 +1,100 @@
+path1:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listReviews
+    description: Lists Project-scoped Review gates. Optional filters narrow by Issue or Review status.
+    parameters:
+    - name: issueId
+      in: query
+      schema:
+        type: string
+        format: uuid
+    - name: status
+      in: query
+      schema:
+        type: string
+        enum: [PENDING, APPROVED, CHANGES_REQUESTED, CANCELLED]
+    responses:
+      '200':
+        description: Reviews in request order.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: ../schemas/reviews.yaml#/Review
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+path2:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - name: reviewID
+    in: path
+    required: true
+    schema:
+      type: string
+      format: uuid
+  get:
+    operationId: getReview
+    description: Reads one Review together with the exact Run evidence pinned to that Review attempt.
+    responses:
+      '200':
+        description: Review and canonical immutable execution evidence.
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/reviews.yaml#/ReviewDetail
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+path3:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - name: reviewID
+    in: path
+    required: true
+    schema:
+      type: string
+      format: uuid
+  post:
+    operationId: approveReview
+    description: Durably approves the exact reviewed candidate, applies it to Project Workspace, then completes the Run and Issue.
+    responses:
+      '200':
+        description: Finalized approval.
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/reviews.yaml#/ReviewApprovalResponse
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+path4:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - name: reviewID
+    in: path
+    required: true
+    schema:
+      type: string
+      format: uuid
+  post:
+    operationId: requestReviewChanges
+    description: Records attributable feedback and atomically queues the next attempt on the same Issue Workspace.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../schemas/reviews.yaml#/ReviewRequestChangesRequest
+    responses:
+      '202':
+        description: Changes requested and follow-up attempt durably queued.
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/reviews.yaml#/ReviewRequestChangesResponse
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
