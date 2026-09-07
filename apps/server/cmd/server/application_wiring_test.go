@@ -21,8 +21,9 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 		t.Skip("AGENT_BOARD_TEST_DATABASE_URL is required for integration wiring test")
 	}
 	repositoryRoot := t.TempDir()
+	workspaceRoot := filepath.Join(t.TempDir(), "workspaces")
 	t.Setenv("AGENT_BOARD_REPOSITORY_ROOTS", repositoryRoot)
-	t.Setenv("AGENT_BOARD_WORKSPACE_ROOT", filepath.Join(t.TempDir(), "workspaces"))
+	t.Setenv("AGENT_BOARD_WORKSPACE_ROOT", workspaceRoot)
 	t.Setenv("AGENT_BOARD_EVIDENCE_ROOT", filepath.Join(t.TempDir(), "evidence"))
 	t.Setenv("AGENT_BOARD_SECRET_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
 	secretWriteToken := strings.Repeat("w", 32)
@@ -37,8 +38,11 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	if !ok {
 		t.Fatalf("handler type = %T, want *applicationHandler", handler)
 	}
-	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.ExecutionStore == nil || application.services.ExecutionContext == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil {
+	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.ReviewCandidates == nil || application.services.ExecutionStore == nil || application.services.ExecutionContext == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil {
 		t.Fatalf("application services were not fully wired: %+v", application.services)
+	}
+	if got := configuredReviewCandidateRoot(); got != filepath.Join(workspaceRoot, ".review-candidates") {
+		t.Fatalf("configuredReviewCandidateRoot()=%q", got)
 	}
 
 	// An authorized invalid request is rejected before persistence, so this
@@ -89,6 +93,15 @@ func TestConfiguredEvidenceRoot(t *testing.T) {
 	t.Setenv("AGENT_BOARD_EVIDENCE_ROOT", root)
 	if got := configuredEvidenceRoot(); got != root {
 		t.Fatalf("configuredEvidenceRoot()=%q want %q", got, root)
+	}
+}
+
+func TestConfiguredReviewCandidateRootUsesWorkspaceRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspaces")
+	t.Setenv("AGENT_BOARD_WORKSPACE_ROOT", root)
+	want := filepath.Join(root, ".review-candidates")
+	if got := configuredReviewCandidateRoot(); got != want {
+		t.Fatalf("configuredReviewCandidateRoot()=%q want %q", got, want)
 	}
 }
 
