@@ -132,7 +132,10 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) error {
 		Delivery string `json:"delivery"`
 	}{}
 	payload.Prompt.Text = text
-	payload.Delivery = "immediate"
+	// OpenCode v1.18.29 accepts only "steer" or "queue". "steer" is also
+	// the native default and starts an idle session immediately without adding
+	// a second synthetic user turn later.
+	payload.Delivery = "steer"
 	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt", payload, nil)
 }
 
