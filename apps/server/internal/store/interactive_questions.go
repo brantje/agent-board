@@ -24,9 +24,10 @@ type InteractiveQuestionBinding struct {
 }
 
 type OpenInteractiveQuestionCommand struct {
-	Question       Question
-	Engine         string
-	CorrelationKey string
+	Question          Question
+	Engine            string
+	CorrelationKey    string
+	RuntimeInstanceID string
 }
 
 type OpenInteractiveQuestionResult struct {
@@ -35,12 +36,14 @@ type OpenInteractiveQuestionResult struct {
 	Run            Run
 	Created        bool
 	EnteredWaiting bool
+	Events         []Event
 }
 
 type OpenInteractiveQuestionsResult struct {
 	Questions      []OpenInteractiveQuestionResult
 	Run            Run
 	EnteredWaiting bool
+	Events         []Event
 }
 
 type ResolveInteractiveQuestionResult struct {
@@ -56,7 +59,8 @@ type InteractiveQuestionStore interface {
 
 // InteractiveQuestionBatchStore atomically creates or reconciles a group of
 // interactive Questions that belong to one native request. Either the complete
-// batch becomes durable or none of its new Questions/bindings do.
+// batch and its required durable lifecycle evidence commit together, or none of
+// the new state does.
 type InteractiveQuestionBatchStore interface {
 	OpenInteractiveQuestions(context.Context, []OpenInteractiveQuestionCommand) (OpenInteractiveQuestionsResult, error)
 }
