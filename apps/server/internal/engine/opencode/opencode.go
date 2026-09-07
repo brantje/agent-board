@@ -16,19 +16,19 @@ import (
 )
 
 const (
-	Name                          = "opencode"
-	defaultAddress                = "127.0.0.1:4096"
-	providerCredentialEnv         = "AGENT_BOARD_PROVIDER_API_KEY"
-	startupTimeout                = 15 * time.Second
-	startupAttemptTimeout         = time.Second
-	startupRetryDelay             = 100 * time.Millisecond
-	reconnectRetryDelay           = 200 * time.Millisecond
-	reconnectAttempts             = 10
-	nativeStatePollInterval       = 250 * time.Millisecond
-	nativeStatePollFailureLimit   = 3
-	inactivePollsBeforeComplete   = 2
-	serviceTerminateGrace         = time.Second
-	serviceStopTimeout            = 5 * time.Second
+	Name                        = "opencode"
+	defaultAddress              = "127.0.0.1:4096"
+	providerCredentialEnv       = "AGENT_BOARD_PROVIDER_API_KEY"
+	startupTimeout              = 15 * time.Second
+	startupAttemptTimeout       = time.Second
+	startupRetryDelay           = 100 * time.Millisecond
+	reconnectRetryDelay         = 200 * time.Millisecond
+	reconnectAttempts           = 10
+	nativeStatePollInterval     = 250 * time.Millisecond
+	nativeStatePollFailureLimit = 3
+	inactivePollsBeforeComplete = 2
+	serviceTerminateGrace       = time.Second
+	serviceStopTimeout          = 5 * time.Second
 )
 
 type Engine struct {
@@ -343,13 +343,17 @@ func reconcilePendingQuestions(ctx context.Context, native *client.Client, sessi
 	if err != nil {
 		return false, fmt.Errorf("opencode engine: reconcile pending Questions: %w", err)
 	}
-	if len(pending) == 0 {
-		return false, nil
+	hadPending := len(pending) != 0
+	if hadPending {
+		if err := state.handlePending(ctx, native, pending); err != nil {
+			return true, err
+		}
 	}
-	if err := state.handlePending(ctx, native, pending); err != nil {
-		return true, err
+	hadAccepted, err := state.reconcileAcceptedReplies(ctx, pending)
+	if err != nil {
+		return hadPending, err
 	}
-	return true, nil
+	return hadPending || hadAccepted, nil
 }
 
 func isSessionIdleEvent(event client.Event, sessionID string) (bool, error) {
