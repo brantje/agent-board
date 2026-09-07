@@ -19,9 +19,9 @@ func (m *ProjectBackedMaterializer) ApplyReviewedCandidate(ctx context.Context, 
 	if !ok {
 		return "", fmt.Errorf("apply reviewed candidate: Project Workspace locking is unavailable: %w", ErrInvalidMetadata)
 	}
-	git, ok := m.issue.git.(*GitCLI)
+	git, ok := m.issue.git.(candidateGit)
 	if !ok {
-		return "", fmt.Errorf("apply reviewed candidate: trusted Git implementation is unavailable: %w", ErrInvalidMetadata)
+		return "", fmt.Errorf("apply reviewed candidate: trusted Git candidate capability is unavailable: %w", ErrInvalidMetadata)
 	}
 	applier, err := NewCandidateApplier(locks, m.projects, git)
 	if err != nil {

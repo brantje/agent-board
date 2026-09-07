@@ -27,13 +27,20 @@ type AcceptedCandidate struct {
 	Files         []CandidateFileSource
 }
 
+type candidateGit interface {
+	findAcceptedReview(context.Context, string, string) (string, bool, error)
+	resetAcceptedCheckout(context.Context, string) error
+	applyCandidatePatch(context.Context, string, []byte, bool) error
+	commitAcceptedCandidate(context.Context, string, string) (string, error)
+}
+
 type CandidateApplier struct {
 	locks    ProjectWorkspaceLockStore
 	projects ProjectWorkspaceSource
-	git      *GitCLI
+	git      candidateGit
 }
 
-func NewCandidateApplier(locks ProjectWorkspaceLockStore, projects ProjectWorkspaceSource, git *GitCLI) (*CandidateApplier, error) {
+func NewCandidateApplier(locks ProjectWorkspaceLockStore, projects ProjectWorkspaceSource, git candidateGit) (*CandidateApplier, error) {
 	if locks == nil || projects == nil || git == nil {
 		return nil, fmt.Errorf("candidate applier dependencies: %w", ErrInvalidMetadata)
 	}

@@ -46,7 +46,7 @@ func TestProjectBackedMaterializerAppliesReviewedCandidate(t *testing.T) {
 	}
 
 	state := &reviewProjectBackedStore{memoryStateStore: &memoryStateStore{workspace: fixtureWorkspace(source)}}
-	legacy, err := NewMaterializer(state, policy, git.GitCLI, filepath.Join(parent, "issues"))
+	legacy, err := NewMaterializer(state, policy, git, filepath.Join(parent, "issues"))
 	if err != nil {
 		t.Fatal(err)
 	}
