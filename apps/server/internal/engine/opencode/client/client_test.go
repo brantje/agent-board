@@ -42,6 +42,9 @@ func TestClientNativeSessionAndQuestionRoutes(t *testing.T) {
 		}
 		writeJSON(t, w, http.StatusOK, map[string]any{"data": map[string]any{"id": "input_1"}})
 	})
+	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{"data": map[string]any{"ses_1": map[string]any{"type": "running"}}})
+	})
 	mux.HandleFunc("POST /api/session/ses_1/interrupt", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /api/session/ses_1/question", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{map[string]any{
@@ -79,6 +82,14 @@ func TestClientNativeSessionAndQuestionRoutes(t *testing.T) {
 	}
 	if err := client.Prompt(context.Background(), session.ID, "implement issue"); err != nil {
 		t.Fatal(err)
+	}
+	active, err := client.SessionActive(context.Background(), session.ID)
+	if err != nil || !active {
+		t.Fatalf("active=%v err=%v", active, err)
+	}
+	inactive, err := client.SessionActive(context.Background(), "ses_other")
+	if err != nil || inactive {
+		t.Fatalf("other active=%v err=%v", inactive, err)
 	}
 	requests, err := client.ListQuestions(context.Background(), session.ID)
 	if err != nil || len(requests) != 1 || len(requests[0].Questions) != 2 || requests[0].ID != "que_1" {
