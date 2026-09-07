@@ -31,8 +31,8 @@ func TestClientConstructionAndMethodValidation(t *testing.T) {
 	if err := native.Prompt(context.Background(), "ses_1", " "); err == nil {
 		t.Fatal("empty Prompt text unexpectedly accepted")
 	}
-	if err := native.WaitSession(context.Background(), " "); err == nil {
-		t.Fatal("empty WaitSession id unexpectedly accepted")
+	if _, err := native.SessionActive(context.Background(), " "); err == nil {
+		t.Fatal("empty SessionActive id unexpectedly accepted")
 	}
 	if err := native.InterruptSession(context.Background(), " "); err == nil {
 		t.Fatal("empty InterruptSession id unexpectedly accepted")
