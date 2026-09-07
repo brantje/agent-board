@@ -194,18 +194,20 @@ type sessionConn struct {
 	closeErr      error
 	readDeadline  time.Time
 	writeDeadline time.Time
+	deadlineWake  chan struct{}
 }
 
 func newSessionConn(parent *Connection, sessionID, id, network, address string) *sessionConn {
 	return &sessionConn{
-		parent:    parent,
-		sessionID: sessionID,
-		id:        id,
-		network:   network,
-		address:   address,
-		incoming:  make(chan []byte, connectReadQueueDepth),
-		connected: make(chan error, 1),
-		done:      make(chan struct{}),
+		parent:       parent,
+		sessionID:    sessionID,
+		id:           id,
+		network:      network,
+		address:      address,
+		incoming:     make(chan []byte, connectReadQueueDepth),
+		connected:    make(chan error, 1),
+		done:         make(chan struct{}),
+		deadlineWake: make(chan struct{}),
 	}
 }
 
@@ -222,6 +224,7 @@ func (c *sessionConn) Read(p []byte) (int, error) {
 			return n, nil
 		}
 		deadline := c.readDeadline
+		wake := c.deadlineWake
 		c.mu.Unlock()
 
 		select {
@@ -269,6 +272,9 @@ func (c *sessionConn) Read(p []byte) (int, error) {
 		case <-c.done:
 			stopTimer()
 			return 0, c.readCloseError()
+		case <-wake:
+			stopTimer()
+			continue
 		case <-timer:
 			return 0, os.ErrDeadlineExceeded
 		}
@@ -318,7 +324,7 @@ func (c *sessionConn) RemoteAddr() net.Addr {
 
 func (c *sessionConn) SetDeadline(deadline time.Time) error {
 	c.mu.Lock()
-	c.readDeadline = deadline
+	c.setReadDeadlineLocked(deadline)
 	c.writeDeadline = deadline
 	c.mu.Unlock()
 	return nil
@@ -326,9 +332,17 @@ func (c *sessionConn) SetDeadline(deadline time.Time) error {
 
 func (c *sessionConn) SetReadDeadline(deadline time.Time) error {
 	c.mu.Lock()
-	c.readDeadline = deadline
+	c.setReadDeadlineLocked(deadline)
 	c.mu.Unlock()
 	return nil
+}
+
+func (c *sessionConn) setReadDeadlineLocked(deadline time.Time) {
+	c.readDeadline = deadline
+	if c.deadlineWake != nil {
+		close(c.deadlineWake)
+	}
+	c.deadlineWake = make(chan struct{})
 }
 
 func (c *sessionConn) SetWriteDeadline(deadline time.Time) error {

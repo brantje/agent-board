@@ -16,18 +16,19 @@ import (
 )
 
 const (
-	Name                        = "opencode"
-	defaultAddress              = "127.0.0.1:4096"
-	providerCredentialEnv       = "AGENT_BOARD_PROVIDER_API_KEY"
-	startupTimeout              = 15 * time.Second
-	startupAttemptTimeout       = time.Second
-	startupRetryDelay           = 100 * time.Millisecond
-	reconnectRetryDelay         = 200 * time.Millisecond
-	reconnectAttempts           = 10
-	nativeStatePollInterval     = 250 * time.Millisecond
-	inactivePollsBeforeComplete = 2
-	serviceTerminateGrace       = time.Second
-	serviceStopTimeout          = 5 * time.Second
+	Name                          = "opencode"
+	defaultAddress                = "127.0.0.1:4096"
+	providerCredentialEnv         = "AGENT_BOARD_PROVIDER_API_KEY"
+	startupTimeout                = 15 * time.Second
+	startupAttemptTimeout         = time.Second
+	startupRetryDelay             = 100 * time.Millisecond
+	reconnectRetryDelay           = 200 * time.Millisecond
+	reconnectAttempts             = 10
+	nativeStatePollInterval       = 250 * time.Millisecond
+	nativeStatePollFailureLimit   = 3
+	inactivePollsBeforeComplete   = 2
+	serviceTerminateGrace         = time.Second
+	serviceStopTimeout            = 5 * time.Second
 )
 
 type Engine struct {
@@ -144,6 +145,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	defer statePoll.Stop()
 	executionObserved := false
 	inactivePolls := 0
+	statePollFailures := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -161,8 +163,14 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			}
 			active, err := native.SessionActive(ctx, session.ID)
 			if err != nil {
-				return engine.Result{}, fmt.Errorf("opencode engine: query native session activity: %w", err)
+				statePollFailures++
+				inactivePolls = 0
+				if statePollFailures >= nativeStatePollFailureLimit {
+					return engine.Result{}, fmt.Errorf("opencode engine: query native session activity after %d consecutive failures: %w", statePollFailures, err)
+				}
+				continue
 			}
+			statePollFailures = 0
 			if active {
 				executionObserved = true
 				inactivePolls = 0
