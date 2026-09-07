@@ -188,7 +188,7 @@ func TestCandidateApplierValidatesDependenciesAndEarlyFailures(t *testing.T) {
 	for name, dependencies := range map[string]struct {
 		locks    ProjectWorkspaceLockStore
 		projects ProjectWorkspaceSource
-		git      *GitCLI
+		git      candidateGit
 	}{
 		"locks":    {projects: projectSource, git: git},
 		"projects": {locks: lockStore, git: git},

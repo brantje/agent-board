@@ -23,6 +23,8 @@ func (s *reviewProjectBackedStore) AcquireWorkspaceBootstrapLock(context.Context
 	return memoryLock{mu: &s.mu}, nil
 }
 
+type gitWithoutCandidateCapability struct{ Git }
+
 func TestProjectBackedMaterializerAppliesReviewedCandidate(t *testing.T) {
 	git := requireGit(t)
 	parent := t.TempDir()
@@ -79,7 +81,7 @@ func TestProjectBackedMaterializerReviewDeliveryValidatesDependencies(t *testing
 	git := requireGit(t)
 	policy, _ := repository.NewPolicy([]string{t.TempDir()})
 	state := &memoryStateStore{}
-	legacy, err := NewMaterializer(state, policy, git, t.TempDir())
+	legacy, err := NewMaterializer(state, policy, gitWithoutCandidateCapability{Git: git}, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +89,7 @@ func TestProjectBackedMaterializerReviewDeliveryValidatesDependencies(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backed.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", AcceptedCandidate{}); err == nil {
-		t.Fatal("materializer without Project Workspace locking should fail")
+	if _, err := backed.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", AcceptedCandidate{}); err == nil || !strings.Contains(err.Error(), "candidate capability") {
+		t.Fatalf("materializer without candidate Git capability error=%v", err)
 	}
 }
