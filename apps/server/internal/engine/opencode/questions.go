@@ -11,9 +11,10 @@ import (
 )
 
 type nativeQuestionBinding struct {
-	questionID string
-	kind       string
-	labels     map[string]string
+	questionID     string
+	correlationKey string
+	kind           string
+	labels         map[string]string
 }
 
 type nativeQuestionState struct {
@@ -79,11 +80,12 @@ func (s *runState) handleQuestion(ctx context.Context, native *client.Client, re
 			if err != nil {
 				return fmt.Errorf("opencode engine: map native Question %s[%d]: %w", request.ID, index, err)
 			}
+			correlationKey := nativeCorrelationKey(s.sessionID, request.ID, index)
 			openRequests[index] = engine.CorrelatedQuestionRequest{
-				CorrelationKey: nativeCorrelationKey(s.sessionID, request.ID, index),
+				CorrelationKey: correlationKey,
 				Question:       mapped,
 			}
-			bindings[index] = nativeQuestionBinding{kind: mapped.Kind, labels: labels}
+			bindings[index] = nativeQuestionBinding{correlationKey: correlationKey, kind: mapped.Kind, labels: labels}
 		}
 
 		opened, err := s.openQuestionBatch(ctx, openRequests)
@@ -119,6 +121,26 @@ func (s *runState) handleQuestion(ctx context.Context, native *client.Client, re
 	if err := replyNativeQuestion(ctx, native, s.sessionID, request.ID, answers); err != nil {
 		return err
 	}
+	if tracker, ok := s.questions.(engine.InteractiveQuestionReplyTracker); ok {
+		accepted := make([]engine.AcceptedInteractiveQuestionReply, len(state.bindings))
+		for index, binding := range state.bindings {
+			accepted[index] = engine.AcceptedInteractiveQuestionReply{
+				QuestionID:     binding.questionID,
+				CorrelationKey: binding.correlationKey,
+			}
+		}
+		if err := tracker.MarkReplyAccepted(ctx, accepted); err != nil {
+			return fmt.Errorf("opencode engine: persist accepted native Question reply %s: %w", request.ID, err)
+		}
+		// Resolution is intentionally deferred until a subsequent authoritative
+		// ListQuestions call no longer contains this native request. That durable
+		// boundary makes partial local resolution retryable without another reply.
+		state.replied = true
+		return nil
+	}
+
+	// Compatibility path for InteractiveQuestioner implementations that predate
+	// durable reply tracking. Production run execution provides the tracker.
 	for index, binding := range state.bindings {
 		if err := s.questions.Resolve(ctx, binding.questionID); err != nil {
 			return fmt.Errorf("opencode engine: resolve Question %s[%d]: %w", request.ID, index, err)
@@ -126,6 +148,43 @@ func (s *runState) handleQuestion(ctx context.Context, native *client.Client, re
 	}
 	state.replied = true
 	return nil
+}
+
+func (s *runState) reconcileAcceptedReplies(ctx context.Context, pending []client.QuestionRequest) (bool, error) {
+	tracker, ok := s.questions.(engine.InteractiveQuestionReplyTracker)
+	if !ok {
+		return false, nil
+	}
+	accepted, err := tracker.ListReplyAccepted(ctx)
+	if err != nil {
+		return false, fmt.Errorf("opencode engine: list accepted native Question replies: %w", err)
+	}
+	if len(accepted) == 0 {
+		return false, nil
+	}
+
+	pendingIDs := make(map[string]struct{}, len(pending))
+	for _, request := range pending {
+		if request.SessionID == s.sessionID {
+			pendingIDs[request.ID] = struct{}{}
+		}
+	}
+	hadAccepted := false
+	for _, binding := range accepted {
+		requestID, belongs := nativeRequestIDFromCorrelation(s.sessionID, binding.CorrelationKey)
+		if !belongs {
+			continue
+		}
+		hadAccepted = true
+		if _, stillPending := pendingIDs[requestID]; stillPending {
+			continue
+		}
+		// Resolve is idempotent in the production store. A failed resolution is
+		// deliberately left journaled and retried on the next reconciliation
+		// cycle instead of turning an already-accepted native reply into Run failure.
+		_ = s.questions.Resolve(ctx, binding.QuestionID)
+	}
+	return hadAccepted, nil
 }
 
 func (s *runState) openQuestionBatch(ctx context.Context, requests []engine.CorrelatedQuestionRequest) ([]engine.Question, error) {
@@ -200,6 +259,19 @@ func mapCanonicalAnswer(binding nativeQuestionBinding, answer engine.QuestionAns
 
 func nativeCorrelationKey(sessionID, requestID string, index int) string {
 	return fmt.Sprintf("%s/%s/%d", sessionID, requestID, index)
+}
+
+func nativeRequestIDFromCorrelation(sessionID, correlationKey string) (string, bool) {
+	prefix := sessionID + "/"
+	if !strings.HasPrefix(correlationKey, prefix) {
+		return "", false
+	}
+	remainder := strings.TrimPrefix(correlationKey, prefix)
+	separator := strings.LastIndex(remainder, "/")
+	if separator <= 0 || separator == len(remainder)-1 {
+		return "", false
+	}
+	return remainder[:separator], true
 }
 
 func replyNativeQuestion(ctx context.Context, native *client.Client, sessionID, requestID string, answers [][]string) error {
