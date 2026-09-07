@@ -80,7 +80,11 @@ func (s *httpReviewStore) FailReviewApproval(context.Context, store.FailReviewAp
 }
 
 func (s *httpReviewStore) RequestReviewChanges(_ context.Context, command store.RequestReviewChangesCommand) (store.RequestReviewChangesResult, error) {
-	s.feedback = command.Feedback
+	feedback := strings.TrimSpace(command.Feedback)
+	if feedback == "" {
+		return store.RequestReviewChangesResult{}, store.ErrInvalidArgument
+	}
+	s.feedback = feedback
 	decision := store.Decision{ID: reviewDecisionID, ProjectID: projectID, Kind: "REVIEW", Outcome: "CHANGES_REQUESTED", ActorType: "HUMAN", SafeDetails: json.RawMessage(`{"feedback":"add regression coverage"}`)}
 	return store.RequestReviewChangesResult{
 		Review:   store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "CHANGES_REQUESTED", DecisionID: &decision.ID},
@@ -103,7 +107,11 @@ func reviewRouter(t *testing.T) (http.Handler, *httpReviewStore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	storeFake := &httpReviewStore{httpRunEvidenceStore: &httpRunEvidenceStore{artifactRef: "unused", artifactSize: 2}}
+	manifest, err := blobs.Put(t.Context(), runID, strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeFake := &httpReviewStore{httpRunEvidenceStore: &httpRunEvidenceStore{artifactRef: manifest.Ref, artifactSize: manifest.SizeBytes}}
 	runEvidence, err := app.NewRunEvidenceService(storeFake, blobs)
 	if err != nil {
 		t.Fatal(err)
