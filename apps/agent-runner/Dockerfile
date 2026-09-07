@@ -12,6 +12,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/agent-r
 FROM alpine:3.22
 
 ARG OPENCODE_VERSION=1.18.29
+ARG AGENT_BOARD_UID
 ENV SHELL=/bin/sh
 
 RUN apk add --no-cache bash curl git tar \
@@ -21,7 +22,11 @@ RUN apk add --no-cache bash curl git tar \
     && rm -rf /root/.opencode \
     && test "$(opencode --version)" = "${OPENCODE_VERSION}" \
     && addgroup -S agentboard \
-    && adduser -S -G agentboard agentboard
+    && if [ -n "${AGENT_BOARD_UID}" ]; then \
+         adduser -S -D -H -u "${AGENT_BOARD_UID}" -G agentboard agentboard; \
+       else \
+         adduser -S -D -H -G agentboard agentboard; \
+       fi
 COPY --from=build /out/agent-runner /usr/local/bin/agent-runner
 
 USER agentboard
