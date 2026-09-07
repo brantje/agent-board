@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -17,7 +18,9 @@ func (s *Store) OpenInteractiveQuestion(ctx context.Context, input store.OpenInt
 	if len(batch.Questions) != 1 {
 		return store.OpenInteractiveQuestionResult{}, store.ErrConflict
 	}
-	return batch.Questions[0], nil
+	result := batch.Questions[0]
+	result.Events = append([]store.Event(nil), batch.Events...)
+	return result, nil
 }
 
 func (s *Store) OpenInteractiveQuestions(ctx context.Context, inputs []store.OpenInteractiveQuestionCommand) (store.OpenInteractiveQuestionsResult, error) {
@@ -31,7 +34,8 @@ func (s *Store) OpenInteractiveQuestions(ctx context.Context, inputs []store.Ope
 			return store.OpenInteractiveQuestionsResult{}, err
 		}
 		if input.Question.ProjectID != first.Question.ProjectID || input.Question.IssueID != first.Question.IssueID ||
-			input.Question.RunID != first.Question.RunID || input.Engine != first.Engine {
+			input.Question.RunID != first.Question.RunID || input.Engine != first.Engine ||
+			input.RuntimeInstanceID != first.RuntimeInstanceID {
 			return store.OpenInteractiveQuestionsResult{}, store.ErrInvalidArgument
 		}
 		if _, duplicate := seenCorrelations[input.CorrelationKey]; duplicate {
@@ -133,6 +137,16 @@ func (s *Store) OpenInteractiveQuestions(ctx context.Context, inputs []store.Ope
 		}
 	}
 
+	persistedEvents := make([]store.Event, 0, len(results)+1)
+	for index := range results {
+		event, ensureErr := ensureInteractiveQuestionCreatedEvent(ctx, tx, run, results[index].Question, first.RuntimeInstanceID)
+		if ensureErr != nil {
+			return store.OpenInteractiveQuestionsResult{}, ensureErr
+		}
+		results[index].Events = []store.Event{event}
+		persistedEvents = append(persistedEvents, event)
+	}
+
 	enteredWaiting := len(missing) > 0 && run.Status == "RUNNING"
 	if enteredWaiting {
 		run, err = scanRun(tx.QueryRow(ctx, `
@@ -157,6 +171,14 @@ func (s *Store) OpenInteractiveQuestions(ctx context.Context, inputs []store.Ope
 			return store.OpenInteractiveQuestionsResult{}, store.ErrConflict
 		}
 		results[missing[0]].EnteredWaiting = true
+
+		waitingEvent, eventErr := appendInteractiveQuestionEvent(ctx, tx, run, first.RuntimeInstanceID, "run.waiting_for_input", map[string]any{
+			"questionId": results[missing[0]].Question.ID,
+		})
+		if eventErr != nil {
+			return store.OpenInteractiveQuestionsResult{}, eventErr
+		}
+		persistedEvents = append(persistedEvents, waitingEvent)
 	}
 
 	for index := range results {
@@ -169,7 +191,71 @@ func (s *Store) OpenInteractiveQuestions(ctx context.Context, inputs []store.Ope
 		Questions:      results,
 		Run:            run,
 		EnteredWaiting: enteredWaiting,
+		Events:         persistedEvents,
 	}, nil
+}
+
+func ensureInteractiveQuestionCreatedEvent(ctx context.Context, tx pgx.Tx, run store.Run, question store.Question, runtimeInstanceID string) (store.Event, error) {
+	existing, err := scanEvent(tx.QueryRow(ctx, `
+		SELECT id::text, schema_version, type, occurred_at, project_id::text, issue_id::text,
+		       run_id::text, agent_id::text, workspace_id::text, runtime_instance_id::text,
+		       correlation_id::text, parent_event_id::text, sequence, actor, payload, created_at
+		FROM events
+		WHERE project_id=$1 AND run_id=$2 AND type='question.created' AND payload->>'questionId'=$3
+		ORDER BY sequence
+		LIMIT 1
+	`, question.ProjectID, question.RunID, question.ID))
+	if err == nil {
+		return existing, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return store.Event{}, err
+	}
+
+	var options []store.QuestionOption
+	if len(question.Options) != 0 {
+		if err := json.Unmarshal(question.Options, &options); err != nil {
+			return store.Event{}, err
+		}
+	}
+	return appendInteractiveQuestionEvent(ctx, tx, run, runtimeInstanceID, "question.created", map[string]any{
+		"questionId": question.ID,
+		"prompt":     question.Prompt,
+		"kind":       question.Kind,
+		"options":    options,
+		"blocking":   true,
+	})
+}
+
+func appendInteractiveQuestionEvent(ctx context.Context, tx pgx.Tx, run store.Run, runtimeInstanceID, eventType string, payload any) (store.Event, error) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return store.Event{}, err
+	}
+	var sequence int64
+	if err := tx.QueryRow(ctx, `
+		UPDATE runs
+		SET event_sequence=event_sequence+1
+		WHERE project_id=$1 AND id=$2
+		RETURNING event_sequence
+	`, run.ProjectID, run.ID).Scan(&sequence); err != nil {
+		return store.Event{}, notFound(err)
+	}
+	issueID, workspaceID := run.IssueID, run.WorkspaceID
+	var runtimeID *string
+	if strings.TrimSpace(runtimeInstanceID) != "" {
+		runtimeID = &runtimeInstanceID
+	}
+	return scanEvent(tx.QueryRow(ctx, `
+		INSERT INTO events (
+			schema_version, type, project_id, issue_id, run_id, agent_id,
+			workspace_id, runtime_instance_id, sequence, actor, payload
+		)
+		VALUES (1, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id::text, schema_version, type, occurred_at, project_id::text, issue_id::text,
+		          run_id::text, agent_id::text, workspace_id::text, runtime_instance_id::text,
+		          correlation_id::text, parent_event_id::text, sequence, actor, payload, created_at
+	`, eventType, run.ProjectID, &issueID, &run.ID, run.AgentID, &workspaceID, runtimeID, sequence, objectJSON(store.EmptyObject), objectJSON(encoded)))
 }
 
 func validateOpenInteractiveQuestion(input store.OpenInteractiveQuestionCommand) error {
