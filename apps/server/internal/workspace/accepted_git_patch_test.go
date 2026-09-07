@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,14 +18,11 @@ func TestGitCLIApplyCandidatePatchHandlesStagedAndUnstagedPatches(t *testing.T) 
 	if err := os.WriteFile(readme, []byte("unstaged change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	unstaged, err := git.run(ctx, "-C", repo, "diff", "--binary")
-	if err != nil {
-		t.Fatal(err)
-	}
+	unstaged := rawGitOutput(t, ctx, git, repo, "diff", "--binary")
 	if err := git.resetAcceptedCheckout(ctx, repo); err != nil {
 		t.Fatal(err)
 	}
-	if err := git.applyCandidatePatch(ctx, repo, []byte(unstaged), false); err != nil {
+	if err := git.applyCandidatePatch(ctx, repo, unstaged, false); err != nil {
 		t.Fatalf("apply unstaged patch: %v", err)
 	}
 	content, err := os.ReadFile(readme)
@@ -41,14 +39,11 @@ func TestGitCLIApplyCandidatePatchHandlesStagedAndUnstagedPatches(t *testing.T) 
 	if _, err := git.run(ctx, "-C", repo, "add", "README.md"); err != nil {
 		t.Fatal(err)
 	}
-	staged, err := git.run(ctx, "-C", repo, "diff", "--binary", "--cached", "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
+	staged := rawGitOutput(t, ctx, git, repo, "diff", "--binary", "--cached", "HEAD")
 	if err := git.resetAcceptedCheckout(ctx, repo); err != nil {
 		t.Fatal(err)
 	}
-	if err := git.applyCandidatePatch(ctx, repo, []byte(staged), true); err != nil {
+	if err := git.applyCandidatePatch(ctx, repo, staged, true); err != nil {
 		t.Fatalf("apply staged patch: %v", err)
 	}
 	cached, err := git.run(ctx, "-C", repo, "diff", "--cached", "--name-only")
@@ -66,4 +61,16 @@ func TestGitCLIApplyCandidatePatchHandlesEmptyAndInvalidInput(t *testing.T) {
 	if err := git.applyCandidatePatch(t.Context(), repo, []byte("not a patch\n"), false); err == nil {
 		t.Fatal("invalid patch should fail")
 	}
+}
+
+func rawGitOutput(t *testing.T, ctx context.Context, git *GitCLI, repo string, args ...string) []byte {
+	t.Helper()
+	commandArgs := append([]string{"-C", repo}, args...)
+	command := exec.CommandContext(ctx, git.binary, commandArgs...)
+	command.Env = hardenedGitEnv()
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return output
 }
