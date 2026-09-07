@@ -21,9 +21,45 @@ func (s *runState) handleEvent(ctx context.Context, native *client.Client, event
 		return s.handleQuestion(ctx, native, request)
 	case "message.part.updated":
 		return s.handlePartUpdated(ctx, event.Properties)
+	case "session.error":
+		return s.handleSessionError(event.Properties)
 	default:
 		return nil
 	}
+}
+
+func (s *runState) handleSessionError(properties json.RawMessage) error {
+	var update struct {
+		SessionID string          `json:"sessionID"`
+		Error     json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(properties, &update); err != nil {
+		return fmt.Errorf("opencode engine: decode native session error: %w", err)
+	}
+	// The event stream is instance-scoped and may contain errors for another
+	// session. Only the native session owned by this Run is terminal here.
+	if update.SessionID == "" || update.SessionID != s.sessionID {
+		return nil
+	}
+
+	message := "native session failed"
+	if len(bytes.TrimSpace(update.Error)) != 0 && !bytes.Equal(bytes.TrimSpace(update.Error), []byte("null")) {
+		var nativeError struct {
+			Name string `json:"name"`
+			Data struct {
+				Message string `json:"message"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(update.Error, &nativeError); err != nil {
+			return fmt.Errorf("opencode engine: decode native session error details: %w", err)
+		}
+		if value := strings.TrimSpace(nativeError.Data.Message); value != "" {
+			message = value
+		} else if value := strings.TrimSpace(nativeError.Name); value != "" {
+			message = value
+		}
+	}
+	return fmt.Errorf("opencode engine: native session error: %s", message)
 }
 
 func (s *runState) handlePartUpdated(ctx context.Context, properties json.RawMessage) error {
