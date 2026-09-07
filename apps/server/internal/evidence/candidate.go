@@ -215,7 +215,7 @@ type CandidateSnapshotter struct {
 	collector        *CandidateCollector
 	store            ArtifactStore
 	blobs            BlobStore
-	reviewCandidates ReviewCandidateWriter
+	reviewCandidates ReviewCandidateArchive
 }
 
 const maxCandidateFileChunks int64 = 4096
@@ -224,14 +224,14 @@ func NewCandidateSnapshotter(collector *CandidateCollector, store ArtifactStore,
 	return newCandidateSnapshotter(collector, store, blobs, nil)
 }
 
-func NewCandidateSnapshotterWithReviewCandidates(collector *CandidateCollector, store ArtifactStore, blobs BlobStore, reviewCandidates ReviewCandidateWriter) (*CandidateSnapshotter, error) {
+func NewCandidateSnapshotterWithReviewCandidates(collector *CandidateCollector, store ArtifactStore, blobs BlobStore, reviewCandidates ReviewCandidateArchive) (*CandidateSnapshotter, error) {
 	if reviewCandidates == nil {
 		return nil, fmt.Errorf("evidence: review candidate store is required")
 	}
 	return newCandidateSnapshotter(collector, store, blobs, reviewCandidates)
 }
 
-func newCandidateSnapshotter(collector *CandidateCollector, store ArtifactStore, blobs BlobStore, reviewCandidates ReviewCandidateWriter) (*CandidateSnapshotter, error) {
+func newCandidateSnapshotter(collector *CandidateCollector, store ArtifactStore, blobs BlobStore, reviewCandidates ReviewCandidateArchive) (*CandidateSnapshotter, error) {
 	if collector == nil || store == nil || blobs == nil {
 		return nil, fmt.Errorf("evidence: candidate collector, artifact store and blob store are required")
 	}
@@ -243,16 +243,21 @@ func (s *CandidateSnapshotter) Snapshot(ctx context.Context, scope RunScope, wor
 	if err != nil {
 		return CandidateSnapshot{}, err
 	}
-	if s.reviewCandidates != nil {
-		if err := s.reviewCandidates.Capture(ctx, scope.RunID, workspace, candidate); err != nil {
-			return CandidateSnapshot{}, fmt.Errorf("evidence: capture private review candidate: %w", err)
-		}
+	if s.reviewCandidates == nil {
+		return s.snapshotWorkspaceCandidate(ctx, scope, workspace, candidate)
 	}
-	manifestData, err := json.Marshal(candidate)
+	if err := s.reviewCandidates.Capture(ctx, scope.RunID, workspace, candidate); err != nil {
+		return CandidateSnapshot{}, fmt.Errorf("evidence: capture private review candidate: %w", err)
+	}
+	pinned, err := s.reviewCandidates.Open(ctx, scope.RunID)
 	if err != nil {
-		return CandidateSnapshot{}, fmt.Errorf("evidence: encode candidate manifest: %w", err)
+		return CandidateSnapshot{}, fmt.Errorf("evidence: reopen private review candidate: %w", err)
 	}
-	manifest, err := s.createArtifact(ctx, scope, "candidate-manifest.json", "candidate_manifest", "application/json", bytes.NewReader(manifestData), store.EmptyObject)
+	return s.snapshotPrivateCandidate(ctx, scope, pinned)
+}
+
+func (s *CandidateSnapshotter) snapshotWorkspaceCandidate(ctx context.Context, scope RunScope, workspace string, candidate Candidate) (CandidateSnapshot, error) {
+	manifest, err := s.snapshotCandidateManifest(ctx, scope, candidate)
 	if err != nil {
 		return CandidateSnapshot{}, err
 	}
@@ -292,15 +297,79 @@ func (s *CandidateSnapshotter) Snapshot(ctx context.Context, scope RunScope, wor
 	return snapshot, nil
 }
 
+func (s *CandidateSnapshotter) snapshotPrivateCandidate(ctx context.Context, scope RunScope, candidate ReviewCandidateSnapshot) (CandidateSnapshot, error) {
+	manifest, err := s.snapshotCandidateManifest(ctx, scope, candidate.Candidate)
+	if err != nil {
+		return CandidateSnapshot{}, err
+	}
+	snapshot := CandidateSnapshot{Manifest: manifest, Candidate: candidate.Candidate}
+
+	for _, patch := range []struct {
+		name   string
+		source ReviewCandidateBlobSource
+	}{
+		{name: "candidate-staged.patch", source: candidate.StagedPatch},
+		{name: "candidate-unstaged.patch", source: candidate.UnstagedPatch},
+	} {
+		if patch.source == nil {
+			continue
+		}
+		reader, err := patch.source(ctx)
+		if err != nil {
+			return CandidateSnapshot{}, err
+		}
+		artifact, createErr := s.createArtifact(ctx, scope, patch.name, "candidate_patch", "text/x-diff", reader, store.EmptyObject)
+		closeErr := reader.Close()
+		if createErr != nil {
+			return CandidateSnapshot{}, createErr
+		}
+		if closeErr != nil {
+			return CandidateSnapshot{}, fmt.Errorf("evidence: close private candidate patch: %w", closeErr)
+		}
+		snapshot.Artifacts = append(snapshot.Artifacts, artifact)
+	}
+
+	for _, file := range candidate.Files {
+		artifacts, err := s.snapshotPrivateCandidateFile(ctx, scope, file)
+		if err != nil {
+			return CandidateSnapshot{}, err
+		}
+		snapshot.Artifacts = append(snapshot.Artifacts, artifacts...)
+	}
+	return snapshot, nil
+}
+
+func (s *CandidateSnapshotter) snapshotCandidateManifest(ctx context.Context, scope RunScope, candidate Candidate) (store.Artifact, error) {
+	manifestData, err := json.Marshal(candidate)
+	if err != nil {
+		return store.Artifact{}, fmt.Errorf("evidence: encode candidate manifest: %w", err)
+	}
+	return s.createArtifact(ctx, scope, "candidate-manifest.json", "candidate_manifest", "application/json", bytes.NewReader(manifestData), store.EmptyObject)
+}
+
 func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope RunScope, workspace, relative string) ([]store.Artifact, error) {
 	file, info, err := openCandidateRegularFile(workspace, relative)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
-	executable := info.Mode().Perm()&0o111 != 0
+	return s.snapshotCandidateFileReader(ctx, scope, relative, info.Mode().Perm()&0o111 != 0, file)
+}
 
-	blobs, source := prepareCandidateBlobSource(s.blobs, scope.RunID, file)
+func (s *CandidateSnapshotter) snapshotPrivateCandidateFile(ctx context.Context, scope RunScope, candidate ReviewCandidateFile) ([]store.Artifact, error) {
+	if candidate.Source == nil {
+		return nil, fmt.Errorf("evidence: private candidate file source is required")
+	}
+	reader, err := candidate.Source(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+	return s.snapshotCandidateFileReader(ctx, scope, candidate.Path, candidate.Executable, reader)
+}
+
+func (s *CandidateSnapshotter) snapshotCandidateFileReader(ctx context.Context, scope RunScope, relative string, executable bool, reader io.Reader) ([]store.Artifact, error) {
+	blobs, source := prepareCandidateBlobSource(s.blobs, scope.RunID, reader)
 	limit := maxBlobBytes(blobs)
 	if limit <= 0 {
 		metadata, _ := json.Marshal(map[string]any{"path": relative, "executable": executable})
