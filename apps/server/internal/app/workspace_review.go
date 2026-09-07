@@ -21,7 +21,7 @@ func (s *WorkspaceService) ApplyReviewedCandidate(ctx context.Context, project s
 	}
 	applier, ok := s.materializer.(reviewedCandidateMaterializer)
 	if !ok {
-		return "", NewError("review_delivery_unsupported", "workspace materializer does not support Review delivery", workspacepkg.ErrInvalidMetadata)
+		return "", fmt.Errorf("workspace review delivery is unavailable")
 	}
 	revision, err := applier.ApplyReviewedCandidate(ctx, project, reviewID, candidate)
 	if err != nil {
