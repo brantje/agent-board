@@ -17,12 +17,20 @@ const (
 	// Keep answer latency bounded while preventing long-lived waiting runs from
 	// polling PostgreSQL at the initial five queries per second indefinitely.
 	interactiveQuestionPollMaxInterval = 2 * time.Second
+	interactiveQuestionReplyAcceptedEvent = "engine.question_reply_accepted"
+	interactiveQuestionResolvedEvent      = "engine.question_binding_resolved"
+	interactiveQuestionEventPageSize      = 500
 )
+
+type runEventReader interface {
+	ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error)
+}
 
 type interactiveQuestioner struct {
 	store             store.QuestionStore
 	interactive       store.InteractiveQuestionStore
 	events            *evidence.Recorder
+	eventReader       runEventReader
 	safe              executioncontext.SafeContext
 	runtimeInstanceID string
 	engine            string
@@ -32,7 +40,7 @@ func (q *interactiveQuestioner) Open(ctx context.Context, correlationKey string,
 	if q == nil || q.store == nil || q.interactive == nil || q.events == nil {
 		return engine.Question{}, fmt.Errorf("run execution: interactive Question capability is unavailable")
 	}
-	command, _, err := q.prepareOpenCommand(correlationKey, request)
+	command, err := q.prepareOpenCommand(correlationKey, request)
 	if err != nil {
 		return engine.Question{}, err
 	}
@@ -60,7 +68,7 @@ func (q *interactiveQuestioner) OpenBatch(ctx context.Context, requests []engine
 
 	commands := make([]store.OpenInteractiveQuestionCommand, len(requests))
 	for index, request := range requests {
-		command, _, err := q.prepareOpenCommand(request.CorrelationKey, request.Question)
+		command, err := q.prepareOpenCommand(request.CorrelationKey, request.Question)
 		if err != nil {
 			return nil, fmt.Errorf("run execution: prepare interactive Question batch item %d: %w", index, err)
 		}
@@ -103,15 +111,15 @@ func (q *interactiveQuestioner) OpenBatch(ctx context.Context, requests []engine
 	return opened, nil
 }
 
-func (q *interactiveQuestioner) prepareOpenCommand(correlationKey string, request engine.QuestionRequest) (store.OpenInteractiveQuestionCommand, []store.QuestionOption, error) {
+func (q *interactiveQuestioner) prepareOpenCommand(correlationKey string, request engine.QuestionRequest) (store.OpenInteractiveQuestionCommand, error) {
 	if err := validateQuestionRequest(request); err != nil {
-		return store.OpenInteractiveQuestionCommand{}, nil, err
+		return store.OpenInteractiveQuestionCommand{}, err
 	}
 	if !request.Blocking {
-		return store.OpenInteractiveQuestionCommand{}, nil, fmt.Errorf("run execution: interactive Questions must be blocking")
+		return store.OpenInteractiveQuestionCommand{}, fmt.Errorf("run execution: interactive Questions must be blocking")
 	}
 	if correlationKey == "" {
-		return store.OpenInteractiveQuestionCommand{}, nil, fmt.Errorf("run execution: interactive Question correlation key is required")
+		return store.OpenInteractiveQuestionCommand{}, fmt.Errorf("run execution: interactive Question correlation key is required")
 	}
 
 	options := make([]store.QuestionOption, 0, len(request.Options))
@@ -120,7 +128,7 @@ func (q *interactiveQuestioner) prepareOpenCommand(correlationKey string, reques
 	}
 	encodedOptions, err := json.Marshal(options)
 	if err != nil {
-		return store.OpenInteractiveQuestionCommand{}, nil, err
+		return store.OpenInteractiveQuestionCommand{}, err
 	}
 	return store.OpenInteractiveQuestionCommand{
 		Question: store.Question{
@@ -137,7 +145,7 @@ func (q *interactiveQuestioner) prepareOpenCommand(correlationKey string, reques
 		Engine:            q.engine,
 		CorrelationKey:    correlationKey,
 		RuntimeInstanceID: q.runtimeInstanceID,
-	}, options, nil
+	}, nil
 }
 
 func (q *interactiveQuestioner) recordOpenResult(ctx context.Context, result store.OpenInteractiveQuestionResult) error {
@@ -236,12 +244,107 @@ func nextInteractiveQuestionPollInterval(current time.Duration) time.Duration {
 	return next
 }
 
+func (q *interactiveQuestioner) MarkReplyAccepted(ctx context.Context, accepted []engine.AcceptedInteractiveQuestionReply) error {
+	if q == nil || q.events == nil || q.eventReader == nil || q.engine == "" {
+		return fmt.Errorf("run execution: interactive Question reply tracking is unavailable")
+	}
+	if len(accepted) == 0 {
+		return fmt.Errorf("run execution: accepted interactive Question reply is empty")
+	}
+	seen := make(map[string]struct{}, len(accepted))
+	for _, binding := range accepted {
+		if binding.QuestionID == "" || binding.CorrelationKey == "" {
+			return fmt.Errorf("run execution: accepted interactive Question reply requires question id and correlation key")
+		}
+		if _, duplicate := seen[binding.QuestionID]; duplicate {
+			return fmt.Errorf("run execution: accepted interactive Question reply contains duplicate question id")
+		}
+		seen[binding.QuestionID] = struct{}{}
+	}
+	return q.record(ctx, interactiveQuestionReplyAcceptedEvent, map[string]any{
+		"engine":   q.engine,
+		"bindings": accepted,
+	})
+}
+
+func (q *interactiveQuestioner) ListReplyAccepted(ctx context.Context) ([]engine.AcceptedInteractiveQuestionReply, error) {
+	if q == nil || q.eventReader == nil || q.engine == "" {
+		return nil, fmt.Errorf("run execution: interactive Question reply tracking is unavailable")
+	}
+	accepted := make(map[string]engine.AcceptedInteractiveQuestionReply)
+	order := make([]string, 0)
+	seenOrder := make(map[string]struct{})
+	after := int64(0)
+	for {
+		events, err := q.eventReader.ListRunEvents(ctx, q.safe.Project.ID, q.safe.Run.ID, after, interactiveQuestionEventPageSize)
+		if err != nil {
+			return nil, err
+		}
+		for _, event := range events {
+			if event.Sequence > after {
+				after = event.Sequence
+			}
+			switch event.Type {
+			case interactiveQuestionReplyAcceptedEvent:
+				var payload struct {
+					Engine   string                                    `json:"engine"`
+					Bindings []engine.AcceptedInteractiveQuestionReply `json:"bindings"`
+				}
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					return nil, fmt.Errorf("run execution: decode accepted interactive Question reply: %w", err)
+				}
+				if payload.Engine != q.engine {
+					continue
+				}
+				for _, binding := range payload.Bindings {
+					if binding.QuestionID == "" || binding.CorrelationKey == "" {
+						return nil, fmt.Errorf("run execution: accepted interactive Question reply event is malformed")
+					}
+					accepted[binding.QuestionID] = binding
+					if _, exists := seenOrder[binding.QuestionID]; !exists {
+						seenOrder[binding.QuestionID] = struct{}{}
+						order = append(order, binding.QuestionID)
+					}
+				}
+			case interactiveQuestionResolvedEvent:
+				var payload struct {
+					Engine     string `json:"engine"`
+					QuestionID string `json:"questionId"`
+				}
+				if err := json.Unmarshal(event.Payload, &payload); err != nil {
+					return nil, fmt.Errorf("run execution: decode resolved interactive Question reply: %w", err)
+				}
+				if payload.Engine == q.engine && payload.QuestionID != "" {
+					delete(accepted, payload.QuestionID)
+				}
+			}
+		}
+		if len(events) < interactiveQuestionEventPageSize {
+			break
+		}
+	}
+
+	result := make([]engine.AcceptedInteractiveQuestionReply, 0, len(accepted))
+	for _, questionID := range order {
+		if binding, ok := accepted[questionID]; ok {
+			result = append(result, binding)
+		}
+	}
+	return result, nil
+}
+
 func (q *interactiveQuestioner) Resolve(ctx context.Context, questionID string) error {
 	if q == nil || q.interactive == nil {
 		return fmt.Errorf("run execution: interactive Question capability is unavailable")
 	}
 	result, err := q.interactive.ResolveInteractiveQuestion(ctx, q.safe.Project.ID, questionID)
 	if err != nil {
+		return err
+	}
+	if err := q.record(ctx, interactiveQuestionResolvedEvent, map[string]any{
+		"engine":     q.engine,
+		"questionId": questionID,
+	}); err != nil {
 		return err
 	}
 	if result.Resumed {
@@ -272,3 +375,4 @@ func (q *interactiveQuestioner) record(ctx context.Context, eventType string, pa
 
 var _ engine.InteractiveQuestioner = (*interactiveQuestioner)(nil)
 var _ engine.InteractiveQuestionBatcher = (*interactiveQuestioner)(nil)
+var _ engine.InteractiveQuestionReplyTracker = (*interactiveQuestioner)(nil)
