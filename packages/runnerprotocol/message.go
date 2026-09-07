@@ -25,6 +25,10 @@ const (
 	TypeExit           MessageType = "exit"
 	TypeTerminate      MessageType = "terminate"
 	TypeKill           MessageType = "kill"
+	TypeConnect        MessageType = "connect"
+	TypeConnected      MessageType = "connected"
+	TypeConnectData    MessageType = "connect_data"
+	TypeConnectClose   MessageType = "connect_close"
 	TypeError          MessageType = "error"
 )
 
@@ -69,6 +73,30 @@ type StartRequest struct {
 
 type StreamData struct {
 	Data []byte `json:"data"`
+}
+
+// ConnectRequest opens a session-scoped connection from agent-runner to a
+// service that is local to the Runtime. The runner applies its own destination
+// policy; v0.1 only permits loopback TCP destinations.
+type ConnectRequest struct {
+	ConnectionID string `json:"connection_id"`
+	Network      string `json:"network"`
+	Address      string `json:"address"`
+}
+
+type Connected struct {
+	ConnectionID string `json:"connection_id"`
+}
+
+type ConnectData struct {
+	ConnectionID string `json:"connection_id"`
+	Data         []byte `json:"data"`
+}
+
+type ConnectClose struct {
+	ConnectionID string `json:"connection_id"`
+	Code         string `json:"code,omitempty"`
+	Message      string `json:"message,omitempty"`
 }
 
 type ExitResult struct {
@@ -146,7 +174,8 @@ func knownType(typ MessageType) bool {
 	switch typ {
 	case TypeServerHello, TypeRunnerHello, TypeHealth, TypeStart, TypeSessionStarted,
 		TypeStdin, TypeStdinClose, TypeStdout, TypeStderr, TypeExit,
-		TypeTerminate, TypeKill, TypeError:
+		TypeTerminate, TypeKill, TypeConnect, TypeConnected, TypeConnectData,
+		TypeConnectClose, TypeError:
 		return true
 	default:
 		return false
@@ -156,7 +185,8 @@ func knownType(typ MessageType) bool {
 func requiresSession(typ MessageType) bool {
 	switch typ {
 	case TypeStart, TypeSessionStarted, TypeStdin, TypeStdinClose, TypeStdout,
-		TypeStderr, TypeExit, TypeTerminate, TypeKill:
+		TypeStderr, TypeExit, TypeTerminate, TypeKill, TypeConnect, TypeConnected,
+		TypeConnectData, TypeConnectClose:
 		return true
 	default:
 		return false

@@ -53,6 +53,7 @@ type Connection struct {
 	mu        sync.RWMutex
 	sessions  map[string]*Session
 	pending   map[string]*pendingSessionMessages
+	connects  map[string]map[string]*sessionConn
 	health    protocol.Health
 	caps      protocol.Capabilities
 	err       error
@@ -79,6 +80,7 @@ func dialWith(ctx context.Context, dialer *websocket.Dialer, endpoint string, he
 		conn:     conn,
 		sessions: make(map[string]*Session),
 		pending:  make(map[string]*pendingSessionMessages),
+		connects: make(map[string]map[string]*sessionConn),
 		done:     make(chan struct{}),
 	}
 	conn.SetReadLimit(maxMessageSize)
@@ -316,6 +318,9 @@ func (c *Connection) handleMessage(msg protocol.Message) error {
 	if msg.Type == protocol.TypeError && msg.SessionID == "" {
 		return protocolErrorFromMessage(msg)
 	}
+	if msg.Type == protocol.TypeConnected || msg.Type == protocol.TypeConnectData || msg.Type == protocol.TypeConnectClose {
+		return c.handleConnectMessage(msg)
+	}
 
 	c.mu.Lock()
 	session := c.sessions[msg.SessionID]
@@ -443,11 +448,21 @@ func (c *Connection) fail(err error) {
 		for _, session := range c.sessions {
 			sessions = append(sessions, session)
 		}
+		connects := make([]*sessionConn, 0)
+		for _, byID := range c.connects {
+			for _, connection := range byID {
+				connects = append(connects, connection)
+			}
+		}
 		c.sessions = make(map[string]*Session)
 		c.pending = make(map[string]*pendingSessionMessages)
+		c.connects = make(map[string]map[string]*sessionConn)
 		c.mu.Unlock()
 		for _, session := range sessions {
 			session.fail(err)
+		}
+		for _, connection := range connects {
+			connection.closeRemote(err)
 		}
 		_ = c.conn.Close()
 		close(c.done)
