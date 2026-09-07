@@ -172,7 +172,7 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 
 	terminal := waitForScriptedRun(t, ctx, database, project.ID, run.ID)
 	if terminal.Status != "READY_FOR_REVIEW" {
-		t.Fatalf("run status=%s failure=%v", terminal.Status, terminal.FailureReason)
+		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
 	}
 	workspaceRecord, err := database.GetWorkspace(ctx, project.ID, terminal.WorkspaceID)
 	if err != nil {
@@ -312,7 +312,7 @@ func waitForOpenCodeQuestion(t *testing.T, ctx context.Context, database *postgr
 			t.Fatal(err)
 		}
 		if run.Status == "FAILED" || run.Status == "CANCELLED" {
-			t.Fatalf("run terminated before Question: status=%s failure=%v", run.Status, run.FailureReason)
+			t.Fatalf("run terminated before Question: status=%s failure=%q", run.Status, openCodeFailureReason(run.FailureReason))
 		}
 		filterRunID := runID
 		questions, err := database.ListQuestions(ctx, projectID, store.QuestionFilter{RunID: &filterRunID, Statuses: []string{"OPEN"}})
@@ -374,4 +374,11 @@ func openCodeEventIndex(events []store.Event, eventType string) int {
 		}
 	}
 	return -1
+}
+
+func openCodeFailureReason(reason *string) string {
+	if reason == nil {
+		return ""
+	}
+	return *reason
 }
