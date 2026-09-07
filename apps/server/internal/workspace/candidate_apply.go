@@ -126,6 +126,11 @@ func writeCandidateFiles(ctx context.Context, root string, files []CandidateFile
 		if err != nil {
 			return err
 		}
+		if _, err := os.Lstat(path); err == nil {
+			return fmt.Errorf("candidate file %q conflicts with an existing Project Workspace path", source.Path)
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("inspect accepted candidate %q: %w", source.Path, err)
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			return fmt.Errorf("create accepted candidate parent: %w", err)
 		}
