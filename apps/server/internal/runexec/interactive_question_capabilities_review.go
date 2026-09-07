@@ -11,7 +11,10 @@ type interactiveQuestionerWithoutReplyTracking struct {
 }
 
 func exposeInteractiveQuestioner(questioner *interactiveQuestioner) engine.InteractiveQuestioner {
-	if questioner == nil || questioner.eventReader != nil {
+	if questioner == nil {
+		return nil
+	}
+	if questioner.eventReader != nil {
 		return questioner
 	}
 	return interactiveQuestionerWithoutReplyTracking{
