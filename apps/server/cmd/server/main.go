@@ -243,6 +243,11 @@ func configureExecutionScheduler(services *app.Services) error {
 	if err != nil {
 		return err
 	}
+	reviewCandidates, err := evidence.NewReviewCandidateStore(configuredReviewCandidateRoot())
+	if err != nil {
+		return err
+	}
+	services.ReviewCandidates = reviewCandidates
 	runEvidence, err := app.NewRunEvidenceService(services.ExecutionStore, blobs)
 	if err != nil {
 		return err
@@ -256,7 +261,7 @@ func configureExecutionScheduler(services *app.Services) error {
 	if err != nil {
 		return err
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), services.ExecutionStore, blobs)
+	candidate, err := evidence.NewCandidateSnapshotterWithReviewCandidates(evidence.NewCandidateCollector(), services.ExecutionStore, blobs, reviewCandidates)
 	if err != nil {
 		return err
 	}
@@ -313,6 +318,10 @@ func configuredEvidenceRoot() string {
 		return filepath.Join(filepath.Dir(workspaceRoot), "evidence")
 	}
 	return defaultEvidenceRoot
+}
+
+func configuredReviewCandidateRoot() string {
+	return filepath.Join(configuredWorkspaceRoot(), ".review-candidates")
 }
 
 func configuredSchedulerOwnerID() string {
