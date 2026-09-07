@@ -50,6 +50,12 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 		return store.Run{}, err
 	}
 
+	if terminal && current.Status == "WAITING_FOR_INPUT" {
+		if err := cleanupTerminalInteractiveQuestions(ctx, tx, run); err != nil {
+			return store.Run{}, err
+		}
+	}
+
 	if input.RunStatus == "WAITING_FOR_INPUT" {
 		command, err := tx.Exec(ctx, `
 			UPDATE issues
