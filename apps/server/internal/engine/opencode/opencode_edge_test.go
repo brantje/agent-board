@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
@@ -80,10 +81,9 @@ func TestInitialTaskPromptIncludesReviewFeedback(t *testing.T) {
 }
 
 func TestWaitHealthyRetriesAndHonorsParentCancellation(t *testing.T) {
-	attempts := 0
+	var attempts atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		attempts++
-		if attempts == 1 {
+		if attempts.Add(1) == 1 {
 			http.Error(w, "starting", http.StatusServiceUnavailable)
 			return
 		}
@@ -97,8 +97,8 @@ func TestWaitHealthyRetriesAndHonorsParentCancellation(t *testing.T) {
 	if err := waitHealthy(context.Background(), native); err != nil {
 		t.Fatalf("waitHealthy() error=%v", err)
 	}
-	if attempts < 2 {
-		t.Fatalf("health attempts=%d want retry", attempts)
+	if attempts.Load() < 2 {
+		t.Fatalf("health attempts=%d want retry", attempts.Load())
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
