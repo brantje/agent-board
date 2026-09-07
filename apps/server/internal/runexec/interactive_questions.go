@@ -32,7 +32,7 @@ func (q *interactiveQuestioner) Open(ctx context.Context, correlationKey string,
 	if q == nil || q.store == nil || q.interactive == nil || q.events == nil {
 		return engine.Question{}, fmt.Errorf("run execution: interactive Question capability is unavailable")
 	}
-	command, options, err := q.prepareOpenCommand(correlationKey, request)
+	command, _, err := q.prepareOpenCommand(correlationKey, request)
 	if err != nil {
 		return engine.Question{}, err
 	}
@@ -40,7 +40,7 @@ func (q *interactiveQuestioner) Open(ctx context.Context, correlationKey string,
 	if err != nil {
 		return engine.Question{}, err
 	}
-	if err := q.recordOpenResult(ctx, result, options); err != nil {
+	if err := q.recordOpenResult(ctx, result); err != nil {
 		return engine.Question{}, err
 	}
 	return engine.Question{ID: result.Question.ID, Blocking: true}, nil
@@ -59,14 +59,12 @@ func (q *interactiveQuestioner) OpenBatch(ctx context.Context, requests []engine
 	}
 
 	commands := make([]store.OpenInteractiveQuestionCommand, len(requests))
-	options := make([][]store.QuestionOption, len(requests))
 	for index, request := range requests {
-		command, mappedOptions, err := q.prepareOpenCommand(request.CorrelationKey, request.Question)
+		command, _, err := q.prepareOpenCommand(request.CorrelationKey, request.Question)
 		if err != nil {
 			return nil, fmt.Errorf("run execution: prepare interactive Question batch item %d: %w", index, err)
 		}
 		commands[index] = command
-		options[index] = mappedOptions
 	}
 
 	batch, err := batchStore.OpenInteractiveQuestions(ctx, commands)
@@ -80,7 +78,7 @@ func (q *interactiveQuestioner) OpenBatch(ctx context.Context, requests []engine
 	opened := make([]engine.Question, len(batch.Questions))
 	for index, result := range batch.Questions {
 		if result.Created {
-			if err := q.recordCreated(ctx, result.Question, options[index]); err != nil {
+			if err := q.recordCreated(ctx, result.Question); err != nil {
 				return nil, err
 			}
 		}
@@ -137,9 +135,9 @@ func (q *interactiveQuestioner) prepareOpenCommand(correlationKey string, reques
 	}, options, nil
 }
 
-func (q *interactiveQuestioner) recordOpenResult(ctx context.Context, result store.OpenInteractiveQuestionResult, options []store.QuestionOption) error {
+func (q *interactiveQuestioner) recordOpenResult(ctx context.Context, result store.OpenInteractiveQuestionResult) error {
 	if result.Created {
-		if err := q.recordCreated(ctx, result.Question, options); err != nil {
+		if err := q.recordCreated(ctx, result.Question); err != nil {
 			return err
 		}
 	}
@@ -149,7 +147,13 @@ func (q *interactiveQuestioner) recordOpenResult(ctx context.Context, result sto
 	return nil
 }
 
-func (q *interactiveQuestioner) recordCreated(ctx context.Context, question store.Question, options []store.QuestionOption) error {
+func (q *interactiveQuestioner) recordCreated(ctx context.Context, question store.Question) error {
+	options := make([]store.QuestionOption, 0)
+	if len(question.Options) != 0 {
+		if err := json.Unmarshal(question.Options, &options); err != nil {
+			return fmt.Errorf("run execution: decode persisted Question options: %w", err)
+		}
+	}
 	return q.record(ctx, "question.created", map[string]any{
 		"questionId": question.ID,
 		"prompt":     question.Prompt,
