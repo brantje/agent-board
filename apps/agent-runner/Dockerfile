@@ -41,12 +41,14 @@ RUN apk add --no-cache curl git tar libstdc++ libgcc \
     && test "$(opencode --version)" = "${OPENCODE_VERSION}" \
     && addgroup -S agentboard \
     && if [ -n "${AGENT_BOARD_UID}" ]; then \
-         adduser -S -D -H -u "${AGENT_BOARD_UID}" -G agentboard agentboard; \
+         adduser -S -D -h /home/agentboard -u "${AGENT_BOARD_UID}" -G agentboard agentboard; \
        else \
-         adduser -S -D -H -G agentboard agentboard; \
+         adduser -S -D -h /home/agentboard -G agentboard agentboard; \
        fi
 COPY --from=build /out/agent-runner /usr/local/bin/agent-runner
 
+ENV HOME=/home/agentboard \
+    SHELL=/bin/sh
 USER agentboard
 WORKDIR /workspace
 ENTRYPOINT ["/usr/local/bin/agent-runner"]
