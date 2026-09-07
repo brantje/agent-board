@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"net"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
@@ -46,6 +48,12 @@ type launcherDialClient struct {
 	sessionID string
 	network   string
 	address   string
+	process   *launcherDialTransport
+}
+
+func (c *launcherDialClient) Start(_ context.Context, sessionID string, _ runner.Request) (runner.ProcessSession, error) {
+	c.process = &launcherDialTransport{id: sessionID, done: make(chan struct{})}
+	return c.process, nil
 }
 
 func (c *launcherDialClient) DialSession(_ context.Context, sessionID, network, address string) (net.Conn, error) {
@@ -54,6 +62,28 @@ func (c *launcherDialClient) DialSession(_ context.Context, sessionID, network, 
 	c.address = address
 	return c.conn, nil
 }
+
+type launcherDialTransport struct {
+	id   string
+	done chan struct{}
+	once sync.Once
+}
+
+func (p *launcherDialTransport) ID() string            { return p.id }
+func (*launcherDialTransport) Stdout() io.Reader       { return strings.NewReader("") }
+func (*launcherDialTransport) Stderr() io.Reader       { return strings.NewReader("") }
+func (*launcherDialTransport) Stdin() io.WriteCloser   { return &launcherStdin{} }
+func (p *launcherDialTransport) Wait(ctx context.Context) (runner.Result, error) {
+	select {
+	case <-p.done:
+		return runner.Result{ExitCode: 0}, nil
+	case <-ctx.Done():
+		return runner.Result{}, ctx.Err()
+	}
+}
+func (p *launcherDialTransport) Terminate(context.Context) error { p.finish(); return nil }
+func (p *launcherDialTransport) Kill(context.Context) error      { p.finish(); return nil }
+func (p *launcherDialTransport) finish()                         { p.once.Do(func() { close(p.done) }) }
 
 func TestCapturingProcessDialsThroughItsOwningExecutionSession(t *testing.T) {
 	safe := processTestSafeContext(t.TempDir())
@@ -124,6 +154,10 @@ func TestCapturingProcessDialsThroughItsOwningExecutionSession(t *testing.T) {
 	}
 	_ = conn.Close()
 
+	if client.process == nil {
+		t.Fatal("dial transport process was not created")
+	}
+	client.process.finish()
 	if _, err := process.Wait(t.Context()); err != nil {
 		t.Fatalf("Wait() error=%v", err)
 	}
