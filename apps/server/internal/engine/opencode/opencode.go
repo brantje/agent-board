@@ -26,6 +26,7 @@ const (
 	reconnectAttempts           = 10
 	nativeStatePollInterval     = 250 * time.Millisecond
 	inactivePollsBeforeComplete = 2
+	serviceTerminateGrace       = time.Second
 	serviceStopTimeout          = 5 * time.Second
 )
 
@@ -389,20 +390,60 @@ func cancelNativeSession(parent context.Context, native *client.Client, sessionI
 }
 
 func stopService(parent context.Context, process engine.Process) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), serviceStopTimeout)
-	defer cancel()
-	_ = process.Terminate(ctx)
-	result, err := process.Wait(ctx)
-	if err == nil {
-		_ = result
+	return stopServiceWithin(parent, process, serviceTerminateGrace, serviceStopTimeout)
+}
+
+func stopServiceWithin(parent context.Context, process engine.Process, terminateGrace, forceTimeout time.Duration) error {
+	base := context.WithoutCancel(parent)
+	waitDone := make(chan error, 1)
+	go func() {
+		_, err := process.Wait(base)
+		waitDone <- err
+	}()
+
+	terminateCtx, cancelTerminate := context.WithTimeout(base, forceTimeout)
+	terminateErr := process.Terminate(terminateCtx)
+	cancelTerminate()
+
+	if terminateErr == nil {
+		timer := time.NewTimer(terminateGrace)
+		select {
+		case waitErr := <-waitDone:
+			if !timer.Stop() {
+				<-timer.C
+			}
+			if waitErr != nil {
+				return fmt.Errorf("opencode engine: stop native server: %w", waitErr)
+			}
+			return nil
+		case <-timer.C:
+		}
+	} else {
+		select {
+		case waitErr := <-waitDone:
+			if waitErr != nil {
+				return fmt.Errorf("opencode engine: stop native server: %w", errors.Join(terminateErr, waitErr))
+			}
+			return nil
+		default:
+		}
+	}
+
+	killCtx, cancelKill := context.WithTimeout(base, forceTimeout)
+	killErr := process.Kill(killCtx)
+	cancelKill()
+
+	timer := time.NewTimer(forceTimeout)
+	defer timer.Stop()
+	select {
+	case waitErr := <-waitDone:
+		if waitErr != nil {
+			return fmt.Errorf("opencode engine: stop native server: %w", errors.Join(terminateErr, killErr, waitErr))
+		}
 		return nil
+	case <-timer.C:
+		return fmt.Errorf("opencode engine: stop native server: %w", errors.Join(terminateErr, killErr, context.DeadlineExceeded))
 	}
-	_ = process.Kill(ctx)
-	_, waitErr := process.Wait(ctx)
-	if waitErr != nil {
-		return fmt.Errorf("opencode engine: stop native server: %w", errors.Join(err, waitErr))
-	}
-	return nil
 }
 
 var _ engine.Engine = (*Engine)(nil)
