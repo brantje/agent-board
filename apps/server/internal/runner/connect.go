@@ -189,25 +189,27 @@ type sessionConn struct {
 	closeOnce   sync.Once
 	connectOnce sync.Once
 
-	mu            sync.Mutex
-	current       []byte
-	closeErr      error
-	readDeadline  time.Time
-	writeDeadline time.Time
-	deadlineWake  chan struct{}
+	mu                sync.Mutex
+	current           []byte
+	closeErr          error
+	readDeadline      time.Time
+	writeDeadline     time.Time
+	readDeadlineWake  chan struct{}
+	writeDeadlineWake chan struct{}
 }
 
 func newSessionConn(parent *Connection, sessionID, id, network, address string) *sessionConn {
 	return &sessionConn{
-		parent:       parent,
-		sessionID:    sessionID,
-		id:           id,
-		network:      network,
-		address:      address,
-		incoming:     make(chan []byte, connectReadQueueDepth),
-		connected:    make(chan error, 1),
-		done:         make(chan struct{}),
-		deadlineWake: make(chan struct{}),
+		parent:            parent,
+		sessionID:         sessionID,
+		id:                id,
+		network:           network,
+		address:           address,
+		incoming:          make(chan []byte, connectReadQueueDepth),
+		connected:         make(chan error, 1),
+		done:              make(chan struct{}),
+		readDeadlineWake:  make(chan struct{}),
+		writeDeadlineWake: make(chan struct{}),
 	}
 }
 
@@ -224,7 +226,7 @@ func (c *sessionConn) Read(p []byte) (int, error) {
 			return n, nil
 		}
 		deadline := c.readDeadline
-		wake := c.deadlineWake
+		wake := c.readDeadlineWake
 		c.mu.Unlock()
 
 		select {
@@ -289,20 +291,41 @@ func (c *sessionConn) Write(p []byte) (int, error) {
 			return written, c.writeCloseError()
 		default:
 		}
-		c.mu.Lock()
-		deadline := c.writeDeadline
-		c.mu.Unlock()
-		if !deadline.IsZero() && !time.Now().Before(deadline) {
-			return written, os.ErrDeadlineExceeded
-		}
 		size := len(p)
 		if size > connectWriteChunkSize {
 			size = connectWriteChunkSize
 		}
 		chunk := append([]byte(nil), p[:size]...)
-		if err := c.parent.write(protocol.TypeConnectData, c.sessionID, protocol.ConnectData{ConnectionID: c.id, Data: chunk}); err != nil {
-			c.closeRemote(err)
-			return written, err
+
+		for {
+			c.mu.Lock()
+			deadline := c.writeDeadline
+			wake := c.writeDeadlineWake
+			c.mu.Unlock()
+			if !deadline.IsZero() && !time.Now().Before(deadline) {
+				return written, os.ErrDeadlineExceeded
+			}
+			err := c.parent.writeSessionMessage(
+				protocol.TypeConnectData,
+				c.sessionID,
+				protocol.ConnectData{ConnectionID: c.id, Data: chunk},
+				deadline,
+				wake,
+				c.done,
+			)
+			if errors.Is(err, errSessionWriteDeadlineChanged) {
+				continue
+			}
+			if err != nil {
+				select {
+				case <-c.done:
+					return written, c.writeCloseError()
+				default:
+				}
+				c.closeRemote(err)
+				return written, err
+			}
+			break
 		}
 		written += size
 		p = p[size:]
@@ -325,7 +348,7 @@ func (c *sessionConn) RemoteAddr() net.Addr {
 func (c *sessionConn) SetDeadline(deadline time.Time) error {
 	c.mu.Lock()
 	c.setReadDeadlineLocked(deadline)
-	c.writeDeadline = deadline
+	c.setWriteDeadlineLocked(deadline)
 	c.mu.Unlock()
 	return nil
 }
@@ -339,17 +362,25 @@ func (c *sessionConn) SetReadDeadline(deadline time.Time) error {
 
 func (c *sessionConn) setReadDeadlineLocked(deadline time.Time) {
 	c.readDeadline = deadline
-	if c.deadlineWake != nil {
-		close(c.deadlineWake)
+	if c.readDeadlineWake != nil {
+		close(c.readDeadlineWake)
 	}
-	c.deadlineWake = make(chan struct{})
+	c.readDeadlineWake = make(chan struct{})
 }
 
 func (c *sessionConn) SetWriteDeadline(deadline time.Time) error {
 	c.mu.Lock()
-	c.writeDeadline = deadline
+	c.setWriteDeadlineLocked(deadline)
 	c.mu.Unlock()
 	return nil
+}
+
+func (c *sessionConn) setWriteDeadlineLocked(deadline time.Time) {
+	c.writeDeadline = deadline
+	if c.writeDeadlineWake != nil {
+		close(c.writeDeadlineWake)
+	}
+	c.writeDeadlineWake = make(chan struct{})
 }
 
 func (c *sessionConn) push(data []byte) bool {
