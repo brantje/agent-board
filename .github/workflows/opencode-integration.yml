@@ -1,0 +1,120 @@
+name: OpenCode integration
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/opencode-integration.yml
+      - apps/agent-runner/Dockerfile
+      - apps/agent-runner/internal/**
+      - apps/server/internal/app/execution_connect.go
+      - apps/server/internal/engine/opencode/**
+      - apps/server/internal/runexec/**
+      - apps/server/internal/runner/**
+      - apps/server/internal/store/**
+      - packages/database/schema.sql
+      - packages/runnerprotocol/**
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/opencode-integration.yml
+      - apps/agent-runner/Dockerfile
+      - apps/agent-runner/internal/**
+      - apps/server/internal/app/execution_connect.go
+      - apps/server/internal/engine/opencode/**
+      - apps/server/internal/runexec/**
+      - apps/server/internal/runner/**
+      - apps/server/internal/store/**
+      - packages/database/schema.sql
+      - packages/runnerprotocol/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opencode-integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  openrouter:
+    name: OpenRouter native Question round trip
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: agent_board_test
+          POSTGRES_USER: agent_board
+          POSTGRES_PASSWORD: agent_board
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agent_board -d agent_board_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENT_BOARD_TEST_DATABASE_URL: postgres://agent_board:agent_board@127.0.0.1:5432/agent_board_test?sslmode=disable
+      AGENT_BOARD_TEST_DATABASE_RESET: "1"
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_WHITELIST: ${{ vars.OPENROUTER_WHITELIST || secrets.OPENROUTER_WHITELIST }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - name: Select allowlisted OpenRouter model
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
+            echo 'OPENROUTER_API_KEY repository secret is required' >&2
+            exit 1
+          fi
+          if [[ -z "${OPENROUTER_WHITELIST:-}" ]]; then
+            echo 'OPENROUTER_WHITELIST repository variable or secret is required' >&2
+            exit 1
+          fi
+
+          selected=''
+          IFS=',' read -r -a candidates <<< "$OPENROUTER_WHITELIST"
+          for candidate in "${candidates[@]}"; do
+            candidate="${candidate#"${candidate%%[![:space:]]*}"}"
+            candidate="${candidate%"${candidate##*[![:space:]]}"}"
+            if [[ -n "$candidate" ]]; then
+              selected="$candidate"
+              break
+            fi
+          done
+          if [[ -z "$selected" ]]; then
+            echo 'OPENROUTER_WHITELIST contains no model IDs' >&2
+            exit 1
+          fi
+          if [[ "$selected" == *$'\n'* || "$selected" == *$'\r'* ]]; then
+            echo 'OPENROUTER_WHITELIST contains an invalid model ID' >&2
+            exit 1
+          fi
+
+          printf 'AGENT_BOARD_TEST_OPENCODE_MODEL=%s\n' "$selected" >> "$GITHUB_ENV"
+      - name: Build OpenCode Runtime image
+        run: >-
+          docker build
+          --build-arg AGENT_BOARD_UID="$(id -u)"
+          --file apps/agent-runner/Dockerfile
+          --tag agent-board-opencode-runtime:ci
+          .
+      - name: Run real OpenCode native Question round trip
+        working-directory: apps/server
+        env:
+          AGENT_BOARD_TEST_OPENCODE: "1"
+          AGENT_BOARD_TEST_DOCKER: "1"
+          AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE: agent-board-opencode-runtime:ci
+          AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND: openrouter
+          AGENT_BOARD_TEST_OPENCODE_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: go test -count=1 -run '^TestOpenCodeDockerInteractiveQuestionRoundTrip$' -v ./internal/runexec
