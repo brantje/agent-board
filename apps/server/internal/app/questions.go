@@ -14,7 +14,7 @@ type QuestionService struct {
 
 func NewQuestionService(questionStore store.QuestionStore) (*QuestionService, error) {
 	if questionStore == nil {
-		return nil, fmt.Errorf("Question store is required")
+		return nil, fmt.Errorf("question store is required")
 	}
 	return &QuestionService{store: questionStore}, nil
 }
