@@ -112,7 +112,7 @@ func TestPendingSessionConnectQueuesDataUntilDialCompletes(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("dial peer was not created")
 	}
-	defer peer.Close()
+	defer func() { _ = peer.Close() }()
 	if err := peer.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
