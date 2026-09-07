@@ -96,7 +96,7 @@ func TestCandidateApplierRollsBackFailedCandidateDelivery(t *testing.T) {
 	}
 }
 
-func TestCandidateApplierSurfacesApprovalLockReleaseFailure(t *testing.T) {
+func TestCandidateApplierRecoversApprovalLockReleaseFailureAfterCommit(t *testing.T) {
 	git := requireGit(t).GitCLI
 	repo := createFixtureRepository(t, git, t.TempDir())
 	releaseErr := errors.New("approval lock release failed")
@@ -117,11 +117,18 @@ func TestCandidateApplierSurfacesApprovalLockReleaseFailure(t *testing.T) {
 			}},
 		}},
 	})
-	if !errors.Is(err, releaseErr) {
-		t.Fatalf("Apply() error=%v want release error", err)
+	if err != nil {
+		t.Fatalf("Apply() error=%v, want committed delivery to remain successful", err)
 	}
-	if revision != "" {
-		t.Fatalf("Apply() revision=%q want empty revision after release failure", revision)
+	if strings.TrimSpace(revision) == "" {
+		t.Fatal("Apply() returned an empty accepted revision")
+	}
+	foundRevision, found, findErr := git.findAcceptedReview(t.Context(), repo, "review-release-failure")
+	if findErr != nil {
+		t.Fatal(findErr)
+	}
+	if !found || foundRevision != revision {
+		t.Fatalf("accepted review revision=%q found=%v want=%q", foundRevision, found, revision)
 	}
 
 	content, readErr := os.ReadFile(filepath.Join(repo, "accepted.txt"))
