@@ -3,6 +3,7 @@ package opencode
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"sync"
 	"sync/atomic"
@@ -13,16 +14,22 @@ import (
 )
 
 type serviceStopProcess struct {
-	done             chan struct{}
-	closeOnce        sync.Once
-	waitCalls        atomic.Int32
-	terminateCalls   atomic.Int32
-	killCalls        atomic.Int32
-	exitOnTerminate  bool
+	done            chan struct{}
+	closeOnce       sync.Once
+	waitCalls       atomic.Int32
+	terminateCalls  atomic.Int32
+	killCalls       atomic.Int32
+	exitOnTerminate bool
+	exitOnKill      bool
+	waitErr         error
 }
 
 func newServiceStopProcess(exitOnTerminate bool) *serviceStopProcess {
-	return &serviceStopProcess{done: make(chan struct{}), exitOnTerminate: exitOnTerminate}
+	return &serviceStopProcess{
+		done:            make(chan struct{}),
+		exitOnTerminate: exitOnTerminate,
+		exitOnKill:      true,
+	}
 }
 
 func (p *serviceStopProcess) ID() string            { return "service-stop" }
@@ -33,6 +40,9 @@ func (p *serviceStopProcess) Wait(ctx context.Context) (engine.ProcessResult, er
 	p.waitCalls.Add(1)
 	select {
 	case <-p.done:
+		if p.waitErr != nil {
+			return engine.ProcessResult{}, p.waitErr
+		}
 		return engine.ProcessResult{ExitCode: -1}, nil
 	case <-ctx.Done():
 		return engine.ProcessResult{}, ctx.Err()
@@ -47,7 +57,9 @@ func (p *serviceStopProcess) Terminate(context.Context) error {
 }
 func (p *serviceStopProcess) Kill(context.Context) error {
 	p.killCalls.Add(1)
-	p.closeOnce.Do(func() { close(p.done) })
+	if p.exitOnKill {
+		p.closeOnce.Do(func() { close(p.done) })
+	}
 	return nil
 }
 
@@ -65,6 +77,31 @@ func TestStopServiceForceStopsWithoutSecondWait(t *testing.T) {
 	process := newServiceStopProcess(false)
 	if err := stopServiceWithin(context.Background(), process, 10*time.Millisecond, 100*time.Millisecond); err != nil {
 		t.Fatalf("stopServiceWithin() error=%v", err)
+	}
+	if process.waitCalls.Load() != 1 || process.terminateCalls.Load() != 1 || process.killCalls.Load() != 1 {
+		t.Fatalf("wait=%d terminate=%d kill=%d", process.waitCalls.Load(), process.terminateCalls.Load(), process.killCalls.Load())
+	}
+}
+
+func TestStopServicePropagatesForcedWaitFailure(t *testing.T) {
+	waitErr := errors.New("forced wait failed")
+	process := newServiceStopProcess(false)
+	process.waitErr = waitErr
+	if err := stopServiceWithin(context.Background(), process, 10*time.Millisecond, 100*time.Millisecond); !errors.Is(err, waitErr) {
+		t.Fatalf("stopServiceWithin() error=%v want wrapped %v", err, waitErr)
+	}
+	if process.waitCalls.Load() != 1 || process.terminateCalls.Load() != 1 || process.killCalls.Load() != 1 {
+		t.Fatalf("wait=%d terminate=%d kill=%d", process.waitCalls.Load(), process.terminateCalls.Load(), process.killCalls.Load())
+	}
+}
+
+func TestStopServiceFailsBoundedlyWhenProcessIgnoresSignals(t *testing.T) {
+	process := newServiceStopProcess(false)
+	process.exitOnKill = false
+	err := stopServiceWithin(context.Background(), process, 5*time.Millisecond, 20*time.Millisecond)
+	process.closeOnce.Do(func() { close(process.done) })
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("stopServiceWithin() error=%v want deadline exceeded", err)
 	}
 	if process.waitCalls.Load() != 1 || process.terminateCalls.Load() != 1 || process.killCalls.Load() != 1 {
 		t.Fatalf("wait=%d terminate=%d kill=%d", process.waitCalls.Load(), process.terminateCalls.Load(), process.killCalls.Load())
