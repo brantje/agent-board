@@ -100,6 +100,64 @@ func TestSchedulerTransitionReleasesCapacityOnInactiveStates(t *testing.T) {
 	}
 }
 
+func TestSchedulerReadyForReviewPreservesDoneIssueAndReleasesOwnership(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "ready-review-done-issue")
+	enqueueFixtureRun(t, s, f, f.run, "ready-review-done-issue")
+	admission := mustAdmit(t, s, "worker-ready-review-done-issue")
+
+	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID:  f.project.ID,
+		JobID:      admission.Job.ID,
+		RunID:      f.run.ID,
+		LeaseToken: admission.Lease.LeaseToken,
+		RunStatus:  "RUNNING",
+	}); err != nil {
+		t.Fatalf("transition running: %v", err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE issues SET status='DONE' WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID); err != nil {
+		t.Fatalf("mark issue done: %v", err)
+	}
+
+	run, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID:  f.project.ID,
+		JobID:      admission.Job.ID,
+		RunID:      f.run.ID,
+		LeaseToken: admission.Lease.LeaseToken,
+		RunStatus:  "READY_FOR_REVIEW",
+	})
+	if err != nil {
+		t.Fatalf("transition ready for review: %v", err)
+	}
+	if run.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("run status=%s want READY_FOR_REVIEW", run.Status)
+	}
+	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 0, 0)
+
+	var issueStatus, jobState string
+	if err := s.pool.QueryRow(ctx, `SELECT status FROM issues WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID).Scan(&issueStatus); err != nil {
+		t.Fatalf("read issue status: %v", err)
+	}
+	if issueStatus != "DONE" {
+		t.Fatalf("issue status=%s want DONE", issueStatus)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT state FROM scheduler_jobs WHERE id=$1`, admission.Job.ID).Scan(&jobState); err != nil {
+		t.Fatalf("read job state: %v", err)
+	}
+	if jobState != "DONE" {
+		t.Fatalf("job state=%s want DONE", jobState)
+	}
+
+	var reviewStatus string
+	if err := s.pool.QueryRow(ctx, `SELECT status FROM reviews WHERE run_id=$1`, f.run.ID).Scan(&reviewStatus); err != nil {
+		t.Fatalf("read review: %v", err)
+	}
+	if reviewStatus != "PENDING" {
+		t.Fatalf("review status=%s want PENDING", reviewStatus)
+	}
+}
+
 func TestCreatePendingReviewIsIdempotentAndRejectsConflictingExistingReview(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
