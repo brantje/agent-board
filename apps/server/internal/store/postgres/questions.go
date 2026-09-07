@@ -172,7 +172,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		UPDATE questions
 		SET status = 'ANSWERED', answered_at = now()
 		WHERE project_id = $1 AND id = $2 AND status = 'OPEN'
-		RETTRNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
 	`, question.ProjectID, question.ID))
 	if err != nil {
 		return store.AnswerQuestionResult{}, err
