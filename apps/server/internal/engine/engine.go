@@ -67,6 +67,11 @@ type QuestionAnswer struct {
 	OptionIDs []string
 }
 
+type AcceptedInteractiveQuestionReply struct {
+	QuestionID     string
+	CorrelationKey string
+}
+
 type Continuation struct {
 	QuestionID string
 	DecisionID string
@@ -94,6 +99,15 @@ type InteractiveQuestioner interface {
 // while engines with multi-Question native requests can require batch safety.
 type InteractiveQuestionBatcher interface {
 	OpenBatch(context.Context, []CorrelatedQuestionRequest) ([]Question, error)
+}
+
+// InteractiveQuestionReplyTracker durably records that a native engine has
+// accepted a reply before canonical bindings are resolved. The accepted list is
+// recovery state: engines can finish any ANSWERED bindings after the native
+// request disappears, including after partial local resolution progress.
+type InteractiveQuestionReplyTracker interface {
+	MarkReplyAccepted(context.Context, []string) error
+	ListReplyAccepted(context.Context) ([]AcceptedInteractiveQuestionReply, error)
 }
 
 type Request struct {
