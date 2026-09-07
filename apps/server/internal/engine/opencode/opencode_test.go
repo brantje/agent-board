@@ -39,13 +39,20 @@ func (p *fakeOpenCodeProcess) Wait(ctx context.Context) (engine.ProcessResult, e
 		return engine.ProcessResult{}, ctx.Err()
 	}
 }
-func (p *fakeOpenCodeProcess) Terminate(context.Context) error { p.once.Do(func() { close(p.done) }); return nil }
-func (p *fakeOpenCodeProcess) Kill(context.Context) error      { p.once.Do(func() { close(p.done) }); return nil }
+func (p *fakeOpenCodeProcess) Terminate(context.Context) error {
+	p.once.Do(func() { close(p.done) })
+	return nil
+}
+func (p *fakeOpenCodeProcess) Kill(context.Context) error {
+	p.once.Do(func() { close(p.done) })
+	return nil
+}
 func (p *fakeOpenCodeProcess) DialContext(ctx context.Context, network, _ string) (net.Conn, error) {
 	return (&net.Dialer{}).DialContext(ctx, network, p.target)
 }
 
 type nopWriteCloser struct{ io.Writer }
+
 func (nopWriteCloser) Close() error { return nil }
 
 type fakeOpenCodeLauncher struct {
@@ -110,14 +117,11 @@ type nativeServerHarness struct {
 	replied         bool
 	questionRequest map[string]any
 	events          chan string
-	replyDone       chan struct{}
-	closeReply      sync.Once
 }
 
 func newNativeServerHarness() *nativeServerHarness {
 	return &nativeServerHarness{
-		events:    make(chan string, 8),
-		replyDone: make(chan struct{}),
+		events: make(chan string, 8),
 		questionRequest: map[string]any{
 			"id": "que_native", "sessionID": "ses_native", "questions": []any{
 				map[string]any{
@@ -192,13 +196,15 @@ func (h *nativeServerHarness) handler(t *testing.T) http.Handler {
 		h.events <- string(event)
 		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "input_native"}})
 	})
-	mux.HandleFunc("POST /api/session/ses_native/wait", func(w http.ResponseWriter, r *http.Request) {
-		select {
-		case <-r.Context().Done():
+	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
+		h.mu.Lock()
+		replied := h.replied
+		h.mu.Unlock()
+		if replied {
+			writeNativeJSON(t, w, map[string]any{"data": map[string]any{}})
 			return
-		case <-h.replyDone:
-			w.WriteHeader(http.StatusNoContent)
 		}
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"ses_native": map[string]any{"type": "running"}}})
 	})
 	mux.HandleFunc("GET /api/session/ses_native/question", func(w http.ResponseWriter, _ *http.Request) {
 		h.mu.Lock()
@@ -219,7 +225,6 @@ func (h *nativeServerHarness) handler(t *testing.T) http.Handler {
 		h.replyAnswers = payload.Answers
 		h.replied = true
 		h.mu.Unlock()
-		h.closeReply.Do(func() { close(h.replyDone) })
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /api/session/ses_native/interrupt", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
