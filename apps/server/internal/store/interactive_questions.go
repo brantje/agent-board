@@ -37,6 +37,12 @@ type OpenInteractiveQuestionResult struct {
 	EnteredWaiting bool
 }
 
+type OpenInteractiveQuestionsResult struct {
+	Questions      []OpenInteractiveQuestionResult
+	Run            Run
+	EnteredWaiting bool
+}
+
 type ResolveInteractiveQuestionResult struct {
 	Binding InteractiveQuestionBinding
 	Run     Run
@@ -46,6 +52,13 @@ type ResolveInteractiveQuestionResult struct {
 type InteractiveQuestionStore interface {
 	OpenInteractiveQuestion(context.Context, OpenInteractiveQuestionCommand) (OpenInteractiveQuestionResult, error)
 	ResolveInteractiveQuestion(context.Context, string, string) (ResolveInteractiveQuestionResult, error)
+}
+
+// InteractiveQuestionBatchStore atomically creates or reconciles a group of
+// interactive Questions that belong to one native request. Either the complete
+// batch becomes durable or none of its new Questions/bindings do.
+type InteractiveQuestionBatchStore interface {
+	OpenInteractiveQuestions(context.Context, []OpenInteractiveQuestionCommand) (OpenInteractiveQuestionsResult, error)
 }
 
 type InteractiveQuestionStoreCapability interface {
