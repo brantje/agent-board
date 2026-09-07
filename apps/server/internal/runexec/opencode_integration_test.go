@@ -187,8 +187,8 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read OpenCode result: %v", err)
 	}
-	if string(result) != "beta\n" {
-		t.Fatalf("OpenCode result=%q want %q", result, "beta\\n")
+	if got := string(result); got != "beta" && got != "beta\n" {
+		t.Fatalf("OpenCode result=%q want %q or %q", result, "beta", "beta\n")
 	}
 
 	events, err := database.ListRunEvents(ctx, project.ID, run.ID, 0, 500)
@@ -196,6 +196,9 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertOpenCodeQuestionEventOrder(t, events)
+	for _, eventType := range []string{"question.created", "run.waiting_for_input", "question.answered", "run.resumed"} {
+		assertOpenCodeEventCount(t, events, eventType, 1)
+	}
 	sessions, err := database.ListExecutionSessionsByRun(ctx, project.ID, run.ID, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -294,7 +297,7 @@ func createOpenCodeIntegrationRun(
 	issue, err := control.CreateIssue(ctx, store.Issue{
 		ProjectID: project.ID,
 		Title:     "Prove the native OpenCode Question round trip",
-		Description: "Before changing any files, use OpenCode's native Question tool to ask exactly one blocking single-choice Question: 'Which marker should I write?' with options 'alpha' and 'beta'. Do not use a free-form answer. After the human answer, create opencode-result.txt containing exactly the selected marker followed by a newline. Do not ask any other Question and do not modify other files.",
+		Description: "Before changing any files, use OpenCode's native Question tool to ask exactly one blocking single-choice Question: 'Which marker should I write?' with options 'alpha' and 'beta'. Do not use a free-form answer. After the human answer, create opencode-result.txt containing only the selected marker; a single trailing newline is allowed. Do not ask any other Question and do not modify other files.",
 		Status:    "TODO",
 	})
 	if err != nil {
@@ -369,6 +372,19 @@ func assertOpenCodeQuestionEventOrder(t *testing.T, events []store.Event) {
 			t.Fatalf("OpenCode Question event order=%v", eventTypes(events))
 		}
 		last = index
+	}
+}
+
+func assertOpenCodeEventCount(t *testing.T, events []store.Event, eventType string, want int) {
+	t.Helper()
+	got := 0
+	for _, event := range events {
+		if event.Type == eventType {
+			got++
+		}
+	}
+	if got != want {
+		t.Fatalf("OpenCode %s event count=%d want %d; events=%v", eventType, got, want, eventTypes(events))
 	}
 }
 
