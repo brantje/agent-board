@@ -117,4 +117,22 @@ jobs:
           AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE: agent-board-opencode-runtime:ci
           AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND: openrouter
           AGENT_BOARD_TEST_OPENCODE_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-        run: go test -count=1 -run '^TestOpenCodeDockerInteractiveQuestionRoundTrip$' -v ./internal/runexec
+        run: |
+          set -euo pipefail
+          if go test -count=1 -run '^TestOpenCodeDockerInteractiveQuestionRoundTrip$' -v ./internal/runexec; then
+            exit 0
+          fi
+
+          echo '--- OpenCode Run diagnostics (durable, redacted state only) ---'
+          PGPASSWORD=agent_board psql \
+            -h 127.0.0.1 -U agent_board -d agent_board_test -x \
+            -c 'SELECT id, status, failure_reason FROM runs ORDER BY created_at DESC LIMIT 1' || true
+          echo '--- Execution Sessions ---'
+          PGPASSWORD=agent_board psql \
+            -h 127.0.0.1 -U agent_board -d agent_board_test -x \
+            -c 'SELECT status, cwd, command_argv, exit_code FROM execution_sessions ORDER BY created_at' || true
+          echo '--- Run Events ---'
+          PGPASSWORD=agent_board psql \
+            -h 127.0.0.1 -U agent_board -d agent_board_test -x \
+            -c 'SELECT sequence, type, payload FROM events ORDER BY sequence' || true
+          exit 1
