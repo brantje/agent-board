@@ -125,18 +125,39 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) error {
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(text) == "" {
 		return fmt.Errorf("opencode: session id and prompt are required")
 	}
+
+	// The documented headless server API starts execution through prompt_async.
+	// The selected model is already stored on the native session by CreateSession,
+	// so omitting model here preserves the exact configured provider/model without
+	// manufacturing another turn or issuing another model call.
+	type textPart struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
 	payload := struct {
+		Parts []textPart `json:"parts"`
+	}{Parts: []textPart{{Type: "text", Text: text}}}
+	path := "/session/" + url.PathEscape(sessionID) + "/prompt_async"
+	if err := c.doJSON(ctx, http.MethodPost, path, payload, nil); err == nil {
+		return nil
+	} else {
+		var httpErr *HTTPError
+		if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusNotFound {
+			return err
+		}
+	}
+
+	// Keep a narrow compatibility fallback for OpenCode builds that predate the
+	// documented headless prompt_async route. v1.18.29 uses the path above.
+	legacyPayload := struct {
 		Prompt struct {
 			Text string `json:"text"`
 		} `json:"prompt"`
 		Delivery string `json:"delivery"`
 	}{}
-	payload.Prompt.Text = text
-	// OpenCode v1.18.29 accepts only "steer" or "queue". "steer" is also
-	// the native default and starts an idle session immediately without adding
-	// a second synthetic user turn later.
-	payload.Delivery = "steer"
-	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt", payload, nil)
+	legacyPayload.Prompt.Text = text
+	legacyPayload.Delivery = "steer"
+	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt", legacyPayload, nil)
 }
 
 // SessionActive reports whether this OpenCode process currently owns the
