@@ -2,13 +2,11 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"sort"
 	"strings"
 	"time"
 
+	evidencepkg "github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	workspacepkg "github.com/brantje/agent-board/apps/server/internal/workspace"
 )
@@ -40,27 +38,28 @@ type reviewCandidateApplier interface {
 }
 
 type ReviewService struct {
-	store    store.ReviewStore
-	projects reviewProjectStore
-	evidence *RunEvidenceService
-	applier  reviewCandidateApplier
+	store      store.ReviewStore
+	projects   reviewProjectStore
+	evidence   *RunEvidenceService
+	candidates evidencepkg.ReviewCandidateReader
+	applier    reviewCandidateApplier
 }
 
-func NewReviewService(reviewStore store.ReviewStore, projects reviewProjectStore, evidence *RunEvidenceService, applier reviewCandidateApplier) (*ReviewService, error) {
-	if reviewStore == nil || projects == nil || evidence == nil || applier == nil {
+func NewReviewService(reviewStore store.ReviewStore, projects reviewProjectStore, evidence *RunEvidenceService, candidates evidencepkg.ReviewCandidateReader, applier reviewCandidateApplier) (*ReviewService, error) {
+	if reviewStore == nil || projects == nil || evidence == nil || candidates == nil || applier == nil {
 		return nil, fmt.Errorf("review service dependencies are required")
 	}
-	return &ReviewService{store: reviewStore, projects: projects, evidence: evidence, applier: applier}, nil
+	return &ReviewService{store: reviewStore, projects: projects, evidence: evidence, candidates: candidates, applier: applier}, nil
 }
 
-// ReviewServiceFromServices exposes Review only when the configured persistence
-// and execution-evidence stack has the required optional capability.
+// ReviewServiceFromServices exposes Review only when the configured persistence,
+// public evidence and private candidate-delivery stacks are all available.
 func ReviewServiceFromServices(services *Services) *ReviewService {
-	if services == nil || services.ExecutionStore == nil || services.RunEvidence == nil || services.Workspaces == nil || !store.SupportsReviewStore(services.ExecutionStore) {
+	if services == nil || services.ExecutionStore == nil || services.RunEvidence == nil || services.ReviewCandidates == nil || services.Workspaces == nil || !store.SupportsReviewStore(services.ExecutionStore) {
 		return nil
 	}
 	reviews := services.ExecutionStore.(store.ReviewStore)
-	service, err := NewReviewService(reviews, services.ExecutionStore, services.RunEvidence, services.Workspaces)
+	service, err := NewReviewService(reviews, services.ExecutionStore, services.RunEvidence, services.ReviewCandidates, services.Workspaces)
 	if err != nil {
 		return nil
 	}
@@ -118,15 +117,12 @@ func (s *ReviewService) Approve(ctx context.Context, projectID, reviewID string,
 	if err != nil {
 		return store.CompleteReviewApprovalResult{}, translateStoreError(err, "project")
 	}
-	evidence, err := s.evidence.Inspect(ctx, projectID, begin.Run.ID)
+	privateCandidate, err := s.candidates.Open(ctx, begin.Run.ID)
 	if err != nil {
-		return store.CompleteReviewApprovalResult{}, err
+		s.persistApprovalFailure(ctx, projectID, reviewID, "Review candidate delivery snapshot is unavailable")
+		return store.CompleteReviewApprovalResult{}, NewError("review_evidence_invalid", "Review candidate delivery snapshot is unavailable", err)
 	}
-	candidate, err := s.acceptedCandidate(evidence)
-	if err != nil {
-		s.persistApprovalFailure(ctx, projectID, reviewID, "Review candidate evidence is incomplete")
-		return store.CompleteReviewApprovalResult{}, NewError("review_evidence_invalid", "Review candidate evidence is incomplete", err)
-	}
+	candidate := acceptedCandidateFromPrivate(privateCandidate)
 	revision, err := s.applier.ApplyReviewedCandidate(ctx, project, begin.Review.ID, candidate)
 	if err != nil {
 		s.persistApprovalFailure(ctx, projectID, reviewID, "candidate could not be applied to the current Project Workspace")
@@ -196,103 +192,21 @@ func summarizeReviewTests(events []store.Event) ReviewTestStatus {
 	return ReviewTestsNotRun
 }
 
-type candidateChunk struct {
-	index  int
-	source workspacepkg.CandidateBlobSource
-}
-
-type candidateFileSet struct {
-	count      int
-	executable bool
-	chunks     []candidateChunk
-}
-
-func (s *ReviewService) acceptedCandidate(value RunEvidence) (workspacepkg.AcceptedCandidate, error) {
+func acceptedCandidateFromPrivate(value evidencepkg.ReviewCandidateSnapshot) workspacepkg.AcceptedCandidate {
 	candidate := workspacepkg.AcceptedCandidate{}
-	manifestCount := 0
-	files := make(map[string]*candidateFileSet)
-	for _, artifact := range value.Artifacts {
-		source := s.artifactSource(value.Run.ProjectID, value.Run.ID, artifact.ID)
-		switch {
-		case artifact.Kind == "candidate_manifest":
-			manifestCount++
-		case artifact.Kind == "candidate_patch" && artifact.Name == "candidate-staged.patch":
-			if candidate.StagedPatch != nil {
-				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("duplicate staged candidate patch")
-			}
-			candidate.StagedPatch = source
-		case artifact.Kind == "candidate_patch" && artifact.Name == "candidate-unstaged.patch":
-			if candidate.UnstagedPatch != nil {
-				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("duplicate unstaged candidate patch")
-			}
-			candidate.UnstagedPatch = source
-		case artifact.Kind == "candidate_file", artifact.Kind == "candidate_file_chunk":
-			var metadata struct {
-				Path       string `json:"path"`
-				Executable bool   `json:"executable"`
-				ChunkIndex int    `json:"chunkIndex"`
-				ChunkCount int    `json:"chunkCount"`
-			}
-			if err := json.Unmarshal(artifact.SafeMetadata, &metadata); err != nil {
-				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("decode candidate file metadata: %w", err)
-			}
-			if strings.TrimSpace(metadata.Path) == "" {
-				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("candidate file path is missing")
-			}
-			if artifact.Kind == "candidate_file" {
-				metadata.ChunkIndex = 0
-				metadata.ChunkCount = 1
-			}
-			if metadata.ChunkIndex < 0 || metadata.ChunkCount < 1 || metadata.ChunkIndex >= metadata.ChunkCount {
-				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("candidate file chunk metadata is invalid")
-			}
-			set := files[metadata.Path]
-			if set == nil {
-				set = &candidateFileSet{count: metadata.ChunkCount, executable: metadata.Executable}
-				files[metadata.Path] = set
-			}
-			if set.count != metadata.ChunkCount {
-				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("candidate file chunk count changed")
-			}
-			if set.executable != metadata.Executable {
-				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("candidate file executable metadata changed")
-			}
-			set.chunks = append(set.chunks, candidateChunk{index: metadata.ChunkIndex, source: source})
-		}
+	if value.StagedPatch != nil {
+		candidate.StagedPatch = workspacepkg.CandidateBlobSource(value.StagedPatch)
 	}
-	if manifestCount != 1 {
-		return workspacepkg.AcceptedCandidate{}, fmt.Errorf("candidate manifest count=%d, want 1", manifestCount)
+	if value.UnstagedPatch != nil {
+		candidate.UnstagedPatch = workspacepkg.CandidateBlobSource(value.UnstagedPatch)
 	}
-
-	paths := make([]string, 0, len(files))
-	for path := range files {
-		paths = append(paths, path)
+	candidate.Files = make([]workspacepkg.CandidateFileSource, 0, len(value.Files))
+	for _, file := range value.Files {
+		candidate.Files = append(candidate.Files, workspacepkg.CandidateFileSource{
+			Path:       file.Path,
+			Executable: file.Executable,
+			Chunks:     []workspacepkg.CandidateBlobSource{workspacepkg.CandidateBlobSource(file.Source)},
+		})
 	}
-	sort.Strings(paths)
-	for _, path := range paths {
-		set := files[path]
-		if len(set.chunks) != set.count {
-			return workspacepkg.AcceptedCandidate{}, fmt.Errorf("candidate file %q has %d/%d chunks", path, len(set.chunks), set.count)
-		}
-		sort.Slice(set.chunks, func(i, j int) bool { return set.chunks[i].index < set.chunks[j].index })
-		chunks := make([]workspacepkg.CandidateBlobSource, 0, len(set.chunks))
-		for index, chunk := range set.chunks {
-			if chunk.index != index {
-				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("candidate file %q has duplicate or missing chunk indexes", path)
-			}
-			chunks = append(chunks, chunk.source)
-		}
-		candidate.Files = append(candidate.Files, workspacepkg.CandidateFileSource{Path: path, Chunks: chunks, Executable: set.executable})
-	}
-	return candidate, nil
-}
-
-func (s *ReviewService) artifactSource(projectID, runID, artifactID string) workspacepkg.CandidateBlobSource {
-	return func(ctx context.Context) (io.ReadCloser, error) {
-		_, reader, err := s.evidence.OpenArtifact(ctx, projectID, runID, artifactID)
-		if err != nil {
-			return nil, err
-		}
-		return reader, nil
-	}
+	return candidate
 }
