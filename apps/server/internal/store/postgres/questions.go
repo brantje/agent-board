@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -77,9 +78,6 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Read the immutable routing identity first, then acquire locks in the same
-	// Run -> Question order used by scheduler reconciliation. The Question is
-	// re-read under lock below before any state or answer validation is applied.
 	initialQuestion, err := scanQuestion(tx.QueryRow(ctx, `
 		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
 		FROM questions
@@ -128,21 +126,45 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		return store.AnswerQuestionResult{}, notFound(err)
 	}
 
+	binding, bindingErr := scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
+		SELECT question_id::text, project_id::text, run_id::text, engine, correlation_key, state, created_at, updated_at
+		FROM engine_question_bindings
+		WHERE project_id=$1 AND question_id=$2
+		FOR UPDATE
+	`, question.ProjectID, question.ID))
+	interactive := bindingErr == nil
+	if bindingErr != nil && !errors.Is(bindingErr, store.ErrNotFound) {
+		return store.AnswerQuestionResult{}, bindingErr
+	}
+	if interactive && binding.State != store.InteractiveQuestionOpen {
+		return store.AnswerQuestionResult{}, store.ErrConflict
+	}
+
 	if question.Blocking {
 		if run.Status != "WAITING_FOR_INPUT" || (issueStatus != "BLOCKED" && issueStatus != "DONE") {
 			return store.AnswerQuestionResult{}, store.ErrConflict
 		}
-		var activeJob bool
-		if err := tx.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM scheduler_jobs
-				WHERE project_id = $1 AND run_id = $2 AND state IN ('QUEUED', 'CLAIMED')
-			)
-		`, question.ProjectID, question.RunID).Scan(&activeJob); err != nil {
-			return store.AnswerQuestionResult{}, err
-		}
-		if activeJob {
-			return store.AnswerQuestionResult{}, store.ErrConflict
+		if interactive {
+			live, err := hasLiveClaim(ctx, tx, question.ProjectID, question.RunID)
+			if err != nil {
+				return store.AnswerQuestionResult{}, err
+			}
+			if !live {
+				return store.AnswerQuestionResult{}, store.ErrConflict
+			}
+		} else {
+			var activeJob bool
+			if err := tx.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM scheduler_jobs
+					WHERE project_id = $1 AND run_id = $2 AND state IN ('QUEUED', 'CLAIMED')
+				)
+			`, question.ProjectID, question.RunID).Scan(&activeJob); err != nil {
+				return store.AnswerQuestionResult{}, err
+			}
+			if activeJob {
+				return store.AnswerQuestionResult{}, store.ErrConflict
+			}
 		}
 	}
 
@@ -150,7 +172,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		UPDATE questions
 		SET status = 'ANSWERED', answered_at = now()
 		WHERE project_id = $1 AND id = $2 AND status = 'OPEN'
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		RETTRNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
 	`, question.ProjectID, question.ID))
 	if err != nil {
 		return store.AnswerQuestionResult{}, err
@@ -171,7 +193,18 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 	}
 
 	result := store.AnswerQuestionResult{Question: question, Decision: decision, Run: run}
-	if question.Blocking {
+	if interactive {
+		binding, err = scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
+			UPDATE engine_question_bindings
+			SET state='ANSWERED', updated_at=now()
+			WHERE project_id=$1 AND question_id=$2 AND state='OPEN'
+			RETURNING question_id::text, project_id::text, run_id::text, engine, correlation_key, state, created_at, updated_at
+		`, question.ProjectID, question.ID))
+		if err != nil {
+			return store.AnswerQuestionResult{}, err
+		}
+		_ = binding
+	} else if question.Blocking {
 		run, err = scanRun(tx.QueryRow(ctx, `
 			UPDATE runs
 			SET status = 'QUEUED', queue_reason = NULL, failure_reason = NULL, completed_at = NULL, updated_at = now()

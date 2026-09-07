@@ -32,6 +32,16 @@ func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.Saf
 	}
 	questions := any(p.store).(store.QuestionStore)
 	request.Questions = &questioner{store: questions, events: p.events, safe: safe, runtimeInstanceID: runtimeInstanceID}
+	if store.SupportsInteractiveQuestionStore(p.store) {
+		request.InteractiveQuestions = &interactiveQuestioner{
+			store:             questions,
+			interactive:       any(p.store).(store.InteractiveQuestionStore),
+			events:            p.events,
+			safe:              safe,
+			runtimeInstanceID: runtimeInstanceID,
+			engine:            safe.Executor.Engine,
+		}
+	}
 	continuation, err := loadContinuation(ctx, questions, safe)
 	if err != nil {
 		return engine.Request{}, err

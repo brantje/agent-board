@@ -69,17 +69,27 @@ type Continuation struct {
 	Answer     QuestionAnswer
 }
 
-// Questioner is the narrow human-input capability available to Engine adapters.
-// Durable Question persistence and Run lifecycle changes remain server-owned.
+// Questioner is the recovery-oriented human-input capability. A blocking Ask
+// unwinds the Engine so the durable scheduler can later execute a continuation.
 type Questioner interface {
 	Ask(context.Context, QuestionRequest) (Question, error)
 }
 
+// InteractiveQuestioner keeps a native Engine session alive while durable
+// human input is collected. Correlation keys are opaque Engine-owned values;
+// persistence, Run state and recovery remain server-owned.
+type InteractiveQuestioner interface {
+	Open(context.Context, string, QuestionRequest) (Question, error)
+	WaitAnswer(context.Context, string) (QuestionAnswer, error)
+	Resolve(context.Context, string) error
+}
+
 type Request struct {
-	Context      executioncontext.SafeContext
-	Launcher     ProcessLauncher
-	Questions    Questioner
-	Continuation *Continuation
+	Context              executioncontext.SafeContext
+	Launcher             ProcessLauncher
+	Questions            Questioner
+	InteractiveQuestions InteractiveQuestioner
+	Continuation         *Continuation
 }
 
 type Result struct {

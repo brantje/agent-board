@@ -160,6 +160,16 @@ func validSchedulerRunTransition(from, to string) bool {
 		case "WAITING_FOR_INPUT", "PAUSED", "READY_FOR_REVIEW", "COMPLETED", "FAILED", "CANCELLED":
 			return true
 		}
+	case "WAITING_FOR_INPUT":
+		// A live interactive Engine keeps the scheduler claim while the Run is
+		// waiting. If that in-flight execution fails or is cancelled before the
+		// native question is resolved, the claimed job still needs a fenced path
+		// to a terminal state. Recovery-oriented waiting never reaches this path
+		// because its claim was already released.
+		switch to {
+		case "FAILED", "CANCELLED":
+			return true
+		}
 	}
 	return false
 }
