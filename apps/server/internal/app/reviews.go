@@ -45,9 +45,21 @@ type ReviewService struct {
 	applier    reviewCandidateApplier
 }
 
-func NewReviewService(reviewStore store.ReviewStore, projects reviewProjectStore, evidence *RunEvidenceService, candidates evidencepkg.ReviewCandidateReader, applier reviewCandidateApplier) (*ReviewService, error) {
-	if reviewStore == nil || projects == nil || evidence == nil || candidates == nil || applier == nil {
+// NewReviewService builds the Review application boundary. Production callers
+// should pass the private candidate reader explicitly. Tests and composite
+// stores may omit it only when the ReviewStore itself implements that reader.
+func NewReviewService(reviewStore store.ReviewStore, projects reviewProjectStore, evidence *RunEvidenceService, applier reviewCandidateApplier, candidateReaders ...evidencepkg.ReviewCandidateReader) (*ReviewService, error) {
+	if reviewStore == nil || projects == nil || evidence == nil || applier == nil || len(candidateReaders) > 1 {
 		return nil, fmt.Errorf("review service dependencies are required")
+	}
+	var candidates evidencepkg.ReviewCandidateReader
+	if len(candidateReaders) == 1 {
+		candidates = candidateReaders[0]
+	} else if reader, ok := any(reviewStore).(evidencepkg.ReviewCandidateReader); ok {
+		candidates = reader
+	}
+	if candidates == nil {
+		return nil, fmt.Errorf("review candidate reader is required")
 	}
 	return &ReviewService{store: reviewStore, projects: projects, evidence: evidence, candidates: candidates, applier: applier}, nil
 }
@@ -59,7 +71,7 @@ func ReviewServiceFromServices(services *Services) *ReviewService {
 		return nil
 	}
 	reviews := services.ExecutionStore.(store.ReviewStore)
-	service, err := NewReviewService(reviews, services.ExecutionStore, services.RunEvidence, services.ReviewCandidates, services.Workspaces)
+	service, err := NewReviewService(reviews, services.ExecutionStore, services.RunEvidence, services.Workspaces, services.ReviewCandidates)
 	if err != nil {
 		return nil
 	}
