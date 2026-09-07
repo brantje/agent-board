@@ -60,7 +60,8 @@ type InteractiveQuestionStore interface {
 // InteractiveQuestionBatchStore atomically creates or reconciles a group of
 // interactive Questions that belong to one native request. Either the complete
 // batch and its required durable lifecycle evidence commit together, or none of
-// the new state does.
+// the new state does. Implementations must return result.Questions in the same
+// order as the input commands so callers preserve correlation-key ordering.
 type InteractiveQuestionBatchStore interface {
 	OpenInteractiveQuestions(context.Context, []OpenInteractiveQuestionCommand) (OpenInteractiveQuestionsResult, error)
 }
