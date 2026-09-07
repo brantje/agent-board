@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,6 +27,15 @@ func (s *runState) handleEvent(ctx context.Context, native *client.Client, event
 }
 
 func (s *runState) handlePartUpdated(ctx context.Context, properties json.RawMessage) error {
+	trimmed := bytes.TrimSpace(properties)
+	// message.part.updated is best-effort visible telemetry. OpenCode can emit
+	// an envelope before the optional properties payload is populated; there is
+	// no control state to recover from that empty update, so ignore it and wait
+	// for a later complete part update instead of failing the Run.
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+
 	var update struct {
 		SessionID string          `json:"sessionID"`
 		Part      json.RawMessage `json:"part"`
