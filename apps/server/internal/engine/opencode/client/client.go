@@ -139,6 +139,23 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) error {
 	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt", payload, nil)
 }
 
+// SessionActive reports whether this OpenCode process currently owns the
+// foreground drain for sessionID. OpenCode v1.18.29 documents absence from
+// /api/session/active as the authoritative inactive state.
+func (c *Client) SessionActive(ctx context.Context, sessionID string) (bool, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return false, fmt.Errorf("opencode: session id is required")
+	}
+	var response struct {
+		Data map[string]json.RawMessage `json:"data"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, "/api/session/active", nil, &response); err != nil {
+		return false, err
+	}
+	_, active := response.Data[sessionID]
+	return active, nil
+}
+
 func (c *Client) InterruptSession(ctx context.Context, sessionID string) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("opencode: session id is required")
