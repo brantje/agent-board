@@ -60,6 +60,7 @@ type CorrelatedQuestionRequest struct {
 type Question struct {
 	ID       string
 	Blocking bool
+	Custom   bool
 }
 
 type QuestionAnswer struct {
