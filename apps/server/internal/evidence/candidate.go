@@ -276,16 +276,17 @@ func (s *CandidateSnapshotter) Snapshot(ctx context.Context, scope RunScope, wor
 }
 
 func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope RunScope, workspace, relative string) ([]store.Artifact, error) {
-	file, _, err := openCandidateRegularFile(workspace, relative)
+	file, info, err := openCandidateRegularFile(workspace, relative)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
+	executable := info.Mode().Perm()&0o111 != 0
 
 	blobs, source := prepareCandidateBlobSource(s.blobs, scope.RunID, file)
 	limit := maxBlobBytes(blobs)
 	if limit <= 0 {
-		metadata, _ := json.Marshal(map[string]string{"path": relative})
+		metadata, _ := json.Marshal(map[string]any{"path": relative, "executable": executable})
 		artifact, err := s.createArtifactWithBlobStore(ctx, scope, blobs, relative, "candidate_file", "application/octet-stream", source, metadata)
 		if err != nil {
 			return nil, err
@@ -303,7 +304,7 @@ func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope 
 	}()
 
 	if size <= limit {
-		metadata, _ := json.Marshal(map[string]string{"path": relative})
+		metadata, _ := json.Marshal(map[string]any{"path": relative, "executable": executable})
 		artifact, err := s.createArtifactWithBlobStore(ctx, scope, blobs, relative, "candidate_file", "application/octet-stream", prepared, metadata)
 		if err != nil {
 			return nil, err
@@ -320,6 +321,7 @@ func (s *CandidateSnapshotter) snapshotUntrackedFile(ctx context.Context, scope 
 		offset := int64(index) * limit
 		metadata, _ := json.Marshal(map[string]any{
 			"path":       relative,
+			"executable": executable,
 			"chunkIndex": index,
 			"chunkCount": chunkCount,
 			"offset":     offset,
