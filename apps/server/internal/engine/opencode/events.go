@@ -14,23 +14,23 @@ func (s *runState) handleEvent(ctx context.Context, native *client.Client, event
 	switch event.Type {
 	case "question.v2.asked":
 		var request client.QuestionRequest
-		if err := json.Unmarshal(event.Data, &request); err != nil {
+		if err := json.Unmarshal(event.Properties, &request); err != nil {
 			return fmt.Errorf("opencode engine: decode native Question event: %w", err)
 		}
 		return s.handleQuestion(ctx, native, request)
 	case "message.part.updated":
-		return s.handlePartUpdated(ctx, event.Data)
+		return s.handlePartUpdated(ctx, event.Properties)
 	default:
 		return nil
 	}
 }
 
-func (s *runState) handlePartUpdated(ctx context.Context, data json.RawMessage) error {
+func (s *runState) handlePartUpdated(ctx context.Context, properties json.RawMessage) error {
 	var update struct {
 		SessionID string          `json:"sessionID"`
 		Part      json.RawMessage `json:"part"`
 	}
-	if err := json.Unmarshal(data, &update); err != nil {
+	if err := json.Unmarshal(properties, &update); err != nil {
 		return fmt.Errorf("opencode engine: decode message part update: %w", err)
 	}
 	if update.SessionID != s.sessionID || len(update.Part) == 0 {
