@@ -52,11 +52,13 @@ Once initialized, later edits to Project repository configuration do not silentl
 
 The Project Workspace HEAD is the canonical accepted revision for local-repository v0.1 workflows.
 
-Approval applies the exact candidate snapshot attached to the Review to the current Project Workspace under a Project-scoped serialization lock. If application succeeds, Agent Board creates an internal acceptance commit and advances Project Workspace HEAD. The Issue is not marked `DONE` until the accepted commit and durable approval state are finalized.
+Approval applies the exact candidate snapshot attached to the Review to the current Project Workspace under a Project-scoped serialization lock. The trusted approval input is the immutable backend-only Review delivery snapshot captured for that Run, not the current Issue Workspace and not the redacted candidate Artifacts exposed through Review/Run inspection. This separation allows public evidence to redact secret values without changing the source bytes that are accepted. The delivery snapshot is stored with durable backend Workspace state and is never exposed through public evidence APIs.
+
+If application succeeds, Agent Board creates an internal acceptance commit and advances Project Workspace HEAD. The Issue is not marked `DONE` until the accepted commit and durable approval state are finalized.
 
 If the Project Workspace has advanced since the reviewed Issue Workspace was created, approval attempts to apply the reviewed candidate on top of the newer accepted state. A real conflict fails the apply with an actionable error; Agent Board does not silently discard either accepted changes or reviewed candidate changes.
 
-Approval is restart-safe and idempotent. A crash after filesystem/Git mutation but before database finalization must be detectable so reconciliation can complete without applying the same Review twice.
+Approval is restart-safe and idempotent. A crash after filesystem/Git mutation but before database finalization must be detectable so reconciliation can complete without applying the same Review twice. Candidate-evidence retries for the same Run reuse the already-pinned Review delivery snapshot so the Review evidence and later approval cannot silently drift if the Issue Workspace changes.
 
 The Project Workspace is internal accepted state only. v0.1 does not push its commits back to the configured source repository and does not create an external PR/MR as part of approval.
 
