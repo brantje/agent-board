@@ -10,6 +10,8 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 )
 
+const acceptedReplyResolveFailureLimit = 3
+
 type nativeQuestionBinding struct {
 	questionID     string
 	correlationKey string
@@ -24,23 +26,25 @@ type nativeQuestionState struct {
 }
 
 type runState struct {
-	sessionID          string
-	questions          engine.InteractiveQuestioner
-	activity           engine.ActivitySink
-	nativeQuestions    map[string]*nativeQuestionState
-	seenTextParts      map[string]struct{}
-	seenToolStates     map[string]struct{}
-	lastVisibleMessage string
+	sessionID                    string
+	questions                    engine.InteractiveQuestioner
+	activity                     engine.ActivitySink
+	nativeQuestions              map[string]*nativeQuestionState
+	seenTextParts                map[string]struct{}
+	seenToolStates               map[string]struct{}
+	acceptedReplyResolveFailures map[string][]error
+	lastVisibleMessage           string
 }
 
 func newRunState(sessionID string, questions engine.InteractiveQuestioner, activity engine.ActivitySink) *runState {
 	return &runState{
-		sessionID:       sessionID,
-		questions:       questions,
-		activity:        activity,
-		nativeQuestions: make(map[string]*nativeQuestionState),
-		seenTextParts:   make(map[string]struct{}),
-		seenToolStates:  make(map[string]struct{}),
+		sessionID:                    sessionID,
+		questions:                    questions,
+		activity:                     activity,
+		nativeQuestions:              make(map[string]*nativeQuestionState),
+		seenTextParts:                make(map[string]struct{}),
+		seenToolStates:               make(map[string]struct{}),
+		acceptedReplyResolveFailures: make(map[string][]error),
 	}
 }
 
@@ -162,6 +166,9 @@ func (s *runState) reconcileAcceptedReplies(ctx context.Context, pending []clien
 	if len(accepted) == 0 {
 		return false, nil
 	}
+	if s.acceptedReplyResolveFailures == nil {
+		s.acceptedReplyResolveFailures = make(map[string][]error)
+	}
 
 	pendingIDs := make(map[string]struct{}, len(pending))
 	for _, request := range pending {
@@ -179,10 +186,23 @@ func (s *runState) reconcileAcceptedReplies(ctx context.Context, pending []clien
 		if _, stillPending := pendingIDs[requestID]; stillPending {
 			continue
 		}
-		// Resolve is idempotent in the production store. A failed resolution is
-		// deliberately left journaled and retried on the next reconciliation
-		// cycle instead of turning an already-accepted native reply into Run failure.
-		_ = s.questions.Resolve(ctx, binding.QuestionID)
+		// Resolve is idempotent in the production store. Transient failures stay
+		// journaled and are retried, but a permanently failing canonical transition
+		// must eventually surface instead of keeping the native session alive forever.
+		if err := s.questions.Resolve(ctx, binding.QuestionID); err != nil {
+			failures := append(s.acceptedReplyResolveFailures[binding.QuestionID], err)
+			s.acceptedReplyResolveFailures[binding.QuestionID] = failures
+			if len(failures) >= acceptedReplyResolveFailureLimit {
+				return hadAccepted, fmt.Errorf(
+					"opencode engine: resolve accepted Question %s after %d consecutive failures: %w",
+					binding.QuestionID,
+					len(failures),
+					errors.Join(failures...),
+				)
+			}
+			continue
+		}
+		delete(s.acceptedReplyResolveFailures, binding.QuestionID)
 	}
 	return hadAccepted, nil
 }
