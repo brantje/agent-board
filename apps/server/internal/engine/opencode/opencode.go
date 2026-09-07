@@ -407,9 +407,11 @@ func stopService(parent context.Context, process engine.Process) error {
 
 func stopServiceWithin(parent context.Context, process engine.Process, terminateGrace, forceTimeout time.Duration) error {
 	base := context.WithoutCancel(parent)
+	waitCtx, cancelWait := context.WithCancel(base)
+	defer cancelWait()
 	waitDone := make(chan error, 1)
 	go func() {
-		_, err := process.Wait(base)
+		_, err := process.Wait(waitCtx)
 		waitDone <- err
 	}()
 
