@@ -196,7 +196,7 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertOpenCodeQuestionEventOrder(t, events)
-	sessions, err := database.ListExecutionSessions(ctx, run.ID, nil)
+	sessions, err := database.ListExecutionSessionsByRun(ctx, project.ID, run.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
