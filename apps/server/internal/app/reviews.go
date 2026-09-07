@@ -202,8 +202,9 @@ type candidateChunk struct {
 }
 
 type candidateFileSet struct {
-	count  int
-	chunks []candidateChunk
+	count      int
+	executable bool
+	chunks     []candidateChunk
 }
 
 func (s *ReviewService) acceptedCandidate(value RunEvidence) (workspacepkg.AcceptedCandidate, error) {
@@ -228,6 +229,7 @@ func (s *ReviewService) acceptedCandidate(value RunEvidence) (workspacepkg.Accep
 		case artifact.Kind == "candidate_file", artifact.Kind == "candidate_file_chunk":
 			var metadata struct {
 				Path       string `json:"path"`
+				Executable bool   `json:"executable"`
 				ChunkIndex int    `json:"chunkIndex"`
 				ChunkCount int    `json:"chunkCount"`
 			}
@@ -246,11 +248,14 @@ func (s *ReviewService) acceptedCandidate(value RunEvidence) (workspacepkg.Accep
 			}
 			set := files[metadata.Path]
 			if set == nil {
-				set = &candidateFileSet{count: metadata.ChunkCount}
+				set = &candidateFileSet{count: metadata.ChunkCount, executable: metadata.Executable}
 				files[metadata.Path] = set
 			}
 			if set.count != metadata.ChunkCount {
 				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("candidate file chunk count changed")
+			}
+			if set.executable != metadata.Executable {
+				return workspacepkg.AcceptedCandidate{}, fmt.Errorf("candidate file executable metadata changed")
 			}
 			set.chunks = append(set.chunks, candidateChunk{index: metadata.ChunkIndex, source: source})
 		}
@@ -277,7 +282,7 @@ func (s *ReviewService) acceptedCandidate(value RunEvidence) (workspacepkg.Accep
 			}
 			chunks = append(chunks, chunk.source)
 		}
-		candidate.Files = append(candidate.Files, workspacepkg.CandidateFileSource{Path: path, Chunks: chunks})
+		candidate.Files = append(candidate.Files, workspacepkg.CandidateFileSource{Path: path, Chunks: chunks, Executable: set.executable})
 	}
 	return candidate, nil
 }
