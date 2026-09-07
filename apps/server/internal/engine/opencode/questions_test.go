@@ -11,20 +11,23 @@ import (
 func TestMapNativeQuestionPreservesSupportedAnswerKinds(t *testing.T) {
 	multiple := true
 	notMultiple := false
+	customDisabled := false
 	tests := []struct {
 		name   string
 		native client.QuestionInfo
 		kind   string
+		custom bool
 		labels map[string]string
 	}{
 		{
 			name:   "text",
 			native: client.QuestionInfo{Question: "Explain the tradeoff"},
 			kind:   "TEXT",
+			custom: true,
 			labels: map[string]string{},
 		},
 		{
-			name: "single choice",
+			name: "single choice defaults custom answers on",
 			native: client.QuestionInfo{
 				Question: "Choose one",
 				Multiple: &notMultiple,
@@ -34,6 +37,7 @@ func TestMapNativeQuestionPreservesSupportedAnswerKinds(t *testing.T) {
 				},
 			},
 			kind:   "SINGLE_CHOICE",
+			custom: true,
 			labels: map[string]string{"option-0": "First", "option-1": "Second"},
 		},
 		{
@@ -47,7 +51,19 @@ func TestMapNativeQuestionPreservesSupportedAnswerKinds(t *testing.T) {
 				},
 			},
 			kind:   "MULTI_CHOICE",
+			custom: true,
 			labels: map[string]string{"option-0": "First", "option-1": "Second"},
+		},
+		{
+			name: "explicit custom disabled",
+			native: client.QuestionInfo{
+				Question: "Choose one",
+				Custom:   &customDisabled,
+				Options:  []client.QuestionOption{{Label: "First"}},
+			},
+			kind:   "SINGLE_CHOICE",
+			custom: false,
+			labels: map[string]string{"option-0": "First"},
 		},
 	}
 
@@ -57,7 +73,7 @@ func TestMapNativeQuestionPreservesSupportedAnswerKinds(t *testing.T) {
 			if err != nil {
 				t.Fatalf("mapNativeQuestion() error=%v", err)
 			}
-			if mapped.Kind != testCase.kind || !mapped.Blocking {
+			if mapped.Kind != testCase.kind || !mapped.Blocking || mapped.Custom != testCase.custom {
 				t.Fatalf("mapped=%+v", mapped)
 			}
 			if !reflect.DeepEqual(labels, testCase.labels) {
@@ -69,6 +85,7 @@ func TestMapNativeQuestionPreservesSupportedAnswerKinds(t *testing.T) {
 
 func TestMapCanonicalAnswerRoundTripsLabelsAndText(t *testing.T) {
 	text := "Use the safer implementation"
+	custom := "Something else"
 	tests := []struct {
 		name    string
 		binding nativeQuestionBinding
@@ -99,6 +116,18 @@ func TestMapCanonicalAnswerRoundTripsLabelsAndText(t *testing.T) {
 			answer: engine.QuestionAnswer{Kind: "MULTI_CHOICE", OptionIDs: []string{"option-1", "option-0"}},
 			want:   []string{"Second", "First"},
 		},
+		{
+			name:    "single choice custom text",
+			binding: nativeQuestionBinding{kind: "SINGLE_CHOICE", custom: true, labels: map[string]string{"option-0": "First"}},
+			answer:  engine.QuestionAnswer{Kind: "SINGLE_CHOICE", Text: &custom},
+			want:    []string{custom},
+		},
+		{
+			name:    "multi choice custom text",
+			binding: nativeQuestionBinding{kind: "MULTI_CHOICE", custom: true, labels: map[string]string{"option-0": "First"}},
+			answer:  engine.QuestionAnswer{Kind: "MULTI_CHOICE", Text: &custom},
+			want:    []string{custom},
+		},
 	}
 
 	for _, testCase := range tests {
@@ -115,6 +144,7 @@ func TestMapCanonicalAnswerRoundTripsLabelsAndText(t *testing.T) {
 }
 
 func TestMapCanonicalAnswerRejectsStaleOrMismatchedChoice(t *testing.T) {
+	custom := "Other"
 	binding := nativeQuestionBinding{
 		kind:   "SINGLE_CHOICE",
 		labels: map[string]string{"option-0": "First"},
@@ -122,6 +152,7 @@ func TestMapCanonicalAnswerRejectsStaleOrMismatchedChoice(t *testing.T) {
 	for _, answer := range []engine.QuestionAnswer{
 		{Kind: "TEXT", Text: stringPointer("First")},
 		{Kind: "SINGLE_CHOICE", OptionIDs: []string{"option-stale"}},
+		{Kind: "SINGLE_CHOICE", Text: &custom},
 	} {
 		if _, err := mapCanonicalAnswer(binding, answer); err == nil {
 			t.Fatalf("answer %+v unexpectedly accepted", answer)
