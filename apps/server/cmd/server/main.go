@@ -16,6 +16,7 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/engine"
+	"github.com/brantje/agent-board/apps/server/internal/engine/opencode"
 	"github.com/brantje/agent-board/apps/server/internal/engine/scripted"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
@@ -265,7 +266,7 @@ func configureExecutionScheduler(services *app.Services) error {
 	if err != nil {
 		return err
 	}
-	engines, err := engine.NewRegistry(scripted.New())
+	engines, err := engine.NewRegistry(scripted.New(), opencode.New())
 	if err != nil {
 		return err
 	}
