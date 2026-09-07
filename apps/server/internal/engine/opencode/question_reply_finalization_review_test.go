@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
+	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 )
 
 type replyFinalizationQuestioner struct {
