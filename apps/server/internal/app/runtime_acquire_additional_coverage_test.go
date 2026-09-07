@@ -92,12 +92,12 @@ func (r *disappearingRunningRuntime) Inspect(ctx context.Context, handle runtime
 	return r.fakeRuntimeImplementation.Inspect(ctx, handle)
 }
 
-type inspectErrorRuntime struct {
+type acquireInspectErrorRuntime struct {
 	fakeRuntimeImplementation
 	err error
 }
 
-func (r *inspectErrorRuntime) Inspect(context.Context, runtimepkg.Handle) (runtimepkg.Inspection, error) {
+func (r *acquireInspectErrorRuntime) Inspect(context.Context, runtimepkg.Handle) (runtimepkg.Inspection, error) {
 	return runtimepkg.Inspection{}, r.err
 }
 
@@ -305,7 +305,7 @@ func TestRuntimeInstanceServiceAcquireReturnsRunningInspectionFailure(t *testing
 		Status: string(runtimepkg.StateRunning), ExternalID: &externalID, RunnerStatus: "READY", SafeHandleMetadata: json.RawMessage(`{"safe":true}`),
 	}}
 	implementationErr := errors.New("inspect transport unavailable")
-	implementation := &inspectErrorRuntime{err: implementationErr}
+	implementation := &acquireInspectErrorRuntime{err: implementationErr}
 	service, err := NewRuntimeInstanceService(&listingRuntimeStore{runtimeServiceStore: base}, &runtimeWorkspaceEnsurer{workspace: workspace}, map[string]runtimepkg.Implementation{"docker": implementation})
 	if err != nil {
 		t.Fatal(err)
@@ -321,7 +321,7 @@ func TestRuntimeInstanceServiceAcquireReturnsRunningInspectionFailure(t *testing
 }
 
 func TestRuntimeInstanceServiceAcquireReportsMissingRuntimeConfiguration(t *testing.T) {
-	service, baseStore, implementation, workspace := runtimeServiceFixture(t)
+	service, _, implementation, workspace := runtimeServiceFixture(t)
 
 	_, err := service.Acquire(t.Context(), workspace.ProjectID, workspace.IssueID, "runtime-missing")
 	if !errors.Is(err, store.ErrNotFound) {
