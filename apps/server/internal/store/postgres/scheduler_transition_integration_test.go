@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestSchedulerTransitionKeepsCapacityWhileRunning(t *testing.T) {
@@ -96,6 +97,47 @@ func TestSchedulerTransitionReleasesCapacityOnInactiveStates(t *testing.T) {
 				t.Fatalf("job state=%s want %s", jobState, tc.jobState)
 			}
 		})
+	}
+}
+
+func TestCreatePendingReviewIsIdempotentAndRejectsConflictingExistingReview(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "pending-review-idempotency")
+
+	create := func() error {
+		t.Helper()
+		tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		if err != nil {
+			t.Fatalf("begin transaction: %v", err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if err := createPendingReview(ctx, tx, f.run); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+
+	if err := create(); err != nil {
+		t.Fatalf("first createPendingReview() error=%v", err)
+	}
+	if err := create(); err != nil {
+		t.Fatalf("idempotent createPendingReview() error=%v", err)
+	}
+
+	var count int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM reviews WHERE run_id=$1`, f.run.ID).Scan(&count); err != nil {
+		t.Fatalf("count reviews: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("review count=%d want 1", count)
+	}
+
+	if _, err := s.pool.Exec(ctx, `UPDATE reviews SET status='APPROVED' WHERE run_id=$1`, f.run.ID); err != nil {
+		t.Fatalf("corrupt review status: %v", err)
+	}
+	if err := create(); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("conflicting createPendingReview() error=%v want ErrConflict", err)
 	}
 }
 
