@@ -29,6 +29,7 @@ type ReviewCandidateFile struct {
 }
 
 type ReviewCandidateSnapshot struct {
+	Candidate     Candidate
 	StagedPatch   ReviewCandidateBlobSource
 	UnstagedPatch ReviewCandidateBlobSource
 	Files         []ReviewCandidateFile
@@ -42,15 +43,23 @@ type ReviewCandidateReader interface {
 	Open(context.Context, string) (ReviewCandidateSnapshot, error)
 }
 
+type ReviewCandidateArchive interface {
+	ReviewCandidateWriter
+	ReviewCandidateReader
+}
+
 type ReviewCandidateStore struct {
 	root string
 }
 
 type reviewCandidateManifest struct {
-	Version       int                           `json:"version"`
-	StagedPatch   string                        `json:"stagedPatch,omitempty"`
-	UnstagedPatch string                        `json:"unstagedPatch,omitempty"`
-	Files         []reviewCandidateManifestFile `json:"files,omitempty"`
+	Version           int                           `json:"version"`
+	Candidate         Candidate                     `json:"candidate"`
+	StagedPatch       string                        `json:"stagedPatch,omitempty"`
+	StagedPatchSize   int64                         `json:"stagedPatchSize,omitempty"`
+	UnstagedPatch     string                        `json:"unstagedPatch,omitempty"`
+	UnstagedPatchSize int64                         `json:"unstagedPatchSize,omitempty"`
+	Files             []reviewCandidateManifestFile `json:"files,omitempty"`
 }
 
 type reviewCandidateManifestFile struct {
@@ -111,7 +120,7 @@ func (s *ReviewCandidateStore) Capture(ctx context.Context, runID, workspace str
 		}
 	}()
 
-	manifest := reviewCandidateManifest{Version: reviewCandidateManifestVersion}
+	manifest := reviewCandidateManifest{Version: reviewCandidateManifestVersion, Candidate: candidate}
 	staged, err := gitOutput(ctx, workspace, "diff", "--binary", "--cached", "HEAD")
 	if err != nil {
 		return err
@@ -121,6 +130,7 @@ func (s *ReviewCandidateStore) Capture(ctx context.Context, runID, workspace str
 	}
 	if len(staged) > 0 {
 		manifest.StagedPatch = "staged.patch"
+		manifest.StagedPatchSize = int64(len(staged))
 		if err := writePrivateCandidateFile(filepath.Join(temporary, manifest.StagedPatch), staged); err != nil {
 			return err
 		}
@@ -134,6 +144,7 @@ func (s *ReviewCandidateStore) Capture(ctx context.Context, runID, workspace str
 	}
 	if len(unstaged) > 0 {
 		manifest.UnstagedPatch = "unstaged.patch"
+		manifest.UnstagedPatchSize = int64(len(unstaged))
 		if err := writePrivateCandidateFile(filepath.Join(temporary, manifest.UnstagedPatch), unstaged); err != nil {
 			return err
 		}
@@ -217,30 +228,26 @@ func (s *ReviewCandidateStore) Open(ctx context.Context, runID string) (ReviewCa
 	if manifest.Version != reviewCandidateManifestVersion {
 		return ReviewCandidateSnapshot{}, fmt.Errorf("unsupported review candidate manifest version %d", manifest.Version)
 	}
-	snapshot := ReviewCandidateSnapshot{}
+	if err := validateReviewCandidateManifest(manifest); err != nil {
+		return ReviewCandidateSnapshot{}, err
+	}
+
+	snapshot := ReviewCandidateSnapshot{Candidate: manifest.Candidate}
 	if manifest.StagedPatch != "" {
-		source, err := reviewCandidateSource(root, manifest.StagedPatch, -1)
+		source, err := reviewCandidateSource(root, manifest.StagedPatch, manifest.StagedPatchSize)
 		if err != nil {
 			return ReviewCandidateSnapshot{}, err
 		}
 		snapshot.StagedPatch = source
 	}
 	if manifest.UnstagedPatch != "" {
-		source, err := reviewCandidateSource(root, manifest.UnstagedPatch, -1)
+		source, err := reviewCandidateSource(root, manifest.UnstagedPatch, manifest.UnstagedPatchSize)
 		if err != nil {
 			return ReviewCandidateSnapshot{}, err
 		}
 		snapshot.UnstagedPatch = source
 	}
-	seenPaths := make(map[string]struct{}, len(manifest.Files))
 	for _, file := range manifest.Files {
-		if strings.TrimSpace(file.Path) == "" || strings.TrimSpace(file.Storage) == "" || file.SizeBytes < 0 {
-			return ReviewCandidateSnapshot{}, fmt.Errorf("invalid review candidate file metadata")
-		}
-		if _, exists := seenPaths[file.Path]; exists {
-			return ReviewCandidateSnapshot{}, fmt.Errorf("duplicate review candidate path %q", file.Path)
-		}
-		seenPaths[file.Path] = struct{}{}
 		source, err := reviewCandidateSource(root, file.Storage, file.SizeBytes)
 		if err != nil {
 			return ReviewCandidateSnapshot{}, err
@@ -248,6 +255,52 @@ func (s *ReviewCandidateStore) Open(ctx context.Context, runID string) (ReviewCa
 		snapshot.Files = append(snapshot.Files, ReviewCandidateFile{Path: file.Path, Executable: file.Executable, Source: source})
 	}
 	return snapshot, nil
+}
+
+func validateReviewCandidateManifest(manifest reviewCandidateManifest) error {
+	if manifest.StagedPatch == "" && manifest.StagedPatchSize != 0 {
+		return fmt.Errorf("review candidate staged patch metadata is inconsistent")
+	}
+	if manifest.UnstagedPatch == "" && manifest.UnstagedPatchSize != 0 {
+		return fmt.Errorf("review candidate unstaged patch metadata is inconsistent")
+	}
+	if manifest.StagedPatchSize < 0 || manifest.UnstagedPatchSize < 0 {
+		return fmt.Errorf("review candidate patch size is invalid")
+	}
+
+	untracked := make(map[string]struct{})
+	seenChanges := make(map[string]struct{}, len(manifest.Candidate.Changes))
+	for _, change := range manifest.Candidate.Changes {
+		path := strings.TrimSpace(change.Path)
+		if path == "" {
+			return fmt.Errorf("review candidate change path is missing")
+		}
+		if _, exists := seenChanges[path]; exists {
+			return fmt.Errorf("duplicate review candidate change path %q", path)
+		}
+		seenChanges[path] = struct{}{}
+		if change.Untracked {
+			untracked[path] = struct{}{}
+		}
+	}
+
+	seenFiles := make(map[string]struct{}, len(manifest.Files))
+	for _, file := range manifest.Files {
+		if strings.TrimSpace(file.Path) == "" || strings.TrimSpace(file.Storage) == "" || file.SizeBytes < 0 {
+			return fmt.Errorf("invalid review candidate file metadata")
+		}
+		if _, exists := seenFiles[file.Path]; exists {
+			return fmt.Errorf("duplicate review candidate path %q", file.Path)
+		}
+		if _, ok := untracked[file.Path]; !ok {
+			return fmt.Errorf("review candidate file %q is not marked untracked", file.Path)
+		}
+		seenFiles[file.Path] = struct{}{}
+	}
+	if len(seenFiles) != len(untracked) {
+		return fmt.Errorf("review candidate untracked file set is incomplete")
+	}
+	return nil
 }
 
 func (s *ReviewCandidateStore) runPath(runID string) (string, error) {
