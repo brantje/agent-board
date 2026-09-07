@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/agent-runner/internal/protocol"
+	"github.com/gorilla/websocket"
 )
 
 func TestSessionConnectRequiresActiveSession(t *testing.T) {
@@ -163,7 +164,7 @@ func TestValidateConnectDestinationRejectsMalformedAddressAndPort(t *testing.T) 
 	}
 }
 
-func startConnectTestSession(t *testing.T, conn testWebSocket, sessionID string) {
+func startConnectTestSession(t *testing.T, conn *websocket.Conn, sessionID string) {
 	t.Helper()
 	send(t, conn, protocol.TypeStart, sessionID, protocol.StartRequest{Command: []string{"sh", "-c", "sleep 30"}})
 	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
@@ -171,7 +172,7 @@ func startConnectTestSession(t *testing.T, conn testWebSocket, sessionID string)
 	}
 }
 
-func waitForExit(t *testing.T, conn testWebSocket) {
+func waitForExit(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
 	for {
 		if msg := read(t, conn); msg.Type == protocol.TypeExit {
