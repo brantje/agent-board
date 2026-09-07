@@ -273,6 +273,17 @@ func (c *sessionConn) Read(p []byte) (int, error) {
 			c.mu.Unlock()
 		case <-c.done:
 			stopTimer()
+			select {
+			case chunk := <-c.incoming:
+				if len(chunk) == 0 {
+					continue
+				}
+				c.mu.Lock()
+				c.current = chunk
+				c.mu.Unlock()
+				continue
+			default:
+			}
 			return 0, c.readCloseError()
 		case <-wake:
 			stopTimer()
