@@ -281,8 +281,11 @@ func (q *interactiveQuestioner) ListReplyAccepted(ctx context.Context) ([]engine
 			return nil, err
 		}
 		for _, event := range events {
-			if event.Sequence > after {
-				after = event.Sequence
+			if event.Sequence == nil {
+				return nil, fmt.Errorf("run execution: run event is missing sequence")
+			}
+			if *event.Sequence > after {
+				after = *event.Sequence
 			}
 			switch event.Type {
 			case interactiveQuestionReplyAcceptedEvent:
