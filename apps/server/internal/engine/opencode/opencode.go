@@ -16,17 +16,17 @@ import (
 )
 
 const (
-	Name                         = "opencode"
-	defaultAddress               = "127.0.0.1:4096"
-	providerCredentialEnv        = "AGENT_BOARD_PROVIDER_API_KEY"
-	startupTimeout               = 15 * time.Second
-	startupAttemptTimeout        = time.Second
-	startupRetryDelay            = 100 * time.Millisecond
-	reconnectRetryDelay          = 200 * time.Millisecond
-	reconnectAttempts            = 10
-	nativeStatePollInterval      = 250 * time.Millisecond
-	inactivePollsBeforeComplete  = 2
-	serviceStopTimeout           = 5 * time.Second
+	Name                        = "opencode"
+	defaultAddress              = "127.0.0.1:4096"
+	providerCredentialEnv       = "AGENT_BOARD_PROVIDER_API_KEY"
+	startupTimeout              = 15 * time.Second
+	startupAttemptTimeout       = time.Second
+	startupRetryDelay           = 100 * time.Millisecond
+	reconnectRetryDelay         = 200 * time.Millisecond
+	reconnectAttempts           = 10
+	nativeStatePollInterval     = 250 * time.Millisecond
+	inactivePollsBeforeComplete = 2
+	serviceStopTimeout          = 5 * time.Second
 )
 
 type Engine struct {
@@ -141,6 +141,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	events := readEvents(eventCtx, stream)
 	statePoll := time.NewTicker(nativeStatePollInterval)
 	defer statePoll.Stop()
+	executionObserved := false
 	inactivePolls := 0
 	for {
 		select {
@@ -153,6 +154,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				return engine.Result{}, err
 			}
 			if hadPending {
+				executionObserved = true
 				inactivePolls = 0
 				continue
 			}
@@ -161,6 +163,15 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				return engine.Result{}, fmt.Errorf("opencode engine: query native session activity: %w", err)
 			}
 			if active {
+				executionObserved = true
+				inactivePolls = 0
+				continue
+			}
+			// Prompt admission and execution ownership are asynchronous in OpenCode.
+			// A newly admitted session can therefore be absent from /api/session/active
+			// briefly before its drain starts. Treat inactivity as completion only after
+			// this exact session has been observed running (or asking a Question).
+			if !executionObserved {
 				inactivePolls = 0
 				continue
 			}

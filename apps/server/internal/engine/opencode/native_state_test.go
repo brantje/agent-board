@@ -167,6 +167,33 @@ func TestEngineCompletesFromAuthoritativeNativeActivityPolling(t *testing.T) {
 	}
 }
 
+func TestEngineDoesNotTreatPreStartInactivityAsCompletion(t *testing.T) {
+	var activeCalls atomic.Int32
+	server := newPollingNativeServer(t, "ses_delayed", func(w http.ResponseWriter, _ *http.Request) {
+		call := activeCalls.Add(1)
+		switch call {
+		case 1, 2, 3:
+			writeNativeJSON(t, w, map[string]any{"data": map[string]any{}})
+		case 4:
+			writeNativeJSON(t, w, map[string]any{"data": map[string]any{"ses_delayed": map[string]any{"type": "running"}}})
+		default:
+			writeNativeJSON(t, w, map[string]any{"data": map[string]any{}})
+		}
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	launcher, adapter := pollingAdapterForServer(t, server)
+	_, err := adapter.Execute(ctx, nativeStateRequest(launcher))
+	if err != nil {
+		t.Fatalf("Execute() error=%v", err)
+	}
+	if calls := activeCalls.Load(); calls < 6 {
+		t.Fatalf("active snapshot calls=%d want at least 6 (three pre-start inactive, active, two inactive confirmations)", calls)
+	}
+}
+
 func TestEngineFailsWhenNativeActivitySnapshotFails(t *testing.T) {
 	server := newPollingNativeServer(t, "ses_poll", func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusBadGateway)

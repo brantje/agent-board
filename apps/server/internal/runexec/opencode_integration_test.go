@@ -158,11 +158,14 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 		}
 	}()
 
+	t.Log("waiting for native OpenCode Question")
 	question := waitForOpenCodeQuestion(t, ctx, database, project.ID, run.ID)
+	t.Logf("received native OpenCode Question %s", question.ID)
 	if question.Kind != "SINGLE_CHOICE" {
 		t.Fatalf("native OpenCode Question kind=%q want SINGLE_CHOICE", question.Kind)
 	}
 	betaOption := optionIDByLabel(t, question, "beta")
+	t.Log("answering native OpenCode Question with beta")
 	if _, err := services.Questions.Answer(ctx, project.ID, question.ID, store.QuestionAnswer{
 		Kind:      "SINGLE_CHOICE",
 		OptionIDs: []string{betaOption},
@@ -170,7 +173,9 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 		t.Fatalf("answer OpenCode Question through Agent Board: %v", err)
 	}
 
+	t.Log("waiting for run completion after native Question reply")
 	terminal := waitForScriptedRun(t, ctx, database, project.ID, run.ID)
+	t.Logf("run reached terminal status %s", terminal.Status)
 	if terminal.Status != "READY_FOR_REVIEW" {
 		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
 	}
@@ -311,7 +316,7 @@ func waitForOpenCodeQuestion(t *testing.T, ctx context.Context, database *postgr
 		if err != nil {
 			t.Fatal(err)
 		}
-		if run.Status == "FAILED" || run.Status == "CANCELLED" {
+		if run.Status == "FAILED" || run.Status == "CANCELLED" || run.Status == "READY_FOR_REVIEW" {
 			t.Fatalf("run terminated before Question: status=%s failure=%q", run.Status, openCodeFailureReason(run.FailureReason))
 		}
 		filterRunID := runID
