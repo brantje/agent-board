@@ -32,6 +32,17 @@ func (s *Store) claimExpiredJobForReconciliation(ctx context.Context, ownerID st
 		return nil, err
 	}
 
+	resolvedQuestion, err := resolveExpiredBlockingQuestion(ctx, tx, job, run, oldLease)
+	if err != nil {
+		return nil, err
+	}
+	if resolvedQuestion {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
 	if run.Status == "QUEUED" && (agentID == "" || modelProfileID == "") {
 		if err := resetInvalidQueuedClaim(ctx, tx, job, oldLease); err != nil {
 			return nil, err

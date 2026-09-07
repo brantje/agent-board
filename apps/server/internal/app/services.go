@@ -17,6 +17,7 @@ import (
 // server startup constructs one coherent application boundary.
 type Services struct {
 	ControlPlane      *Service
+	Questions         *QuestionService
 	Workspaces        *WorkspaceService
 	RuntimeInstances  *RuntimeInstanceService
 	RunnerConnections *runner.Manager
@@ -38,7 +39,15 @@ func NewServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 	if err != nil {
 		return nil, err
 	}
-	return &Services{ControlPlane: controlPlane, Workspaces: workspaces}, nil
+	services := &Services{ControlPlane: controlPlane, Workspaces: workspaces}
+	if store.SupportsQuestionStore(controlPlaneStore) {
+		questions, err := NewQuestionService(controlPlaneStore.(store.QuestionStore))
+		if err != nil {
+			return nil, err
+		}
+		services.Questions = questions
+	}
+	return services, nil
 }
 
 func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, implementations map[string]runtimepkg.Implementation, secretResolvers ...executioncontext.SecretResolver) (*Services, error) {
