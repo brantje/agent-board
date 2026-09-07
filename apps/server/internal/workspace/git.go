@@ -60,6 +60,19 @@ func (g *GitCLI) Clone(ctx context.Context, source, destination, branch string) 
 	return err
 }
 
+func (g *GitCLI) CheckoutRevision(ctx context.Context, repositoryPath, revision string) error {
+	revision = strings.TrimSpace(revision)
+	if !isFullCommitRevision(revision) {
+		return fmt.Errorf("git revision must be a full commit id")
+	}
+	resolved, err := g.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", revision+"^{commit}")
+	if err != nil {
+		return err
+	}
+	_, err = g.run(ctx, "-C", repositoryPath, "checkout", "--detach", resolved)
+	return err
+}
+
 func (g *GitCLI) CheckoutNewBranch(ctx context.Context, repositoryPath, branch string) error {
 	_, err := g.run(ctx, "-C", repositoryPath, "checkout", "-b", branch)
 	return err
@@ -145,6 +158,18 @@ func commandName(args []string) string {
 		return arg
 	}
 	return "command"
+}
+
+func isFullCommitRevision(revision string) bool {
+	if len(revision) != 40 && len(revision) != 64 {
+		return false
+	}
+	for _, char := range revision {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') && (char < 'A' || char > 'F') {
+			return false
+		}
+	}
+	return true
 }
 
 func hardenedGitEnv() []string {

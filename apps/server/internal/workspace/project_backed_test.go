@@ -49,6 +49,25 @@ func TestProjectBackedMaterializerUsesAcceptedProjectWorkspace(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Simulate another approval advancing the mutable accepted branch after the
+	// accepted snapshot was resolved but before this Issue Workspace clones it.
+	if err := os.WriteFile(filepath.Join(accepted.Path, "newer.txt"), []byte("newer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.run(context.Background(), "-C", accepted.Path, "add", "newer.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.run(context.Background(), "-C", accepted.Path, "-c", "user.name=Agent Board", "-c", "user.email=agent-board@localhost", "commit", "-m", "newer accepted state"); err != nil {
+		t.Fatal(err)
+	}
+	newerRevision, err := git.HeadRevision(context.Background(), accepted.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newerRevision == accepted.AcceptedRevision {
+		t.Fatal("fixture did not advance accepted branch")
+	}
+
 	issueRoot := filepath.Join(parent, "issue-workspaces")
 	state := &memoryStateStore{workspace: fixtureWorkspace(source)}
 	legacy, _ := NewMaterializer(state, policy, git, issueRoot)
@@ -64,6 +83,9 @@ func TestProjectBackedMaterializerUsesAcceptedProjectWorkspace(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join(got.Path, "accepted.txt"))
 	if err != nil || string(content) != "accepted\n" {
 		t.Fatalf("Issue Workspace did not start from accepted Project Workspace: content=%q err=%v", content, err)
+	}
+	if _, err := os.Stat(filepath.Join(got.Path, "newer.txt")); !os.IsNotExist(err) {
+		t.Fatalf("Issue Workspace included state newer than accepted revision: err=%v", err)
 	}
 	if got.BaseRevision == nil || *got.BaseRevision != accepted.AcceptedRevision {
 		t.Fatalf("Issue Workspace base revision=%v, want accepted revision %q", got.BaseRevision, accepted.AcceptedRevision)
