@@ -168,7 +168,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				continue
 			}
 			// Prompt admission and execution ownership are asynchronous in OpenCode.
-			// A newly admitted session can therefore be absent from /api/session/active
+			// A newly admitted session can therefore be absent from /session/status
 			// briefly before its drain starts. Treat inactivity as completion only after
 			// this exact session has been observed running (or asking a Question).
 			if !executionObserved {
@@ -211,6 +211,13 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
 				return engine.Result{}, err
+			}
+			// A native Question can be asked and answered before the first activity
+			// poll. Since handleQuestion only retains requests for this exact native
+			// session, its presence is authoritative proof that execution started.
+			if len(state.nativeQuestions) > 0 {
+				executionObserved = true
+				inactivePolls = 0
 			}
 		}
 	}
