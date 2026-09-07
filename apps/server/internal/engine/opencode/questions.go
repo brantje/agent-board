@@ -17,6 +17,7 @@ type nativeQuestionBinding struct {
 	correlationKey string
 	kind           string
 	labels         map[string]string
+	custom         bool
 }
 
 type nativeQuestionState struct {
@@ -89,7 +90,12 @@ func (s *runState) handleQuestion(ctx context.Context, native *client.Client, re
 				CorrelationKey: correlationKey,
 				Question:       mapped,
 			}
-			bindings[index] = nativeQuestionBinding{correlationKey: correlationKey, kind: mapped.Kind, labels: labels}
+			bindings[index] = nativeQuestionBinding{
+				correlationKey: correlationKey,
+				kind:           mapped.Kind,
+				labels:         labels,
+				custom:         mapped.Custom,
+			}
 		}
 
 		opened, err := s.openQuestionBatch(ctx, openRequests)
@@ -226,7 +232,10 @@ func mapNativeQuestion(native client.QuestionInfo) (engine.QuestionRequest, map[
 	if prompt == "" {
 		return engine.QuestionRequest{}, nil, fmt.Errorf("native Question prompt is empty")
 	}
-	request := engine.QuestionRequest{Prompt: prompt, Blocking: true}
+	request := engine.QuestionRequest{Prompt: prompt, Blocking: true, Custom: true}
+	if native.Custom != nil {
+		request.Custom = *native.Custom
+	}
 	labels := make(map[string]string, len(native.Options))
 	if len(native.Options) == 0 {
 		request.Kind = "TEXT"
@@ -261,6 +270,9 @@ func mapCanonicalAnswer(binding nativeQuestionBinding, answer engine.QuestionAns
 		return []string{*answer.Text}, nil
 	case "SINGLE_CHOICE", "MULTI_CHOICE":
 		if len(answer.OptionIDs) == 0 {
+			if binding.custom && answer.Text != nil && strings.TrimSpace(*answer.Text) != "" {
+				return []string{*answer.Text}, nil
+			}
 			return nil, fmt.Errorf("choice answer has no options")
 		}
 		labels := make([]string, 0, len(answer.OptionIDs))
