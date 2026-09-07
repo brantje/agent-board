@@ -21,11 +21,46 @@ func (s *RedactingStore) interactiveQuestionStore() (store.InteractiveQuestionSt
 	return s.ControlPlaneStore.(store.InteractiveQuestionStore), nil
 }
 
+func (s *RedactingStore) interactiveQuestionBatchStore() (store.InteractiveQuestionBatchStore, error) {
+	if s == nil {
+		return nil, fmt.Errorf("redacting store base does not support interactive Question batch operations")
+	}
+	questions, ok := s.ControlPlaneStore.(store.InteractiveQuestionBatchStore)
+	if !ok {
+		return nil, fmt.Errorf("redacting store base does not support interactive Question batch operations")
+	}
+	return questions, nil
+}
+
 func (s *RedactingStore) OpenInteractiveQuestion(ctx context.Context, input store.OpenInteractiveQuestionCommand) (store.OpenInteractiveQuestionResult, error) {
 	questions, err := s.interactiveQuestionStore()
 	if err != nil {
 		return store.OpenInteractiveQuestionResult{}, err
 	}
+	redacted, err := s.redactInteractiveQuestionCommand(input)
+	if err != nil {
+		return store.OpenInteractiveQuestionResult{}, err
+	}
+	return questions.OpenInteractiveQuestion(ctx, redacted)
+}
+
+func (s *RedactingStore) OpenInteractiveQuestions(ctx context.Context, inputs []store.OpenInteractiveQuestionCommand) (store.OpenInteractiveQuestionsResult, error) {
+	questions, err := s.interactiveQuestionBatchStore()
+	if err != nil {
+		return store.OpenInteractiveQuestionsResult{}, err
+	}
+	redacted := make([]store.OpenInteractiveQuestionCommand, len(inputs))
+	for index, input := range inputs {
+		command, redactErr := s.redactInteractiveQuestionCommand(input)
+		if redactErr != nil {
+			return store.OpenInteractiveQuestionsResult{}, redactErr
+		}
+		redacted[index] = command
+	}
+	return questions.OpenInteractiveQuestions(ctx, redacted)
+}
+
+func (s *RedactingStore) redactInteractiveQuestionCommand(input store.OpenInteractiveQuestionCommand) (store.OpenInteractiveQuestionCommand, error) {
 	question := input.Question
 	question.Prompt = s.registry.RedactString(question.RunID, question.Prompt)
 	if question.Recommendation != nil {
@@ -33,14 +68,14 @@ func (s *RedactingStore) OpenInteractiveQuestion(ctx context.Context, input stor
 		question.Recommendation = &value
 	}
 	if len(question.Options) != 0 {
-		redacted, redactErr := s.registry.RedactJSON(question.RunID, question.Options)
-		if redactErr != nil {
-			return store.OpenInteractiveQuestionResult{}, redactErr
+		redacted, err := s.registry.RedactJSON(question.RunID, question.Options)
+		if err != nil {
+			return store.OpenInteractiveQuestionCommand{}, err
 		}
 		question.Options = redacted
 	}
 	input.Question = question
-	return questions.OpenInteractiveQuestion(ctx, input)
+	return input, nil
 }
 
 func (s *RedactingStore) ResolveInteractiveQuestion(ctx context.Context, projectID, questionID string) (store.ResolveInteractiveQuestionResult, error) {
@@ -52,4 +87,5 @@ func (s *RedactingStore) ResolveInteractiveQuestion(ctx context.Context, project
 }
 
 var _ store.InteractiveQuestionStore = (*RedactingStore)(nil)
+var _ store.InteractiveQuestionBatchStore = (*RedactingStore)(nil)
 var _ store.InteractiveQuestionStoreCapability = (*RedactingStore)(nil)
