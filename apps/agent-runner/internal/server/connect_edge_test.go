@@ -43,7 +43,7 @@ func TestSessionConnectValidatesConnectionMessages(t *testing.T) {
 	assertConnectCloseCode(t, read(t, conn), "", "invalid_connect_close")
 
 	send(t, conn, protocol.TypeKill, "validation-session", nil)
-	waitForExit(t, conn)
+	waitForConnectTestExit(t, conn)
 }
 
 func TestSessionConnectReportsLoopbackDialFailure(t *testing.T) {
@@ -67,7 +67,7 @@ func TestSessionConnectReportsLoopbackDialFailure(t *testing.T) {
 	assertConnectCloseCode(t, read(t, conn), "dial-failure", "connect_failed")
 
 	send(t, conn, protocol.TypeKill, "dial-failure-session", nil)
-	waitForExit(t, conn)
+	waitForConnectTestExit(t, conn)
 }
 
 func TestSessionConnectRejectsDuplicateConnectionID(t *testing.T) {
@@ -107,7 +107,7 @@ func TestSessionConnectRejectsDuplicateConnectionID(t *testing.T) {
 		t.Fatalf("close response=%#v", msg)
 	}
 	send(t, conn, protocol.TypeKill, "duplicate-session", nil)
-	waitForExit(t, conn)
+	waitForConnectTestExit(t, conn)
 }
 
 func TestSessionEndClosesActiveConnections(t *testing.T) {
@@ -172,7 +172,7 @@ func startConnectTestSession(t *testing.T, conn *websocket.Conn, sessionID strin
 	}
 }
 
-func waitForExit(t *testing.T, conn *websocket.Conn) {
+func waitForConnectTestExit(t *testing.T, conn *websocket.Conn) {
 	t.Helper()
 	for {
 		if msg := read(t, conn); msg.Type == protocol.TypeExit {
