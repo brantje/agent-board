@@ -61,10 +61,17 @@ func (a *CandidateApplier) Apply(ctx context.Context, project store.Project, rev
 		return "", fmt.Errorf("acquire Project Workspace approval lock: %w", err)
 	}
 	defer func() {
-		if releaseErr := lock.Release(); err == nil && releaseErr != nil {
-			revision = ""
-			err = fmt.Errorf("release Project Workspace approval lock: %w", releaseErr)
+		releaseErr := lock.Release()
+		if err != nil || releaseErr == nil {
+			return
 		}
+		if strings.TrimSpace(revision) != "" {
+			// A non-empty revision means candidate delivery is already durable.
+			// Reporting a later lock-release error as a delivery failure would let
+			// Review state diverge from the accepted Project Workspace.
+			return
+		}
+		err = fmt.Errorf("release Project Workspace approval lock: %w", releaseErr)
 	}()
 
 	if commit, found, err := a.git.findAcceptedReview(ctx, accepted.Path, reviewID); err != nil {
