@@ -192,6 +192,52 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		return store.AnswerQuestionResult{}, err
 	}
 
+	answerPayload, err := json.Marshal(map[string]any{
+		"questionId": question.ID,
+		"answer":     input.Answer,
+		"actorType":  input.ActorType,
+		"actorId":    input.ActorID,
+	})
+	if err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+	decisionPayload, err := json.Marshal(map[string]any{
+		"decisionId": decision.ID,
+		"questionId": question.ID,
+		"kind":       decision.Kind,
+		"outcome":    decision.Outcome,
+		"actorType":  decision.ActorType,
+		"actorId":    decision.ActorID,
+	})
+	if err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+	workspaceID := run.WorkspaceID
+	if _, err := appendEventTx(ctx, tx, store.Event{
+		Type:        "question.answered",
+		ProjectID:   question.ProjectID,
+		IssueID:     &issueID,
+		RunID:       &runID,
+		AgentID:     run.AgentID,
+		WorkspaceID: &workspaceID,
+		Actor:       store.EmptyObject,
+		Payload:     answerPayload,
+	}); err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+	if _, err := appendEventTx(ctx, tx, store.Event{
+		Type:        "decision.recorded",
+		ProjectID:   question.ProjectID,
+		IssueID:     &issueID,
+		RunID:       &runID,
+		AgentID:     run.AgentID,
+		WorkspaceID: &workspaceID,
+		Actor:       store.EmptyObject,
+		Payload:     decisionPayload,
+	}); err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+
 	result := store.AnswerQuestionResult{Question: question, Decision: decision, Run: run}
 	if interactive {
 		binding, err = scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
