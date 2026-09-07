@@ -129,3 +129,28 @@ func TestPendingSessionConnectQueuesDataUntilDialCompletes(t *testing.T) {
 	send(t, conn, protocol.TypeKill, "pending-data-session", nil)
 	waitForConnectTestExit(t, conn)
 }
+
+func TestNetworkAllowsIPEnforcesRequestedAddressFamily(t *testing.T) {
+	ipv4 := net.ParseIP("127.0.0.1")
+	ipv6 := net.ParseIP("::1")
+	cases := []struct {
+		name    string
+		network string
+		ip      net.IP
+		want    bool
+	}{
+		{name: "tcp accepts ipv4", network: "tcp", ip: ipv4, want: true},
+		{name: "tcp accepts ipv6", network: "tcp", ip: ipv6, want: true},
+		{name: "tcp4 accepts ipv4", network: "tcp4", ip: ipv4, want: true},
+		{name: "tcp4 rejects ipv6", network: "tcp4", ip: ipv6, want: false},
+		{name: "tcp6 rejects ipv4", network: "tcp6", ip: ipv4, want: false},
+		{name: "tcp6 accepts ipv6", network: "tcp6", ip: ipv6, want: true},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			if got := networkAllowsIP(test.network, test.ip); got != test.want {
+				t.Fatalf("networkAllowsIP(%q, %v)=%v want %v", test.network, test.ip, got, test.want)
+			}
+		})
+	}
+}
