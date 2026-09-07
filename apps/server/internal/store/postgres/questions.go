@@ -12,7 +12,7 @@ import (
 
 func (s *Store) GetQuestion(ctx context.Context, projectID, questionID string) (store.Question, error) {
 	return scanQuestion(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1 AND id = $2
 	`, projectID, questionID))
@@ -20,7 +20,7 @@ func (s *Store) GetQuestion(ctx context.Context, projectID, questionID string) (
 
 func (s *Store) ListQuestions(ctx context.Context, projectID string, filter store.QuestionFilter) ([]store.Question, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1
 		  AND ($2::uuid IS NULL OR issue_id = $2)
@@ -59,7 +59,7 @@ func (s *Store) GetDecisionByQuestion(ctx context.Context, projectID, questionID
 
 func (s *Store) GetOpenBlockingQuestion(ctx context.Context, projectID, runID string) (store.Question, error) {
 	return scanQuestion(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1 AND run_id = $2 AND blocking AND status = 'OPEN'
 		ORDER BY created_at, id
@@ -79,7 +79,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	initialQuestion, err := scanQuestion(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1 AND id = $2
 	`, input.ProjectID, input.QuestionID))
@@ -98,7 +98,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 	}
 
 	question, err := scanQuestion(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1 AND id = $2
 		FOR UPDATE
@@ -175,7 +175,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		UPDATE questions
 		SET status = 'ANSWERED', answered_at = now()
 		WHERE project_id = $1 AND id = $2 AND status = 'OPEN'
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 	`, question.ProjectID, question.ID))
 	if err != nil {
 		return store.AnswerQuestionResult{}, err
@@ -280,7 +280,13 @@ func validateQuestionAnswer(question store.Question, answer store.QuestionAnswer
 			return store.ErrInvalidArgument
 		}
 	case "SINGLE_CHOICE", "MULTI_CHOICE":
-		if answer.Text != nil || len(answer.OptionIDs) == 0 || (question.Kind == "SINGLE_CHOICE" && len(answer.OptionIDs) != 1) {
+		if answer.Text != nil {
+			if !question.Custom || strings.TrimSpace(*answer.Text) == "" || len(answer.OptionIDs) != 0 {
+				return store.ErrInvalidArgument
+			}
+			return nil
+		}
+		if len(answer.OptionIDs) == 0 || (question.Kind == "SINGLE_CHOICE" && len(answer.OptionIDs) != 1) {
 			return store.ErrInvalidArgument
 		}
 		var options []store.QuestionOption
