@@ -148,10 +148,7 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 		}
 		database.Close()
 	}
-	return &applicationHandler{
-		Handler:  httpapi.NewRouterWithApplication(services, secretWriteAuthorizer),
-		services: services,
-	}, closeApplication, nil
+	return &applicationHandler{Handler: httpapi.NewRouterWithApplication(services, secretWriteAuthorizer), services: services}, closeApplication, nil
 }
 
 func reconcileRuntimeInstances(ctx context.Context, handler http.Handler) error {
@@ -200,7 +197,16 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	materializer, err := workspace.NewMaterializer(database, policy, git, configuredWorkspaceRoot())
+	workspaceRoot := configuredWorkspaceRoot()
+	projectMaterializer, err := workspace.NewProjectMaterializer(database, policy, git, workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	issueMaterializer, err := workspace.NewMaterializer(database, policy, git, workspaceRoot)
+	if err != nil {
+		return nil, err
+	}
+	materializer, err := workspace.NewProjectBackedMaterializer(issueMaterializer, projectMaterializer)
 	if err != nil {
 		return nil, err
 	}
