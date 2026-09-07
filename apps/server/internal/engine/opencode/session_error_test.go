@@ -57,7 +57,9 @@ func TestHandleSessionErrorRejectsMalformedControlPayload(t *testing.T) {
 		t.Fatal("malformed session.error unexpectedly accepted")
 	}
 	invalidDetails := json.RawMessage(`{"sessionID":"ses_1","error":"not-an-object"}`)
-	invalidDetails = json.RawMessage(strings.ReplaceAll(string(invalidDetails), `\"`, `"`))
+	if !json.Valid(invalidDetails) {
+		invalidDetails = json.RawMessage(`{"sessionID":"ses_1","error":"not-an-object"}`[1:])
+	}
 	if err := state.handleSessionError(invalidDetails); err == nil {
 		t.Fatal("malformed native error details unexpectedly accepted")
 	}
