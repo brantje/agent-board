@@ -212,24 +212,41 @@ type CandidateSnapshot struct {
 }
 
 type CandidateSnapshotter struct {
-	collector *CandidateCollector
-	store     ArtifactStore
-	blobs     BlobStore
+	collector        *CandidateCollector
+	store            ArtifactStore
+	blobs            BlobStore
+	reviewCandidates ReviewCandidateWriter
 }
 
 const maxCandidateFileChunks int64 = 4096
 
 func NewCandidateSnapshotter(collector *CandidateCollector, store ArtifactStore, blobs BlobStore) (*CandidateSnapshotter, error) {
+	return newCandidateSnapshotter(collector, store, blobs, nil)
+}
+
+func NewCandidateSnapshotterWithReviewCandidates(collector *CandidateCollector, store ArtifactStore, blobs BlobStore, reviewCandidates ReviewCandidateWriter) (*CandidateSnapshotter, error) {
+	if reviewCandidates == nil {
+		return nil, fmt.Errorf("evidence: review candidate store is required")
+	}
+	return newCandidateSnapshotter(collector, store, blobs, reviewCandidates)
+}
+
+func newCandidateSnapshotter(collector *CandidateCollector, store ArtifactStore, blobs BlobStore, reviewCandidates ReviewCandidateWriter) (*CandidateSnapshotter, error) {
 	if collector == nil || store == nil || blobs == nil {
 		return nil, fmt.Errorf("evidence: candidate collector, artifact store and blob store are required")
 	}
-	return &CandidateSnapshotter{collector: collector, store: store, blobs: blobs}, nil
+	return &CandidateSnapshotter{collector: collector, store: store, blobs: blobs, reviewCandidates: reviewCandidates}, nil
 }
 
 func (s *CandidateSnapshotter) Snapshot(ctx context.Context, scope RunScope, workspace string) (CandidateSnapshot, error) {
 	candidate, err := s.collector.Collect(ctx, workspace)
 	if err != nil {
 		return CandidateSnapshot{}, err
+	}
+	if s.reviewCandidates != nil {
+		if err := s.reviewCandidates.Capture(ctx, scope.RunID, workspace, candidate); err != nil {
+			return CandidateSnapshot{}, fmt.Errorf("evidence: capture private review candidate: %w", err)
+		}
 	}
 	manifestData, err := json.Marshal(candidate)
 	if err != nil {
