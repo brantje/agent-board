@@ -46,14 +46,11 @@ type QuestionRequest struct {
 	} `json:"tool,omitempty"`
 }
 
+// Event is the native OpenCode v2 event envelope used by v1.18.29. Event
+// payloads are carried in properties; unknown future top-level fields are
+// intentionally ignored by encoding/json.
 type Event struct {
-	ID       string                     `json:"id"`
-	Type     string                     `json:"type"`
-	Data     json.RawMessage            `json:"data"`
-	Metadata map[string]json.RawMessage `json:"metadata,omitempty"`
-	Durable  *struct {
-		AggregateID string `json:"aggregateID"`
-		Seq         int64  `json:"seq"`
-		Version     int    `json:"version"`
-	} `json:"durable,omitempty"`
+	ID         string          `json:"id"`
+	Type       string          `json:"type"`
+	Properties json.RawMessage `json:"properties"`
 }
