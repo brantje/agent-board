@@ -38,7 +38,7 @@ func TestReviewCommandsValidateRequiredInput(t *testing.T) {
 			return err
 		},
 		"changes oversized feedback": func() error {
-			_, err := s.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{ProjectID: "project", ReviewID: "review", Feedback: strings.Repeat("x", maxReviewFeedbackBytes+1)})
+			_, err := s.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{ProjectID: "project", ReviewID: "review", Feedback: strings.Repeat("x", maxReviewFeedbackCharacters+1)})
 			return err
 		},
 	} {
@@ -47,6 +47,25 @@ func TestReviewCommandsValidateRequiredInput(t *testing.T) {
 				t.Fatalf("error=%v want ErrInvalidArgument", err)
 			}
 		})
+	}
+}
+
+func TestRequestReviewChangesCountsUnicodeCharacters(t *testing.T) {
+	s := New(testPool(t))
+	ctx := t.Context()
+	fixture, review := readyReviewFixture(t, s, "unicode-feedback-limit")
+
+	feedback := strings.Repeat("é", maxReviewFeedbackCharacters)
+	result, err := s.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{
+		ProjectID: fixture.project.ID,
+		ReviewID:  review.ID,
+		Feedback:  feedback,
+	})
+	if err != nil {
+		t.Fatalf("RequestReviewChanges() error=%v", err)
+	}
+	if result.Review.Status != "CHANGES_REQUESTED" {
+		t.Fatalf("review status=%s want CHANGES_REQUESTED", result.Review.Status)
 	}
 }
 

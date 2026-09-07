@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 
-const maxReviewFeedbackBytes = 32 << 10
+const maxReviewFeedbackCharacters = 32 << 10
 
 func (s *Store) GetReview(ctx context.Context, projectID, reviewID string) (store.Review, error) {
 	return scanReview(s.pool.QueryRow(ctx, `
@@ -262,7 +263,7 @@ func (s *Store) FailReviewApproval(ctx context.Context, input store.FailReviewAp
 
 func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestReviewChangesCommand) (store.RequestReviewChangesResult, error) {
 	feedback := strings.TrimSpace(input.Feedback)
-	if strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.ReviewID) == "" || feedback == "" || len(feedback) > maxReviewFeedbackBytes {
+	if strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.ReviewID) == "" || feedback == "" || utf8.RuneCountInString(feedback) > maxReviewFeedbackCharacters {
 		return store.RequestReviewChangesResult{}, store.ErrInvalidArgument
 	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})

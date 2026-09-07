@@ -72,6 +72,7 @@ ReviewRequestChangesRequest:
   properties:
     feedback:
       type: string
+      description: Human review feedback, limited to 32768 Unicode characters.
       minLength: 1
       maxLength: 32768
 
