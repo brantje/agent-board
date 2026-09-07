@@ -13,7 +13,7 @@ import (
 
 func (s *runState) handleEvent(ctx context.Context, native *client.Client, event client.Event) error {
 	switch event.Type {
-	case "question.v2.asked":
+	case "question.asked", "question.v2.asked":
 		var request client.QuestionRequest
 		if err := json.Unmarshal(event.Properties, &request); err != nil {
 			return fmt.Errorf("opencode engine: decode native Question event: %w", err)

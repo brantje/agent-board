@@ -85,8 +85,7 @@ func (c *Client) CloseIdleConnections() {
 func (c *Client) Health(ctx context.Context) (Health, error) {
 	var health Health
 	err := c.doJSON(ctx, http.MethodGet, "/api/health", nil, &health)
-	var httpErr *HTTPError
-	if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+	if isNotFound(err) {
 		err = c.doJSON(ctx, http.MethodGet, "/global/health", nil, &health)
 	}
 	if err != nil {
@@ -140,33 +139,44 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) error {
 	path := "/session/" + url.PathEscape(sessionID) + "/prompt_async"
 	if err := c.doJSON(ctx, http.MethodPost, path, payload, nil); err == nil {
 		return nil
-	} else {
-		var httpErr *HTTPError
-		if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusNotFound {
-			return err
-		}
+	} else if !isNotFound(err) {
+		return err
 	}
 
 	// Keep a narrow compatibility fallback for OpenCode builds that predate the
 	// documented headless prompt_async route. v1.18.29 uses the path above.
-	legacyPayload := struct {
+	fallbackPayload := struct {
 		Prompt struct {
 			Text string `json:"text"`
 		} `json:"prompt"`
 		Delivery string `json:"delivery"`
 	}{}
-	legacyPayload.Prompt.Text = text
-	legacyPayload.Delivery = "steer"
-	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt", legacyPayload, nil)
+	fallbackPayload.Prompt.Text = text
+	fallbackPayload.Delivery = "steer"
+	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt", fallbackPayload, nil)
 }
 
-// SessionActive reports whether this OpenCode process currently owns the
-// foreground drain for sessionID. OpenCode v1.18.29 documents absence from
-// /api/session/active as the authoritative inactive state.
+// SessionActive follows the same documented headless execution surface as
+// Prompt. OpenCode v1.18.29 exposes the legacy SessionPrompt lifecycle through
+// /session/status; polling /api/session/active would observe the separate V2
+// execution coordinator and can report this prompt inactive while it is busy.
 func (c *Client) SessionActive(ctx context.Context, sessionID string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return false, fmt.Errorf("opencode: session id is required")
 	}
+	type status struct {
+		Type string `json:"type"`
+	}
+	var statuses map[string]status
+	if err := c.doJSON(ctx, http.MethodGet, "/session/status", nil, &statuses); err == nil {
+		current, ok := statuses[sessionID]
+		return ok && current.Type != "" && current.Type != "idle", nil
+	} else if !isNotFound(err) {
+		return false, err
+	}
+
+	// Compatibility fallback for OpenCode builds without the documented status
+	// endpoint. The pinned v1.18.29 Runtime uses /session/status above.
 	var response struct {
 		Data map[string]json.RawMessage `json:"data"`
 	}
@@ -181,6 +191,12 @@ func (c *Client) InterruptSession(ctx context.Context, sessionID string) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("opencode: session id is required")
 	}
+	path := "/session/" + url.PathEscape(sessionID) + "/abort"
+	if err := c.doJSON(ctx, http.MethodPost, path, nil, nil); err == nil {
+		return nil
+	} else if !isNotFound(err) {
+		return err
+	}
 	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/interrupt", nil, nil)
 }
 
@@ -188,6 +204,25 @@ func (c *Client) ListQuestions(ctx context.Context, sessionID string) ([]Questio
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, fmt.Errorf("opencode: session id is required")
 	}
+
+	// prompt_async executes through OpenCode's native Question.Service, whose
+	// documented headless list route is instance-scoped. Filter it to the exact
+	// session owned by this Agent Board Run before exposing requests upstream.
+	var pending []QuestionRequest
+	if err := c.doJSON(ctx, http.MethodGet, "/question", nil, &pending); err == nil {
+		filtered := make([]QuestionRequest, 0, len(pending))
+		for _, request := range pending {
+			if request.SessionID == sessionID {
+				filtered = append(filtered, request)
+			}
+		}
+		return filtered, nil
+	} else if !isNotFound(err) {
+		return nil, err
+	}
+
+	// Compatibility fallback for V2-only OpenCode builds and deterministic
+	// fixtures written against the newer session-scoped API.
 	var response struct {
 		Data []QuestionRequest `json:"data"`
 	}
@@ -204,6 +239,12 @@ func (c *Client) ReplyQuestion(ctx context.Context, sessionID, requestID string,
 	payload := struct {
 		Answers [][]string `json:"answers"`
 	}{Answers: answers}
+	path := "/question/" + url.PathEscape(requestID) + "/reply"
+	if err := c.doJSON(ctx, http.MethodPost, path, payload, nil); err == nil {
+		return nil
+	} else if !isNotFound(err) {
+		return err
+	}
 	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/question/"+url.PathEscape(requestID)+"/reply", payload, nil)
 }
 
@@ -211,7 +252,18 @@ func (c *Client) RejectQuestion(ctx context.Context, sessionID, requestID string
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(requestID) == "" {
 		return fmt.Errorf("opencode: session id and question request id are required")
 	}
+	path := "/question/" + url.PathEscape(requestID) + "/reject"
+	if err := c.doJSON(ctx, http.MethodPost, path, nil, nil); err == nil {
+		return nil
+	} else if !isNotFound(err) {
+		return err
+	}
 	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/question/"+url.PathEscape(requestID)+"/reject", nil, nil)
+}
+
+func isNotFound(err error) bool {
+	var httpErr *HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, payload, output any) error {
