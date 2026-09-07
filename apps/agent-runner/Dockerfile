@@ -31,7 +31,7 @@ RUN apk add --no-cache curl git tar libstdc++ libgcc \
            exit 1 \
            ;; \
        esac \
-    && curl -fsSL \
+    && curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
          "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/${opencode_asset}" \
          -o /tmp/opencode.tar.gz \
     && echo "${opencode_sha256}  /tmp/opencode.tar.gz" | sha256sum -c - \
