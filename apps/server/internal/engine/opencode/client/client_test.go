@@ -37,7 +37,7 @@ func TestClientNativeSessionAndQuestionRoutes(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Errorf("decode prompt: %v", err)
 		}
-		if payload.Prompt.Text != "implement issue" || payload.Delivery != "immediate" {
+		if payload.Prompt.Text != "implement issue" || payload.Delivery != "steer" {
 			t.Errorf("prompt payload=%+v", payload)
 		}
 		writeJSON(t, w, http.StatusOK, map[string]any{"data": map[string]any{"id": "input_1"}})
@@ -127,7 +127,7 @@ func TestClientDecodesNativeSSEEvents(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, ": heartbeat\n")
-		_, _ = fmt.Fprint(w, "data: {\"id\":\"evt_1\",\"type\":\"question.v2.asked\",\"data\":{\"id\":\"que_1\",\"sessionID\":\"ses_1\",\"questions\":[]}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"evt_1\",\"type\":\"question.v2.asked\",\"properties\":{\"id\":\"que_1\",\"sessionID\":\"ses_1\",\"questions\":[]}}\n\n")
 	}))
 	defer server.Close()
 	client, err := New(server.Client(), server.URL)
@@ -144,7 +144,7 @@ func TestClientDecodesNativeSSEEvents(t *testing.T) {
 		t.Fatalf("event=%+v err=%v", event, err)
 	}
 	var request QuestionRequest
-	if err := json.Unmarshal(event.Data, &request); err != nil || request.ID != "que_1" || request.SessionID != "ses_1" {
+	if err := json.Unmarshal(event.Properties, &request); err != nil || request.ID != "que_1" || request.SessionID != "ses_1" {
 		t.Fatalf("question=%+v err=%v", request, err)
 	}
 }
