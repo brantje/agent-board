@@ -18,25 +18,30 @@ func TestWorkspaceBootstrapTransitionsAreScopedAndReadyIsTerminal(t *testing.T) 
 	other := seedRunFixture(t, s, "workspace-bootstrap-other")
 
 	path := "/workspaces/" + fixture.workspace.ID
-	pending, err := s.MarkWorkspaceBootstrapPending(ctx, fixture.project.ID, fixture.issue.ID, fixture.workspace.ID, path, "/repos/source", "main", fixture.workspace.WorkingBranch)
+	pinnedRevision := "0123456789abcdef"
+	pending, err := s.MarkWorkspaceBootstrapPending(ctx, fixture.project.ID, fixture.issue.ID, fixture.workspace.ID, path, "/repos/source", "main", pinnedRevision, fixture.workspace.WorkingBranch)
 	if err != nil {
 		t.Fatalf("mark pending: %v", err)
 	}
-	if pending.BootstrapStatus != "PENDING" || pending.RepositoryPath == nil || *pending.RepositoryPath != "/repos/source" || pending.BaseRevision != nil {
+	if pending.BootstrapStatus != "PENDING" || pending.RepositoryPath == nil || *pending.RepositoryPath != "/repos/source" || pending.BaseRevision == nil || *pending.BaseRevision != pinnedRevision {
 		t.Fatalf("pending workspace = %+v", pending)
 	}
-	if _, err := s.MarkWorkspaceBootstrapPending(ctx, other.project.ID, fixture.issue.ID, fixture.workspace.ID, path, "/repos/source", "main", fixture.workspace.WorkingBranch); !errors.Is(err, store.ErrNotFound) {
+	persistedPending, err := s.GetWorkspaceByIssue(ctx, fixture.project.ID, fixture.issue.ID)
+	if err != nil || persistedPending.BaseRevision == nil || *persistedPending.BaseRevision != pinnedRevision {
+		t.Fatalf("persisted pending workspace = %+v err=%v", persistedPending, err)
+	}
+	if _, err := s.MarkWorkspaceBootstrapPending(ctx, other.project.ID, fixture.issue.ID, fixture.workspace.ID, path, "/repos/source", "main", pinnedRevision, fixture.workspace.WorkingBranch); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-project pending error = %v", err)
 	}
 	if _, err := s.MarkWorkspaceBootstrapReady(ctx, fixture.project.ID, fixture.issue.ID, fixture.workspace.ID, path, "/repos/source", "main", "", fixture.workspace.WorkingBranch); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("blank base revision error = %v", err)
 	}
 
-	ready, err := s.MarkWorkspaceBootstrapReady(ctx, fixture.project.ID, fixture.issue.ID, fixture.workspace.ID, path, "/repos/source", "main", "0123456789abcdef", fixture.workspace.WorkingBranch)
+	ready, err := s.MarkWorkspaceBootstrapReady(ctx, fixture.project.ID, fixture.issue.ID, fixture.workspace.ID, path, "/repos/source", "main", pinnedRevision, fixture.workspace.WorkingBranch)
 	if err != nil {
 		t.Fatalf("mark ready: %v", err)
 	}
-	if ready.BootstrapStatus != "READY" || ready.BaseRevision == nil || *ready.BaseRevision != "0123456789abcdef" {
+	if ready.BootstrapStatus != "READY" || ready.BaseRevision == nil || *ready.BaseRevision != pinnedRevision {
 		t.Fatalf("ready workspace = %+v", ready)
 	}
 	if _, err := s.MarkWorkspaceBootstrapFailed(ctx, fixture.project.ID, fixture.issue.ID, fixture.workspace.ID); !errors.Is(err, store.ErrConflict) {

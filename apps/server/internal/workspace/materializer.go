@@ -126,7 +126,7 @@ func (m *Materializer) Ensure(ctx context.Context, project store.Project, issue 
 		return m.fail(ctx, current, fmt.Errorf("reset invalid workspace checkout: %w", err))
 	}
 
-	pending, err := m.store.MarkWorkspaceBootstrapPending(ctx, project.ID, issue.ID, current.ID, finalPath, source, baseBranch, current.WorkingBranch)
+	pending, err := m.store.MarkWorkspaceBootstrapPending(ctx, project.ID, issue.ID, current.ID, finalPath, source, baseBranch, expectedBaseRevision, current.WorkingBranch)
 	if err != nil {
 		return store.Workspace{}, fmt.Errorf("mark workspace pending: %w", err)
 	}

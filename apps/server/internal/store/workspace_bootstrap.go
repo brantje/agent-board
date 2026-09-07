@@ -19,7 +19,7 @@ type WorkspaceBootstrapLock interface {
 type WorkspaceBootstrapStore interface {
 	GetWorkspaceByIssue(ctx context.Context, projectID, issueID string) (Workspace, error)
 	AcquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string) (WorkspaceBootstrapLock, error)
-	MarkWorkspaceBootstrapPending(ctx context.Context, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, workingBranch string) (Workspace, error)
+	MarkWorkspaceBootstrapPending(ctx context.Context, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, baseRevision, workingBranch string) (Workspace, error)
 	MarkWorkspaceBootstrapReady(ctx context.Context, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, baseRevision, workingBranch string) (Workspace, error)
 	MarkWorkspaceBootstrapFailed(ctx context.Context, projectID, issueID, workspaceID string) (Workspace, error)
 }

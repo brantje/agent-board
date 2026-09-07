@@ -92,6 +92,81 @@ func TestProjectBackedMaterializerUsesAcceptedProjectWorkspace(t *testing.T) {
 	}
 }
 
+func TestProjectBackedMaterializerKeepsPersistedPendingRevisionAcrossRetry(t *testing.T) {
+	git := requireGit(t)
+	parent := t.TempDir()
+	sourceRoot := filepath.Join(parent, "sources")
+	if err := os.Mkdir(sourceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := createFixtureRepository(t, git.GitCLI, sourceRoot)
+	policy, _ := repository.NewPolicy([]string{sourceRoot})
+	projectMaterializer, _ := NewProjectMaterializer(&projectWorkspaceLockStore{}, policy, git, filepath.Join(parent, "project-workspaces"))
+	project := store.Project{ID: "project-1", RepositoryPath: source, DefaultBranch: "main"}
+	accepted, err := projectMaterializer.EnsureProjectWorkspace(context.Background(), project)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(accepted.Path, "pinned.txt"), []byte("pinned\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.run(context.Background(), "-C", accepted.Path, "add", "pinned.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.run(context.Background(), "-C", accepted.Path, "-c", "user.name=Agent Board", "-c", "user.email=agent-board@localhost", "commit", "-m", "pinned accepted state"); err != nil {
+		t.Fatal(err)
+	}
+	pinnedRevision, err := git.HeadRevision(context.Background(), accepted.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(accepted.Path, "after-restart.txt"), []byte("newer\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.run(context.Background(), "-C", accepted.Path, "add", "after-restart.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.run(context.Background(), "-C", accepted.Path, "-c", "user.name=Agent Board", "-c", "user.email=agent-board@localhost", "commit", "-m", "accepted after bootstrap crash"); err != nil {
+		t.Fatal(err)
+	}
+	accepted.AcceptedRevision, err = git.HeadRevision(context.Background(), accepted.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.AcceptedRevision == pinnedRevision {
+		t.Fatal("fixture did not advance accepted revision")
+	}
+
+	current := fixtureWorkspace(accepted.Path)
+	current.RepositoryPath = workspaceStringPointer(accepted.Path)
+	current.BaseBranch = workspaceStringPointer(accepted.BaseBranch)
+	current.BaseRevision = workspaceStringPointer(pinnedRevision)
+	current.BootstrapStatus = "PENDING"
+	state := &memoryStateStore{workspace: current}
+	legacy, _ := NewMaterializer(state, policy, git, filepath.Join(parent, "issue-workspaces"))
+	backed, err := NewProjectBackedMaterializer(legacy, staticProjectWorkspaceSource{value: accepted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue := store.Issue{ID: "issue-1", ProjectID: project.ID}
+
+	got, err := backed.Ensure(context.Background(), project, issue, current)
+	if err != nil {
+		t.Fatalf("retry Ensure() error = %v", err)
+	}
+	if got.BaseRevision == nil || *got.BaseRevision != pinnedRevision {
+		t.Fatalf("retry base revision=%v want pinned %q", got.BaseRevision, pinnedRevision)
+	}
+	if _, err := os.Stat(filepath.Join(got.Path, "pinned.txt")); err != nil {
+		t.Fatalf("pinned file missing after retry: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(got.Path, "after-restart.txt")); !os.IsNotExist(err) {
+		t.Fatalf("retry drifted to newer accepted revision: err=%v", err)
+	}
+}
+
 func TestProjectBackedMaterializerPreservesExistingReadyIssueWorkspace(t *testing.T) {
 	git := requireGit(t)
 	parent := t.TempDir()

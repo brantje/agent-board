@@ -46,6 +46,15 @@ func (m *ProjectBackedMaterializer) Ensure(ctx context.Context, project store.Pr
 	source := filepath.Clean(accepted.Path)
 	branch := strings.TrimSpace(accepted.BaseBranch)
 	revision := strings.TrimSpace(accepted.AcceptedRevision)
+	if pinned := workspaceBaseRevision(current); pinned != "" {
+		revision = pinned
+		if current.RepositoryPath != nil && strings.TrimSpace(*current.RepositoryPath) != "" {
+			source = filepath.Clean(*current.RepositoryPath)
+		}
+		if current.BaseBranch != nil && strings.TrimSpace(*current.BaseBranch) != "" {
+			branch = strings.TrimSpace(*current.BaseBranch)
+		}
+	}
 	backedStore := &projectBackedStateStore{StateStore: m.issue.store, source: source, branch: branch, revision: revision}
 	delegated := &Materializer{store: backedStore, repositories: exactWorkspaceResolver{path: source}, git: m.issue.git, workspaceRoot: m.issue.workspaceRoot}
 	current.RepositoryPath = workspaceStringPointer(source)
@@ -69,7 +78,7 @@ func (s *projectBackedStateStore) GetWorkspaceByIssue(ctx context.Context, proje
 	if err != nil {
 		return store.Workspace{}, err
 	}
-	if value.BootstrapStatus != "READY" {
+	if value.BootstrapStatus != "READY" && workspaceBaseRevision(value) == "" {
 		value.RepositoryPath = workspaceStringPointer(s.source)
 		value.BaseBranch = workspaceStringPointer(s.branch)
 		value.BaseRevision = workspaceStringPointer(s.revision)
