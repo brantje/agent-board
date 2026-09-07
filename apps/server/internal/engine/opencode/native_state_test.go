@@ -49,7 +49,7 @@ func TestIsSessionIdleEventFiltersAndValidatesNativeSession(t *testing.T) {
 
 func TestReconcilePendingQuestionsHandlesEmptyAndErrorResponses(t *testing.T) {
 	emptyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeNativeJSON(t, w, map[string]any{"data": []any{}})
+		writeNativeJSON(t, w, []any{})
 	}))
 	defer emptyServer.Close()
 	native, err := client.New(emptyServer.Client(), emptyServer.URL)
