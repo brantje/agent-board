@@ -15,7 +15,7 @@ ARG OPENCODE_VERSION=1.18.29
 ARG AGENT_BOARD_UID
 ENV SHELL=/bin/sh
 
-RUN apk add --no-cache bash curl git tar \
+RUN apk add --no-cache bash curl git tar libstdc++ libgcc \
     && curl -fsSL https://opencode.ai/install | bash -s -- --version "${OPENCODE_VERSION}" --no-modify-path \
     && cp /root/.opencode/bin/opencode /usr/local/bin/opencode \
     && chmod 0755 /usr/local/bin/opencode \
