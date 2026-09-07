@@ -8,7 +8,9 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
@@ -141,6 +143,45 @@ func TestEngineCompletesOnMatchingNativeIdleEvent(t *testing.T) {
 	}
 }
 
+func TestEngineCompletesFromAuthoritativeNativeActivityPolling(t *testing.T) {
+	var activeCalls atomic.Int32
+	server := newPollingNativeServer(t, "ses_poll", func(w http.ResponseWriter, _ *http.Request) {
+		call := activeCalls.Add(1)
+		if call == 1 {
+			writeNativeJSON(t, w, map[string]any{"data": map[string]any{"ses_poll": map[string]any{"type": "running"}}})
+			return
+		}
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{}})
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	launcher, adapter := pollingAdapterForServer(t, server)
+	_, err := adapter.Execute(ctx, nativeStateRequest(launcher))
+	if err != nil {
+		t.Fatalf("Execute() error=%v", err)
+	}
+	if calls := activeCalls.Load(); calls < 3 {
+		t.Fatalf("active snapshot calls=%d want at least 3 (active plus two inactive confirmations)", calls)
+	}
+}
+
+func TestEngineFailsWhenNativeActivitySnapshotFails(t *testing.T) {
+	server := newPollingNativeServer(t, "ses_poll", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "boom", http.StatusBadGateway)
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	launcher, adapter := pollingAdapterForServer(t, server)
+	_, err := adapter.Execute(ctx, nativeStateRequest(launcher))
+	if err == nil || !strings.Contains(err.Error(), "query native session activity") || !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("Execute() error=%v", err)
+	}
+}
+
 func TestSessionActivePropagatesHTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusBadGateway)
@@ -152,6 +193,58 @@ func TestSessionActivePropagatesHTTPError(t *testing.T) {
 	}
 	if _, err := native.SessionActive(context.Background(), "ses_1"); err == nil || !strings.Contains(err.Error(), "HTTP 502") {
 		t.Fatalf("SessionActive error=%v", err)
+	}
+}
+
+func newPollingNativeServer(t *testing.T, sessionID string, active http.HandlerFunc) *httptest.Server {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
+	})
+	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": sessionID}})
+	})
+	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"properties\":{}}\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	})
+	mux.HandleFunc("POST /api/session/"+sessionID+"/prompt", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "input_poll"}})
+	})
+	mux.HandleFunc("GET /api/session/"+sessionID+"/question", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": []any{}})
+	})
+	mux.HandleFunc("GET /api/session/active", active)
+	mux.HandleFunc("POST /api/session/"+sessionID+"/interrupt", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	return httptest.NewServer(mux)
+}
+
+func pollingAdapterForServer(t *testing.T, server *httptest.Server) (*fakeOpenCodeLauncher, *Engine) {
+	t.Helper()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &fakeOpenCodeLauncher{process: newFakeOpenCodeProcess(parsed.Host)}
+	return launcher, newWithAddress(parsed.Host)
+}
+
+func nativeStateRequest(launcher *fakeOpenCodeLauncher) engine.Request {
+	return engine.Request{
+		Context: executioncontext.SafeContext{
+			Issue:    executioncontext.IssueContext{Title: "Observe native completion"},
+			Executor: executioncontext.ExecutorContext{Engine: Name},
+			Model:    executioncontext.ModelContext{Model: "test-model"},
+			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
+		},
+		Launcher:             launcher,
+		InteractiveQuestions: &fakeInteractiveQuestions{},
 	}
 }
 
