@@ -38,6 +38,15 @@ func (s *failingListAndReleaseRuntimeStore) AcquireRuntimeAcquisitionLock(contex
 	return failingReleaseRuntimeLock{err: s.releaseErr}, nil
 }
 
+type lockErrorRuntimeStore struct {
+	*listingRuntimeStore
+	err error
+}
+
+func (s *lockErrorRuntimeStore) AcquireRuntimeAcquisitionLock(context.Context, string, string) (store.RuntimeAcquisitionLock, error) {
+	return nil, s.err
+}
+
 type stoppedRecoveringRuntime struct {
 	fakeRuntimeImplementation
 	recoverCalls int
@@ -59,6 +68,17 @@ func (r *missingRecoveringRuntime) Recover(context.Context, runtimepkg.RuntimeSp
 	return runtimepkg.Handle{}, runtimepkg.Inspection{}, runtimepkg.ErrNotFound
 }
 
+type provisioningRecoveringRuntime struct {
+	fakeRuntimeImplementation
+	recoverCalls int
+}
+
+func (r *provisioningRecoveringRuntime) Recover(context.Context, runtimepkg.RuntimeSpec) (runtimepkg.Handle, runtimepkg.Inspection, error) {
+	r.recoverCalls++
+	handle := runtimepkg.Handle{ExternalID: "recovered-provisioning", Metadata: json.RawMessage(`{"safe":true}`)}
+	return handle, runtimepkg.Inspection{ExternalID: handle.ExternalID, State: runtimepkg.StateProvisioning}, nil
+}
+
 type disappearingRunningRuntime struct {
 	fakeRuntimeImplementation
 	inspectCalls int
@@ -70,6 +90,15 @@ func (r *disappearingRunningRuntime) Inspect(ctx context.Context, handle runtime
 		return runtimepkg.Inspection{}, runtimepkg.ErrNotFound
 	}
 	return r.fakeRuntimeImplementation.Inspect(ctx, handle)
+}
+
+type inspectErrorRuntime struct {
+	fakeRuntimeImplementation
+	err error
+}
+
+func (r *inspectErrorRuntime) Inspect(context.Context, runtimepkg.Handle) (runtimepkg.Inspection, error) {
+	return runtimepkg.Inspection{}, r.err
 }
 
 func TestRuntimeInstanceServiceAcquireWithoutListerCreatesAndStartsRuntime(t *testing.T) {
@@ -140,6 +169,26 @@ func TestRuntimeInstanceServiceAcquireJoinsOperationAndLockReleaseFailures(t *te
 	}
 }
 
+func TestRuntimeInstanceServiceAcquireReportsLockAcquisitionFailure(t *testing.T) {
+	_, baseStore, implementation, workspace := runtimeServiceFixture(t)
+	service, err := NewRuntimeInstanceService(
+		&lockErrorRuntimeStore{listingRuntimeStore: &listingRuntimeStore{runtimeServiceStore: baseStore}, err: store.ErrConflict},
+		&runtimeWorkspaceEnsurer{workspace: workspace},
+		map[string]runtimepkg.Implementation{"docker": implementation},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.Acquire(t.Context(), workspace.ProjectID, workspace.IssueID, baseStore.runtime.ID)
+	if !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("Acquire() error=%v", err)
+	}
+	if implementation.createdSpec.RuntimeInstanceID != "" || implementation.startCalls != 0 {
+		t.Fatalf("lock failure must not provision compute: startCalls=%d created=%+v", implementation.startCalls, implementation.createdSpec)
+	}
+}
+
 func TestRuntimeInstanceServiceAcquireRestartsRecoveredStoppedRuntime(t *testing.T) {
 	projectID := "project-1"
 	workspace := store.Workspace{ID: "workspace-1", ProjectID: projectID, IssueID: "issue-1", Path: "/workspaces/one", BootstrapStatus: "READY"}
@@ -194,6 +243,30 @@ func TestRuntimeInstanceServiceAcquireReplacesRecoveredMissingRuntime(t *testing
 	}
 }
 
+func TestRuntimeInstanceServiceAcquireRejectsUnsettledRecoveredRuntime(t *testing.T) {
+	projectID := "project-1"
+	workspace := store.Workspace{ID: "workspace-1", ProjectID: projectID, IssueID: "issue-1", Path: "/workspaces/one", BootstrapStatus: "READY"}
+	runtimeConfig := store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runtime:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Enabled: true}
+	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{
+		ID: "instance-unsettled", ProjectID: projectID, WorkspaceID: workspace.ID, RuntimeID: runtimeConfig.ID,
+		Status: string(runtimepkg.StateProvisioning), RunnerStatus: "CONNECTING",
+	}}
+	rs := &reconcileStore{runtimeServiceStore: base, workspace: workspace}
+	implementation := &provisioningRecoveringRuntime{}
+	service, err := NewRuntimeInstanceService(rs, &runtimeWorkspaceEnsurer{workspace: workspace}, map[string]runtimepkg.Implementation{"docker": implementation})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.Acquire(t.Context(), projectID, workspace.IssueID, runtimeConfig.ID)
+	if !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("Acquire() error=%v", err)
+	}
+	if implementation.recoverCalls != 1 || implementation.createdSpec.RuntimeInstanceID != "" || implementation.startCalls != 0 {
+		t.Fatalf("unsettled recovery must not provision: recoverCalls=%d startCalls=%d created=%+v", implementation.recoverCalls, implementation.startCalls, implementation.createdSpec)
+	}
+}
+
 func TestRuntimeInstanceServiceAcquireReplacesDisappearedRunningRuntime(t *testing.T) {
 	projectID := "project-1"
 	workspace := store.Workspace{ID: "workspace-1", ProjectID: projectID, IssueID: "issue-1", Path: "/workspaces/one", BootstrapStatus: "READY"}
@@ -219,5 +292,42 @@ func TestRuntimeInstanceServiceAcquireReplacesDisappearedRunningRuntime(t *testi
 	}
 	if implementation.inspectCalls != 3 || implementation.startCalls != 1 || implementation.createdSpec.RuntimeInstanceID != instance.ID {
 		t.Fatalf("inspectCalls=%d startCalls=%d created=%+v", implementation.inspectCalls, implementation.startCalls, implementation.createdSpec)
+	}
+}
+
+func TestRuntimeInstanceServiceAcquireReturnsRunningInspectionFailure(t *testing.T) {
+	projectID := "project-1"
+	workspace := store.Workspace{ID: "workspace-1", ProjectID: projectID, IssueID: "issue-1", Path: "/workspaces/one", BootstrapStatus: "READY"}
+	runtimeConfig := store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runtime:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Enabled: true}
+	externalID := "container-running"
+	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{
+		ID: "instance-running", ProjectID: projectID, WorkspaceID: workspace.ID, RuntimeID: runtimeConfig.ID,
+		Status: string(runtimepkg.StateRunning), ExternalID: &externalID, RunnerStatus: "READY", SafeHandleMetadata: json.RawMessage(`{"safe":true}`),
+	}}
+	implementationErr := errors.New("inspect transport unavailable")
+	implementation := &inspectErrorRuntime{err: implementationErr}
+	service, err := NewRuntimeInstanceService(&listingRuntimeStore{runtimeServiceStore: base}, &runtimeWorkspaceEnsurer{workspace: workspace}, map[string]runtimepkg.Implementation{"docker": implementation})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = service.Acquire(t.Context(), projectID, workspace.IssueID, runtimeConfig.ID)
+	if !errors.Is(err, implementationErr) {
+		t.Fatalf("Acquire() error=%v", err)
+	}
+	if implementation.createdSpec.RuntimeInstanceID != "" || implementation.startCalls != 0 {
+		t.Fatalf("inspection failure must not provision replacement: startCalls=%d created=%+v", implementation.startCalls, implementation.createdSpec)
+	}
+}
+
+func TestRuntimeInstanceServiceAcquireReportsMissingRuntimeConfiguration(t *testing.T) {
+	service, baseStore, implementation, workspace := runtimeServiceFixture(t)
+
+	_, err := service.Acquire(t.Context(), workspace.ProjectID, workspace.IssueID, "runtime-missing")
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Acquire() error=%v", err)
+	}
+	if implementation.createdSpec.RuntimeInstanceID != "" || implementation.startCalls != 0 {
+		t.Fatalf("missing runtime must not provision compute: startCalls=%d created=%+v", implementation.startCalls, implementation.createdSpec)
 	}
 }
