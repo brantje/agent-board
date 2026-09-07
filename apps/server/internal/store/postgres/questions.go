@@ -140,17 +140,20 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		return store.AnswerQuestionResult{}, store.ErrConflict
 	}
 
+	interactiveLive := false
 	if question.Blocking {
 		if run.Status != "WAITING_FOR_INPUT" || (issueStatus != "BLOCKED" && issueStatus != "DONE") {
 			return store.AnswerQuestionResult{}, store.ErrConflict
 		}
 		if interactive {
-			live, err := hasLiveClaim(ctx, tx, question.ProjectID, question.RunID)
+			interactiveLive, err = hasLiveClaim(ctx, tx, question.ProjectID, question.RunID)
 			if err != nil {
 				return store.AnswerQuestionResult{}, err
 			}
-			if !live {
-				return store.AnswerQuestionResult{}, store.ErrConflict
+			if !interactiveLive {
+				if err := retireExpiredInteractiveClaims(ctx, tx, question.ProjectID, question.RunID); err != nil {
+					return store.AnswerQuestionResult{}, err
+				}
 			}
 		} else {
 			var activeJob bool
@@ -250,32 +253,14 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 			return store.AnswerQuestionResult{}, err
 		}
 		_ = binding
-	} else if question.Blocking {
-		run, err = scanRun(tx.QueryRow(ctx, `
-			UPDATE runs
-			SET status = 'QUEUED', queue_reason = NULL, failure_reason = NULL, completed_at = NULL, updated_at = now()
-			WHERE project_id = $1 AND id = $2 AND status = 'WAITING_FOR_INPUT'
-			RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-		`, question.ProjectID, question.RunID))
+	}
+
+	if question.Blocking && (!interactive || !interactiveLive) {
+		resumedRun, job, err := queueBlockingQuestionResume(ctx, tx, question)
 		if err != nil {
 			return store.AnswerQuestionResult{}, err
 		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE issues
-			SET status = 'IN_PROGRESS', updated_at = now()
-			WHERE project_id = $1 AND id = $2 AND status = 'BLOCKED'
-		`, question.ProjectID, question.IssueID); err != nil {
-			return store.AnswerQuestionResult{}, err
-		}
-		job, err := scanSchedulerJob(tx.QueryRow(ctx, `
-			INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key, available_at)
-			VALUES ($1, $2, 'RESUME', 'QUEUED', $3, now())
-			RETURNING id::text, project_id::text, run_id::text, kind, state, wait_reason, idempotency_key, available_at, created_at, updated_at
-		`, question.ProjectID, question.RunID, "question:"+question.ID+":resume"))
-		if err != nil {
-			return store.AnswerQuestionResult{}, err
-		}
-		result.Run = run
+		result.Run = resumedRun
 		result.Job = &job
 	}
 
