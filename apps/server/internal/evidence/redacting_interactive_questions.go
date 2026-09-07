@@ -14,6 +14,13 @@ func (s *RedactingStore) SupportsInteractiveQuestionStore() bool {
 	return store.SupportsInteractiveQuestionStore(s.ControlPlaneStore)
 }
 
+func (s *RedactingStore) SupportsInteractiveQuestionBatchStore() bool {
+	if s == nil {
+		return false
+	}
+	return store.SupportsInteractiveQuestionBatchStore(s.ControlPlaneStore)
+}
+
 func (s *RedactingStore) interactiveQuestionStore() (store.InteractiveQuestionStore, error) {
 	if s == nil || !store.SupportsInteractiveQuestionStore(s.ControlPlaneStore) {
 		return nil, fmt.Errorf("redacting store base does not support interactive Question operations")
@@ -22,14 +29,10 @@ func (s *RedactingStore) interactiveQuestionStore() (store.InteractiveQuestionSt
 }
 
 func (s *RedactingStore) interactiveQuestionBatchStore() (store.InteractiveQuestionBatchStore, error) {
-	if s == nil {
+	if s == nil || !store.SupportsInteractiveQuestionBatchStore(s.ControlPlaneStore) {
 		return nil, fmt.Errorf("redacting store base does not support interactive Question batch operations")
 	}
-	questions, ok := s.ControlPlaneStore.(store.InteractiveQuestionBatchStore)
-	if !ok {
-		return nil, fmt.Errorf("redacting store base does not support interactive Question batch operations")
-	}
-	return questions, nil
+	return s.ControlPlaneStore.(store.InteractiveQuestionBatchStore), nil
 }
 
 func (s *RedactingStore) OpenInteractiveQuestion(ctx context.Context, input store.OpenInteractiveQuestionCommand) (store.OpenInteractiveQuestionResult, error) {
@@ -89,3 +92,4 @@ func (s *RedactingStore) ResolveInteractiveQuestion(ctx context.Context, project
 var _ store.InteractiveQuestionStore = (*RedactingStore)(nil)
 var _ store.InteractiveQuestionBatchStore = (*RedactingStore)(nil)
 var _ store.InteractiveQuestionStoreCapability = (*RedactingStore)(nil)
+var _ store.InteractiveQuestionBatchStoreCapability = (*RedactingStore)(nil)
