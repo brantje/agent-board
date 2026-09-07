@@ -3,6 +3,7 @@ package runexec
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
@@ -84,31 +85,19 @@ func TestInteractiveQuestionerOpenBatchUsesAtomicStoreAndOrdersEvidence(t *testi
 
 func TestNextInteractiveQuestionPollIntervalBacksOffAndCaps(t *testing.T) {
 	interval := interactiveQuestionPollInitialInterval
-	want := []int64{
-		int64(400_000_000),
-		int64(800_000_000),
-		int64(1_600_000_000),
-		int64(2_000_000_000),
-		int64(2_000_000_000),
+	want := []time.Duration{
+		400 * time.Millisecond,
+		800 * time.Millisecond,
+		1600 * time.Millisecond,
+		2 * time.Second,
+		2 * time.Second,
 	}
 	for index, expected := range want {
 		interval = nextInteractiveQuestionPollInterval(interval)
-		if int64(interval) != expected {
-			t.Fatalf("step %d interval=%s want %s", index, interval, timeDuration(expected))
+		if interval != expected {
+			t.Fatalf("step %d interval=%s want %s", index, interval, expected)
 		}
 	}
-}
-
-func timeDuration(value int64) string {
-	return fmtDuration(value)
-}
-
-func fmtDuration(value int64) string {
-	return durationString(value)
-}
-
-func durationString(value int64) string {
-	return time.Duration(value).String()
 }
 
 var _ store.InteractiveQuestionStore = (*interactiveBatchLifecycleStore)(nil)
