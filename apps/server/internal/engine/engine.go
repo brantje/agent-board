@@ -51,6 +51,11 @@ type QuestionRequest struct {
 	Blocking       bool
 }
 
+type CorrelatedQuestionRequest struct {
+	CorrelationKey string
+	Question       QuestionRequest
+}
+
 type Question struct {
 	ID       string
 	Blocking bool
@@ -82,6 +87,13 @@ type InteractiveQuestioner interface {
 	Open(context.Context, string, QuestionRequest) (Question, error)
 	WaitAnswer(context.Context, string) (QuestionAnswer, error)
 	Resolve(context.Context, string) error
+}
+
+// InteractiveQuestionBatcher opens one native Question request atomically. It
+// is a separate capability so existing single-Question adapters remain valid
+// while engines with multi-Question native requests can require batch safety.
+type InteractiveQuestionBatcher interface {
+	OpenBatch(context.Context, []CorrelatedQuestionRequest) ([]Question, error)
 }
 
 type Request struct {
