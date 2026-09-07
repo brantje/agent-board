@@ -11,6 +11,7 @@ import (
 )
 
 const maxSSELineSize = 8 << 20
+const maxSSEEventSize = 8 << 20
 
 type EventStream struct {
 	body    io.ReadCloser
@@ -65,6 +66,13 @@ func (s *EventStream) Next() (Event, error) {
 		}
 		if field != "data" {
 			continue
+		}
+		added := len(value)
+		if data.Len() > 0 {
+			added++
+		}
+		if added > maxSSEEventSize-data.Len() {
+			return Event{}, fmt.Errorf("opencode: event payload exceeds %d bytes", maxSSEEventSize)
 		}
 		if data.Len() > 0 {
 			data.WriteByte('\n')
