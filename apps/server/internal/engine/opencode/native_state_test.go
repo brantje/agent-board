@@ -111,6 +111,9 @@ func TestEngineCompletesOnMatchingNativeIdleEvent(t *testing.T) {
 	mux.HandleFunc("GET /api/session/ses_idle/question", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, map[string]any{"data": []any{}})
 	})
+	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"ses_idle": map[string]any{"type": "running"}}})
+	})
 	mux.HandleFunc("POST /api/session/ses_idle/interrupt", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
