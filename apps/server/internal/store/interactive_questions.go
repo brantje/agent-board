@@ -69,6 +69,10 @@ type InteractiveQuestionStoreCapability interface {
 	SupportsInteractiveQuestionStore() bool
 }
 
+type InteractiveQuestionBatchStoreCapability interface {
+	SupportsInteractiveQuestionBatchStore() bool
+}
+
 func SupportsInteractiveQuestionStore(value any) bool {
 	if value == nil {
 		return false
@@ -78,6 +82,19 @@ func SupportsInteractiveQuestionStore(value any) bool {
 	}
 	if capability, ok := value.(InteractiveQuestionStoreCapability); ok {
 		return capability.SupportsInteractiveQuestionStore()
+	}
+	return true
+}
+
+func SupportsInteractiveQuestionBatchStore(value any) bool {
+	if value == nil {
+		return false
+	}
+	if _, ok := value.(InteractiveQuestionBatchStore); !ok {
+		return false
+	}
+	if capability, ok := value.(InteractiveQuestionBatchStoreCapability); ok {
+		return capability.SupportsInteractiveQuestionBatchStore()
 	}
 	return true
 }
