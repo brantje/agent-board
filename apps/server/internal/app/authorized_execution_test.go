@@ -101,11 +101,7 @@ func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput
 	}
 	close(transport.resultCh)
 	_, _ = process.Wait(context.Background())
-	select {
-	case <-released:
-	case <-time.After(time.Second):
-		t.Fatal("redaction registration was not released after terminal drained process")
-	}
+	assertRunRedactionRetainedAndRelease(t, service, "run-1", released)
 }
 
 func TestAuthorizedExecutionProcessDoesNotExposeRawProcess(t *testing.T) {
@@ -180,6 +176,28 @@ func TestAuthorizedExecutionRejectsRuntimeMismatchBeforeSessionCreation(t *testi
 	if releases != 1 {
 		t.Fatalf("redaction releases=%d, want 1", releases)
 	}
+}
+
+func assertRunRedactionRetainedAndRelease(t *testing.T, service *AuthorizedExecutionSessionService, runID string, released <-chan struct{}) {
+	t.Helper()
+	service.redactionMu.Lock()
+	_, retained := service.runRedactions[runID]
+	service.redactionMu.Unlock()
+	if !retained {
+		t.Fatalf("Run %q redaction lease was not retained", runID)
+	}
+	select {
+	case <-released:
+		t.Fatal("Run redaction lease released before Processor completion")
+	default:
+	}
+	service.ReleaseRunRedaction(runID)
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("Run redaction lease was not released")
+	}
+	service.ReleaseRunRedaction(runID)
 }
 
 type requestCapturingClient struct {
