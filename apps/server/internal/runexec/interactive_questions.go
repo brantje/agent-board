@@ -201,7 +201,10 @@ func (q *interactiveQuestioner) WaitAnswer(ctx context.Context, questionID strin
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
-				<-timer.C
+				select {
+				case <-timer.C:
+				default:
+				}
 			}
 			return engine.QuestionAnswer{}, ctx.Err()
 		case <-timer.C:
