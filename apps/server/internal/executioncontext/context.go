@@ -3,15 +3,16 @@ package executioncontext
 import "encoding/json"
 
 type SafeContext struct {
-	Project   ProjectContext   `json:"project"`
-	Issue     IssueContext     `json:"issue"`
-	Run       RunContext       `json:"run"`
-	Agent     AgentContext     `json:"agent"`
-	Executor  ExecutorContext  `json:"executor"`
-	Model     ModelContext     `json:"model"`
-	Provider  ProviderContext  `json:"provider"`
-	Runtime   RuntimeContext   `json:"runtime"`
-	Workspace WorkspaceContext `json:"workspace"`
+	Project        ProjectContext         `json:"project"`
+	Issue          IssueContext           `json:"issue"`
+	Run            RunContext             `json:"run"`
+	Agent          AgentContext           `json:"agent"`
+	Executor       ExecutorContext        `json:"executor"`
+	Model          ModelContext           `json:"model"`
+	Provider       ProviderContext        `json:"provider"`
+	Runtime        RuntimeContext         `json:"runtime"`
+	Workspace      WorkspaceContext       `json:"workspace"`
+	ReviewFeedback *ReviewFeedbackContext `json:"reviewFeedback,omitempty"`
 }
 
 type ProjectContext struct {
@@ -86,6 +87,13 @@ type WorkspaceContext struct {
 	BaseRevision    *string `json:"baseRevision,omitempty"`
 	WorkingBranch   string  `json:"workingBranch"`
 	BootstrapStatus string  `json:"bootstrapStatus"`
+}
+
+type ReviewFeedbackContext struct {
+	ReviewID      string `json:"reviewId"`
+	DecisionID    string `json:"decisionId"`
+	PreviousRunID string `json:"previousRunId"`
+	Feedback      string `json:"feedback"`
 }
 
 type Resolved struct {
