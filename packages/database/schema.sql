@@ -288,6 +288,7 @@ CREATE TABLE questions (
     kind text NOT NULL DEFAULT 'TEXT' CHECK (kind IN ('TEXT', 'SINGLE_CHOICE', 'MULTI_CHOICE')),
     options jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(options) = 'array'),
     recommendation text,
+    custom boolean NOT NULL DEFAULT false,
     blocking boolean NOT NULL DEFAULT true,
     status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'ANSWERED', 'CANCELLED')),
     created_at timestamptz NOT NULL DEFAULT now(),
