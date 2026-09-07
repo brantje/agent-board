@@ -45,9 +45,23 @@ func TestReplyNativeQuestionRetriesOnlyWhileRequestIsPending(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusNoContent)
 		case "GET /api/session/ses_1/question":
-			writeNativeJSON(t, w, map[string]any{"data": []any{map[string]any{
-				"id": "que_1", "sessionID": "ses_1", "questions": []any{map[string]any{"question": "Choose", "header": "Choice", "options": []any{map[string]any{"label": "A", "description": "first"}}},
-			}}})
+			writeNativeJSON(t, w, map[string]any{
+				"data": []any{
+					map[string]any{
+						"id":        "que_1",
+						"sessionID": "ses_1",
+						"questions": []any{
+							map[string]any{
+								"question": "Choose",
+								"header":   "Choice",
+								"options": []any{
+									map[string]any{"label": "A", "description": "first"},
+								},
+							},
+						},
+					},
+				},
+			})
 		default:
 			http.NotFound(w, r)
 		}
