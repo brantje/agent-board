@@ -62,7 +62,7 @@ describe('IssueRelationships', () => {
 
     await targetSelect.setValue(target.id)
     await wrapper.get('[data-field=relationshipType] select').setValue('blocks')
-    await button(wrapper, 'Add relationship').trigger('click')
+    await wrapper.get('form').trigger('submit')
     await flushPromises()
 
     const post = fetch.mock.calls.find(([, options]) => options.method === 'POST')
@@ -89,7 +89,7 @@ describe('IssueRelationships', () => {
     const wrapper = mount(IssueRelationships, { props: { projectId: 'p', issueId: source.id }, global })
     await flushPromises()
     await wrapper.get('[data-field=relationshipTarget] select').setValue(target.id)
-    await button(wrapper, 'Add relationship').trigger('click')
+    await wrapper.get('form').trigger('submit')
     await flushPromises()
 
     expect(wrapper.text()).toContain('relationship already exists')
