@@ -11,7 +11,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-var errSessionWriteDeadlineChanged = errors.New("runner: session write deadline changed")
+var (
+	errSessionWriteDeadlineChanged = errors.New("runner: session write deadline changed")
+	errSessionTransportWrite       = errors.New("runner: session transport write failed")
+)
 
 func (c *Connection) writeSessionMessage(
 	typ protocol.MessageType,
@@ -68,7 +71,10 @@ func (c *Connection) writeSessionMessage(
 	if err := c.conn.SetWriteDeadline(deadline); err != nil {
 		return err
 	}
-	return c.conn.WriteMessage(websocket.TextMessage, data)
+	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		return errors.Join(errSessionTransportWrite, err)
+	}
+	return nil
 }
 
 func lockWriteMutexUntil(
