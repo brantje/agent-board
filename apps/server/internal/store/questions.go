@@ -32,6 +32,7 @@ type AnswerQuestionResult struct {
 	Decision Decision
 	Run      Run
 	Job      *SchedulerJob
+	Events   []Event
 }
 
 type QuestionStore interface {

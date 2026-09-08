@@ -171,6 +171,7 @@ type CreateProviderRequest struct {
 	Kind          string          `json:"kind"`
 	BaseURL       *string         `json:"baseUrl"`
 	CredentialRef *string         `json:"credentialRef"`
+	Credential    *string         `json:"credential"`
 	Enabled       *bool           `json:"enabled"`
 	SafeMetadata  json.RawMessage `json:"safeMetadata"`
 }

@@ -49,6 +49,7 @@ const global = {
     IssueCard,
     IssueEditor,
     IssueRelationships: { template: '<section>Relationships</section>' },
+    QuestionPanel: { props: ['projectId', 'issueId', 'runId'], template: '<section>Questions</section>' },
     NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' }
   }
 }
@@ -191,6 +192,7 @@ describe('Issue workflow components', () => {
 
     expect(wrapper.text()).toContain('Priority 0')
     expect(wrapper.text()).toContain('No Runs yet')
+    expect(wrapper.text()).toContain('Questions')
     expect(wrapper.find('option[value=draft]').exists()).toBe(false)
     expect(wrapper.find('option[value=disabled]').exists()).toBe(false)
     await formForField(wrapper, 'agent').trigger('submit')

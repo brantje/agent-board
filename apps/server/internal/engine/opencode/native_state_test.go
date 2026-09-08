@@ -197,6 +197,86 @@ func TestEngineDoesNotTreatPreStartInactivityAsCompletion(t *testing.T) {
 	}
 }
 
+func TestEngineFailsWhenPromptNeverStartsExecution(t *testing.T) {
+	server := newPollingNativeServer(t, "ses_stalled", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{}})
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	launcher, adapter := pollingAdapterForServer(t, server)
+	_, err := adapter.Execute(ctx, nativeStateRequest(launcher))
+	if err == nil || !strings.Contains(err.Error(), "did not start execution after prompt") {
+		t.Fatalf("Execute() error=%v", err)
+	}
+}
+
+func TestEngineFailsWhenIdleBeforeExecutionStarts(t *testing.T) {
+	idleEvents := make(chan struct{}, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
+	})
+	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "ses_idle_early"}})
+	})
+	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"properties\":{}}\n\n")
+		flusher.Flush()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-idleEvents:
+		}
+		properties := idleEventProperties(t, "ses_idle_early")
+		event, err := json.Marshal(map[string]any{"id": "evt_idle", "type": "session.idle", "properties": properties})
+		if err != nil {
+			t.Errorf("marshal idle event: %v", err)
+			return
+		}
+		_, _ = io.WriteString(w, "data: "+string(event)+"\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	})
+	mux.HandleFunc("POST /api/session/ses_idle_early/prompt", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "input_idle"}})
+		idleEvents <- struct{}{}
+	})
+	mux.HandleFunc("GET /api/session/ses_idle_early/question", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": []any{}})
+	})
+	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{}})
+	})
+	mux.HandleFunc("POST /api/session/ses_idle_early/interrupt", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := newWithAddress(parsed.Host)
+	_, err = adapter.Execute(context.Background(), engine.Request{
+		Context: executioncontext.SafeContext{
+			Issue:    executioncontext.IssueContext{Title: "Fail on early idle"},
+			Executor: executioncontext.ExecutorContext{Engine: Name},
+			Model:    executioncontext.ModelContext{Model: "test-model"},
+			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
+		},
+		Launcher:             &fakeOpenCodeLauncher{process: newFakeOpenCodeProcess(parsed.Host)},
+		InteractiveQuestions: &fakeInteractiveQuestions{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "became idle before execution started") {
+		t.Fatalf("Execute() error=%v", err)
+	}
+}
+
 func TestEngineFailsWhenNativeActivitySnapshotFails(t *testing.T) {
 	server := newPollingNativeServer(t, "ses_poll", func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusBadGateway)

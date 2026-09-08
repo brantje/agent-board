@@ -10,12 +10,11 @@ describe('intentional configuration inputs', () => {
     expect(payloadFor('runtimes', draftFor('runtimes', { name: 'Runtime', workspacePolicy: 'issue' }))).not.toHaveProperty('workspacePolicy')
   })
 
-  it('uses direct Runtime selection and safe credentials', () => {
+  it('uses direct Runtime selection and omits server-owned credential references', () => {
     expect(definitions['executor-profiles'].fields.map(field => field.key)).toContain('runtimeId')
     expect(definitions).not.toHaveProperty('runtime-profiles')
-    expect(draftFor('providers', { credentialRef: 'hidden', name: 'P' }).credentialRef).toBe('')
+    expect(definitions.providers.fields.map(field => field.key)).not.toContain('credentialRef')
     expect(payloadFor('providers', draftFor('providers'))).not.toHaveProperty('credentialRef')
-    expect(payloadFor('providers', { ...draftFor('providers'), credentialRef: 'key' }).credentialRef).toBe('key')
   })
 
   it('preserves public provider and model-profile metadata during edits', () => {

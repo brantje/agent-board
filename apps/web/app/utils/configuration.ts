@@ -51,7 +51,6 @@ export const definitions: Record<ConfigKind, Definition> = {
       name,
       { key: 'kind', label: 'Provider kind', initial: 'openai-compatible', required: true },
       { key: 'baseUrl', label: 'Base URL' },
-      { key: 'credentialRef', label: 'Credential reference', help: 'Enter the secret reference to attach. Leave blank when editing to preserve the saved credential. Saved references and plaintext values are never returned.' },
       { key: 'safeMetadata', label: 'Safe metadata', type: 'json', initial: '{}', help: 'Non-secret provider metadata exposed by the public API.' },
       enabled
     ]
@@ -117,7 +116,7 @@ export type Draft = Record<string, string|number|boolean>
 
 export function draftFor(kind: ConfigKind, source: Record<string, unknown> = {}): Draft {
   return Object.fromEntries(definitions[kind].fields.map(field => {
-    const value = field.key === 'credentialRef' ? undefined : source[field.key]
+    const value = source[field.key]
     return [field.key, value == null
       ? field.initial ?? ''
       : field.type === 'json'
@@ -130,7 +129,6 @@ export function draftFor(kind: ConfigKind, source: Record<string, unknown> = {})
 
 export function payloadFor(kind: ConfigKind, draft: Draft): Record<string, unknown> {
   return Object.fromEntries(definitions[kind].fields
-    .filter(field => field.key !== 'credentialRef' || draft[field.key])
     .map(field => {
       const value = draft[field.key]
       return [field.key,

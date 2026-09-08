@@ -61,3 +61,34 @@ path3:
               format: binary
       default:
         $ref: ../components/api-components.yaml#/responses/Error
+
+path4:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/RunID
+  get:
+    operationId: streamRunEvents
+    description: >
+      Live Project/Run Event stream. Clients load persisted evidence first, then
+      reconnect with afterSequence set to the last observed Event sequence.
+      Each SSE data payload is EventEvidence JSON. The SSE id field is the Event
+      UUID and is the client idempotency key. afterSequence is the v0.1 reconnect
+      cursor and selects Events with sequence greater than the given value.
+    parameters:
+    - name: afterSequence
+      in: query
+      description: Reconnect cursor. Only Events with sequence greater than this value are replayed, then live Events are forwarded.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    responses:
+      '200':
+        description: Server-Sent Event stream of EventEvidence records.
+        content:
+          text/event-stream:
+            schema:
+              type: string
+              description: SSE frames. data is EventEvidence JSON; id is the Event UUID.
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

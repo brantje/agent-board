@@ -124,7 +124,7 @@ func reviewRouter(t *testing.T) (http.Handler, *httpReviewStore) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newRouterWithReviews(app.New(&fakeControlPlaneStore{}), runEvidence, nil, nil, nil, reviews), storeFake
+	return newRouterWithReviews(app.New(&fakeControlPlaneStore{}), runEvidence, nil, nil, nil, reviews, nil), storeFake
 }
 
 func TestReviewRoutesExposeEvidenceAndCommands(t *testing.T) {

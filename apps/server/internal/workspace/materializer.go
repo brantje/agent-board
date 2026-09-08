@@ -339,12 +339,14 @@ func removeUnreadyFinal(path string) error {
 
 func workspaceRepository(current store.Workspace, project store.Project) (string, string) {
 	repositoryPath := project.RepositoryPath
-	if current.RepositoryPath != nil && strings.TrimSpace(*current.RepositoryPath) != "" {
-		repositoryPath = *current.RepositoryPath
-	}
 	baseBranch := project.DefaultBranch
-	if current.BaseBranch != nil && strings.TrimSpace(*current.BaseBranch) != "" {
-		baseBranch = *current.BaseBranch
+	if current.BootstrapStatus == "READY" {
+		if current.RepositoryPath != nil && strings.TrimSpace(*current.RepositoryPath) != "" {
+			repositoryPath = *current.RepositoryPath
+		}
+		if current.BaseBranch != nil && strings.TrimSpace(*current.BaseBranch) != "" {
+			baseBranch = *current.BaseBranch
+		}
 	}
 	return repositoryPath, baseBranch
 }

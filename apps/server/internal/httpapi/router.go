@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -16,6 +17,7 @@ type api struct {
 	questions             *app.QuestionService
 	reviews               *app.ReviewService
 	runEvidence           *app.RunEvidenceService
+	eventHub              *evidence.Hub
 	secrets               app.SecretWriter
 	secretWriteAuthorizer SecretWriteAuthorizer
 }
@@ -55,6 +57,7 @@ func NewRouterWithApplication(services *app.Services, authorizers ...SecretWrite
 		authorizer,
 		services.Questions,
 		app.ReviewServiceFromServices(services),
+		services.EventHub,
 	)
 }
 
@@ -63,16 +66,16 @@ func newRouter(service *app.Service, runEvidence *app.RunEvidenceService, secret
 	if len(questionServices) > 0 {
 		questions = questionServices[0]
 	}
-	return newRouterWithReviews(service, runEvidence, secretWriter, secretWriteAuthorizer, questions, nil)
+	return newRouterWithReviews(service, runEvidence, secretWriter, secretWriteAuthorizer, questions, nil, nil)
 }
 
-func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretWriteAuthorizer SecretWriteAuthorizer, questions *app.QuestionService, reviews *app.ReviewService) http.Handler {
+func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretWriteAuthorizer SecretWriteAuthorizer, questions *app.QuestionService, reviews *app.ReviewService, eventHub *evidence.Hub) http.Handler {
 	router := chi.NewRouter()
 	router.Get("/healthz", handleHealth)
 	if service == nil {
 		return router
 	}
-	a := &api{service: service, questions: questions, reviews: reviews, runEvidence: runEvidence, secrets: secretWriter, secretWriteAuthorizer: secretWriteAuthorizer}
+	a := &api{service: service, questions: questions, reviews: reviews, runEvidence: runEvidence, eventHub: eventHub, secrets: secretWriter, secretWriteAuthorizer: secretWriteAuthorizer}
 	router.Route("/api", func(r chi.Router) {
 		a.registerConfigurationRoutes(r)
 		a.registerIssueRunRoutes(r)

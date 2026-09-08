@@ -32,13 +32,13 @@ func (r *Runtime) RunnerEndpoint(ctx context.Context, handle runtimepkg.Handle) 
 		return runtimepkg.RunnerEndpoint{}, fmt.Errorf("%w: Docker network settings are unavailable", runtimepkg.ErrRunnerUnavailable)
 	}
 
-	endpoint := inspected.NetworkSettings.Networks["bridge"]
+	endpoint := inspected.NetworkSettings.Networks[r.runnerControlNetwork()]
 	if endpoint == nil || !endpoint.IPAddress.IsValid() {
-		return runtimepkg.RunnerEndpoint{}, fmt.Errorf("%w: Docker bridge network has no routable address", runtimepkg.ErrRunnerUnavailable)
+		return runtimepkg.RunnerEndpoint{}, fmt.Errorf("%w: Docker control network has no routable address", runtimepkg.ErrRunnerUnavailable)
 	}
 	host := strings.TrimSpace(endpoint.IPAddress.String())
 	if host == "" {
-		return runtimepkg.RunnerEndpoint{}, fmt.Errorf("%w: Docker bridge network has no routable address", runtimepkg.ErrRunnerUnavailable)
+		return runtimepkg.RunnerEndpoint{}, fmt.Errorf("%w: Docker control network has no routable address", runtimepkg.ErrRunnerUnavailable)
 	}
 
 	u := url.URL{Scheme: "ws", Host: net.JoinHostPort(host, runnerPort), Path: runnerPath}

@@ -43,6 +43,7 @@ type ReviewService struct {
 	evidence   *RunEvidenceService
 	candidates evidencepkg.ReviewCandidateReader
 	applier    reviewCandidateApplier
+	publisher  persistedEventPublisher
 }
 
 // NewReviewService builds the Review application boundary. Production callers
@@ -75,6 +76,7 @@ func ReviewServiceFromServices(services *Services) *ReviewService {
 	if err != nil {
 		return nil
 	}
+	service.publisher = services.Events
 	return service
 }
 
@@ -151,6 +153,7 @@ func (s *ReviewService) Approve(ctx context.Context, projectID, reviewID string,
 		// by retrying this command after a crash/database outage.
 		return store.CompleteReviewApprovalResult{}, translateStoreError(err, "review")
 	}
+	publishPersistedEvents(ctx, s.publisher, result.Events)
 	return result, nil
 }
 
@@ -167,6 +170,7 @@ func (s *ReviewService) RequestChanges(ctx context.Context, projectID, reviewID,
 	if err != nil {
 		return store.RequestReviewChangesResult{}, translateStoreError(err, "review")
 	}
+	publishPersistedEvents(ctx, s.publisher, result.Events)
 	return result, nil
 }
 

@@ -73,6 +73,7 @@ ProviderInput:
     kind: {type: string}
     baseUrl: {type: [string, 'null']}
     credentialRef: {type: [string, 'null'], writeOnly: true}
+    credential: {type: string, minLength: 1, writeOnly: true}
     enabled: {type: boolean, default: true}
     safeMetadata: {$ref: '#/JSONMap'}
 ModelProfile:
