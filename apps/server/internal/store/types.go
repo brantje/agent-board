@@ -31,6 +31,7 @@ type Issue struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	LastEvent       *Event
+	PreviousStatus  string
 }
 
 type IssueRelationship struct {

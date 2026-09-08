@@ -278,9 +278,13 @@ func (s *Service) UpdateIssue(ctx context.Context, input store.Issue) (store.Iss
 	}
 	eventType := "issue.updated"
 	payload := issueMutationPayload(value)
-	if current.Status != value.Status {
+	previousStatus := value.PreviousStatus
+	if previousStatus == "" {
+		previousStatus = current.Status
+	}
+	if previousStatus != value.Status {
 		eventType = "issue.status_changed"
-		payload["previousStatus"] = current.Status
+		payload["previousStatus"] = previousStatus
 	}
 	event, err := s.recordIssueEvent(ctx, eventType, value, payload)
 	if err != nil {
@@ -302,7 +306,8 @@ func (s *Service) GetRun(ctx context.Context, projectID, runID string) (store.Ru
 	return value, translateStoreError(err, "run")
 }
 
-const projectEventPageSize = 500
+var projectEventPageSize = 500
+var projectEventMaxPages = 20
 
 func (s *Service) ListProjectEventsAfter(ctx context.Context, projectID, afterID string) ([]store.Event, error) {
 	if _, err := s.GetProject(ctx, projectID); err != nil {
@@ -313,7 +318,7 @@ func (s *Service) ListProjectEventsAfter(ctx context.Context, projectID, afterID
 	}
 	events := make([]store.Event, 0)
 	cursor := afterID
-	for {
+	for page := 0; page < projectEventMaxPages; page++ {
 		batch, err := s.store.ListProjectEventsAfter(ctx, projectID, cursor, projectEventPageSize)
 		if err != nil {
 			return nil, translateStoreError(err, "event")
@@ -327,6 +332,7 @@ func (s *Service) ListProjectEventsAfter(ctx context.Context, projectID, afterID
 			return events, nil
 		}
 	}
+	return events, nil
 }
 
 func translateStoreError(err error, resource string) error {

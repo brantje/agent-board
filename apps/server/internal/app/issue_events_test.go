@@ -77,6 +77,88 @@ func TestIssueMutationsRecordPersistBeforePublishEvents(t *testing.T) {
 	}
 }
 
+func TestAssignIssueSkipsEventWhenAgentAlreadyOwnsIssue(t *testing.T) {
+	pid := coverageProjectID()
+	agentID := coverageAgent().ID
+	issue := coverageIssue()
+	issue.AssignedAgentID = &agentID
+	base := &stickyIssueStore{
+		fakeStore: fakeStore{project: store.Project{ID: pid, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, agent: coverageAgent()},
+		issue:     issue,
+	}
+	svc := New(base)
+	recorder := &capturingIssueRecorder{}
+	svc.SetEventRecorder(recorder)
+
+	assigned, _, err := svc.AssignIssue(context.Background(), pid, issue.ID, agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assigned.AssignedAgentID == nil || *assigned.AssignedAgentID != agentID {
+		t.Fatalf("assigned=%+v", assigned)
+	}
+	if len(recorder.events) != 0 {
+		t.Fatalf("idempotent assign recorded %v", recorder.events)
+	}
+}
+
+func TestUpdateIssueUsesLockedPreviousStatusForEventType(t *testing.T) {
+	pid := coverageProjectID()
+	base := &lockedStatusStore{
+		fakeStore: fakeStore{project: store.Project{ID: pid, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}},
+	}
+	svc := New(base)
+	recorder := &capturingIssueRecorder{}
+	svc.SetEventRecorder(recorder)
+
+	updated := coverageIssue()
+	updated.Status = "IN_PROGRESS"
+	got, err := svc.UpdateIssue(context.Background(), updated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.LastEvent == nil || got.LastEvent.Type != "issue.status_changed" {
+		t.Fatalf("lastEvent=%+v", got.LastEvent)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(got.LastEvent.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["previousStatus"] != "BLOCKED" {
+		t.Fatalf("payload=%s", got.LastEvent.Payload)
+	}
+}
+
+type stickyIssueStore struct {
+	fakeStore
+	issue store.Issue
+}
+
+func (s *stickyIssueStore) GetIssue(context.Context, string, string) (store.Issue, error) {
+	return s.issue, nil
+}
+
+func (s *stickyIssueStore) AssignIssue(_ context.Context, _, _, agentID string) (store.Issue, store.Run, error) {
+	s.issue.AssignedAgentID = &agentID
+	s.issue.Status = "IN_PROGRESS"
+	return s.issue, coverageRun(), nil
+}
+
+type lockedStatusStore struct {
+	fakeStore
+}
+
+func (s *lockedStatusStore) GetIssue(context.Context, string, string) (store.Issue, error) {
+	issue := coverageIssue()
+	issue.Status = "TODO"
+	return issue, nil
+}
+
+func (s *lockedStatusStore) UpdateIssue(_ context.Context, input store.Issue) (store.Issue, error) {
+	input.PreviousStatus = "BLOCKED"
+	return input, nil
+}
+
 func TestIssueMutationsSkipEventsWhenRecorderMissing(t *testing.T) {
 	pid := coverageProjectID()
 	svc := New(&fakeStore{project: store.Project{ID: pid, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, agent: coverageAgent()})
