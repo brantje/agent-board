@@ -73,6 +73,7 @@ describe('theme CSS architecture', () => {
     expect(light).toContain("html[data-theme='light']")
     expect(light).toContain('--color-bg:')
     expect(light).toContain('--board-column-backlog:')
+    expect(light).toContain('--board-column-todo:')
     expect(light).toContain('--board-column-in-progress:')
     expect(light).toContain('--board-column-blocked:')
     expect(light).toContain('--board-column-review:')
@@ -80,7 +81,9 @@ describe('theme CSS architecture', () => {
     expect(light).not.toContain(':root,')
 
     expect(main).toContain('.board-column-backlog')
+    expect(main).toContain('.board-column-todo')
     expect(main).toContain('var(--board-column-backlog)')
+    expect(main).toContain('var(--board-column-todo)')
     expect(main).toContain('var(--board-column-in-progress)')
     expect(main).toContain('var(--board-column-blocked)')
     expect(main).toContain('var(--board-column-review)')
