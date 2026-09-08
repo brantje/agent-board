@@ -37,4 +37,11 @@ html[data-theme='dark'] {
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 28%);
   --shadow-md: 0 6px 18px rgb(0 0 0 / 34%);
   --shadow-lg: 0 16px 40px rgb(0 0 0 / 42%);
+
+  --board-column-backlog: #262626;
+  --board-column-todo: #252628;
+  --board-column-in-progress: #2a2820;
+  --board-column-blocked: #2c2425;
+  --board-column-review: #242830;
+  --board-column-done: #232a26;
 }
