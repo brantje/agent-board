@@ -34,15 +34,19 @@ describe('intentional configuration inputs', () => {
     expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', safeMetadata: '[]' }).map(error => error.name)).toContain('safeMetadata')
   })
 
-  it('labels scope and marks disabled or non-enabled choices unavailable', () => {
+  it('labels scope and marks directly unrunnable choices unavailable', () => {
     expect(resourceOptions([
       { id: 'a', name: 'A', enabled: false, projectId: null },
       { id: 'b', name: 'B', state: 'DRAFT', projectId: 'p' },
-      { id: 'c', name: 'C', projectId: 'p' }
+      { id: 'c', name: 'C', projectId: 'p' },
+      { id: 'd', name: 'D', healthStatus: 'UNHEALTHY', projectId: null },
+      { id: 'e', name: 'E', healthStatus: 'UNKNOWN', projectId: null }
     ])).toEqual([
       { label: 'A · Shared · Disabled', value: 'a', disabled: true },
       { label: 'B · Project · DRAFT', value: 'b', disabled: true },
-      { label: 'C · Project', value: 'c', disabled: false }
+      { label: 'C · Project', value: 'c', disabled: false },
+      { label: 'D · Shared · Unhealthy', value: 'd', disabled: true },
+      { label: 'E · Shared', value: 'e', disabled: false }
     ])
     expect(canEdit({ id: 'a', name: 'A', projectId: null }, 'p')).toBe(false)
     expect(canEdit({ id: 'a', name: 'A', projectId: 'p' }, 'p')).toBe(true)
