@@ -14,8 +14,8 @@ type fakeStore struct {
 	agent   store.Agent
 }
 
-func (f *fakeStore) GetProject(context.Context, string) (store.Project, error) {
-	if f.project.ID == "" {
+func (f *fakeStore) GetProject(_ context.Context, id string) (store.Project, error) {
+	if f.project.ID == "" || f.project.ID != id {
 		return store.Project{}, store.ErrNotFound
 	}
 	return f.project, nil
