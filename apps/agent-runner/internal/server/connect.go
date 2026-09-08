@@ -20,7 +20,10 @@ const (
 	connectQueueDepth  = 32
 )
 
-var connectDialContext = (&net.Dialer{}).DialContext
+var (
+	connectDialContext = (&net.Dialer{}).DialContext
+	connectLookupIPAddr = net.DefaultResolver.LookupIPAddr
+)
 
 type sessionConnector struct {
 	server    *Server
@@ -144,6 +147,12 @@ func (s *Server) handleConnectData(writer *connectionWriter, msg protocol.Messag
 		return
 	}
 	chunk := append([]byte(nil), payload.Data...)
+	select {
+	case <-connector.done:
+		s.sendConnectClose(writer, msg.SessionID, payload.ConnectionID, "connection_closed", "session connection is closed")
+		return
+	default:
+	}
 	select {
 	case connector.writes <- chunk:
 	case <-connector.done:
@@ -377,7 +386,7 @@ func resolveConnectDestination(ctx context.Context, network, address string) (st
 		return net.JoinHostPort(ip.String(), strconv.Itoa(port)), nil
 	}
 
-	resolved, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	resolved, err := connectLookupIPAddr(ctx, host)
 	if err != nil || len(resolved) == 0 {
 		return "", fmt.Errorf("destination is not loopback")
 	}
