@@ -62,6 +62,13 @@ func decodeErrorCode(t *testing.T, recorder *httptest.ResponseRecorder) string {
 	return body.Error.Code
 }
 
+func assertAPIError(t *testing.T, recorder *httptest.ResponseRecorder, status int, code string) {
+	t.Helper()
+	if recorder.Code != status || decodeErrorCode(t, recorder) != code {
+		t.Fatalf("status=%d body=%s want status=%d code=%s", recorder.Code, recorder.Body.String(), status, code)
+	}
+}
+
 func TestIssuePriorityAndRelationshipHTTPContract(t *testing.T) {
 	backend := &issueRelationshipHTTPStore{fakeControlPlaneStore: &fakeControlPlaneStore{}}
 	router := NewRouter(app.New(backend))
@@ -78,6 +85,10 @@ func TestIssuePriorityAndRelationshipHTTPContract(t *testing.T) {
 	if created.Priority != 4 {
 		t.Fatalf("priority=%d want 4", created.Priority)
 	}
+
+	invalidPriority := httptest.NewRecorder()
+	router.ServeHTTP(invalidPriority, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues", strings.NewReader(`{"title":"Too important","priority":5}`)))
+	assertAPIError(t, invalidPriority, http.StatusBadRequest, "invalid_argument")
 
 	createRelationship := httptest.NewRecorder()
 	router.ServeHTTP(createRelationship, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships", strings.NewReader(`{"targetIssueId":"`+otherID+`","type":"blocks"}`)))
@@ -101,20 +112,48 @@ func TestIssuePriorityAndRelationshipHTTPContract(t *testing.T) {
 	backend.duplicate = true
 	duplicate := httptest.NewRecorder()
 	router.ServeHTTP(duplicate, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships", strings.NewReader(`{"targetIssueId":"`+otherID+`","type":"blocks"}`)))
-	if duplicate.Code != http.StatusConflict || decodeErrorCode(t, duplicate) != "issue_relationship_exists" {
-		t.Fatalf("duplicate status=%d body=%s", duplicate.Code, duplicate.Body.String())
-	}
+	assertAPIError(t, duplicate, http.StatusConflict, "issue_relationship_exists")
 	backend.duplicate = false
 
 	self := httptest.NewRecorder()
 	router.ServeHTTP(self, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships", strings.NewReader(`{"targetIssueId":"`+issueID+`","type":"related_to"}`)))
-	if self.Code != http.StatusBadRequest || decodeErrorCode(t, self) != "issue_relationship_self_reference" {
-		t.Fatalf("self status=%d body=%s", self.Code, self.Body.String())
-	}
+	assertAPIError(t, self, http.StatusBadRequest, "issue_relationship_self_reference")
+
+	invalidTargetID := httptest.NewRecorder()
+	router.ServeHTTP(invalidTargetID, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships", strings.NewReader(`{"targetIssueId":"not-a-uuid","type":"blocks"}`)))
+	assertAPIError(t, invalidTargetID, http.StatusBadRequest, "invalid_id")
+
+	missingTarget := httptest.NewRecorder()
+	router.ServeHTTP(missingTarget, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships", strings.NewReader(`{"targetIssueId":"`+modelID+`","type":"blocks"}`)))
+	assertAPIError(t, missingTarget, http.StatusNotFound, "issue_relationship_target_not_found")
+
+	invalidType := httptest.NewRecorder()
+	router.ServeHTTP(invalidType, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships", strings.NewReader(`{"targetIssueId":"`+otherID+`","type":"parents"}`)))
+	assertAPIError(t, invalidType, http.StatusBadRequest, "invalid_argument")
+
+	invalidBody := httptest.NewRecorder()
+	router.ServeHTTP(invalidBody, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships", strings.NewReader(`{"targetIssueId":`)))
+	assertAPIError(t, invalidBody, http.StatusBadRequest, "invalid_request")
+
+	invalidSourceID := httptest.NewRecorder()
+	router.ServeHTTP(invalidSourceID, httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID+"/issues/not-a-uuid/relationships", nil))
+	assertAPIError(t, invalidSourceID, http.StatusBadRequest, "invalid_id")
+
+	missingSource := httptest.NewRecorder()
+	router.ServeHTTP(missingSource, httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID+"/issues/"+modelID+"/relationships", nil))
+	assertAPIError(t, missingSource, http.StatusNotFound, "issue_not_found")
 
 	remove := httptest.NewRecorder()
 	router.ServeHTTP(remove, httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships/"+modelID, nil))
 	if remove.Code != http.StatusNoContent {
 		t.Fatalf("delete status=%d body=%s", remove.Code, remove.Body.String())
 	}
+
+	missingRelationship := httptest.NewRecorder()
+	router.ServeHTTP(missingRelationship, httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships/"+modelID, nil))
+	assertAPIError(t, missingRelationship, http.StatusNotFound, "issue_relationship_not_found")
+
+	invalidRelationshipID := httptest.NewRecorder()
+	router.ServeHTTP(invalidRelationshipID, httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID+"/issues/"+issueID+"/relationships/not-a-uuid", nil))
+	assertAPIError(t, invalidRelationshipID, http.StatusBadRequest, "invalid_id")
 }
