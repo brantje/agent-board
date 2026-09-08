@@ -15,7 +15,7 @@ const links = computed(() => navigation(projectId.value))
         <UNavigationMenu aria-label="Settings navigation" orientation="vertical" :collapsed="collapsed" :items="links.settings" class="mt-auto" data-testid="settings-main-nav" />
       </template>
       <template #footer>
-        <UColorModeButton />
+        <ThemeSelector />
         <span class="text-xs text-muted">Self-hosted · v0.1</span>
       </template>
     </UDashboardSidebar>

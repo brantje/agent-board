@@ -1,19 +1,203 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow:ital,wght@0,400;0,500;0,700&family=Barlow+Condensed:wght@600&display=swap');
 @import "tailwindcss";
 @import "@nuxt/ui";
+@import "../../themes/shared.css";
+@import "../../themes/dark.css";
+@import "../../themes/light.css";
+
 @theme static {
-  --color-steel-50: #f1f6f9; --color-steel-100: #dce8f0; --color-steel-200: #bfd3e2;
-  --color-steel-300: #99b9cf; --color-steel-400: #759db9; --color-steel-500: #547f9f;
-  --color-steel-600: #416580; --color-steel-700: #38546a; --color-steel-800: #304658;
-  --color-steel-900: #2b3c4a; --color-steel-950: #1d2832;
-  --radius-xs: 2px;
-  --color-sidebar: var(--board-sidebar);
+  --font-sans: var(--font-body);
+  --font-mono: var(--font-machine);
+
+  --color-accent-50: var(--accent-100);
+  --color-accent-100: var(--accent-100);
+  --color-accent-200: var(--accent-200);
+  --color-accent-300: var(--accent-300);
+  --color-accent-400: var(--accent-400);
+  --color-accent-500: var(--accent-500);
+  --color-accent-600: var(--accent-600);
+  --color-accent-700: var(--accent-700);
+  --color-accent-800: var(--accent-800);
+  --color-accent-900: var(--accent-900);
+  --color-accent-950: var(--accent-900);
+
+  --color-danger-50: var(--danger-100);
+  --color-danger-100: var(--danger-100);
+  --color-danger-200: color-mix(in srgb, var(--danger-100) 70%, var(--color-danger));
+  --color-danger-300: color-mix(in srgb, var(--danger-100) 45%, var(--color-danger));
+  --color-danger-400: color-mix(in srgb, var(--danger-100) 20%, var(--color-danger));
+  --color-danger-500: var(--color-danger);
+  --color-danger-600: color-mix(in srgb, var(--color-danger) 75%, var(--danger-700));
+  --color-danger-700: var(--danger-700);
+  --color-danger-800: var(--danger-700);
+  --color-danger-900: var(--danger-700);
+  --color-danger-950: var(--danger-700);
+
+  --color-neutral-50: var(--neutral-100);
+  --color-neutral-100: var(--neutral-100);
+  --color-neutral-200: var(--neutral-200);
+  --color-neutral-300: var(--neutral-300);
+  --color-neutral-400: var(--neutral-400);
+  --color-neutral-500: var(--neutral-500);
+  --color-neutral-600: var(--neutral-600);
+  --color-neutral-700: var(--neutral-700);
+  --color-neutral-800: var(--neutral-800);
+  --color-neutral-900: var(--neutral-900);
+  --color-neutral-950: var(--neutral-900);
+
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --color-sidebar: var(--neutral-100);
 }
-:root { --ui-radius: 0.125rem; --board-sidebar: #f4f4f4; --ui-primary: var(--color-steel-600); }
-.dark { --board-sidebar: #181818; --ui-bg: #212121; --ui-bg-muted: #242424; --ui-bg-elevated: #292929; --ui-border: #3d3d3d; --ui-primary: var(--color-steel-300); }
-html, body, #__nuxt { min-height: 100%; }
-body { margin: 0; }
-.detail-grid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr) 19rem; }
-.form-grid { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.section-label { font-size: .6875rem; text-transform: uppercase; letter-spacing: .08em; color: var(--ui-text-muted); }
-pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; }
-@media (max-width: 900px) { .detail-grid, .form-grid { grid-template-columns: minmax(0, 1fr); } }
+
+:root {
+  --ui-radius: 0;
+  --ui-bg: var(--color-bg);
+  --ui-bg-muted: var(--neutral-100);
+  --ui-bg-elevated: var(--color-surface);
+  --ui-bg-accented: var(--neutral-300);
+  --ui-border: var(--color-divider);
+  --ui-border-muted: var(--color-divider);
+  --ui-border-accented: var(--neutral-500);
+  --ui-text-dimmed: var(--neutral-700);
+  --ui-text-muted: var(--neutral-800);
+  --ui-text-toned: var(--neutral-900);
+  --ui-text: var(--color-text);
+  --ui-text-highlighted: var(--color-text);
+  --ui-text-inverted: var(--color-on-accent);
+  --ui-bg-inverted: var(--color-text);
+  --ui-border-inverted: var(--color-text);
+}
+
+html,
+body,
+#__nuxt {
+  min-height: 100%;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+body {
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: -.015em;
+}
+
+nav {
+  font-size: var(--font-size-nav);
+}
+
+table tbody {
+  font-size: var(--font-size-table-body);
+}
+
+table thead th {
+  color: var(--neutral-800);
+  font-size: var(--font-size-table-header);
+  font-weight: 500;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+code,
+kbd,
+pre,
+.font-mono,
+[data-machine-value] {
+  font-family: var(--font-machine);
+  font-variant-numeric: tabular-nums;
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: .75rem;
+}
+
+.section-label {
+  font-size: var(--font-size-kicker);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--ui-text-muted);
+}
+
+.detail-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) 19rem;
+}
+
+.form-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .detail-grid,
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+*,
+*::before,
+*::after {
+  border-radius: 0 !important;
+}
+
+input[type='radio'],
+input[type='radio']::before,
+input[type='radio']::after {
+  border-radius: 9999px !important;
+}
+
+button,
+[role='button'] {
+  cursor: pointer;
+}
+
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent) !important;
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role='combobox']:focus-visible,
+[contenteditable]:focus-visible,
+form:has(textarea:focus-visible),
+form:has([contenteditable]:focus-visible) {
+  outline: none !important;
+  outline-offset: 0;
+  --tw-ring-color: var(--color-accent) !important;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+
+button:disabled,
+[role='button'][aria-disabled='true'] {
+  opacity: .45;
+}

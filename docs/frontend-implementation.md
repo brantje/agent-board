@@ -129,8 +129,11 @@ apps/web/app/components/*
 apps/web/app/composables/*
   frontend data/interaction composition
 
+apps/web/app/themes/*
+  shared/dark/light theme tokens
+
 apps/web/app/assets/css/*
-  shared theme/application CSS
+  Tailwind/Nuxt UI mapping and application CSS
 
 apps/web/app/app.config.ts
   Nuxt UI theme/component defaults where appropriate

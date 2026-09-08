@@ -89,9 +89,18 @@ Use application configuration for intentional Nuxt UI defaults and shared compon
 
 Shared configuration is where Agent Board's square default, semantic colors and repeated component variants should live whenever Nuxt UI supports the relevant theme/default hook.
 
-### shared CSS
+### Theme CSS
 
-Shared application CSS owns system-wide tokens/rules that are not more appropriately represented through Nuxt UI configuration, including typography roles, application-specific layout constants, surface tokens and any radius tokens not expressible cleanly through component configuration.
+Palette and shared tokens live in dedicated files, not in page-local classes:
+
+```text
+apps/web/app/themes/shared.css  spacing, radius, typography
+apps/web/app/themes/dark.css     dark palette (default :root)
+apps/web/app/themes/light.css    light palette (html[data-theme='light'])
+apps/web/app/assets/css/main.css Tailwind/Nuxt UI mapping and application rules
+```
+
+`shared.css` owns tokens that do not change between modes. `dark.css` and `light.css` own the graphite/steel-blue palette. Application CSS maps those tokens into Tailwind `@theme` colors and Nuxt UI `--ui-*` variables so product components can keep using semantic colors.
 
 ### product components
 
@@ -103,7 +112,7 @@ Prefer semantic Nuxt UI colors and shared tokens over raw palette colors scatter
 
 Dark mode is the default. Light mode remains complete and usable.
 
-Use Nuxt UI/Nuxt Color Mode facilities rather than implementing a parallel theme system. Components should consume semantic colors so the same composition works in both modes.
+Theme selection is owned by `data-theme` on `html`, persisted as `agent-board-theme`, and applied before first paint by a head bootstrap script. `ThemeSelector` (Nuxt UI `USelect`) is the user control. The client plugin restores the stored theme after hydration. Components consume semantic colors/`--ui-*` tokens so the same composition works in both modes.
 
 The light theme should preserve the same square, dense, technical visual language rather than becoming a separate rounded design.
 

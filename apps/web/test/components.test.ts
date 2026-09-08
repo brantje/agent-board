@@ -10,7 +10,7 @@ import { navigation } from '../app/utils/navigation'
 import { useResource } from '../app/composables/useResource'
 
 const pass = { template: '<div><slot name="header" :collapsed="false" /><slot name="default" :collapsed="false" /><slot name="footer" /><slot name="body" /><slot name="leading" /></div>' }
-const stubs = Object.fromEntries(['UApp','UDashboardGroup','UDashboardSidebar','UDashboardPanel','UDashboardNavbar','UDashboardToolbar','AppShell','PageFrame','USeparator','UColorModeButton','UDashboardSidebarCollapse','NuxtRouteAnnouncer','USkeleton'].map(name => [name, pass]))
+const stubs = Object.fromEntries(['UApp','UDashboardGroup','UDashboardSidebar','UDashboardPanel','UDashboardNavbar','UDashboardToolbar','AppShell','PageFrame','USeparator','ThemeSelector','UDashboardSidebarCollapse','NuxtRouteAnnouncer','USkeleton'].map(name => [name, pass]))
 const menu = { props: ['items'], template: '<nav><a v-for="item in items" :href="item.to">{{ item.label }}</a></nav>' }
 const alert = { props: ['title','description','actions'], template: '<div role="alert">{{ title }} {{ description }}<button @click="actions[0].onClick()">Retry</button></div>' }
 const empty = { props: ['title','description'], template: '<div>{{ title }} {{ description }}</div>' }
@@ -48,7 +48,7 @@ describe('application foundation', () => {
         stubs: {
           ...global.stubs,
           UDashboardSidebar: sidebar,
-          UColorModeButton: { template: '<button type="button" aria-label="Color mode">Color mode</button>' }
+          ThemeSelector: { template: '<div data-testid="theme-selector" aria-label="Application theme">Theme</div>' }
         }
       }
     })
@@ -56,7 +56,7 @@ describe('application foundation', () => {
     expect(settings.classes()).toContain('mt-auto')
     expect(wrapper.find('[data-testid="sidebar-footer"] [data-testid="settings-main-nav"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="sidebar-footer"]').text()).toContain('Self-hosted')
-    expect(wrapper.find('[data-testid="sidebar-footer"] [aria-label="Color mode"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="sidebar-footer"] [data-testid="theme-selector"]').exists()).toBe(true)
   })
   it('provides a viewport page and compact action slots', () => {
     const wrapper = mount(Page, { props: { title: 'Board', description: 'Project context' }, slots: { actions: '<span>New issue</span>', default: '<p>Work</p>' }, global })

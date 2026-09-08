@@ -22,8 +22,9 @@ Rules:
 - Pill shapes are reserved for cases where the shape conveys useful semantics such as tags/chips/statuses.
 - Prefer tonal surface hierarchy and borders over shadows for depth.
 - Use shared Nuxt UI theme/component defaults and semantic colors rather than scattered raw palette values.
+- Theme tokens live in `apps/web/app/themes/{shared,dark,light}.css`; `main.css` only maps them into Tailwind/Nuxt UI.
 - Primary/accent color is a restrained steel blue and should be used sparingly for active navigation, links, primary actions, selection and focus.
-- Dark mode is default; light mode remains fully supported and retains the same square technical visual language.
+- Dark mode is default; light mode remains fully supported and retains the same square technical visual language. The document `data-theme` attribute owns the active palette.
 - Preserve semantic HTML and readable hierarchy for headings, body text, status/meta text, logs and code.
 - Preserve accessibility, keyboard/focus behavior and responsive behavior provided by Nuxt UI/Reka UI.
 - Muted text/borders still need sufficient readability and contrast; status never relies on color alone.
