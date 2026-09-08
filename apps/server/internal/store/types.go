@@ -10,6 +10,7 @@ var EmptyObject = json.RawMessage(`{}`)
 type Project struct {
 	ID               string
 	Name             string
+	IssuePrefix      string
 	RepositoryPath   string
 	DefaultBranch    string
 	WorkflowSettings json.RawMessage
@@ -20,6 +21,8 @@ type Project struct {
 type Issue struct {
 	ID              string
 	ProjectID       string
+	Number          int
+	Key             string
 	Title           string
 	Description     string
 	Status          string

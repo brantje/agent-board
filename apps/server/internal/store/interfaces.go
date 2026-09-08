@@ -18,6 +18,7 @@ type CoreStore interface {
 	GetProject(context.Context, string) (Project, error)
 	CreateIssue(context.Context, Issue) (Issue, error)
 	GetIssue(context.Context, string, string) (Issue, error)
+	GetIssueUUIDByKey(context.Context, string, string) (string, error)
 }
 
 type ConfigurationStore interface {

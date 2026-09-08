@@ -10,6 +10,8 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE projects (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text NOT NULL CHECK (btrim(name) <> ''),
+    issue_prefix text NOT NULL CHECK (issue_prefix ~ '^[A-Z][A-Z0-9]{1,9}$'),
+    next_issue_number integer NOT NULL DEFAULT 1 CHECK (next_issue_number >= 1),
     repository_path text NOT NULL CHECK (btrim(repository_path) <> ''),
     default_branch text NOT NULL DEFAULT 'main' CHECK (btrim(default_branch) <> ''),
     workflow_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(workflow_settings) = 'object'),
@@ -18,6 +20,7 @@ CREATE TABLE projects (
 );
 
 CREATE UNIQUE INDEX projects_name_uq ON projects (lower(name));
+CREATE UNIQUE INDEX projects_issue_prefix_uq ON projects (issue_prefix);
 
 CREATE TABLE secrets (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -130,6 +133,7 @@ CREATE INDEX agents_executor_profile_idx ON agents (executor_profile_id);
 CREATE TABLE issues (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    number integer NOT NULL CHECK (number >= 1),
     title text NOT NULL CHECK (btrim(title) <> ''),
     description text NOT NULL DEFAULT '',
     status text NOT NULL DEFAULT 'BACKLOG' CHECK (status IN ('BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE')),
@@ -137,7 +141,8 @@ CREATE TABLE issues (
     assigned_agent_id uuid REFERENCES agents(id) ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (project_id, id)
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, number)
 );
 
 CREATE INDEX issues_project_status_idx ON issues (project_id, status, created_at);

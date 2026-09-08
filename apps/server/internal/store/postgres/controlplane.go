@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Store) ListProjects(ctx context.Context) ([]store.Project, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text, name, repository_path, default_branch, workflow_settings, created_at, updated_at FROM projects ORDER BY created_at, id`)
+	rows, err := s.pool.Query(ctx, `SELECT id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, created_at, updated_at FROM projects ORDER BY created_at, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -28,19 +28,25 @@ func (s *Store) UpdateProject(ctx context.Context, input store.Project) (store.P
 	return scanProject(s.pool.QueryRow(ctx, `
 		UPDATE projects SET name=$2, repository_path=$3, default_branch=$4, workflow_settings=$5, updated_at=now()
 		WHERE id=$1
-		RETURNING id::text, name, repository_path, default_branch, workflow_settings, created_at, updated_at
+		RETURNING id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, created_at, updated_at
 	`, input.ID, input.Name, input.RepositoryPath, input.DefaultBranch, objectJSON(input.WorkflowSettings)))
 }
 
 func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, created_at, updated_at FROM issues WHERE project_id=$1 ORDER BY created_at, id`, projectID)
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+issueSelectColumns+`
+		FROM issues AS i
+		JOIN projects AS p ON p.id = i.project_id
+		WHERE i.project_id=$1
+		ORDER BY i.created_at, i.id
+	`, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []store.Issue
 	for rows.Next() {
-		value, err := scanIssueWithPriority(rows)
+		value, err := scanIssueJoined(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -89,10 +95,11 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 		}
 	}
 
-	updated, err := scanIssueWithPriority(tx.QueryRow(ctx, `
-		UPDATE issues SET title=$3, description=$4, status=$5, priority=$6, assigned_agent_id=$7, updated_at=now()
-		WHERE project_id=$1 AND id=$2
-		RETURNING id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, created_at, updated_at
+	updated, err := scanIssueJoined(tx.QueryRow(ctx, `
+		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, assigned_agent_id=$7, updated_at=now()
+		FROM projects AS p
+		WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
+		RETURNING `+issueSelectColumns+`
 	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.Priority, input.AssignedAgentID))
 	if err != nil {
 		return store.Issue{}, err

@@ -206,7 +206,7 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 
 func createScriptedIntegrationRun(t *testing.T, ctx context.Context, control *app.Service, repositoryPath, image string) (store.Project, store.Run) {
 	t.Helper()
-	project, err := control.CreateProject(ctx, store.Project{Name: "Scripted integration", RepositoryPath: repositoryPath, DefaultBranch: "main", WorkflowSettings: store.EmptyObject})
+	project, err := control.CreateProject(ctx, store.Project{Name: "Scripted integration", IssuePrefix: "SCR", RepositoryPath: repositoryPath, DefaultBranch: "main", WorkflowSettings: store.EmptyObject})
 	if err != nil {
 		t.Fatal(err)
 	}

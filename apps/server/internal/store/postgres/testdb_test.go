@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -71,4 +73,26 @@ func validateTestDatabaseReset(databaseName, optIn string) error {
 		return fmt.Errorf("refusing destructive PostgreSQL test reset for database %q; expected %q", databaseName, testDatabaseName)
 	}
 	return nil
+}
+
+func testProjectInput(name, repositoryPath, issuePrefix string) store.Project {
+	if issuePrefix == "" {
+		issuePrefix = prefixForTestName(name)
+	}
+	return store.Project{
+		Name:           name,
+		RepositoryPath: repositoryPath,
+		IssuePrefix:    issuePrefix,
+	}
+}
+
+func prefixForTestName(name string) string {
+	clean := strings.NewReplacer("-", "", "/", "", " ", "").Replace(strings.ToUpper(name))
+	if len(clean) < 2 {
+		return "TP"
+	}
+	if len(clean) > 10 {
+		return clean[:10]
+	}
+	return clean
 }

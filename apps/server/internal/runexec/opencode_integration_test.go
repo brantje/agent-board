@@ -218,6 +218,7 @@ func createOpenCodeIntegrationRun(
 	t.Helper()
 	project, err := control.CreateProject(ctx, store.Project{
 		Name:             "OpenCode integration",
+		IssuePrefix:      "OC",
 		RepositoryPath:   repositoryPath,
 		DefaultBranch:    "main",
 		WorkflowSettings: store.EmptyObject,

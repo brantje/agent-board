@@ -14,9 +14,9 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	s := New(pool)
 	ctx := context.Background()
 
-	p1, err := s.CreateProject(ctx, store.Project{Name: "Project One", RepositoryPath: "/repos/one", DefaultBranch: "main", WorkflowSettings: store.EmptyObject})
+	p1, err := s.CreateProject(ctx, testProjectInput("Project One", "/repos/one", "P1"))
 	if err != nil { t.Fatal(err) }
-	p2, err := s.CreateProject(ctx, store.Project{Name: "Project Two", RepositoryPath: "/repos/two", DefaultBranch: "main", WorkflowSettings: store.EmptyObject})
+	p2, err := s.CreateProject(ctx, testProjectInput("Project Two", "/repos/two", "P2"))
 	if err != nil { t.Fatal(err) }
 	projects, err := s.ListProjects(ctx)
 	if err != nil || len(projects) != 2 { t.Fatalf("projects=%d err=%v", len(projects), err) }

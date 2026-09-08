@@ -194,10 +194,11 @@ func (s *Store) CompleteReviewApproval(ctx context.Context, input store.Complete
 	if err != nil {
 		return store.CompleteReviewApprovalResult{}, err
 	}
-	issue, err = scanIssue(tx.QueryRow(ctx, `
-		UPDATE issues SET status='DONE', updated_at=now()
-		WHERE project_id=$1 AND id=$2 AND status='REVIEW'
-		RETURNING id::text, project_id::text, title, description, status, assigned_agent_id::text, created_at, updated_at
+	issue, err = scanIssueJoined(tx.QueryRow(ctx, `
+		UPDATE issues AS i SET status='DONE', updated_at=now()
+		FROM projects AS p
+		WHERE i.project_id=$1 AND i.id=$2 AND i.status='REVIEW' AND p.id=i.project_id
+		RETURNING `+issueSelectColumns+`
 	`, issue.ProjectID, issue.ID))
 	if err != nil {
 		return store.CompleteReviewApprovalResult{}, err
@@ -348,10 +349,11 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
-	issue, err = scanIssue(tx.QueryRow(ctx, `
-		UPDATE issues SET status='IN_PROGRESS', updated_at=now()
-		WHERE project_id=$1 AND id=$2 AND status='REVIEW'
-		RETURNING id::text, project_id::text, title, description, status, assigned_agent_id::text, created_at, updated_at
+	issue, err = scanIssueJoined(tx.QueryRow(ctx, `
+		UPDATE issues AS i SET status='IN_PROGRESS', updated_at=now()
+		FROM projects AS p
+		WHERE i.project_id=$1 AND i.id=$2 AND i.status='REVIEW' AND p.id=i.project_id
+		RETURNING `+issueSelectColumns+`
 	`, issue.ProjectID, issue.ID))
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
@@ -394,9 +396,12 @@ func lockReviewCommandState(ctx context.Context, tx pgx.Tx, projectID, reviewID 
 	if review.RunID != initial.RunID || review.IssueID != initial.IssueID {
 		return store.Review{}, store.Run{}, store.Issue{}, store.ErrConflict
 	}
-	issue, err := scanIssue(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, title, description, status, assigned_agent_id::text, created_at, updated_at
-		FROM issues WHERE project_id=$1 AND id=$2 FOR UPDATE
+	issue, err := scanIssueJoined(tx.QueryRow(ctx, `
+		SELECT `+issueSelectColumns+`
+		FROM issues AS i
+		JOIN projects AS p ON p.id=i.project_id
+		WHERE i.project_id=$1 AND i.id=$2
+		FOR UPDATE OF i
 	`, review.ProjectID, review.IssueID))
 	if err != nil {
 		return store.Review{}, store.Run{}, store.Issue{}, err

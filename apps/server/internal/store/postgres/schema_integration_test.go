@@ -159,7 +159,8 @@ func TestSchemaHasNoObviousSecretPlaintextColumns(t *testing.T) {
 func insertProject(t *testing.T, pool *pgxpool.Pool, name string) string {
 	t.Helper()
 	var id string
-	if err := pool.QueryRow(context.Background(), `INSERT INTO projects (name, repository_path, default_branch) VALUES ($1, '/repo', 'main') RETURNING id::text`, name).Scan(&id); err != nil {
+	prefix := prefixForTestName(name)
+	if err := pool.QueryRow(context.Background(), `INSERT INTO projects (name, issue_prefix, repository_path, default_branch) VALUES ($1, $2, '/repo', 'main') RETURNING id::text`, name, prefix).Scan(&id); err != nil {
 		t.Fatalf("insert Project: %v", err)
 	}
 	return id
@@ -168,7 +169,18 @@ func insertProject(t *testing.T, pool *pgxpool.Pool, name string) string {
 func insertIssue(t *testing.T, pool *pgxpool.Pool, projectID, title string) string {
 	t.Helper()
 	var id string
-	if err := pool.QueryRow(context.Background(), `INSERT INTO issues (project_id, title, status) VALUES ($1, $2, 'TODO') RETURNING id::text`, projectID, title).Scan(&id); err != nil {
+	if err := pool.QueryRow(context.Background(), `
+		WITH allocated AS (
+			UPDATE projects
+			SET next_issue_number = next_issue_number + 1
+			WHERE id = $1
+			RETURNING next_issue_number - 1 AS number
+		)
+		INSERT INTO issues (project_id, number, title, status)
+		SELECT $1, allocated.number, $2, 'TODO'
+		FROM allocated
+		RETURNING id::text
+	`, projectID, title).Scan(&id); err != nil {
 		t.Fatalf("insert Issue: %v", err)
 	}
 	return id
