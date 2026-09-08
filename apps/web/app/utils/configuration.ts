@@ -169,13 +169,16 @@ export function validateDraft(kind: ConfigKind, draft: Draft) {
 
 export function resourceOptions(items: ConfigRecord[]) {
   return items.map(item => {
-    const disabled = item.enabled === false || (item.state !== undefined && item.state !== 'ENABLED')
+    const unavailableReasons = [
+      item.enabled === false ? 'Disabled' : undefined,
+      item.state !== undefined && item.state !== 'ENABLED' ? item.state : undefined,
+      item.healthStatus === 'UNHEALTHY' ? 'Unhealthy' : undefined
+    ].filter((reason): reason is string => Boolean(reason))
     const scope = item.projectId ? 'Project' : 'Shared'
-    const state = item.enabled === false ? 'Disabled' : item.state && item.state !== 'ENABLED' ? item.state : undefined
     return {
-      label: `${item.name} · ${scope}${state ? ` · ${state}` : ''}`,
+      label: `${item.name} · ${scope}${unavailableReasons.length ? ` · ${unavailableReasons.join(' · ')}` : ''}`,
       value: item.id,
-      disabled
+      disabled: unavailableReasons.length > 0
     }
   })
 }
