@@ -42,6 +42,12 @@ export function refetchTargets(type: string) {
   }
 }
 
+const boardActivityFamilies = new Set(['issue', 'run', 'question', 'review', 'decision'])
+
+export function isBoardActivityEvent(type: string) {
+  return boardActivityFamilies.has(type.split('.')[0] || '')
+}
+
 export function eventTitle(event: EventEvidence) {
   if (event.type === 'agent.message') {
     const kind = typeof event.payload?.kind === 'string' ? event.payload.kind : 'message'

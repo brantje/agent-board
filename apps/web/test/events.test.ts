@@ -1,8 +1,9 @@
 import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { ref, defineComponent, h } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { eventTitle, mergeEvents, maxSequence, refetchTargets } from '../app/utils/events'
+import { eventTitle, mergeEvents, maxSequence, refetchTargets, isBoardActivityEvent, compareEvents } from '../app/utils/events'
 import { useRunEvents } from '../app/composables/useRunEvents'
+import { useProjectEvents } from '../app/composables/useProjectEvents'
 import ActivityTimeline from '../app/components/ActivityTimeline.vue'
 import { event, evidence, MockEventSource } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
@@ -24,6 +25,10 @@ describe('event timeline projection', () => {
     const merged = mergeEvents([first], [second, duplicate, third])
     expect(merged.map(item => item.id)).toEqual(['b', 'a', 'c'])
     expect(maxSequence(merged)).toBe(3)
+    expect(compareEvents(
+      event({ id: 'later', type: 'issue.updated', sequence: 1, occurredAt: '2026-01-01T00:00:02.000Z' }),
+      event({ id: 'earlier', type: 'issue.updated', sequence: 1, occurredAt: '2026-01-01T00:00:01.000Z' })
+    )).toBeGreaterThan(0)
   })
 
   it('labels semantic agent.message kinds without calling them thoughts or inferring rationale from tools', () => {
@@ -43,6 +48,10 @@ describe('event timeline projection', () => {
     expect(refetchTargets('review.approved')).toEqual({ run: false, questions: false, reviews: true, issue: false })
     expect(refetchTargets('issue.status_changed')).toEqual({ run: false, questions: false, reviews: false, issue: true })
     expect(refetchTargets('agent.message')).toEqual({ run: false, questions: false, reviews: false, issue: false })
+    expect(isBoardActivityEvent('question.created')).toBe(true)
+    expect(isBoardActivityEvent('decision.recorded')).toBe(true)
+    expect(isBoardActivityEvent('tool.completed')).toBe(false)
+    expect(isBoardActivityEvent('agent.message')).toBe(false)
   })
 })
 
@@ -176,3 +185,91 @@ describe('useRunEvents', () => {
     wrapper.unmount()
   })
 })
+
+describe('useProjectEvents', () => {
+  it('opens a Project stream, reconnects with afterId, and does not leak after unmount', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', MockEventSource)
+    const received: string[] = []
+    const wrapper = mount(defineComponent({
+      setup() {
+        useProjectEvents('project-a', event => { received.push(event.id) })
+        return () => h('div')
+      }
+    }))
+    await flushPromises()
+    expect(MockEventSource.instances[0]?.url).toBe('/api/projects/project-a/events')
+
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-1', type: 'issue.created', sequence: null }))
+    await flushPromises()
+    expect(received).toEqual(['evt-1'])
+
+    MockEventSource.instances[0]?.fail()
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(MockEventSource.instances.at(-1)?.url).toBe('/api/projects/project-a/events?afterId=evt-1')
+    expect(MockEventSource.instances[0]?.closed).toBe(true)
+
+    wrapper.unmount()
+    MockEventSource.instances.at(-1)?.emit(event({ id: 'evt-2', type: 'issue.updated', sequence: null }))
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(received).toEqual(['evt-1'])
+    expect(MockEventSource.instances.at(-1)?.closed).toBe(true)
+  })
+
+  it('opens one stream per Project and ignores overlapping reconnects after unmount', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', MockEventSource)
+    const ids = ref(['project-a', 'project-b'])
+    const wrapper = mount(defineComponent({
+      setup() {
+        useProjectEvents(ids, () => {})
+        return () => h('div')
+      }
+    }))
+    await flushPromises()
+    expect(MockEventSource.instances.map(item => item.url).sort()).toEqual([
+      '/api/projects/project-a/events',
+      '/api/projects/project-b/events'
+    ])
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(MockEventSource.instances.every(item => item.closed)).toBe(true)
+  })
+
+  it('drops removed Project streams, ignores bad payloads, and cancels reconnect timers', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', MockEventSource)
+    const ids = ref<string[] | undefined>(['project-a', 'project-a', '', 'project-b'])
+    const received: string[] = []
+    const wrapper = mount(defineComponent({
+      setup() {
+        useProjectEvents(ids, event => { received.push(event.id) })
+        return () => h('div')
+      }
+    }))
+    await flushPromises()
+    expect(MockEventSource.instances.map(item => item.url).sort()).toEqual([
+      '/api/projects/project-a/events',
+      '/api/projects/project-b/events'
+    ])
+
+    MockEventSource.instances[0]?.emit('not-json')
+    MockEventSource.instances[0]?.onmessage?.({ data: '{"no":"event"}' } as MessageEvent<string>)
+    MockEventSource.instances[0]?.onmessage?.({ data: '{' } as MessageEvent<string>)
+    await flushPromises()
+    expect(received).toEqual([])
+
+    ids.value = ['project-a']
+    await flushPromises()
+    expect(MockEventSource.instances.find(item => item.url.includes('project-b'))?.closed).toBe(true)
+
+    MockEventSource.instances.find(item => !item.closed)?.fail()
+    ids.value = undefined
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(received).toEqual([])
+    wrapper.unmount()
+  })
+})
+

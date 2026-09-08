@@ -3,8 +3,9 @@ import { computed, ref } from 'vue'
 import type { Agent, Issue, Project } from '../types/api'
 import { apiPath } from '../utils/api'
 import { boardColumnSurface, boardColumns } from '../utils/issues'
+import { isBoardActivityEvent } from '../utils/events'
 import { useResource } from '../composables/useResource'
-import { useRefresh } from '../composables/useRefresh'
+import { useProjectEvents } from '../composables/useProjectEvents'
 
 const props = defineProps<{ projectId: string }>()
 const project = useResource<Project>(() => apiPath('projects', undefined, props.projectId))
@@ -31,7 +32,10 @@ async function created() {
   await refreshAll()
 }
 
-useRefresh(refreshAll)
+useProjectEvents(() => props.projectId, async event => {
+  if (!isBoardActivityEvent(event.type)) return
+  await refreshAll()
+})
 </script>
 
 <template>
