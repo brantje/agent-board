@@ -6,7 +6,10 @@ func projectDTO(v store.Project) ProjectDTO {
 	return ProjectDTO{v.ID, v.Name, v.RepositoryPath, v.DefaultBranch, v.WorkflowSettings, v.CreatedAt, v.UpdatedAt}
 }
 func issueDTO(v store.Issue) IssueDTO {
-	return IssueDTO{v.ID, v.ProjectID, v.Title, v.Description, v.Status, v.AssignedAgentID, v.CreatedAt, v.UpdatedAt}
+	return IssueDTO{v.ID, v.ProjectID, v.Title, v.Description, v.Status, v.Priority, v.AssignedAgentID, v.CreatedAt, v.UpdatedAt}
+}
+func issueRelationshipDTO(v store.IssueRelationship) IssueRelationshipDTO {
+	return IssueRelationshipDTO{v.ID, v.ProjectID, v.SourceIssueID, v.TargetIssueID, v.Type, v.CreatedAt}
 }
 func providerDTO(v store.Provider) ProviderDTO {
 	return ProviderDTO{v.ID, v.Name, v.Kind, v.BaseURL, v.Enabled, v.HealthStatus, v.SafeMetadata, v.CreatedAt, v.UpdatedAt}
