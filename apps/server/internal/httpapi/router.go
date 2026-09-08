@@ -153,7 +153,7 @@ func writeAppError(w http.ResponseWriter, err error) {
 		switch {
 		case strings.HasSuffix(apiErr.Code, "_not_found"):
 			status = http.StatusNotFound
-		case apiErr.Code == "conflict", apiErr.Code == "issue_done", apiErr.Code == "agent_unavailable", apiErr.Code == "review_apply_failed", apiErr.Code == "review_evidence_invalid":
+		case apiErr.Code == "conflict", apiErr.Code == "issue_done", apiErr.Code == "agent_unavailable", apiErr.Code == "review_apply_failed", apiErr.Code == "review_evidence_invalid", apiErr.Code == "issue_relationship_exists":
 			status = http.StatusConflict
 		case apiErr.Code == "execution_configuration_invalid":
 			status = http.StatusUnprocessableEntity
