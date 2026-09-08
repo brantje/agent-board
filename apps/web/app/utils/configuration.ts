@@ -220,7 +220,7 @@ export function validateDraft(kind: ConfigKind, draft: Draft) {
       invalid ||= !/^[A-Za-z][A-Za-z0-9]{1,9}$/.test(String(value).trim())
     }
     if (field.allowCustom) {
-      invalid ||= !String(value ?? '').trim() || String(value) === CUSTOM_PROVIDER_KIND
+      invalid ||= !String(value ?? '').trim() || String(value).trim() === CUSTOM_PROVIDER_KIND
     } else if (field.options) {
       invalid ||= !field.options.includes(String(value))
     }
