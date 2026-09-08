@@ -3,8 +3,9 @@ import { computed, ref } from 'vue'
 import type { Agent, AssignmentResponse, Issue, Run } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { latestRun, statusLabel } from '../utils/issues'
+import { isBoardActivityEvent } from '../utils/events'
 import { useResource } from '../composables/useResource'
-import { useRefresh } from '../composables/useRefresh'
+import { useProjectEvents } from '../composables/useProjectEvents'
 import IssueRelationships from './IssueRelationships.vue'
 
 const props = defineProps<{ projectId: string; issueId: string }>()
@@ -28,11 +29,16 @@ const assignmentDescription = computed(() => {
   return `Board status: ${statusLabel(result.issue.status)}. Run attempt ${result.run.attempt}: ${statusLabel(result.run.status)}. Execution continues server-side.`
 })
 
+const questionsPanel = ref<{ refresh?: () => Promise<unknown> }>()
+
 async function reload() {
-  await Promise.all([refresh(), agents.refresh(), runs.refresh()])
+  await Promise.all([refresh(), agents.refresh(), runs.refresh(), questionsPanel.value?.refresh?.()])
 }
 
-useRefresh(reload)
+useProjectEvents(() => props.projectId, async event => {
+  if (!isBoardActivityEvent(event.type)) return
+  await reload()
+})
 
 async function assign() {
   if (!selected.value || assigning.value || issue.value?.status === 'DONE') return
@@ -96,7 +102,7 @@ async function saved(savedIssue: Issue) {
           </UCard>
 
           <slot name="questions">
-            <QuestionPanel :project-id="projectId" :issue-id="issueId" />
+            <QuestionPanel ref="questionsPanel" :project-id="projectId" :issue-id="issueId" />
           </slot>
         </section>
 

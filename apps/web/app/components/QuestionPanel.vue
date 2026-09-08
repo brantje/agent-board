@@ -75,6 +75,8 @@ async function answer(question: Question) {
     answering.value = ''
   }
 }
+
+defineExpose({ refresh })
 </script>
 
 <template>

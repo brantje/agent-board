@@ -70,4 +70,12 @@ describe('InboxView', () => {
     expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
     wrapper.unmount()
   })
+
+  it('shows an error when the Project list cannot be loaded', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'project_not_found' } }), { status: 404 })))
+    const wrapper = mount(InboxView, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('unavailable or belongs to another project')
+    wrapper.unmount()
+  })
 })
