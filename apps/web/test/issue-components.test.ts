@@ -53,6 +53,7 @@ const global = {
   }
 }
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(value => value.text() === label)!
+const formForField = (wrapper: ReturnType<typeof mount>, name: string) => wrapper.findAll('form').find(form => form.find(`[data-field=${name}]`).exists())!
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -192,18 +193,18 @@ describe('Issue workflow components', () => {
     expect(wrapper.text()).toContain('No Runs yet')
     expect(wrapper.find('option[value=draft]').exists()).toBe(false)
     expect(wrapper.find('option[value=disabled]').exists()).toBe(false)
-    await wrapper.get('[data-field=agent]').closest('form')!.trigger('submit')
+    await formForField(wrapper, 'agent').trigger('submit')
     expect(fetch.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0)
 
     await wrapper.get('[data-field=agent] select').setValue('a')
     fail = true
-    await wrapper.get('[data-field=agent]').closest('form')!.trigger('submit')
+    await formForField(wrapper, 'agent').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('selected execution configuration is not runnable')
     expect(wrapper.text()).not.toContain('unsafe backend detail')
 
     fail = false
-    await wrapper.get('[data-field=agent]').closest('form')!.trigger('submit')
+    await formForField(wrapper, 'agent').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Assignment accepted')
     expect(wrapper.text()).toContain('Board status: In Progress')
