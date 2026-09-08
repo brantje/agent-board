@@ -61,7 +61,7 @@ func main() {
 		slog.SetDefault(slog.New(redaction.NewSlogHandler(baseHandler, application.services.Redaction)))
 	}
 	if application, ok := handler.(*applicationHandler); ok && application.services != nil {
-		if err := app.EnsureOpenRouterFromEnv(ctx, application.services.ControlPlane, application.services.Secrets, os.Getenv); err != nil {
+		if err := app.EnsureOpenRouterFromEnv(ctx, application.services.ControlPlane, secretStoreFromServices(application.services), os.Getenv); err != nil {
 			slog.Error("bootstrap OpenRouter provider", "error", err)
 			closeStore()
 			stop()
@@ -415,4 +415,12 @@ func serve(ctx context.Context, server *http.Server, listener net.Listener) erro
 
 func normalizeAddress(address string) string {
 	return strings.TrimSpace(address)
+}
+
+func secretStoreFromServices(services *app.Services) app.SecretStore {
+	if services == nil || services.Secrets == nil {
+		return nil
+	}
+	store, _ := services.Secrets.(app.SecretStore)
+	return store
 }
