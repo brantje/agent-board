@@ -5,6 +5,7 @@ node_modules/
 coverage/
 dist/
 bin/
+apps/server/tmp/
 *.test
 .env
 .env.*
@@ -12,3 +13,5 @@ bin/
 .DS_Store
 .idea/
 .vscode/
+workspaces/
+evidence/

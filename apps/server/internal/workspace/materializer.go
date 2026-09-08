@@ -169,6 +169,9 @@ func (m *Materializer) Ensure(ctx context.Context, project store.Project, issue 
 		return m.fail(ctx, current, fmt.Errorf("publish workspace checkout: %w", err))
 	}
 	published = true
+	if err := PreparePublishedWorkspace(finalPath, RuntimeIdentityFromEnv()); err != nil {
+		return m.fail(ctx, current, fmt.Errorf("prepare workspace for runtime access: %w", err))
+	}
 
 	ready, err := m.store.MarkWorkspaceBootstrapReady(ctx, project.ID, issue.ID, current.ID, finalPath, source, baseBranch, baseRevision, current.WorkingBranch)
 	if err != nil {

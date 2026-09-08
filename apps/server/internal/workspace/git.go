@@ -3,6 +3,7 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,9 +14,12 @@ import (
 
 const defaultGitCommandTimeout = 5 * time.Minute
 
+var ErrNotGitRepository = errors.New("workspace: path is not a git repository and is not empty")
+
 type Git interface {
 	ValidateBranch(context.Context, string) error
 	Clone(context.Context, string, string, string) error
+	InitRepository(context.Context, string, string) error
 	CheckoutNewBranch(context.Context, string, string) error
 	HeadRevision(context.Context, string) (string, error)
 	CurrentBranch(context.Context, string) (string, error)
@@ -58,6 +62,43 @@ func (g *GitCLI) ValidateBranch(ctx context.Context, branch string) error {
 func (g *GitCLI) Clone(ctx context.Context, source, destination, branch string) error {
 	_, err := g.run(ctx, "clone", "--no-hardlinks", "--no-tags", "--single-branch", "--branch", branch, "--", source, destination)
 	return err
+}
+
+func (g *GitCLI) InitRepository(ctx context.Context, repositoryPath, defaultBranch string) error {
+	defaultBranch = strings.TrimSpace(defaultBranch)
+	if defaultBranch == "" {
+		return fmt.Errorf("git default branch must not be blank")
+	}
+	isRepository, err := g.IsRepository(ctx, repositoryPath)
+	if err != nil {
+		return err
+	}
+	if isRepository {
+		return nil
+	}
+	if occupied, err := directoryHasEntries(repositoryPath); err != nil {
+		return err
+	} else if occupied {
+		return fmt.Errorf("repository path %q: %w", repositoryPath, ErrNotGitRepository)
+	}
+	if _, err := g.run(ctx, "-C", repositoryPath, "init", "-b", defaultBranch); err != nil {
+		return err
+	}
+	_, err = g.run(ctx,
+		"-C", repositoryPath,
+		"-c", "user.name=Agent Board",
+		"-c", "user.email=agent-board@localhost",
+		"commit", "--allow-empty", "-m", "Initial commit",
+	)
+	return err
+}
+
+func directoryHasEntries(repositoryPath string) (bool, error) {
+	entries, err := os.ReadDir(repositoryPath)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) > 0, nil
 }
 
 func (g *GitCLI) CheckoutRevision(ctx context.Context, repositoryPath, revision string) error {

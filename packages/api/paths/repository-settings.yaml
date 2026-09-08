@@ -1,0 +1,8 @@
+path1:
+  get:
+    operationId: getRepositorySettings
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/RepositorySettings
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

@@ -13,7 +13,7 @@ export interface ConfigRecord {
 export interface Field {
   key: string
   label: string
-  type?: 'number'|'select'|'textarea'|'checkbox'|'json'|'lines'
+  type?: 'number'|'select'|'textarea'|'checkbox'|'json'|'lines'|'provider-model'
   required?: boolean
   options?: string[]
   selectItems?: Array<{ label: string; value: string }>
@@ -83,7 +83,7 @@ export const definitions: Record<ConfigKind, Definition> = {
     fields: [
       name,
       { key: 'issuePrefix', label: 'Issue prefix', required: true, immutable: true, help: 'Immutable public prefix for Issue keys such as AB-12. Use 2-10 uppercase letters and digits; must start with a letter.' },
-      { key: 'repositoryPath', label: 'Local repository path', required: true, help: 'Path visible to the backend within deployment-authorized repository roots.' },
+      { key: 'repositoryPath', label: 'Local repository path', required: true, help: 'Backend-visible path within deployment-authorized repository roots. If the directory does not exist, Agent Board creates it and initializes a new Git repository on save.' },
       { key: 'defaultBranch', label: 'Default branch', initial: 'main', required: true },
       { key: 'workflowSettings', label: 'Workflow settings', type: 'json', initial: '{}', help: 'Optional workflow policy overrides supported by your Go server.' }
     ]
@@ -119,7 +119,7 @@ export const definitions: Record<ConfigKind, Definition> = {
     fields: [
       name,
       reference('providerId', 'Provider', 'providers'),
-      { key: 'model', label: 'Model', required: true },
+      { key: 'model', label: 'Model', type: 'provider-model', required: true, help: 'Models load from the Provider API when available. Enter a model ID manually when discovery is unavailable.' },
       { key: 'temperature', label: 'Temperature', type: 'number', min: 0, max: 2 },
       { key: 'maxTokens', label: 'Max tokens', type: 'number', min: 1 },
       { key: 'maxConcurrent', label: 'Capacity', type: 'number', min: 1, help: 'Leave empty for unlimited concurrent Runs.' },

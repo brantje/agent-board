@@ -100,6 +100,7 @@ describe('intentional configuration inputs', () => {
 
   it('describes each empty configuration list in product terms', () => {
     expect(definitions.projects.emptyDescription).toBe('Create a Project with a local repository, default branch, and Issue prefix to open a board.')
+    expect(definitions.projects.fields.find(field => field.key === 'repositoryPath')?.help).toContain('creates it and initializes a new Git repository')
     expect(definitions.providers.emptyDescription).toBe('Add a Provider with encrypted credentials so Model Profiles can call a model API.')
     expect(definitions['model-profiles'].emptyDescription).toBe('Create a Model Profile to select a Provider, model, and optional concurrent Run capacity.')
     expect(definitions.runtimes.emptyDescription).toBe('Define a Runtime image and execution policy so Agents can start agent-runner.')

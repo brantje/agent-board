@@ -22,9 +22,11 @@ The server reads these filesystem settings:
 
 Repository roots and configured Project repository paths are canonicalized through symlinks before access. A Project path must resolve to a directory at or below one authorized root; relative paths, sibling-prefix tricks and symlink escapes are rejected. Authorization is rechecked immediately before Git access rather than trusted only from configuration time.
 
-When using the default Compose setup, `AGENT_BOARD_REPOSITORY_ROOT` is the host directory bind-mounted read-only at `AGENT_BOARD_REPOSITORY_MOUNT_PATH` (default `/repositories`). `AGENT_BOARD_REPOSITORY_ROOTS` must contain the container-visible path, not the host path. For example, mounting `/srv/repos` at `/repositories` means a Project repository `/srv/repos/widget` is configured in Agent Board as `/repositories/widget`.
+When using the default Compose setup, `AGENT_BOARD_REPOSITORY_ROOT` is the host directory bind-mounted at `AGENT_BOARD_REPOSITORY_MOUNT_PATH` (default `/repositories`). `AGENT_BOARD_REPOSITORY_ROOTS` must contain the container-visible path, not the host path. For example, mounting `/srv/repos` at `/repositories` means a Project repository `/srv/repos/widget` is configured in Agent Board as `/repositories/widget`.
 
-The Workspace root remains writable and durable. Repository source mounts may be read-only because Agent Board materializes them into backend-owned Workspaces before execution or approval delivery.
+The repository bind mount is writable so Agent Board can create missing Project repository directories and initialize them as Git repositories on Project create/update. The configured repository remains a bootstrap source only; durable accepted and execution state still lives in backend-owned Workspaces.
+
+The Workspace root remains writable and durable. Agent Board materializes configured repositories into backend-owned Workspaces before execution or approval delivery.
 
 ## Project Workspace
 
