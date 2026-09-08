@@ -1,1 +1,1 @@
-<template><ConfigManager kind="agents" /></template>
+<template><SettingsShell><ConfigManager kind="agents" /></SettingsShell></template>

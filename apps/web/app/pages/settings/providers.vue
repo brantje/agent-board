@@ -1,1 +1,1 @@
-<template><ConfigManager kind="providers" /></template>
+<template><SettingsShell><ConfigManager kind="providers" /></SettingsShell></template>

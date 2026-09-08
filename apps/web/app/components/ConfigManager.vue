@@ -110,9 +110,6 @@ async function save() {
 <template>
   <PageFrame :title="definition.title" :description="pageDescription">
     <template #actions>
-      <template v-if="resourceId">
-        <UButton v-for="section in ['model-profiles', 'runtimes', 'executor-profiles']" :key="section" :label="definitions[section as ConfigKind].title" :to="`/projects/${resourceId}/settings/${section}`" variant="outline" />
-      </template>
       <UButton :label="`New ${definition.singular.toLowerCase()}`" icon="i-lucide-plus" @click="edit()" />
     </template>
 

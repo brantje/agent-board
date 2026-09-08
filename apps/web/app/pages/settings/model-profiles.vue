@@ -1,1 +1,1 @@
-<template><ConfigManager kind="model-profiles" /></template>
+<template><SettingsShell><ConfigManager kind="model-profiles" /></SettingsShell></template>
