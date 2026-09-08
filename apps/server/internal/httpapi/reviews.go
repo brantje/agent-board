@@ -138,12 +138,12 @@ func (a *api) approveReview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	result, err := a.reviews.Approve(r.Context(), projectID, reviewID, nil)
+	keys, err := a.issueKeyMap(r.Context(), projectID)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	keys, err := a.issueKeyMap(r.Context(), projectID)
+	result, err := a.reviews.Approve(r.Context(), projectID, reviewID, nil)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -165,12 +165,12 @@ func (a *api) requestReviewChanges(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
-	result, err := a.reviews.RequestChanges(r.Context(), projectID, reviewID, request.Feedback, nil)
+	keys, err := a.issueKeyMap(r.Context(), projectID)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	keys, err := a.issueKeyMap(r.Context(), projectID)
+	result, err := a.reviews.RequestChanges(r.Context(), projectID, reviewID, request.Feedback, nil)
 	if err != nil {
 		writeAppError(w, err)
 		return

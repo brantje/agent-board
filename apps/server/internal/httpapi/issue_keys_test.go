@@ -133,3 +133,10 @@ func TestIssueKeyForUUIDFallsBackToUUID(t *testing.T) {
 		t.Fatalf("expected uuid fallback")
 	}
 }
+
+func TestIssueKeysFromResolved(t *testing.T) {
+	keys := issueKeysFromResolved(issueID, issueKey, otherID, otherIssueKey)
+	if keys[issueID] != issueKey || keys[otherID] != otherIssueKey {
+		t.Fatalf("keys=%v", keys)
+	}
+}

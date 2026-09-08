@@ -188,11 +188,7 @@ func (a *api) createIssueRelationship(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	keys, err := a.issueKeyMap(r.Context(), projectID)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
+	keys := issueKeysFromResolved(issueUUID, chi.URLParam(r, "issueID"), targetUUID, req.TargetIssueID)
 	writeJSON(w, http.StatusCreated, issueRelationshipDTO(value, keys))
 }
 
@@ -282,10 +278,6 @@ func (a *api) assignIssue(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	keys, err := a.issueKeyMap(r.Context(), projectID)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
+	keys := issueKeysFromPath(issueUUID, chi.URLParam(r, "issueID"))
 	writeJSON(w, http.StatusAccepted, AssignmentResponse{Issue: issueDTO(issue), Run: runDTO(run, keys)})
 }

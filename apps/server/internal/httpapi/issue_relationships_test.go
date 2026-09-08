@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,8 +15,16 @@ import (
 
 type issueRelationshipHTTPStore struct {
 	*fakeControlPlaneStore
-	relationships []store.IssueRelationship
-	duplicate     bool
+	relationships   []store.IssueRelationship
+	duplicate       bool
+	listIssuesErr   error
+}
+
+func (s *issueRelationshipHTTPStore) ListIssues(ctx context.Context, pid string) ([]store.Issue, error) {
+	if s.listIssuesErr != nil {
+		return nil, s.listIssuesErr
+	}
+	return s.fakeControlPlaneStore.ListIssues(ctx, pid)
 }
 
 func (s *issueRelationshipHTTPStore) GetIssue(_ context.Context, pid, id string) (store.Issue, error) {
@@ -156,4 +165,25 @@ func TestIssuePriorityAndRelationshipHTTPContract(t *testing.T) {
 	invalidRelationshipID := httptest.NewRecorder()
 	router.ServeHTTP(invalidRelationshipID, httptest.NewRequest(http.MethodDelete, "/api/projects/"+projectID+"/issues/"+issueKey+"/relationships/not-a-uuid", nil))
 	assertAPIError(t, invalidRelationshipID, http.StatusBadRequest, "invalid_id")
+}
+
+func TestCreateIssueRelationshipSerializesKeysWithoutListingIssues(t *testing.T) {
+	backend := &issueRelationshipHTTPStore{
+		fakeControlPlaneStore: &fakeControlPlaneStore{},
+		listIssuesErr:         errors.New("list issues unavailable"),
+	}
+	router := NewRouter(app.New(backend))
+
+	createRelationship := httptest.NewRecorder()
+	router.ServeHTTP(createRelationship, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues/"+issueKey+"/relationships", strings.NewReader(`{"targetIssueId":"`+otherIssueKey+`","type":"blocks"}`)))
+	if createRelationship.Code != http.StatusCreated {
+		t.Fatalf("relationship create status=%d body=%s", createRelationship.Code, createRelationship.Body.String())
+	}
+	var relationship IssueRelationshipDTO
+	if err := json.Unmarshal(createRelationship.Body.Bytes(), &relationship); err != nil {
+		t.Fatal(err)
+	}
+	if relationship.SourceIssueID != issueKey || relationship.TargetIssueID != otherIssueKey {
+		t.Fatalf("relationship=%+v", relationship)
+	}
 }

@@ -128,6 +128,11 @@ func (a *api) answerQuestion(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &request) {
 		return
 	}
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	result, err := a.questions.Answer(r.Context(), projectID, questionID, store.QuestionAnswer{
 		Kind:      request.Kind,
 		Text:      request.Text,
@@ -141,11 +146,6 @@ func (a *api) answerQuestion(w http.ResponseWriter, r *http.Request) {
 	if result.Job != nil {
 		id := result.Job.ID
 		resumeJobID = &id
-	}
-	keys, err := a.issueKeyMap(r.Context(), projectID)
-	if err != nil {
-		writeAppError(w, err)
-		return
 	}
 	writeJSON(w, http.StatusOK, QuestionAnswerResponse{
 		Question:    questionDTO(result.Question, keys),

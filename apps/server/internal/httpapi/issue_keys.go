@@ -82,3 +82,11 @@ func issueKeyForUUID(keys map[string]string, issueUUID string) string {
 	}
 	return issueUUID
 }
+
+func issueKeysFromResolved(sourceUUID, sourceKey, targetUUID, targetKey string) map[string]string {
+	return map[string]string{sourceUUID: sourceKey, targetUUID: targetKey}
+}
+
+func issueKeysFromPath(issueUUID, issueKey string) map[string]string {
+	return map[string]string{issueUUID: issueKey}
+}
