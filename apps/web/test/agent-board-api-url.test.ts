@@ -13,6 +13,10 @@ describe('resolveAgentBoardApiUrl', () => {
     expect(resolveAgentBoardApiUrl('http://[::1]:3001')).toBe('http://[::1]:3001')
   })
 
+  it('permits compose internal service http upstreams', () => {
+    expect(resolveAgentBoardApiUrl('http://server:3001')).toBe('http://server:3001')
+  })
+
   it('permits remote https upstreams', () => {
     expect(resolveAgentBoardApiUrl('https://agent-board.example.com')).toBe('https://agent-board.example.com')
   })
