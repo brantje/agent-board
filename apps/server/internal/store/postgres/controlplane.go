@@ -33,14 +33,14 @@ func (s *Store) UpdateProject(ctx context.Context, input store.Project) (store.P
 }
 
 func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, title, description, status, assigned_agent_id::text, created_at, updated_at FROM issues WHERE project_id=$1 ORDER BY created_at, id`, projectID)
+	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, created_at, updated_at FROM issues WHERE project_id=$1 ORDER BY created_at, id`, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []store.Issue
 	for rows.Next() {
-		value, err := scanIssue(rows)
+		value, err := scanIssueWithPriority(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -89,11 +89,11 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 		}
 	}
 
-	updated, err := scanIssue(tx.QueryRow(ctx, `
-		UPDATE issues SET title=$3, description=$4, status=$5, assigned_agent_id=$6, updated_at=now()
+	updated, err := scanIssueWithPriority(tx.QueryRow(ctx, `
+		UPDATE issues SET title=$3, description=$4, status=$5, priority=$6, assigned_agent_id=$7, updated_at=now()
 		WHERE project_id=$1 AND id=$2
-		RETURNING id::text, project_id::text, title, description, status, assigned_agent_id::text, created_at, updated_at
-	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.AssignedAgentID))
+		RETURNING id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, created_at, updated_at
+	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.Priority, input.AssignedAgentID))
 	if err != nil {
 		return store.Issue{}, err
 	}
