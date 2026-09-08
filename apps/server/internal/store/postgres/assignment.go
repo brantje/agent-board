@@ -129,29 +129,27 @@ func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID stri
 
 func verifyRunnableAgent(ctx context.Context, tx pgx.Tx, projectID, agentID string) error {
 	var agentState, providerHealth, runtimeHealth, runtimeKind, runtimeImage string
-	var executorEnabled, modelEnabled, providerEnabled, runtimeEnabled bool
+	var modelEnabled, providerEnabled, runtimeEnabled bool
 	err := tx.QueryRow(ctx, `
-        SELECT agent.state, executor.enabled, model.enabled, provider.enabled, provider.health_status,
+        SELECT agent.state, model.enabled, provider.enabled, provider.health_status,
                runtime.enabled, runtime.health_status, runtime.kind, runtime.image
         FROM agents AS agent
-        JOIN executor_profiles AS executor ON executor.id=agent.executor_profile_id
-        JOIN model_profiles AS model ON model.id=executor.model_profile_id
+        JOIN model_profiles AS model ON model.id=agent.model_profile_id
         JOIN providers AS provider ON provider.id=model.provider_id
-        JOIN runtimes AS runtime ON runtime.id=executor.runtime_id
+        JOIN runtimes AS runtime ON runtime.id=agent.runtime_id
         WHERE agent.id=$2
           AND (agent.project_id IS NULL OR agent.project_id=$1)
-          AND (executor.project_id IS NULL OR executor.project_id=$1)
           AND (model.project_id IS NULL OR model.project_id=$1)
           AND (runtime.project_id IS NULL OR runtime.project_id=$1)
-        FOR SHARE OF agent, executor, model, provider, runtime
+        FOR SHARE OF agent, model, provider, runtime
     `, projectID, agentID).Scan(
-		&agentState, &executorEnabled, &modelEnabled, &providerEnabled, &providerHealth,
+		&agentState, &modelEnabled, &providerEnabled, &providerHealth,
 		&runtimeEnabled, &runtimeHealth, &runtimeKind, &runtimeImage,
 	)
 	if err != nil {
 		return notFound(err)
 	}
-	if agentState != "ENABLED" || !executorEnabled || !modelEnabled || !providerEnabled || providerHealth == "UNHEALTHY" ||
+	if agentState != "ENABLED" || !modelEnabled || !providerEnabled || providerHealth == "UNHEALTHY" ||
 		!runtimeEnabled || runtimeHealth == "UNHEALTHY" || runtimeKind != "docker" || strings.TrimSpace(runtimeImage) == "" {
 		return store.ErrConflict
 	}

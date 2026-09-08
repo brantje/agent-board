@@ -9,16 +9,15 @@ Run
   -> Project + Project instructions
   -> Issue title/description/current relevant context
   -> Agent + Agent instructions
-      -> Executor Profile
-          -> Engine
-          -> Model Profile
-              -> Provider
-          -> Runtime
+      -> Engine
+      -> Model Profile
+          -> Provider
+      -> Runtime
   -> Workspace identity/repository metadata
   -> explicit Question/Review/resume context
 ```
 
-Executor Profile references Runtime directly.
+Agents select Runtime directly.
 
 The resolved non-secret context is immutable for the execution attempt and suitable for safe provenance capture.
 
@@ -96,4 +95,4 @@ Errors never include plaintext secrets, ciphertext, full environments or sensiti
 
 ## Provenance
 
-The safe resolved context is the source for immutable Run provenance. It captures the direct Runtime selected by Executor Profile. Historical Run inspection never reconstructs execution truth from mutable current Agent/Executor/Model/Provider/Runtime records.
+The safe resolved context is the source for immutable Run provenance. It captures the direct Runtime selected by Agent. Historical Run inspection never reconstructs execution truth from mutable current Agent/Model/Provider/Runtime records.

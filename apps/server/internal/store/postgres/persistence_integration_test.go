@@ -20,7 +20,6 @@ type runFixture struct {
 	provider  store.Provider
 	model     store.ModelProfile
 	runtime   store.Runtime
-	profile   store.ExecutorProfile
 	agent     store.Agent
 	run       store.Run
 }
@@ -44,11 +43,7 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
-	profile, err := s.CreateExecutorProfile(ctx, store.ExecutorProfile{ProjectID: &project.ID, Name: "profile-" + suffix, Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, Enabled: true})
-	if err != nil {
-		t.Fatalf("create profile: %v", err)
-	}
-	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, ExecutorProfileID: profile.ID})
+	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -64,7 +59,7 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	return runFixture{project, issue, workspace, provider, model, runtime, profile, agent, run}
+	return runFixture{project, issue, workspace, provider, model, runtime, agent, run}
 }
 
 func TestExecutionPersistenceInvariants(t *testing.T) {

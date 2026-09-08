@@ -11,7 +11,7 @@ Other Issue, Run, Review, Question, Workspace, Runtime, Engine, and worker route
 
 The request remains the strict `{ "agentId": <uuid> }` contract. Project, Issue, and Agent lookups preserve the existing Project/shared scope rules and the existing `project_not_found`, `issue_not_found`, `issue_done`, `agent_not_found`, `agent_unavailable`, and `execution_configuration_invalid` errors.
 
-Assignment reuses the Go execution-configuration checks already used by Review continuation. The Agent must be enabled, have an accessible Executor Profile, resolve its Model/Profile/Provider and Runtime Profile/Runtime within scope, and resolve a currently supported executable configuration. This does not move Engine execution into Go.
+Assignment reuses the Go execution-configuration checks already used by Review continuation. The Agent must be enabled, resolve its Engine, Model Profile, Provider and Runtime within scope, and resolve a currently supported executable configuration. This does not move Engine execution into Go.
 
 A successful first assignment atomically:
 

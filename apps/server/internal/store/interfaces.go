@@ -25,7 +25,6 @@ type ConfigurationStore interface {
 	CreateProvider(context.Context, Provider) (Provider, error)
 	CreateModelProfile(context.Context, ModelProfile) (ModelProfile, error)
 	CreateRuntime(context.Context, Runtime) (Runtime, error)
-	CreateExecutorProfile(context.Context, ExecutorProfile) (ExecutorProfile, error)
 	CreateAgent(context.Context, Agent) (Agent, error)
 	GetAgent(context.Context, string, string) (Agent, error)
 }

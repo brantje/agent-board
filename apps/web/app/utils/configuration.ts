@@ -101,7 +101,7 @@ export const definitions: Record<ConfigKind, Definition> = {
         required: true,
         allowCustom: true,
         selectItems: providerKindSelectItems,
-        help: 'OpenCode provider used when an Executor Profile runs with the OpenCode engine.'
+        help: 'OpenCode provider used when an Agent runs with the OpenCode engine.'
       },
       {
         key: 'baseUrl',
@@ -130,7 +130,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   runtimes: {
     title: 'Runtimes',
     singular: 'Runtime',
-    emptyDescription: 'Define a Runtime image and execution policy so Executor Profiles can start agent-runner.',
+    emptyDescription: 'Define a Runtime image and execution policy so Agents can start agent-runner.',
     fields: [
       name,
       { key: 'kind', label: 'Kind', type: 'select', options: ['docker'], initial: 'docker' },
@@ -145,34 +145,24 @@ export const definitions: Record<ConfigKind, Definition> = {
       enabled
     ]
   },
-  'executor-profiles': {
-    title: 'Executor Profiles',
-    singular: 'Executor Profile',
-    emptyDescription: 'Combine an Engine, Model Profile, and Runtime into an Executor Profile that Agents can use.',
+  agents: {
+    title: 'Agents',
+    singular: 'Agent',
+    emptyDescription: 'Create an Agent with role instructions, Engine, Model Profile, and Runtime before assigning Issues.',
     fields: [
       name,
+      { key: 'roleInstructions', label: 'Role / instructions', type: 'textarea' },
       { key: 'engine', label: 'Engine', type: 'select', options: ['opencode', 'scripted'], initial: 'opencode' },
       reference('modelProfileId', 'Model Profile', 'model-profiles'),
       reference('runtimeId', 'Runtime', 'runtimes'),
       { key: 'engineSettings', label: 'Engine settings', type: 'json', initial: '{}' },
-      enabled
-    ]
-  },
-  agents: {
-    title: 'Agents',
-    singular: 'Agent',
-    emptyDescription: 'Create an Agent with role instructions and an Executor Profile before assigning Issues.',
-    fields: [
-      name,
-      { key: 'roleInstructions', label: 'Role / instructions', type: 'textarea' },
-      reference('executorProfileId', 'Executor Profile', 'executor-profiles'),
       { key: 'concurrencyLimit', label: 'Concurrency limit', type: 'number', initial: 1, min: 1, required: true },
       { key: 'state', label: 'State', type: 'select', options: ['DRAFT', 'ENABLED', 'DISABLED', 'ARCHIVED'], initial: 'ENABLED' }
     ]
   }
 }
 
-export type ConfigKind = 'projects'|'providers'|'model-profiles'|'runtimes'|'executor-profiles'|'agents'
+export type ConfigKind = 'projects'|'providers'|'model-profiles'|'runtimes'|'agents'
 export type Draft = Record<string, string|number|boolean>
 
 export function draftFor(kind: ConfigKind, source: Record<string, unknown> = {}): Draft {

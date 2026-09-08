@@ -25,15 +25,7 @@ func (s *Service) AssignIssue(ctx context.Context, projectID, issueID, agentID s
 		return store.Issue{}, store.Run{}, NewError("agent_unavailable", "agent is not runnable", store.ErrConflict)
 	}
 
-	executor, err := s.GetExecutorProfile(ctx, scope, agent.ExecutorProfileID)
-	if err != nil {
-		return store.Issue{}, store.Run{}, executionConfigError(err)
-	}
-	if !executor.Enabled {
-		return store.Issue{}, store.Run{}, executionConfigError(nil)
-	}
-
-	model, err := s.GetModelProfile(ctx, scope, executor.ModelProfileID)
+	model, err := s.GetModelProfile(ctx, scope, agent.ModelProfileID)
 	if err != nil {
 		return store.Issue{}, store.Run{}, executionConfigError(err)
 	}
@@ -49,7 +41,7 @@ func (s *Service) AssignIssue(ctx context.Context, projectID, issueID, agentID s
 		return store.Issue{}, store.Run{}, executionConfigError(nil)
 	}
 
-	runtime, err := s.GetRuntime(ctx, scope, executor.RuntimeID)
+	runtime, err := s.GetRuntime(ctx, scope, agent.RuntimeID)
 	if err != nil {
 		return store.Issue{}, store.Run{}, executionConfigError(err)
 	}

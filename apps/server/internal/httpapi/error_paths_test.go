@@ -13,8 +13,7 @@ func TestProjectScopedEndpointsHideMissingProject(t *testing.T) {
 	router := NewRouter(app.New(&fakeControlPlaneStore{}))
 	modelBody := `{"providerId":"` + providerID + `","name":"Model","model":"model","generationSettings":{}}`
 	runtimeBody := `{"name":"Runtime","kind":"docker","image":"image","networkPolicy":"none","capabilities":{}}`
-	executorBody := `{"name":"Executor","engine":"test","modelProfileId":"` + modelID + `","runtimeId":"` + runtimeID + `","engineSettings":{}}`
-	agentBody := `{"name":"Agent","executorProfileId":"` + executorID + `","concurrencyLimit":1,"state":"ENABLED"}`
+	agentBody := `{"name":"Agent","engine":"test","modelProfileId":"` + modelID + `","runtimeId":"` + runtimeID + `","engineSettings":{},"concurrencyLimit":1,"state":"ENABLED"}`
 	issueBody := `{"title":"Issue","status":"TODO"}`
 	cases := []struct{ method, path, body string }{
 		{http.MethodGet, "/api/projects/" + otherID, ""},
@@ -27,10 +26,6 @@ func TestProjectScopedEndpointsHideMissingProject(t *testing.T) {
 		{http.MethodPost, "/api/projects/" + otherID + "/runtimes", runtimeBody},
 		{http.MethodGet, "/api/projects/" + otherID + "/runtimes/" + runtimeID, ""},
 		{http.MethodPut, "/api/projects/" + otherID + "/runtimes/" + runtimeID, runtimeBody},
-		{http.MethodGet, "/api/projects/" + otherID + "/executor-profiles", ""},
-		{http.MethodPost, "/api/projects/" + otherID + "/executor-profiles", executorBody},
-		{http.MethodGet, "/api/projects/" + otherID + "/executor-profiles/" + executorID, ""},
-		{http.MethodPut, "/api/projects/" + otherID + "/executor-profiles/" + executorID, executorBody},
 		{http.MethodGet, "/api/projects/" + otherID + "/agents", ""},
 		{http.MethodPost, "/api/projects/" + otherID + "/agents", agentBody},
 		{http.MethodGet, "/api/projects/" + otherID + "/agents/" + agentID, ""},
@@ -64,7 +59,6 @@ func TestGlobalEndpointValidationAndMissingResources(t *testing.T) {
 		{http.MethodPut, "/api/providers/" + otherID, `{"name":"Provider","kind":"test"}`, "provider_not_found", http.StatusNotFound},
 		{http.MethodGet, "/api/model-profiles/" + otherID, "", "model_profile_not_found", http.StatusNotFound},
 		{http.MethodGet, "/api/runtimes/" + otherID, "", "runtime_not_found", http.StatusNotFound},
-		{http.MethodGet, "/api/executor-profiles/" + otherID, "", "executor_profile_not_found", http.StatusNotFound},
 		{http.MethodGet, "/api/agents/" + otherID, "", "agent_not_found", http.StatusNotFound},
 	}
 	for _, tc := range cases {

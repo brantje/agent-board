@@ -28,10 +28,6 @@ paths:
     $ref: ./paths/runtimes.yaml#/path1
   /api/runtimes/{resourceID}:
     $ref: ./paths/runtimes.yaml#/path2
-  /api/executor-profiles:
-    $ref: ./paths/executor-profiles.yaml#/path1
-  /api/executor-profiles/{resourceID}:
-    $ref: ./paths/executor-profiles.yaml#/path2
   /api/agents:
     $ref: ./paths/agents.yaml#/path1
   /api/agents/{resourceID}:
@@ -46,10 +42,6 @@ paths:
     $ref: ./paths/runtimes.yaml#/path3
   /api/projects/{projectID}/runtimes/{resourceID}:
     $ref: ./paths/runtimes.yaml#/path4
-  /api/projects/{projectID}/executor-profiles:
-    $ref: ./paths/executor-profiles.yaml#/path3
-  /api/projects/{projectID}/executor-profiles/{resourceID}:
-    $ref: ./paths/executor-profiles.yaml#/path4
   /api/projects/{projectID}/agents:
     $ref: ./paths/agents.yaml#/path3
   /api/projects/{projectID}/agents/{resourceID}:

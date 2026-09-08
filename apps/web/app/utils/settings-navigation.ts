@@ -7,7 +7,6 @@ function projectPath(projectId: string, segment: string) {
 export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
   const modelProfiles = projectId ? projectPath(projectId, 'model-profiles') : '/settings/model-profiles'
   const runtimes = projectId ? projectPath(projectId, 'runtimes') : '/settings/runtimes'
-  const executorProfiles = projectId ? projectPath(projectId, 'executor-profiles') : '/settings/executor-profiles'
   const agents = projectId ? `/projects/${encodeURIComponent(projectId)}/agents` : '/agents'
   const overview = projectId ? projectPath(projectId, '') : '/settings'
 
@@ -31,8 +30,7 @@ export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
     ],
     [
       { label: 'Execution', type: 'label' },
-      { label: 'Agents', to: agents },
-      { label: 'Executor Profiles', to: executorProfiles }
+      { label: 'Agents', to: agents }
     ]
   ]
 }

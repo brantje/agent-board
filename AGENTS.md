@@ -32,7 +32,6 @@ Reach the complete v0.1 coding flow as quickly as possible:
 Local Project repository
  -> Issue
  -> Agent
- -> Executor Profile
       -> Engine
       -> Model Profile -> Provider
       -> Runtime
@@ -89,7 +88,7 @@ After the answers, finalize the plan and proceed. Avoid extended question trees 
 - Engine processes execute inside the selected Runtime Instance through `agent-runner`.
 - Server/runner transport is explicitly versioned WebSocket.
 - Model inference is independent from Runtime compute.
-- Executor Profile references Runtime directly.
+- Agents select Runtime directly.
 - Runtime owns the complete execution environment/policy configuration.
 - Agent concurrency and Model Profile capacity are scheduler constraints.
 - Questions and Decisions are first-class durable objects.
@@ -103,8 +102,7 @@ Canonical configuration:
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Executor Profile
-Agent -> Executor Profile
+Engine + Model Profile + Runtime -> Agent
 ```
 
 Board workflow:
@@ -178,7 +176,7 @@ pnpm build
 - PostgreSQL owns durable scheduling state; process-local semaphores/maps are not authoritative.
 - Human decisions requiring continuation persist that continuation durably before success returns.
 - Do not create parallel schedulers, Run lifecycles, Workspaces or Engine-owned authoritative state.
-- Do not introduce a Runtime Profile domain/API/persistence/UI layer; Executor Profiles select Runtime directly.
+- Do not introduce a Runtime Profile domain/API/persistence/UI layer; Agents select Runtime directly.
 - Keep Engine adapters server-side and independent from raw runner WebSocket framing.
 - Keep `agent-runner` Engine-neutral and free of PostgreSQL, scheduler, Review and control-plane authorization logic.
 
@@ -200,7 +198,7 @@ In short: do not repeat yourself, and do not build things until the product actu
 
 ## Database
 
-`packages/database/schema.sql` is the one canonical pre-release schema. Executor Profile persists `runtime_id` directly. Recreate development databases when incompatible schema changes require it.
+`packages/database/schema.sql` is the one canonical pre-release schema. Agents persist `runtime_id` directly. Recreate development databases when incompatible schema changes require it.
 
 ## Source control / Workspace
 
@@ -219,7 +217,7 @@ Authenticated GitHub/GitLab/Bitbucket/Forgejo Source Connections are later work 
 Agent-executed code is untrusted.
 
 ```text
-Executor Profile
+Agent
  -> Runtime
  -> validated Runtime Spec
  -> Runtime implementation

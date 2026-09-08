@@ -81,7 +81,7 @@ describe('configuration screens', () => {
 
   it('shows reference errors, retries, distinguishes scope, and disables shared edits in project scope', async () => {
     let fail = true
-    vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path.includes('executor-profiles') ? [] : [{ id: 'a', name: 'Shared', projectId: null }]), { status: fail && path.includes('executor-profiles') ? 403 : 200 })))
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path.includes('model-profiles') ? [] : [{ id: 'a', name: 'Shared', projectId: null }]), { status: fail && path.includes('model-profiles') ? 403 : 200 })))
     const wrapper = mount(ConfigManager, { props: { kind: 'agents', projectId: 'p' }, global })
     await flushPromises()
     await button(wrapper, 'View shared').trigger('click')
@@ -204,13 +204,13 @@ describe('configuration screens', () => {
 
   it('rejects saving an existing configuration that references a disabled dependency', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
-      if (path === '/api/executor-profiles') return new Response(JSON.stringify([{ id: 'e', name: 'Executor', engine: 'opencode', modelProfileId: 'm', runtimeId: 'r', enabled: true, engineSettings: {} }]))
+      if (path === '/api/agents') return new Response(JSON.stringify([{ id: 'a', name: 'Coder', engine: 'opencode', modelProfileId: 'm', runtimeId: 'r', engineSettings: {}, state: 'ENABLED' }]))
       if (path === '/api/model-profiles') return new Response(JSON.stringify([{ id: 'm', name: 'Disabled model', enabled: false }]))
       if (path === '/api/runtimes') return new Response(JSON.stringify([{ id: 'r', name: 'Runtime', enabled: true }]))
       return new Response('{}', { status: options.method === 'PUT' ? 200 : 404 })
     })
     vi.stubGlobal('fetch', fetch)
-    const wrapper = mount(ConfigManager, { props: { kind: 'executor-profiles' }, global })
+    const wrapper = mount(ConfigManager, { props: { kind: 'agents' }, global })
     await flushPromises()
     await button(wrapper, 'Edit').trigger('click')
     await wrapper.get('form').trigger('submit')

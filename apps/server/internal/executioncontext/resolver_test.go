@@ -14,7 +14,6 @@ type fakeStore struct {
 	run       store.Run
 	workspace store.Workspace
 	agent     store.Agent
-	executor  store.ExecutorProfile
 	model     store.ModelProfile
 	provider  store.Provider
 	runtime   store.Runtime
@@ -25,7 +24,6 @@ func (f fakeStore) GetIssue(context.Context, string, string) (store.Issue, error
 func (f fakeStore) GetRun(context.Context, string, string) (store.Run, error) { return f.run, nil }
 func (f fakeStore) GetWorkspace(context.Context, string, string) (store.Workspace, error) { return f.workspace, nil }
 func (f fakeStore) GetAgentInScope(context.Context, *string, string) (store.Agent, error) { return f.agent, nil }
-func (f fakeStore) GetExecutorProfile(context.Context, *string, string) (store.ExecutorProfile, error) { return f.executor, nil }
 func (f fakeStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) { return f.model, nil }
 func (f fakeStore) GetProvider(context.Context, string) (store.Provider, error) { return f.provider, nil }
 func (f fakeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) { return f.runtime, nil }
@@ -40,8 +38,7 @@ func validStore() fakeStore {
 		issue: store.Issue{ID: "i1", ProjectID: projectID, Title: "Issue", Description: "Do work", Status: "IN_PROGRESS"},
 		run: store.Run{ID: "r1", ProjectID: projectID, IssueID: "i1", WorkspaceID: "w1", AgentID: &agentID, Attempt: 2},
 		workspace: store.Workspace{ID: "w1", ProjectID: projectID, IssueID: "i1", Path: "/work/w1", WorkingBranch: "issue/i1", BootstrapStatus: "READY"},
-		agent: store.Agent{ID: agentID, ProjectID: &projectID, Name: "Coder", RoleInstructions: "Implement", ExecutorProfileID: "e1", State: "ENABLED"},
-		executor: store.ExecutorProfile{ID: "e1", ProjectID: &projectID, Name: "exec", Engine: "opencode", ModelProfileID: "m1", RuntimeID: "rt1", Enabled: true},
+		agent: store.Agent{ID: agentID, ProjectID: &projectID, Name: "Coder", RoleInstructions: "Implement", Engine: "opencode", ModelProfileID: "m1", RuntimeID: "rt1", EngineSettings: json.RawMessage(`{}`), State: "ENABLED"},
 		model: store.ModelProfile{ID: "m1", ProjectID: &projectID, ProviderID: "pr1", Name: "model", Model: "gpt", Enabled: true},
 		provider: store.Provider{ID: "pr1", Name: "provider", Kind: "openai-compatible", BaseURL: &baseURL, CredentialRef: &credentialRef, Enabled: true},
 		runtime: store.Runtime{ID: "rt1", ProjectID: &projectID, Name: "runtime", Kind: "docker", Image: "runtime:test", NetworkPolicy: "restricted", WorkspacePolicy: "issue", AllowedSecretRefs: []string{"runtime-token"}, Enabled: true},
@@ -58,7 +55,7 @@ func TestResolveBuildsSafeImmutableContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Safe.Agent.RoleInstructions != "Implement" || got.Safe.Runtime.Image != "runtime:test" {
+	if got.Safe.Agent.RoleInstructions != "Implement" || got.Safe.Agent.Engine != "opencode" || got.Safe.Runtime.Image != "runtime:test" {
 		t.Fatalf("resolved = %+v", got.Safe)
 	}
 	if got.ProviderCredentialRef == nil || *got.ProviderCredentialRef != "provider-token" {

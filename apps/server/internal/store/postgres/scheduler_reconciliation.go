@@ -95,11 +95,8 @@ func lockExpiredReconciliationCandidate(ctx context.Context, tx pgx.Tx) (store.S
 		LEFT JOIN agents AS agent
 		  ON agent.id=run.agent_id
 		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
-		LEFT JOIN executor_profiles AS executor
-		  ON executor.id=agent.executor_profile_id
-		 AND (executor.project_id IS NULL OR executor.project_id=run.project_id)
 		LEFT JOIN model_profiles AS model
-		  ON model.id=executor.model_profile_id
+		  ON model.id=agent.model_profile_id
 		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
 		WHERE job.state='CLAIMED' AND lease.expires_at <= now()
 		ORDER BY lease.expires_at, job.created_at, job.id

@@ -20,7 +20,6 @@ const (
 	providerID  = "22222222-2222-4222-8222-222222222222"
 	modelID     = "33333333-3333-4333-8333-333333333333"
 	runtimeID   = "44444444-4444-4444-8444-444444444444"
-	executorID  = "55555555-5555-4555-8555-555555555555"
 	agentID     = "66666666-6666-4666-8666-666666666666"
 	issueID     = "77777777-7777-4777-8777-777777777777"
 	issueKey    = "AB-1"
@@ -126,37 +125,24 @@ func (f *fakeControlPlaneStore) GetRuntime(_ context.Context, scope *string, id 
 func (f *fakeControlPlaneStore) UpdateRuntime(_ context.Context, _ *string, v store.Runtime) (store.Runtime, error) {
 	return v, nil
 }
-func (f *fakeControlPlaneStore) ListExecutorProfiles(_ context.Context, scope *string) ([]store.ExecutorProfile, error) {
-	return []store.ExecutorProfile{{ID: executorID, ProjectID: scoped(scope), Name: "Executor", Engine: "test", ModelProfileID: modelID, RuntimeID: runtimeID, EngineSettings: store.EmptyObject, Enabled: true}}, nil
-}
-func (f *fakeControlPlaneStore) CreateExecutorProfile(_ context.Context, v store.ExecutorProfile) (store.ExecutorProfile, error) {
-	v.ID = executorID
-	if v.EngineSettings == nil {
-		v.EngineSettings = store.EmptyObject
-	}
-	return v, nil
-}
-func (f *fakeControlPlaneStore) GetExecutorProfile(_ context.Context, scope *string, id string) (store.ExecutorProfile, error) {
-	if id != executorID {
-		return store.ExecutorProfile{}, store.ErrNotFound
-	}
-	return store.ExecutorProfile{ID: executorID, ProjectID: scoped(scope), Name: "Executor", Engine: "test", ModelProfileID: modelID, RuntimeID: runtimeID, EngineSettings: store.EmptyObject, Enabled: true}, nil
-}
-func (f *fakeControlPlaneStore) UpdateExecutorProfile(_ context.Context, _ *string, v store.ExecutorProfile) (store.ExecutorProfile, error) {
-	return v, nil
+func agentFixture(scope *string) store.Agent {
+	return store.Agent{ID: agentID, ProjectID: scoped(scope), Name: "Agent", Engine: "test", ModelProfileID: modelID, RuntimeID: runtimeID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"}
 }
 func (f *fakeControlPlaneStore) ListAgents(_ context.Context, scope *string) ([]store.Agent, error) {
-	return []store.Agent{{ID: agentID, ProjectID: scoped(scope), Name: "Agent", ExecutorProfileID: executorID, ConcurrencyLimit: 1, State: "ENABLED"}}, nil
+	return []store.Agent{agentFixture(scope)}, nil
 }
 func (f *fakeControlPlaneStore) CreateAgent(_ context.Context, v store.Agent) (store.Agent, error) {
 	v.ID = agentID
+	if v.EngineSettings == nil {
+		v.EngineSettings = store.EmptyObject
+	}
 	return v, nil
 }
 func (f *fakeControlPlaneStore) GetAgentInScope(_ context.Context, scope *string, id string) (store.Agent, error) {
 	if id != agentID {
 		return store.Agent{}, store.ErrNotFound
 	}
-	return store.Agent{ID: agentID, ProjectID: scoped(scope), Name: "Agent", ExecutorProfileID: executorID, ConcurrencyLimit: 1, State: "ENABLED"}, nil
+	return agentFixture(scope), nil
 }
 func (f *fakeControlPlaneStore) UpdateAgent(_ context.Context, _ *string, v store.Agent) (store.Agent, error) {
 	return v, nil
@@ -223,8 +209,7 @@ func TestControlPlaneRoutes(t *testing.T) {
 	providerBody := `{"name":"Provider","kind":"test","credentialRef":"secret-ref","safeMetadata":{}}`
 	modelBody := `{"providerId":"` + providerID + `","name":"Model","model":"model","generationSettings":{}}`
 	runtimeBody := `{"name":"Runtime","kind":"docker","image":"image","networkPolicy":"none","capabilities":{}}`
-	executorBody := `{"name":"Executor","engine":"test","modelProfileId":"` + modelID + `","runtimeId":"` + runtimeID + `","engineSettings":{}}`
-	agentBody := `{"name":"Agent","executorProfileId":"` + executorID + `","concurrencyLimit":1,"state":"ENABLED"}`
+	agentBody := `{"name":"Agent","engine":"test","modelProfileId":"` + modelID + `","runtimeId":"` + runtimeID + `","engineSettings":{},"concurrencyLimit":1,"state":"ENABLED"}`
 	issueBody := `{"title":"Issue","status":"TODO"}`
 	cases := []struct {
 		name, method, path, body string
@@ -233,7 +218,7 @@ func TestControlPlaneRoutes(t *testing.T) {
 		{"list projects", "GET", "/api/projects", "", 200}, {"create project", "POST", "/api/projects", projectBody, 201}, {"get project", "GET", "/api/projects/" + projectID, "", 200}, {"update project", "PATCH", "/api/projects/" + projectID, `{"name":"Renamed"}`, 200},
 		{"list providers", "GET", "/api/providers", "", 200}, {"create provider", "POST", "/api/providers", providerBody, 201}, {"get provider", "GET", "/api/providers/" + providerID, "", 200}, {"update provider", "PUT", "/api/providers/" + providerID, providerBody, 200},
 	}
-	resources := []struct{ name, path, id, body string }{{"model", "model-profiles", modelID, modelBody}, {"runtime", "runtimes", runtimeID, runtimeBody}, {"executor", "executor-profiles", executorID, executorBody}, {"agent", "agents", agentID, agentBody}}
+	resources := []struct{ name, path, id, body string }{{"model", "model-profiles", modelID, modelBody}, {"runtime", "runtimes", runtimeID, runtimeBody}, {"agent", "agents", agentID, agentBody}}
 	for _, r := range resources {
 		cases = append(cases,
 			struct {
@@ -428,7 +413,7 @@ func blockHasMethod(doc, label, method string) bool {
 }
 
 func TestDTOsMarshalAsObjects(t *testing.T) {
-	for _, value := range []any{projectDTO(store.Project{IssuePrefix: "AB", WorkflowSettings: store.EmptyObject}), issueDTO(issueFixture("TODO")), providerDTO(store.Provider{SafeMetadata: store.EmptyObject}), modelProfileDTO(store.ModelProfile{GenerationSettings: store.EmptyObject}), runtimeDTO(store.Runtime{Capabilities: store.EmptyObject}), executorProfileDTO(store.ExecutorProfile{EngineSettings: store.EmptyObject}), agentDTO(store.Agent{}), runDTO(store.Run{IssueID: issueID}, map[string]string{issueID: issueKey})} {
+	for _, value := range []any{projectDTO(store.Project{IssuePrefix: "AB", WorkflowSettings: store.EmptyObject}), issueDTO(issueFixture("TODO")), providerDTO(store.Provider{SafeMetadata: store.EmptyObject}), modelProfileDTO(store.ModelProfile{GenerationSettings: store.EmptyObject}), runtimeDTO(store.Runtime{Capabilities: store.EmptyObject}), agentDTO(store.Agent{EngineSettings: store.EmptyObject}), runDTO(store.Run{IssueID: issueID}, map[string]string{issueID: issueKey})} {
 		if _, err := json.Marshal(value); err != nil {
 			t.Fatal(err)
 		}

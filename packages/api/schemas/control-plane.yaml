@@ -153,40 +153,18 @@ RuntimeInput:
     allowedSecretRefs: {type: array, items: {type: string}}
     capabilities: {$ref: '#/JSONMap'}
     enabled: {type: boolean, default: true}
-ExecutorProfile:
-  type: object
-  required: [id, projectId, name, engine, modelProfileId, runtimeId, engineSettings, enabled, createdAt, updatedAt]
-  properties:
-    id: {type: string, format: uuid}
-    projectId: {type: [string, 'null'], format: uuid}
-    name: {type: string}
-    engine: {type: string}
-    modelProfileId: {type: string, format: uuid}
-    runtimeId: {type: string, format: uuid}
-    engineSettings: {$ref: '#/JSONMap'}
-    enabled: {type: boolean}
-    createdAt: {type: string, format: date-time}
-    updatedAt: {type: string, format: date-time}
-ExecutorProfileInput:
-  type: object
-  additionalProperties: false
-  required: [name, engine, modelProfileId, runtimeId]
-  properties:
-    name: {type: string}
-    engine: {type: string}
-    modelProfileId: {type: string, format: uuid}
-    runtimeId: {type: string, format: uuid}
-    engineSettings: {$ref: '#/JSONMap'}
-    enabled: {type: boolean, default: true}
 Agent:
   type: object
-  required: [id, projectId, name, roleInstructions, executorProfileId, concurrencyLimit, state, createdAt, updatedAt]
+  required: [id, projectId, name, roleInstructions, engine, modelProfileId, runtimeId, engineSettings, concurrencyLimit, state, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: [string, 'null'], format: uuid}
     name: {type: string}
     roleInstructions: {type: string}
-    executorProfileId: {type: string, format: uuid}
+    engine: {type: string}
+    modelProfileId: {type: string, format: uuid}
+    runtimeId: {type: string, format: uuid}
+    engineSettings: {$ref: '#/JSONMap'}
     concurrencyLimit: {type: integer, minimum: 1}
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED]}
     createdAt: {type: string, format: date-time}
@@ -194,11 +172,14 @@ Agent:
 AgentInput:
   type: object
   additionalProperties: false
-  required: [name, executorProfileId]
+  required: [name, engine, modelProfileId, runtimeId]
   properties:
     name: {type: string}
     roleInstructions: {type: string}
-    executorProfileId: {type: string, format: uuid}
+    engine: {type: string}
+    modelProfileId: {type: string, format: uuid}
+    runtimeId: {type: string, format: uuid}
+    engineSettings: {$ref: '#/JSONMap'}
     concurrencyLimit: {type: integer, minimum: 1, default: 1}
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}
 Issue:

@@ -87,9 +87,6 @@ func TestConfigurationOwnershipChangesCannotBreakProjectScope(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `UPDATE runtimes SET project_id = $1 WHERE id = $2`, second.project.ID, first.runtime.ID); err == nil {
 		t.Fatal("expected referenced runtime ownership change to fail")
 	}
-	if _, err := s.pool.Exec(ctx, `UPDATE executor_profiles SET project_id = $1 WHERE id = $2`, second.project.ID, first.profile.ID); err == nil {
-		t.Fatal("expected referenced executor profile ownership change to fail")
-	}
 
 	orphanModel, err := s.CreateModelProfile(ctx, store.ModelProfile{
 		ProjectID:  &first.project.ID,
@@ -119,9 +116,12 @@ func TestImmutableEvidenceBlocksParentDeletion(t *testing.T) {
 	}
 
 	historyAgent, err := s.CreateAgent(ctx, store.Agent{
-		ProjectID:         &f.project.ID,
-		Name:              "history-agent",
-		ExecutorProfileID: f.profile.ID,
+		ProjectID:      &f.project.ID,
+		Name:           "history-agent",
+		Engine:         "test",
+		ModelProfileID: f.model.ID,
+		RuntimeID:      f.runtime.ID,
+		EngineSettings: store.EmptyObject,
 	})
 	if err != nil {
 		t.Fatalf("create history agent: %v", err)

@@ -25,7 +25,10 @@ const agent = {
   projectId: 'p',
   name: 'Coder',
   roleInstructions: '',
-  executorProfileId: 'e',
+  engine: 'opencode',
+  modelProfileId: 'm',
+  runtimeId: 'r',
+  engineSettings: {},
   concurrencyLimit: 1,
   state: 'ENABLED'
 }

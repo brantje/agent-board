@@ -39,23 +39,15 @@ func TestAssignIssueTreatsReadyForReviewRunAsActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
-	executor, err := s.CreateExecutorProfile(ctx, store.ExecutorProfile{
-		ProjectID:      &project.ID,
-		Name:           "ready-review",
-		Engine:         "test",
-		ModelProfileID: model.ID,
-		RuntimeID:      runtime.ID,
-		Enabled:        true,
-	})
-	if err != nil {
-		t.Fatalf("create executor profile: %v", err)
-	}
 	agent, err := s.CreateAgent(ctx, store.Agent{
-		ProjectID:         &project.ID,
-		Name:              "ready-review",
-		ExecutorProfileID: executor.ID,
-		ConcurrencyLimit:  1,
-		State:             "ENABLED",
+		ProjectID:        &project.ID,
+		Name:             "ready-review",
+		Engine:           "test",
+		ModelProfileID:   model.ID,
+		RuntimeID:        runtime.ID,
+		EngineSettings:   store.EmptyObject,
+		ConcurrencyLimit: 1,
+		State:            "ENABLED",
 	})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)

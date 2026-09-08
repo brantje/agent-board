@@ -36,11 +36,8 @@ func (s *Store) EnqueueJob(ctx context.Context, input store.SchedulerJob) (store
 		JOIN agents AS agent
 		  ON agent.id=run.agent_id
 		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
-		JOIN executor_profiles AS executor
-		  ON executor.id=agent.executor_profile_id
-		 AND (executor.project_id IS NULL OR executor.project_id=run.project_id)
 		JOIN model_profiles AS model
-		  ON model.id=executor.model_profile_id
+		  ON model.id=agent.model_profile_id
 		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
 		WHERE run.project_id=$1 AND run.id=$2
 		ON CONFLICT (idempotency_key) DO NOTHING
@@ -204,11 +201,8 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 		LEFT JOIN agents AS agent
 		  ON agent.id=run.agent_id
 		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
-		LEFT JOIN executor_profiles AS executor
-		  ON executor.id=agent.executor_profile_id
-		 AND (executor.project_id IS NULL OR executor.project_id=run.project_id)
 		LEFT JOIN model_profiles AS model
-		  ON model.id=executor.model_profile_id
+		  ON model.id=agent.model_profile_id
 		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
 		WHERE job.state='QUEUED'
 		  AND job.available_at <= now()
@@ -303,11 +297,8 @@ func (s *Store) ClaimNextJob(ctx context.Context, ownerID string, leaseDuration 
 		LEFT JOIN agents AS agent
 		  ON agent.id=run.agent_id
 		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
-		LEFT JOIN executor_profiles AS executor
-		  ON executor.id=agent.executor_profile_id
-		 AND (executor.project_id IS NULL OR executor.project_id=run.project_id)
 		LEFT JOIN model_profiles AS model
-		  ON model.id=executor.model_profile_id
+		  ON model.id=agent.model_profile_id
 		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
 		WHERE job.state='QUEUED' AND job.available_at <= now()
 		ORDER BY job.available_at, job.created_at, job.id

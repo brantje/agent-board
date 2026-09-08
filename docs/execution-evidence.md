@@ -9,7 +9,6 @@ Before/at execution ownership, persist a safe immutable snapshot of what the Run
 Include where applicable:
 
 - Project / Issue / Run / Agent
-- Executor Profile
 - Engine identity/version/public settings
 - Model Profile
 - Provider identity/type/base endpoint metadata
@@ -21,9 +20,9 @@ Include where applicable:
 - Source Connection identity without credentials
 - relevant workflow/config revision metadata
 
-Runtime is captured directly because Executor Profile references Runtime directly.
+Runtime is captured directly because Agents select Runtime directly.
 
-Never persist secret plaintext in public execution evidence. Editing current Agent/Executor/Model/Provider/Runtime configuration does not alter historical Run provenance.
+Never persist secret plaintext in public execution evidence. Editing current Agent/Model/Provider/Runtime configuration does not alter historical Run provenance.
 
 ## Raw output
 

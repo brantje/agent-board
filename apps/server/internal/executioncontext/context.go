@@ -7,7 +7,6 @@ type SafeContext struct {
 	Issue          IssueContext           `json:"issue"`
 	Run            RunContext             `json:"run"`
 	Agent          AgentContext           `json:"agent"`
-	Executor       ExecutorContext        `json:"executor"`
 	Model          ModelContext           `json:"model"`
 	Provider       ProviderContext        `json:"provider"`
 	Runtime        RuntimeContext         `json:"runtime"`
@@ -36,16 +35,11 @@ type RunContext struct {
 }
 
 type AgentContext struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	RoleInstructions string `json:"roleInstructions"`
-}
-
-type ExecutorContext struct {
-	ID             string          `json:"id"`
-	Name           string          `json:"name"`
-	Engine         string          `json:"engine"`
-	EngineSettings json.RawMessage `json:"engineSettings,omitempty"`
+	ID               string          `json:"id"`
+	Name             string          `json:"name"`
+	RoleInstructions string          `json:"roleInstructions"`
+	Engine           string          `json:"engine"`
+	EngineSettings   json.RawMessage `json:"engineSettings,omitempty"`
 }
 
 type ModelContext struct {

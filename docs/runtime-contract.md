@@ -25,7 +25,7 @@ Docker is implementation #1; the contract remains implementation-neutral.
 ## Resolution
 
 ```text
-Executor Profile
+Agent
  -> Runtime
  -> verify accessible/enabled/runnable
  -> validated Runtime Spec
@@ -36,7 +36,7 @@ Executor Profile
  -> Engine process
 ```
 
-Runtime owns the complete executable environment configuration and policy. Executor Profile references Runtime directly.
+Runtime owns the complete executable environment configuration and policy. Agents select Runtime directly.
 
 ## Runtime configuration
 
