@@ -191,13 +191,14 @@ AgentInput:
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}
 Issue:
   type: object
-  required: [id, projectId, title, description, status, assignedAgentId, createdAt, updatedAt]
+  required: [id, projectId, title, description, status, priority, assignedAgentId, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
     title: {type: string}
     description: {type: string}
     status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]}
+    priority: {type: integer, minimum: 0, maximum: 4}
     assignedAgentId: {type: [string, 'null'], format: uuid}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
@@ -209,6 +210,7 @@ IssueCreate:
     title: {type: string}
     description: {type: string}
     status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE], default: BACKLOG}
+    priority: {type: integer, minimum: 0, maximum: 4, default: 0}
 IssueUpdate:
   type: object
   additionalProperties: false
@@ -216,6 +218,24 @@ IssueUpdate:
     title: {type: string}
     description: {type: string}
     status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]}
+    priority: {type: integer, minimum: 0, maximum: 4}
+IssueRelationship:
+  type: object
+  required: [id, projectId, sourceIssueId, targetIssueId, type, createdAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: string, format: uuid}
+    sourceIssueId: {type: string, format: uuid}
+    targetIssueId: {type: string, format: uuid}
+    type: {type: string, enum: [blocks, depends_on, related_to, duplicates]}
+    createdAt: {type: string, format: date-time}
+IssueRelationshipCreate:
+  type: object
+  additionalProperties: false
+  required: [targetIssueId, type]
+  properties:
+    targetIssueId: {type: string, format: uuid}
+    type: {type: string, enum: [blocks, depends_on, related_to, duplicates]}
 Run:
   type: object
   required: [id, projectId, issueId, workspaceId, agentId, attempt, status, queueReason, failureReason, createdAt, startedAt, completedAt, updatedAt]
