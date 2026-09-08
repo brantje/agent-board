@@ -81,3 +81,33 @@ func TestRunnerHelloPayloadShape(t *testing.T) {
 		t.Fatalf("unexpected version payload: %#v", payload)
 	}
 }
+
+func TestConnectionPayloadRejectsMalformedOrAmbiguousInput(t *testing.T) {
+	for _, payload := range []string{
+		"", "null", `[]`, `{"connection_id":"c","data":"!invalid-base64!"}`,
+		`{"connection_id":"c","unknown":true}`, `{"connection_id":"c"} {}`,
+		`{"connection_id":"c"} trailing`,
+	} {
+		t.Run(payload, func(t *testing.T) {
+			_, err := DecodePayload[ConnectData](Message{Version: Version1, Type: TypeConnectData, SessionID: "s", Payload: json.RawMessage(payload)})
+			if err == nil {
+				t.Fatal("malformed connection payload accepted")
+			}
+		})
+	}
+}
+
+func TestOutboundMessagesEnforceProtocolBoundary(t *testing.T) {
+	for _, message := range []Message{
+		{Version: Version1, Type: "unknown", SessionID: "s"},
+		{Version: Version1, Type: TypeHealth, SessionID: "s"},
+		{Version: Version1, Type: TypeConnectData, SessionID: "s", Payload: json.RawMessage(`{"data":`)},
+	} {
+		if _, err := Encode(message); !errors.Is(err, ErrInvalidMessage) {
+			t.Fatalf("invalid outbound message %+v: %v", message, err)
+		}
+	}
+	if _, err := NewMessage(Version1, TypeConnect, "", ConnectRequest{ConnectionID: "c", Network: "tcp", Address: "127.0.0.1:4096"}); !errors.Is(err, ErrInvalidMessage) {
+		t.Fatalf("unscoped outbound connect: %v", err)
+	}
+}

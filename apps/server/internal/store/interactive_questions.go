@@ -50,6 +50,7 @@ type ResolveInteractiveQuestionResult struct {
 	Binding InteractiveQuestionBinding
 	Run     Run
 	Resumed bool
+	Events  []Event
 }
 
 type InteractiveQuestionStore interface {

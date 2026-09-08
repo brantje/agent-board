@@ -16,7 +16,7 @@ const (
 	interactiveQuestionPollInitialInterval = 200 * time.Millisecond
 	// Keep answer latency bounded while preventing long-lived waiting runs from
 	// polling PostgreSQL at the initial five queries per second indefinitely.
-	interactiveQuestionPollMaxInterval = 2 * time.Second
+	interactiveQuestionPollMaxInterval    = 2 * time.Second
 	interactiveQuestionReplyAcceptedEvent = "engine.question_reply_accepted"
 	interactiveQuestionResolvedEvent      = "engine.question_binding_resolved"
 	interactiveQuestionEventPageSize      = 500
@@ -351,6 +351,9 @@ func (q *interactiveQuestioner) Resolve(ctx context.Context, questionID string) 
 	result, err := q.interactive.ResolveInteractiveQuestion(ctx, q.safe.Project.ID, questionID)
 	if err != nil {
 		return err
+	}
+	if len(result.Events) != 0 {
+		return nil
 	}
 	if err := q.record(ctx, interactiveQuestionResolvedEvent, map[string]any{
 		"engine":     q.engine,

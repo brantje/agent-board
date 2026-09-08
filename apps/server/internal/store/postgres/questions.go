@@ -255,7 +255,22 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		_ = binding
 	}
 
-	if question.Blocking && (!interactive || !interactiveLive) {
+	queueResume := question.Blocking && (!interactive || !interactiveLive)
+	if queueResume && interactive {
+		// All Questions in a native request must remain answerable after lease
+		// loss. Queue recovery only after the final outstanding answer commits.
+		var pending bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM engine_question_bindings
+				WHERE project_id=$1 AND run_id=$2 AND state='OPEN'
+			)
+		`, question.ProjectID, question.RunID).Scan(&pending); err != nil {
+			return store.AnswerQuestionResult{}, err
+		}
+		queueResume = !pending
+	}
+	if queueResume {
 		resumedRun, job, err := queueBlockingQuestionResume(ctx, tx, question)
 		if err != nil {
 			return store.AnswerQuestionResult{}, err

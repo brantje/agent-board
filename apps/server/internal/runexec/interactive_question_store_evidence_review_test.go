@@ -180,3 +180,26 @@ func TestInteractiveQuestionerOpenBatchFallsBackToRecorderWhenStoreReturnsNoEven
 		t.Fatalf("fallback event order=%+v", eventStore.events)
 	}
 }
+
+func TestInteractiveQuestionerResolveDoesNotDuplicateStoreOwnedEvidence(t *testing.T) {
+	eventStore := &questionEventStore{}
+	recorder, err := evidence.NewRecorder(eventStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lifecycle := &interactiveLifecycleStore{resolveResult: store.ResolveInteractiveQuestionResult{
+		Resumed: true,
+		Events:  []store.Event{{Type: "engine.question_binding_resolved"}, {Type: "run.resumed"}},
+	}}
+	q := &interactiveQuestioner{
+		interactive: lifecycle, events: recorder, safe: interactiveSafeContext(), engine: "opencode",
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if err := q.Resolve(context.Background(), "question-1"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(eventStore.events) != 0 {
+		t.Fatalf("store-owned resolution evidence was duplicated: %+v", eventStore.events)
+	}
+}

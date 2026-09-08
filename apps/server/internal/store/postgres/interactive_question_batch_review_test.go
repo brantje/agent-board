@@ -108,3 +108,51 @@ func TestInteractiveQuestionBatchCommitsTogetherAndEntersWaitingOnce(t *testing.
 	}
 	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "BLOCKED")
 }
+
+func TestExpiredInteractiveBatchWaitsForEveryAnswerBeforeRecovery(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "expired-interactive-batch")
+	enqueueFixtureRun(t, s, f, f.run, "expired-interactive-batch-start")
+	admission := mustAdmit(t, s, "expired-interactive-batch-worker")
+	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: admission.Job.ID, RunID: f.run.ID,
+		LeaseToken: admission.Lease.LeaseToken, RunStatus: "RUNNING",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := s.OpenInteractiveQuestions(ctx, []store.OpenInteractiveQuestionCommand{
+		{Question: store.Question{ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID, Prompt: "First?", Kind: "TEXT", Blocking: true}, Engine: "opencode", CorrelationKey: "expired-batch/0"},
+		{Question: store.Question{ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID, Prompt: "Second?", Kind: "TEXT", Blocking: true}, Engine: "opencode", CorrelationKey: "expired-batch/1"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expireLease(t, s, admission.Job.ID)
+	answer := "continue"
+	for index, opened := range batch.Questions {
+		result, err := s.AnswerQuestion(ctx, store.AnswerQuestionCommand{
+			ProjectID: f.project.ID, QuestionID: opened.Question.ID,
+			Answer: store.QuestionAnswer{Kind: "TEXT", Text: &answer}, ActorType: "HUMAN",
+		})
+		if err != nil {
+			t.Fatalf("answer %d: %v", index, err)
+		}
+		if index == 0 {
+			if result.Run.Status != "WAITING_FOR_INPUT" || result.Job != nil {
+				t.Fatalf("first answer stranded the remaining Question: run=%s job=%+v", result.Run.Status, result.Job)
+			}
+			assertIssueStatus(t, s, f.project.ID, f.issue.ID, "BLOCKED")
+		} else if result.Run.Status != "QUEUED" || result.Job == nil || result.Job.Kind != "RESUME" {
+			t.Fatalf("final answer did not queue recovery: %+v", result)
+		}
+	}
+	var resumes int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_jobs WHERE run_id=$1 AND kind='RESUME'`, f.run.ID).Scan(&resumes); err != nil {
+		t.Fatal(err)
+	}
+	if resumes != 1 {
+		t.Fatalf("resume jobs=%d want 1", resumes)
+	}
+	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 0, 0)
+}

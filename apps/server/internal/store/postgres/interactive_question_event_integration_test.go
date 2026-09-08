@@ -100,3 +100,79 @@ func eventTypeList(events []store.Event) []string {
 	}
 	return values
 }
+
+func TestInteractiveResolutionCommitsLifecycleEvidenceAtomically(t *testing.T) {
+	for _, rejectedType := range []string{"engine.question_binding_resolved", "run.resumed"} {
+		t.Run(rejectedType, func(t *testing.T) {
+			s := New(testPool(t))
+			ctx := context.Background()
+			f := seedRunFixture(t, s, "atomic-interactive-resolution")
+			enqueueFixtureRun(t, s, f, f.run, "atomic-interactive-resolution-start")
+			admission := mustAdmit(t, s, "atomic-interactive-resolution-worker")
+			if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+				ProjectID: f.project.ID, JobID: admission.Job.ID, RunID: f.run.ID,
+				LeaseToken: admission.Lease.LeaseToken, RunStatus: "RUNNING",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			opened, err := s.OpenInteractiveQuestion(ctx, store.OpenInteractiveQuestionCommand{
+				Question: store.Question{ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID, Prompt: "Continue?", Kind: "TEXT", Blocking: true},
+				Engine:   "opencode", CorrelationKey: "atomic-resolution/0",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			answer := "continue"
+			if _, err := s.AnswerQuestion(ctx, store.AnswerQuestionCommand{
+				ProjectID: f.project.ID, QuestionID: opened.Question.ID,
+				Answer: store.QuestionAnswer{Kind: "TEXT", Text: &answer}, ActorType: "HUMAN",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			// Reject an actual event INSERT, after the binding and Run updates.
+			if _, err := s.pool.Exec(ctx, `ALTER TABLE events ADD CONSTRAINT reject_resolution_event CHECK (type <> '`+rejectedType+`')`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.ResolveInteractiveQuestion(ctx, f.project.ID, opened.Question.ID); err == nil {
+				t.Fatal("resolution committed without required lifecycle evidence")
+			}
+			run, err := s.GetRun(ctx, f.project.ID, f.run.ID)
+			if err != nil || run.Status != "WAITING_FOR_INPUT" {
+				t.Fatalf("failed evidence write changed Run: %+v err=%v", run, err)
+			}
+			var bindingState string
+			if err := s.pool.QueryRow(ctx, `SELECT state FROM engine_question_bindings WHERE question_id=$1`, opened.Question.ID).Scan(&bindingState); err != nil {
+				t.Fatal(err)
+			}
+			if bindingState != "ANSWERED" {
+				t.Fatalf("failed evidence write changed binding: %s", bindingState)
+			}
+			if _, err := s.pool.Exec(ctx, `ALTER TABLE events DROP CONSTRAINT reject_resolution_event`); err != nil {
+				t.Fatal(err)
+			}
+			for attempt := 0; attempt < 2; attempt++ {
+				if _, err := s.ResolveInteractiveQuestion(ctx, f.project.ID, opened.Question.ID); err != nil {
+					t.Fatalf("retry %d: %v", attempt, err)
+				}
+			}
+			events, err := s.ListRunEvents(ctx, f.project.ID, f.run.ID, 0, 500)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, typ := range []string{"engine.question_binding_resolved", "run.resumed"} {
+				count := 0
+				for _, event := range events {
+					if event.Type == typ {
+						count++
+					}
+				}
+				if count != 1 {
+					t.Fatalf("%s events=%d want 1", typ, count)
+				}
+			}
+			if eventIndex(events, "question.answered") >= eventIndex(events, "run.resumed") {
+				t.Fatalf("event order=%v", eventTypeList(events))
+			}
+		})
+	}
+}

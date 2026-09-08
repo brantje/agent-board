@@ -302,10 +302,22 @@ func (s *Store) ResolveInteractiveQuestion(ctx context.Context, projectID, quest
 		return store.ResolveInteractiveQuestionResult{}, store.ErrConflict
 	}
 	if binding.State == store.InteractiveQuestionResolved {
+		event, err := scanEvent(tx.QueryRow(ctx, `
+			SELECT id::text, schema_version, type, occurred_at, project_id::text, issue_id::text,
+			       run_id::text, agent_id::text, workspace_id::text, runtime_instance_id::text,
+			       correlation_id::text, parent_event_id::text, sequence, actor, payload, created_at
+			FROM events
+			WHERE project_id=$1 AND run_id=$2 AND type='engine.question_binding_resolved'
+			  AND payload->>'questionId'=$3
+			ORDER BY sequence LIMIT 1
+		`, projectID, run.ID, questionID))
+		if err != nil {
+			return store.ResolveInteractiveQuestionResult{}, err
+		}
 		if err := tx.Commit(ctx); err != nil {
 			return store.ResolveInteractiveQuestionResult{}, err
 		}
-		return store.ResolveInteractiveQuestionResult{Binding: binding, Run: run}, nil
+		return store.ResolveInteractiveQuestionResult{Binding: binding, Run: run, Events: []store.Event{event}}, nil
 	}
 	if binding.State != store.InteractiveQuestionAnswered {
 		return store.ResolveInteractiveQuestionResult{}, store.ErrConflict
@@ -366,10 +378,26 @@ func (s *Store) ResolveInteractiveQuestion(ctx context.Context, projectID, quest
 		resumed = true
 	}
 
+	// Resolution, resume and the reply journal must commit together. A failed
+	// event write leaves the accepted binding available for reconciliation.
+	resolvedEvent, err := appendInteractiveQuestionEvent(ctx, tx, run, "", "engine.question_binding_resolved", map[string]any{
+		"engine": binding.Engine, "questionId": questionID,
+	})
+	if err != nil {
+		return store.ResolveInteractiveQuestionResult{}, err
+	}
+	events := []store.Event{resolvedEvent}
+	if resumed {
+		resumedEvent, err := appendInteractiveQuestionEvent(ctx, tx, run, "", "run.resumed", map[string]any{"questionId": questionID})
+		if err != nil {
+			return store.ResolveInteractiveQuestionResult{}, err
+		}
+		events = append(events, resumedEvent)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.ResolveInteractiveQuestionResult{}, err
 	}
-	return store.ResolveInteractiveQuestionResult{Binding: binding, Run: run, Resumed: resumed}, nil
+	return store.ResolveInteractiveQuestionResult{Binding: binding, Run: run, Resumed: resumed, Events: events}, nil
 }
 
 func hasLiveClaim(ctx context.Context, tx pgx.Tx, projectID, runID string) (bool, error) {
