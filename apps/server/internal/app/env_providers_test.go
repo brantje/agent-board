@@ -109,11 +109,12 @@ func (s *envProviderStore) CreateModelProfile(_ context.Context, p store.ModelPr
 }
 
 type captureEnvSecretWriter struct {
-	ref     string
-	value   []byte
-	calls   int
-	err     error
-	stored  map[string][]byte
+	ref        string
+	value      []byte
+	calls      int
+	err        error
+	resolveErr error
+	stored     map[string][]byte
 }
 
 func newCaptureEnvSecretWriter() *captureEnvSecretWriter {
@@ -134,6 +135,9 @@ func (w *captureEnvSecretWriter) Put(_ context.Context, _ secrets.Scope, ref str
 }
 
 func (w *captureEnvSecretWriter) Resolve(_ context.Context, _ secrets.Scope, ref string) ([]byte, error) {
+	if w.resolveErr != nil {
+		return nil, w.resolveErr
+	}
 	if w.stored == nil {
 		return nil, secrets.ErrNotFound
 	}
@@ -555,5 +559,23 @@ func TestEnsureOpenRouterFromEnvResumesWhenCredentialRefDangling(t *testing.T) {
 	}
 	if writer.calls != 1 {
 		t.Fatalf("secret writes = %d, want 1", writer.calls)
+	}
+}
+
+func TestEnsureOpenRouterFromEnvPropagatesCredentialResolveFailure(t *testing.T) {
+	credentialRef := "provider:existing"
+	st := &envProviderStore{providers: []store.Provider{{ID: "existing", Name: "OpenRouter", Kind: "openrouter", CredentialRef: &credentialRef}}}
+	writer := newCaptureEnvSecretWriter()
+	writer.resolveErr = errors.New("secret store unavailable")
+	svc := New(st)
+
+	err := EnsureOpenRouterFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
+		openRouterEnvKey: "sk-openrouter-key",
+	}))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if writer.calls != 0 {
+		t.Fatalf("secret writes = %d, want 0", writer.calls)
 	}
 }

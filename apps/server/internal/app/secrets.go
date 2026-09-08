@@ -14,3 +14,11 @@ type SecretStore interface {
 	SecretWriter
 	Resolve(context.Context, secrets.Scope, string) ([]byte, error)
 }
+
+func SecretStoreFromWriter(writer SecretWriter) SecretStore {
+	if writer == nil {
+		return nil
+	}
+	store, _ := writer.(SecretStore)
+	return store
+}
