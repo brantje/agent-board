@@ -103,12 +103,12 @@ func (s *Store) CreateQuestion(ctx context.Context, input store.Question) (store
 		status = "OPEN"
 	}
 	return scanQuestion(s.pool.QueryRow(ctx, `
-		INSERT INTO questions (project_id, issue_id, run_id, prompt, kind, options, recommendation, blocking, status)
-		SELECT $1, run.issue_id, run.id, $4, $5, $6, $7, $8, $9
+		INSERT INTO questions (project_id, issue_id, run_id, prompt, kind, options, recommendation, custom, blocking, status)
+		SELECT $1, run.issue_id, run.id, $4, $5, $6, $7, $8, $9, $10
 		FROM runs AS run
 		WHERE run.project_id = $1 AND run.id = $3 AND run.issue_id = $2
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
-	`, input.ProjectID, input.IssueID, input.RunID, input.Prompt, kind, arrayJSON(input.Options), input.Recommendation, input.Blocking, status))
+		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
+	`, input.ProjectID, input.IssueID, input.RunID, input.Prompt, kind, arrayJSON(input.Options), input.Recommendation, input.Custom, input.Blocking, status))
 }
 
 func (s *Store) CreateDecision(ctx context.Context, input store.Decision) (store.Decision, error) {
@@ -193,7 +193,7 @@ func scanExecutionSession(row pgx.Row) (store.ExecutionSession, error) {
 
 func scanQuestion(row pgx.Row) (store.Question, error) {
 	var value store.Question
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.IssueID, &value.RunID, &value.Prompt, &value.Kind, &value.Options, &value.Recommendation, &value.Blocking, &value.Status, &value.CreatedAt, &value.AnsweredAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.IssueID, &value.RunID, &value.Prompt, &value.Kind, &value.Options, &value.Recommendation, &value.Custom, &value.Blocking, &value.Status, &value.CreatedAt, &value.AnsweredAt); err != nil {
 		return store.Question{}, notFound(err)
 	}
 	return value, nil
