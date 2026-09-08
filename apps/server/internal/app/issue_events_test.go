@@ -82,6 +82,8 @@ func TestAssignIssueSkipsEventWhenAgentAlreadyOwnsIssue(t *testing.T) {
 	agentID := coverageAgent().ID
 	issue := coverageIssue()
 	issue.AssignedAgentID = &agentID
+	existing := store.Event{ID: "evt-assigned", Type: "issue.assigned", ProjectID: pid, IssueID: &issue.ID}
+	issue.LastEvent = &existing
 	base := &stickyIssueStore{
 		fakeStore: fakeStore{project: store.Project{ID: pid, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, agent: coverageAgent()},
 		issue:     issue,
@@ -96,6 +98,9 @@ func TestAssignIssueSkipsEventWhenAgentAlreadyOwnsIssue(t *testing.T) {
 	}
 	if assigned.AssignedAgentID == nil || *assigned.AssignedAgentID != agentID {
 		t.Fatalf("assigned=%+v", assigned)
+	}
+	if assigned.LastEvent == nil || assigned.LastEvent.ID != existing.ID {
+		t.Fatalf("idempotent assign lastEvent=%+v", assigned.LastEvent)
 	}
 	if len(recorder.events) != 0 {
 		t.Fatalf("idempotent assign recorded %v", recorder.events)
@@ -141,7 +146,9 @@ func (s *stickyIssueStore) GetIssue(context.Context, string, string) (store.Issu
 func (s *stickyIssueStore) AssignIssue(_ context.Context, _, _, agentID string) (store.Issue, store.Run, error) {
 	s.issue.AssignedAgentID = &agentID
 	s.issue.Status = "IN_PROGRESS"
-	return s.issue, coverageRun(), nil
+	locked := s.issue
+	locked.LastEvent = nil
+	return locked, coverageRun(), nil
 }
 
 type lockedStatusStore struct {
