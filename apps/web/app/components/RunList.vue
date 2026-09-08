@@ -49,7 +49,7 @@ useProjectEvents(projectIds, event => {
   void load()
 })
 onMounted(load)
-const empty = computed(() => !pending.value && !error.value && !rows.value.length)
+const empty = computed(() => !pending.value && !error.value && !rows.value.length && !partialErrors.value.length)
 </script>
 
 <template>

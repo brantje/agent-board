@@ -89,6 +89,20 @@ describe('RunList', () => {
     wrapper.unmount()
   })
 
+  it('keeps all-project Run fetch failures visible instead of the empty state', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/projects') return new Response(JSON.stringify([project, { ...project, id: 'project-b', name: 'Other' }]))
+      return new Response(JSON.stringify({ error: { code: 'project_not_found' } }), { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(RunList, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Other')
+    expect(wrapper.text()).toContain('unavailable or belongs to another project')
+    expect(wrapper.text()).not.toContain('No Runs yet')
+    wrapper.unmount()
+  })
+
   it('shows an error when the Project list cannot be loaded', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'project_not_found' } }), { status: 404 })))
     const wrapper = mount(RunList, { global })
