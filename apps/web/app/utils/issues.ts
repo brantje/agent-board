@@ -2,6 +2,18 @@ import type { Issue, Run } from '../types/api'
 
 export const issueStatuses = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE'] as const
 
+const issuePriorities = [
+  { label: 'Low', variant: 'subtle' as const, icon: 'i-lucide-signal-low' },
+  { label: 'Low', variant: 'subtle' as const, icon: 'i-lucide-signal-low' },
+  { label: 'Medium', variant: 'subtle' as const, icon: 'i-lucide-signal-medium' },
+  { label: 'High', variant: 'solid' as const, icon: 'i-lucide-signal-high' },
+  { label: 'Highest', variant: 'solid' as const, icon: 'i-lucide-signal' }
+] as const
+
+export function issuePriority(priority: number) {
+  return issuePriorities[priority] ?? { label: `Priority ${priority}`, variant: 'subtle' as const, icon: 'i-lucide-signal-low' }
+}
+
 export function statusLabel(status: string) {
   return status
     .toLowerCase()
@@ -14,7 +26,7 @@ export function boardColumns(issues: Issue[], search = '') {
   return issueStatuses.map(status => ({
     status,
     label: statusLabel(status),
-    issues: issues.filter(issue => issue.status === status && `${issue.title} ${issue.id}`.toLowerCase().includes(query))
+    issues: issues.filter(issue => issue.status === status && `${issue.title} ${issue.id} ${issue.description}`.toLowerCase().includes(query))
   }))
 }
 

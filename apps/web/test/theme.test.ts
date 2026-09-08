@@ -49,6 +49,9 @@ describe('theme CSS architecture', () => {
     expect(main).toContain('--ui-bg-elevated: var(--color-surface)')
     expect(main).toContain('--ui-border: var(--color-divider)')
     expect(main).toContain('--color-accent-600: var(--accent-600)')
+    expect(main).toContain('border-radius: 0 !important')
+    expect(main).toContain('.issue-identity')
+    expect(main).toContain('.issue-priority')
     expect(main).not.toContain('--color-steel-500')
     expect(main).not.toContain('.dark {')
 

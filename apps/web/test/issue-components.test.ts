@@ -69,12 +69,22 @@ describe('Issue workflow components', () => {
   it('renders the authoritative card hierarchy and safe links for assigned/unassigned Issues', async () => {
     const wrapper = mount(IssueCard, { props: { issue }, global })
     expect(wrapper.get('a').attributes('href')).toBe('/projects/p/issues/AB-12')
-    expect(wrapper.text()).toContain('AB-12')
-    expect(wrapper.text()).toContain('Unassigned')
-    await wrapper.setProps({ issue: { ...issue, assignedAgentId: 'a' } })
-    expect(wrapper.text()).toContain('Assigned Agent')
+    const text = wrapper.text()
+    expect(text.indexOf('AB-12')).toBeLessThan(text.indexOf('Fix scheduler'))
+    expect(text.indexOf('Fix scheduler')).toBeLessThan(text.indexOf('Persist leases'))
+    expect(text).toContain('Low')
+    expect(text).not.toContain('Unassigned')
+    expect(text).not.toContain('TODO')
+    expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(false)
+
+    await wrapper.setProps({ issue: { ...issue, assignedAgentId: 'a', priority: 3, description: '' } })
+    expect(wrapper.text()).toContain('High')
+    expect(wrapper.text()).not.toContain('Persist leases')
+    expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(true)
+
     await wrapper.setProps({ agentName: 'Coder' })
-    expect(wrapper.text()).toContain('Coder')
+    expect(wrapper.find('[aria-label="Coder"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(false)
   })
 
   it('creates only valid Issues, round-trips priority, and cannot submit protected Review/Done transitions', async () => {
