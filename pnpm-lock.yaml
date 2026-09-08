@@ -10,6 +10,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@iconify-json/lucide':
+        specifier: ^1.2.129
+        version: 1.2.129
       '@nuxt/ui':
         specifier: 4.11.0
         version: 4.11.0(f898727aa1883633195165cc80d45447)
@@ -535,6 +538,9 @@ packages:
 
   '@floating-ui/vue@1.1.11':
     resolution: {integrity: sha512-HzHKCNVxnGS35r9fCHBc3+uCnjw9IWIlCPL683cGgM9Kgj2BiAl8x1mS7vtvP6F9S/e/q4O6MApwSHj8hNLGfw==}
+
+  '@iconify-json/lucide@1.2.129':
+    resolution: {integrity: sha512-pa0ufllJOXTDIH2BxE/BtWQEf/x46/lINDWcmncICV1/52veZ7KSBzQaVh9xDpmjDs8QN4j2Ex/LWlSSveL3yw==}
 
   '@iconify/collections@1.0.733':
     resolution: {integrity: sha512-ckW+JM8b+Pt07fg5bpNbI05m6a8m7MptMb+QbRnsaNvqefvhJsqHzw1ZLtOCd2gxieDIERuIQBokZ/Ssf96sew==}
@@ -4794,6 +4800,10 @@ snapshots:
     transitivePeerDependencies:
       - '@vue/composition-api'
       - vue
+
+  '@iconify-json/lucide@1.2.129':
+    dependencies:
+      '@iconify/types': 2.0.0
 
   '@iconify/collections@1.0.733':
     dependencies:
