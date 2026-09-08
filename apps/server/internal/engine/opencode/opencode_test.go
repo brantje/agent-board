@@ -269,6 +269,14 @@ func TestEngineAnswersNativeQuestionWithoutSecondPrompt(t *testing.T) {
 	if launcher.starts != 1 {
 		t.Fatalf("server starts=%d", launcher.starts)
 	}
+	host, port, err := net.SplitHostPort(parsed.Host)
+	if err != nil {
+		t.Fatalf("split test server address: %v", err)
+	}
+	command := launcher.request.Command
+	if len(command) != 6 || command[0] != "opencode" || command[1] != "serve" || command[2] != "--hostname" || command[3] != host || command[4] != "--port" || command[5] != port {
+		t.Fatalf("server command=%v want address %s:%s", command, host, port)
+	}
 	if harness.promptCalls != 1 {
 		t.Fatalf("prompt calls=%d want 1", harness.promptCalls)
 	}
