@@ -5,6 +5,7 @@ import { apiPath, apiRequest } from '../utils/api'
 import { latestRun, statusLabel } from '../utils/issues'
 import { useResource } from '../composables/useResource'
 import { useRefresh } from '../composables/useRefresh'
+import IssueRelationships from './IssueRelationships.vue'
 
 const props = defineProps<{ projectId: string; issueId: string }>()
 const { data: issue, pending, error, refresh } = useResource<Issue>(() => apiPath('issues', props.projectId, props.issueId))
@@ -77,6 +78,8 @@ async function saved(savedIssue: Issue) {
             <p class="whitespace-pre-wrap break-words">{{ issue.description || 'No description provided.' }}</p>
           </UCard>
 
+          <IssueRelationships :project-id="projectId" :issue-id="issueId" />
+
           <UCard>
             <h2 class="section-label mb-3">Latest Run</h2>
             <AsyncState :pending="runs.pending.value" :error="runs.error.value" :empty="!latest" empty-title="No Runs yet" @retry="runs.refresh">
@@ -102,6 +105,10 @@ async function saved(savedIssue: Issue) {
               <div>
                 <dt class="text-muted">Board status</dt>
                 <dd>{{ statusLabel(issue.status) }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">Priority</dt>
+                <dd>Priority {{ issue.priority }}</dd>
               </div>
               <div>
                 <dt class="text-muted">Assigned Agent</dt>
