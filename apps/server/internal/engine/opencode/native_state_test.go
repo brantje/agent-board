@@ -131,7 +131,7 @@ func TestEngineCompletesOnMatchingNativeIdleEvent(t *testing.T) {
 	_, err = adapter.Execute(context.Background(), engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Complete on native idle"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "test-model"},
 			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
 		},
@@ -265,7 +265,7 @@ func TestEngineFailsWhenIdleBeforeExecutionStarts(t *testing.T) {
 	_, err = adapter.Execute(context.Background(), engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Fail on early idle"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "test-model"},
 			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
 		},
@@ -349,7 +349,7 @@ func nativeStateRequest(launcher *fakeOpenCodeLauncher) engine.Request {
 	return engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Observe native completion"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "test-model"},
 			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
 		},

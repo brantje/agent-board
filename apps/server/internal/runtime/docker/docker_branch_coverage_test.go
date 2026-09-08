@@ -238,17 +238,30 @@ func TestVerifyContainerRejectsUnsafeOrMismatchedShapes(t *testing.T) {
 		mutate func(*container.InspectResponse, *handleMetadata)
 	}{
 		{"incomplete", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Config = nil }},
-		{"label", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Config.Labels[labelRuntime] = "other" }},
+		{"label", func(inspected *container.InspectResponse, _ *handleMetadata) {
+			inspected.Config.Labels[labelRuntime] = "other"
+		}},
 		{"image", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Config.Image = "other:image" }},
 		{"working directory", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Config.WorkingDir = "/tmp" }},
 		{"privileged", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.Privileged = true }},
-		{"host pid", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.PidMode = container.PidMode("host") }},
-		{"capability", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.CapAdd = append(inspected.HostConfig.CapAdd, "SYS_ADMIN") }},
-		{"device", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.Devices = []container.DeviceMapping{{PathOnHost: "/dev/null"}} }},
+		{"host pid", func(inspected *container.InspectResponse, _ *handleMetadata) {
+			inspected.HostConfig.PidMode = container.PidMode("host")
+		}},
+		{"capability", func(inspected *container.InspectResponse, _ *handleMetadata) {
+			inspected.HostConfig.CapAdd = append(inspected.HostConfig.CapAdd, "SYS_ADMIN")
+		}},
+		{"device", func(inspected *container.InspectResponse, _ *handleMetadata) {
+			inspected.HostConfig.Devices = []container.DeviceMapping{{PathOnHost: "/dev/null"}}
+		}},
 		{"mount count", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Mounts = nil }},
 		{"mount shape", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Mounts[0].RW = false }},
-		{"docker socket", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.Mounts[0].Source = "/var/run/docker.sock" }},
-		{"none network", func(inspected *container.InspectResponse, _ *handleMetadata) { inspected.HostConfig.NetworkMode = container.NetworkMode("bridge"); inspected.Config.NetworkDisabled = false }},
+		{"docker socket", func(inspected *container.InspectResponse, _ *handleMetadata) {
+			inspected.Mounts[0].Source = "/var/run/docker.sock"
+		}},
+		{"none network", func(inspected *container.InspectResponse, _ *handleMetadata) {
+			inspected.HostConfig.NetworkMode = container.NetworkMode("bridge")
+			inspected.Config.NetworkDisabled = false
+		}},
 		{"unsupported network", func(_ *container.InspectResponse, meta *handleMetadata) { meta.Network = runtimepkg.NetworkRestricted }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

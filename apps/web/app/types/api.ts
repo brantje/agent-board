@@ -26,6 +26,7 @@ export interface Issue {
   assignedAgentId: string | null
   createdAt: string
   updatedAt: string
+  lastEvent?: EventEvidence | null
 }
 
 export interface IssueRelationship {
@@ -110,6 +111,9 @@ export interface EventEvidence {
   schemaVersion: number
   type: string
   occurredAt: string
+  projectId?: string
+  issueId?: string | null
+  runId?: string | null
   sequence: number | null
   agentId: string | null
   workspaceId: string | null

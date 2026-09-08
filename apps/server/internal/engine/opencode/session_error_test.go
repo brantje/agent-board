@@ -14,7 +14,7 @@ func TestHandleSessionErrorFailsOnlyOwnedNativeSession(t *testing.T) {
 
 	other := mustJSON(t, map[string]any{
 		"sessionID": "ses_other",
-		"error": map[string]any{"name": "UnknownError", "data": map[string]any{"message": "ignore me"}},
+		"error":     map[string]any{"name": "UnknownError", "data": map[string]any{"message": "ignore me"}},
 	})
 	if err := state.handleEvent(context.Background(), nil, client.Event{Type: "session.error", Properties: other}); err != nil {
 		t.Fatalf("unrelated session.error returned %v", err)
@@ -22,7 +22,7 @@ func TestHandleSessionErrorFailsOnlyOwnedNativeSession(t *testing.T) {
 
 	owned := mustJSON(t, map[string]any{
 		"sessionID": "ses_1",
-		"error": map[string]any{"name": "ProviderAuthError", "data": map[string]any{"message": "provider authentication failed"}},
+		"error":     map[string]any{"name": "ProviderAuthError", "data": map[string]any{"message": "provider authentication failed"}},
 	})
 	err := state.handleEvent(context.Background(), nil, client.Event{Type: "session.error", Properties: owned})
 	if err == nil || !strings.Contains(err.Error(), "provider authentication failed") {

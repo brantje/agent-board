@@ -65,6 +65,7 @@ type EvidenceStore interface {
 	GetRunProvenance(context.Context, string, string) (json.RawMessage, error)
 	AppendEvent(context.Context, Event) (Event, error)
 	ListRunEvents(context.Context, string, string, int64, int) ([]Event, error)
+	ListProjectEventsAfter(context.Context, string, string, int) ([]Event, error)
 	CreateRawOutputChunk(context.Context, RawOutputChunk) (RawOutputChunk, error)
 	GetRawOutputChunk(context.Context, string, string, string) (RawOutputChunk, error)
 	ListRawOutputChunks(context.Context, string, string) ([]RawOutputChunk, error)

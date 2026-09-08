@@ -89,7 +89,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, fmt.Errorf("opencode engine: parse native server address: %w", err)
 	}
 	process, err := request.Launcher.Start(ctx, engine.ProcessRequest{
-		Command: []string{"opencode", "serve", "--hostname", host, "--port", port},
+		Command:               []string{"opencode", "serve", "--hostname", host, "--port", port},
 		CWD:                   "/workspace",
 		Env:                   env,
 		ProviderCredentialEnv: providerCredentialEnv,

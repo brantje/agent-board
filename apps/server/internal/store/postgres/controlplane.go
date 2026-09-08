@@ -34,9 +34,10 @@ func (s *Store) UpdateProject(ctx context.Context, input store.Project) (store.P
 
 func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT `+issueSelectColumns+`
+		SELECT `+issueSelectColumns+`, `+lastEventSelectColumns+`
 		FROM issues AS i
 		JOIN projects AS p ON p.id = i.project_id
+		`+lastEventLateralJoin+`
 		WHERE i.project_id=$1
 		ORDER BY i.created_at, i.id
 	`, projectID)
@@ -46,7 +47,7 @@ func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue
 	defer rows.Close()
 	var out []store.Issue
 	for rows.Next() {
-		value, err := scanIssueJoined(rows)
+		value, err := scanIssueJoinedWithLastEvent(rows)
 		if err != nil {
 			return nil, err
 		}

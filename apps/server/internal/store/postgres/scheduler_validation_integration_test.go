@@ -13,10 +13,10 @@ func TestSchedulerAdmissionValidationAndEmptyQueue(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name     string
-		owner    string
-		lease    time.Duration
-		backoff  time.Duration
+		name    string
+		owner   string
+		lease   time.Duration
+		backoff time.Duration
 	}{
 		{name: "blank owner", owner: "", lease: time.Minute, backoff: time.Second},
 		{name: "zero lease", owner: "worker", lease: 0, backoff: time.Second},

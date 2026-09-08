@@ -182,7 +182,11 @@ input[type='radio']::after,
 .issue-priority,
 .issue-priority *,
 .issue-priority::before,
-.issue-priority::after {
+.issue-priority::after,
+.issue-last-event,
+.issue-last-event *,
+.issue-last-event::before,
+.issue-last-event::after {
   border-radius: 9999px !important;
 }
 

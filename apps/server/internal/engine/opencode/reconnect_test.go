@@ -141,7 +141,7 @@ func TestEngineReconcilesMissedQuestionAfterEventStreamDisconnect(t *testing.T) 
 	_, err = adapter.Execute(executeCtx, engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Recover the missed Question"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "claude-sonnet"},
 			Provider: executioncontext.ProviderContext{Kind: "anthropic"},
 		},

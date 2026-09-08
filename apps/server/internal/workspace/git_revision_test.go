@@ -17,9 +17,9 @@ func TestFullCommitRevisionValidation(t *testing.T) {
 		revision string
 		want     bool
 	}{
-		"sha1 lower":     {revision: strings.Repeat("a", 40), want: true},
-		"sha256 upper":   {revision: strings.Repeat("A", 64), want: true},
-		"wrong length":   {revision: strings.Repeat("a", 39), want: false},
+		"sha1 lower":      {revision: strings.Repeat("a", 40), want: true},
+		"sha256 upper":    {revision: strings.Repeat("A", 64), want: true},
+		"wrong length":    {revision: strings.Repeat("a", 39), want: false},
 		"non hexadecimal": {revision: strings.Repeat("g", 40), want: false},
 	} {
 		t.Run(name, func(t *testing.T) {

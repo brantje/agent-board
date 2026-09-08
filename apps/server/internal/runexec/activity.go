@@ -8,17 +8,17 @@ import (
 )
 
 var engineActivityTypes = map[string]struct{}{
-	"agent.message":   {},
-	"tool.started":    {},
-	"tool.completed":  {},
-	"tool.failed":     {},
-	"test.started":    {},
-	"test.completed":  {},
-	"test.failed":     {},
-	"file.created":    {},
-	"file.modified":   {},
-	"file.deleted":    {},
-	"file.renamed":    {},
+	"agent.message":  {},
+	"tool.started":   {},
+	"tool.completed": {},
+	"tool.failed":    {},
+	"test.started":   {},
+	"test.completed": {},
+	"test.failed":    {},
+	"file.created":   {},
+	"file.modified":  {},
+	"file.deleted":   {},
+	"file.renamed":   {},
 }
 
 func (l *processLauncher) RecordActivity(ctx context.Context, activity engine.ActivityEvent) error {

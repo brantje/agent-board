@@ -83,11 +83,23 @@ func TestIssueRelationshipServiceContract(t *testing.T) {
 		call func() error
 		code string
 	}{
-		{"self", func() error { _, err := svc.CreateIssueRelationship(ctx, store.IssueRelationship{ProjectID: projectID, SourceIssueID: source.ID, TargetIssueID: source.ID, Type: "related_to"}); return err }, "issue_relationship_self_reference"},
-		{"invalid type", func() error { _, err := svc.CreateIssueRelationship(ctx, store.IssueRelationship{ProjectID: projectID, SourceIssueID: source.ID, TargetIssueID: target.ID, Type: "unknown"}); return err }, "invalid_argument"},
-		{"missing target", func() error { _, err := svc.CreateIssueRelationship(ctx, store.IssueRelationship{ProjectID: projectID, SourceIssueID: source.ID, TargetIssueID: "missing", Type: "blocks"}); return err }, "issue_relationship_target_not_found"},
+		{"self", func() error {
+			_, err := svc.CreateIssueRelationship(ctx, store.IssueRelationship{ProjectID: projectID, SourceIssueID: source.ID, TargetIssueID: source.ID, Type: "related_to"})
+			return err
+		}, "issue_relationship_self_reference"},
+		{"invalid type", func() error {
+			_, err := svc.CreateIssueRelationship(ctx, store.IssueRelationship{ProjectID: projectID, SourceIssueID: source.ID, TargetIssueID: target.ID, Type: "unknown"})
+			return err
+		}, "invalid_argument"},
+		{"missing target", func() error {
+			_, err := svc.CreateIssueRelationship(ctx, store.IssueRelationship{ProjectID: projectID, SourceIssueID: source.ID, TargetIssueID: "missing", Type: "blocks"})
+			return err
+		}, "issue_relationship_target_not_found"},
 		{"missing source list", func() error { _, err := svc.ListIssueRelationships(ctx, projectID, "missing"); return err }, "issue_not_found"},
-		{"missing source create", func() error { _, err := svc.CreateIssueRelationship(ctx, store.IssueRelationship{ProjectID: projectID, SourceIssueID: "missing", TargetIssueID: target.ID, Type: "blocks"}); return err }, "issue_not_found"},
+		{"missing source create", func() error {
+			_, err := svc.CreateIssueRelationship(ctx, store.IssueRelationship{ProjectID: projectID, SourceIssueID: "missing", TargetIssueID: target.ID, Type: "blocks"})
+			return err
+		}, "issue_not_found"},
 		{"missing source delete", func() error { return svc.DeleteIssueRelationship(ctx, projectID, "missing", "relationship") }, "issue_not_found"},
 	}
 	for _, tc := range cases {

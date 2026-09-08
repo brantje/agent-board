@@ -4,18 +4,21 @@ import type { Project, Question, Review, Run } from '../types/api'
 import { apiPath, apiQuery, apiRequest } from '../utils/api'
 import { composeInbox, type InboxItem } from '../utils/inbox'
 import { runStatusLabel } from '../utils/runs'
-import { useRefresh } from '../composables/useRefresh'
+import { isBoardActivityEvent } from '../utils/events'
+import { useProjectEvents } from '../composables/useProjectEvents'
 
 const pending = ref(true)
 const error = ref<Error>()
 const items = ref<InboxItem[]>([])
 const partialErrors = ref<{ id: string; name: string; message: string }[]>([])
+const projectIds = ref<string[]>([])
 
 async function load() {
   pending.value = !items.value.length
   error.value = undefined
   try {
     const projects = await apiRequest<Project[]>(apiPath('projects'))
+    projectIds.value = projects.map(project => project.id)
     const failures: { id: string; name: string; message: string }[] = []
     const groups = await Promise.all(projects.map(async project => {
       try {
@@ -36,12 +39,16 @@ async function load() {
     error.value = failure as Error
     items.value = []
     partialErrors.value = []
+    projectIds.value = []
   } finally {
     pending.value = false
   }
 }
 
-useRefresh(load)
+useProjectEvents(projectIds, event => {
+  if (!isBoardActivityEvent(event.type)) return
+  void load()
+})
 onMounted(load)
 const empty = computed(() => !pending.value && !error.value && !items.value.length && !partialErrors.value.length)
 

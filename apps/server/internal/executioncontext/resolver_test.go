@@ -20,13 +20,25 @@ type fakeStore struct {
 }
 
 func (f fakeStore) GetProject(context.Context, string) (store.Project, error) { return f.project, nil }
-func (f fakeStore) GetIssue(context.Context, string, string) (store.Issue, error) { return f.issue, nil }
+func (f fakeStore) GetIssue(context.Context, string, string) (store.Issue, error) {
+	return f.issue, nil
+}
 func (f fakeStore) GetRun(context.Context, string, string) (store.Run, error) { return f.run, nil }
-func (f fakeStore) GetWorkspace(context.Context, string, string) (store.Workspace, error) { return f.workspace, nil }
-func (f fakeStore) GetAgentInScope(context.Context, *string, string) (store.Agent, error) { return f.agent, nil }
-func (f fakeStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) { return f.model, nil }
-func (f fakeStore) GetProvider(context.Context, string) (store.Provider, error) { return f.provider, nil }
-func (f fakeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) { return f.runtime, nil }
+func (f fakeStore) GetWorkspace(context.Context, string, string) (store.Workspace, error) {
+	return f.workspace, nil
+}
+func (f fakeStore) GetAgentInScope(context.Context, *string, string) (store.Agent, error) {
+	return f.agent, nil
+}
+func (f fakeStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) {
+	return f.model, nil
+}
+func (f fakeStore) GetProvider(context.Context, string) (store.Provider, error) {
+	return f.provider, nil
+}
+func (f fakeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) {
+	return f.runtime, nil
+}
 
 func validStore() fakeStore {
 	projectID := "p1"
@@ -34,14 +46,14 @@ func validStore() fakeStore {
 	credentialRef := "provider-token"
 	baseURL := "https://example.test"
 	return fakeStore{
-		project: store.Project{ID: projectID, Name: "Project", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: json.RawMessage(`{"mode":"review"}`)},
-		issue: store.Issue{ID: "i1", ProjectID: projectID, Title: "Issue", Description: "Do work", Status: "IN_PROGRESS"},
-		run: store.Run{ID: "r1", ProjectID: projectID, IssueID: "i1", WorkspaceID: "w1", AgentID: &agentID, Attempt: 2},
+		project:   store.Project{ID: projectID, Name: "Project", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: json.RawMessage(`{"mode":"review"}`)},
+		issue:     store.Issue{ID: "i1", ProjectID: projectID, Title: "Issue", Description: "Do work", Status: "IN_PROGRESS"},
+		run:       store.Run{ID: "r1", ProjectID: projectID, IssueID: "i1", WorkspaceID: "w1", AgentID: &agentID, Attempt: 2},
 		workspace: store.Workspace{ID: "w1", ProjectID: projectID, IssueID: "i1", Path: "/work/w1", WorkingBranch: "issue/i1", BootstrapStatus: "READY"},
-		agent: store.Agent{ID: agentID, ProjectID: &projectID, Name: "Coder", RoleInstructions: "Implement", Engine: "opencode", ModelProfileID: "m1", RuntimeID: "rt1", EngineSettings: json.RawMessage(`{}`), State: "ENABLED"},
-		model: store.ModelProfile{ID: "m1", ProjectID: &projectID, ProviderID: "pr1", Name: "model", Model: "gpt", Enabled: true},
-		provider: store.Provider{ID: "pr1", Name: "provider", Kind: "openai-compatible", BaseURL: &baseURL, CredentialRef: &credentialRef, Enabled: true},
-		runtime: store.Runtime{ID: "rt1", ProjectID: &projectID, Name: "runtime", Kind: "docker", Image: "runtime:test", NetworkPolicy: "restricted", WorkspacePolicy: "issue", AllowedSecretRefs: []string{"runtime-token"}, Enabled: true},
+		agent:     store.Agent{ID: agentID, ProjectID: &projectID, Name: "Coder", RoleInstructions: "Implement", Engine: "opencode", ModelProfileID: "m1", RuntimeID: "rt1", EngineSettings: json.RawMessage(`{}`), State: "ENABLED"},
+		model:     store.ModelProfile{ID: "m1", ProjectID: &projectID, ProviderID: "pr1", Name: "model", Model: "gpt", Enabled: true},
+		provider:  store.Provider{ID: "pr1", Name: "provider", Kind: "openai-compatible", BaseURL: &baseURL, CredentialRef: &credentialRef, Enabled: true},
+		runtime:   store.Runtime{ID: "rt1", ProjectID: &projectID, Name: "runtime", Kind: "docker", Image: "runtime:test", NetworkPolicy: "restricted", WorkspacePolicy: "issue", AllowedSecretRefs: []string{"runtime-token"}, Enabled: true},
 	}
 }
 

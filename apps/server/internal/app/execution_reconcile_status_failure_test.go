@@ -14,7 +14,7 @@ func TestReconcileRetainsActiveProcessWhenBusyPersistenceFails(t *testing.T) {
 	statusErr := errors.New("persist BUSY failed")
 	base := &executionSessionStoreFake{
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
-		session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
+		session:  store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
 	}
 	storeWithFailure := &reconcileStatusFailureStore{executionSessionStoreFake: base, err: statusErr}
 	transport := &reconcileDrainTransport{

@@ -262,11 +262,11 @@ func newCancelBranchTransport(id string) *cancelBranchTransport {
 	return &cancelBranchTransport{id: id, done: make(chan struct{}), result: runner.Result{ExitCode: 137, Signaled: true}}
 }
 
-func (t *cancelBranchTransport) ID() string                { return t.id }
-func (t *cancelBranchTransport) Stdout() io.Reader         { return strings.NewReader("") }
-func (t *cancelBranchTransport) Stderr() io.Reader         { return strings.NewReader("") }
-func (t *cancelBranchTransport) Stdin() io.WriteCloser     { return nopBuffer{} }
-func (t *cancelBranchTransport) finish()                   { t.closeOnce.Do(func() { close(t.done) }) }
+func (t *cancelBranchTransport) ID() string                      { return t.id }
+func (t *cancelBranchTransport) Stdout() io.Reader               { return strings.NewReader("") }
+func (t *cancelBranchTransport) Stderr() io.Reader               { return strings.NewReader("") }
+func (t *cancelBranchTransport) Stdin() io.WriteCloser           { return nopBuffer{} }
+func (t *cancelBranchTransport) finish()                         { t.closeOnce.Do(func() { close(t.done) }) }
 func (t *cancelBranchTransport) Terminate(context.Context) error { return t.terminateErr }
 func (t *cancelBranchTransport) Kill(context.Context) error      { return t.killErr }
 func (t *cancelBranchTransport) Wait(ctx context.Context) (runner.Result, error) {

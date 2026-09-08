@@ -17,7 +17,7 @@ import (
 type candidateErrorReader struct{ err error }
 
 func (r candidateErrorReader) Read([]byte) (int, error) { return 0, r.err }
-func (r candidateErrorReader) Close() error              { return nil }
+func (r candidateErrorReader) Close() error             { return nil }
 
 type candidateCloseErrorReader struct {
 	io.Reader

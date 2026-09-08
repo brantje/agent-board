@@ -183,7 +183,9 @@ func (h *nativeServerHarness) handler(t *testing.T) http.Handler {
 	})
 	mux.HandleFunc("POST /api/session/ses_native/prompt", func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
-			Prompt struct{ Text string `json:"text"` } `json:"prompt"`
+			Prompt struct {
+				Text string `json:"text"`
+			} `json:"prompt"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Errorf("decode prompt: %v", err)
@@ -218,7 +220,9 @@ func (h *nativeServerHarness) handler(t *testing.T) http.Handler {
 		writeNativeJSON(t, w, map[string]any{"data": []any{h.questionRequest}})
 	})
 	mux.HandleFunc("POST /api/session/ses_native/question/que_native/reply", func(w http.ResponseWriter, r *http.Request) {
-		var payload struct{ Answers [][]string `json:"answers"` }
+		var payload struct {
+			Answers [][]string `json:"answers"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Errorf("decode native answer: %v", err)
 		}

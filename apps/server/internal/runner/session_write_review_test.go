@@ -11,9 +11,9 @@ import (
 
 func TestLockWriteMutexUntilFailsClosedBeforeAcquisition(t *testing.T) {
 	tests := []struct {
-		name string
+		name  string
 		setup func() (time.Time, <-chan struct{}, <-chan struct{}, <-chan struct{})
-		want error
+		want  error
 	}{
 		{
 			name: "expired deadline",

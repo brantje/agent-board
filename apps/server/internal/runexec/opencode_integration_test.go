@@ -287,10 +287,10 @@ func createOpenCodeIntegrationRun(
 		t.Fatal(err)
 	}
 	issue, err := control.CreateIssue(ctx, store.Issue{
-		ProjectID: project.ID,
-		Title:     "Prove the native OpenCode Question round trip",
+		ProjectID:   project.ID,
+		Title:       "Prove the native OpenCode Question round trip",
 		Description: "Before changing any files, use OpenCode's native Question tool to ask exactly one blocking single-choice Question: 'Which marker should I write?' with options 'alpha' and 'beta'. Do not use a free-form answer. After the human answer, create opencode-result.txt containing only the selected marker; a single trailing newline is allowed. Do not ask any other Question and do not modify other files.",
-		Status:    "TODO",
+		Status:      "TODO",
 	})
 	if err != nil {
 		t.Fatal(err)

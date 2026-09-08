@@ -22,6 +22,9 @@ func (a *api) registerIssueRunRoutes(r chi.Router) {
 	r.Post("/projects/{projectID}/issues/{issueID}/assignment", a.assignIssue)
 	r.Get("/projects/{projectID}/runs", a.listRuns)
 	r.Get("/projects/{projectID}/runs/{runID}", a.getRun)
+	if a.eventHub != nil {
+		r.Get("/projects/{projectID}/events", a.streamProjectEvents)
+	}
 }
 
 func (a *api) listIssues(w http.ResponseWriter, r *http.Request) {

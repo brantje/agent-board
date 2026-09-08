@@ -122,12 +122,99 @@ func TestHubIgnoresEventsWithoutRun(t *testing.T) {
 	events, unsubscribe := hub.Subscribe(ctx, "run-1")
 	defer unsubscribe()
 
-	if err := hub.Publish(context.Background(), store.Event{ID: "project-event", Type: "issue.created"}); err != nil {
+	if err := hub.Publish(context.Background(), store.Event{ID: "project-event", Type: "issue.created", ProjectID: "project-1"}); err != nil {
 		t.Fatal(err)
 	}
 	select {
 	case event := <-events:
 		t.Fatalf("run subscriber received project event %+v", event)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestHubPublishesRunlessEventsToProjectSubscribers(t *testing.T) {
+	hub := NewHub()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, unsubscribe := hub.SubscribeProject(ctx, "project-1")
+	defer unsubscribe()
+
+	want := store.Event{ID: "issue-1", Type: "issue.created", ProjectID: "project-1"}
+	if err := hub.Publish(context.Background(), want); err != nil {
+		t.Fatal(err)
+	}
+	got := receiveEvent(t, events)
+	if got.ID != want.ID || got.Type != want.Type {
+		t.Fatalf("got=%+v want=%+v", got, want)
+	}
+}
+
+func TestHubPublishesRunEventsToProjectAndRunSubscribers(t *testing.T) {
+	hub := NewHub()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	projectEvents, unsubProject := hub.SubscribeProject(ctx, "project-1")
+	defer unsubProject()
+	runEvents, unsubRun := hub.Subscribe(ctx, "run-1")
+	defer unsubRun()
+
+	runID := "run-1"
+	want := store.Event{ID: "run-started", Type: "run.started", ProjectID: "project-1", RunID: &runID}
+	if err := hub.Publish(context.Background(), want); err != nil {
+		t.Fatal(err)
+	}
+	if got := receiveEvent(t, projectEvents); got.ID != want.ID {
+		t.Fatalf("project subscriber got=%+v", got)
+	}
+	if got := receiveEvent(t, runEvents); got.ID != want.ID {
+		t.Fatalf("run subscriber got=%+v", got)
+	}
+}
+
+func TestHubIsolatesProjectSubscribers(t *testing.T) {
+	hub := NewHub()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first, unsubFirst := hub.SubscribeProject(ctx, "project-1")
+	defer unsubFirst()
+	second, unsubSecond := hub.SubscribeProject(ctx, "project-2")
+	defer unsubSecond()
+
+	if err := hub.Publish(context.Background(), store.Event{ID: "only-project-1", Type: "issue.updated", ProjectID: "project-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := receiveEvent(t, first); got.ID != "only-project-1" {
+		t.Fatalf("project-1 event=%+v", got)
+	}
+	select {
+	case event := <-second:
+		t.Fatalf("project-2 subscriber received %+v", event)
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestHubSubscribeProjectNilHubOrEmptyIDIsIdle(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var nilHub *Hub
+	idle, unsubscribe := nilHub.SubscribeProject(ctx, "project-1")
+	unsubscribe()
+	select {
+	case event := <-idle:
+		t.Fatalf("nil hub delivered %+v", event)
+	default:
+	}
+
+	hub := NewHub()
+	idle, unsubscribe = hub.SubscribeProject(ctx, "")
+	defer unsubscribe()
+	if err := hub.Publish(context.Background(), store.Event{ID: "ignored", Type: "issue.created", ProjectID: "project-1"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case event := <-idle:
+		t.Fatalf("empty projectID subscriber delivered %+v", event)
 	case <-time.After(20 * time.Millisecond):
 	}
 }

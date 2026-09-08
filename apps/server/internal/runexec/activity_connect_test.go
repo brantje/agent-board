@@ -69,10 +69,10 @@ type launcherDialTransport struct {
 	once sync.Once
 }
 
-func (p *launcherDialTransport) ID() string            { return p.id }
-func (*launcherDialTransport) Stdout() io.Reader       { return strings.NewReader("") }
-func (*launcherDialTransport) Stderr() io.Reader       { return strings.NewReader("") }
-func (*launcherDialTransport) Stdin() io.WriteCloser   { return &launcherStdin{} }
+func (p *launcherDialTransport) ID() string          { return p.id }
+func (*launcherDialTransport) Stdout() io.Reader     { return strings.NewReader("") }
+func (*launcherDialTransport) Stderr() io.Reader     { return strings.NewReader("") }
+func (*launcherDialTransport) Stdin() io.WriteCloser { return &launcherStdin{} }
 func (p *launcherDialTransport) Wait(ctx context.Context) (runner.Result, error) {
 	select {
 	case <-p.done:

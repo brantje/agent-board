@@ -62,8 +62,8 @@ func TestReconcileAllFailureAndReporterBranches(t *testing.T) {
 
 	listErr := &reconcileBranchStore{
 		branchExecutionStore: newBranchExecutionStore(),
-		projects: []store.Project{{ID: "project-1"}},
-		listSessionsErr: errors.New("list sessions failed"),
+		projects:             []store.Project{{ID: "project-1"}},
+		listSessionsErr:      errors.New("list sessions failed"),
 	}
 	service = reconcileBranchService(t, listErr, &reconcileExecutionManager{})
 	if err := service.ReconcileAll(context.Background()); err == nil {
@@ -72,7 +72,7 @@ func TestReconcileAllFailureAndReporterBranches(t *testing.T) {
 
 	reportStore := &reconcileBranchStore{
 		branchExecutionStore: newBranchExecutionStore(),
-		projects: []store.Project{{ID: "project-1"}},
+		projects:             []store.Project{{ID: "project-1"}},
 	}
 	reportStore.session = store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"}
 	service = reconcileBranchService(t, reportStore, &reconcileExecutionManager{err: runner.ErrDisconnected})

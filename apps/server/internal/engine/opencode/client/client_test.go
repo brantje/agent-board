@@ -14,7 +14,7 @@ func TestClientNativeSessionAndQuestionRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
-			Model ModelRef `json:"model"`
+			Model    ModelRef `json:"model"`
 			Location struct {
 				Directory string `json:"directory"`
 			} `json:"location"`

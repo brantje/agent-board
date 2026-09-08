@@ -135,13 +135,13 @@ func TestSchedulerReconciliationTerminalOutcomes(t *testing.T) {
 	reason := "external execution failed"
 	blankReason := "   "
 	cases := []struct {
-		name              string
-		outcome           store.SchedulerReconciliationOutcome
-		failureReason     *string
-		wantRunStatus     string
-		wantJobState      string
-		wantError         error
-		wantLeaseCount    int
+		name                 string
+		outcome              store.SchedulerReconciliationOutcome
+		failureReason        *string
+		wantRunStatus        string
+		wantJobState         string
+		wantError            error
+		wantLeaseCount       int
 		wantReservationCount int
 	}{
 		{

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	SecretWriteCapabilityHeader = "X-Agent-Board-Secret-Write-Token"
+	SecretWriteCapabilityHeader  = "X-Agent-Board-Secret-Write-Token"
 	minimumSecretWriteTokenBytes = 32
 )
 

@@ -14,9 +14,9 @@ import (
 )
 
 type startFailureRuntime struct {
-	stopProjectID    string
-	stopInstanceID   string
-	destroyProjectID string
+	stopProjectID     string
+	stopInstanceID    string
+	destroyProjectID  string
 	destroyInstanceID string
 }
 

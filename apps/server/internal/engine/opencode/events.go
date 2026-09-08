@@ -147,8 +147,8 @@ func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) err
 
 func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) error {
 	var part struct {
-		ID   string `json:"id"`
-		Tool string `json:"tool"`
+		ID    string `json:"id"`
+		Tool  string `json:"tool"`
 		State struct {
 			Status string `json:"status"`
 			Title  string `json:"title,omitempty"`

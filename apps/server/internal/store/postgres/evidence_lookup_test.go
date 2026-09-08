@@ -14,13 +14,13 @@ func TestRunScopedEvidenceGettersEnforceScope(t *testing.T) {
 	other := seedRunFixture(t, s, "run-evidence-getters-other")
 
 	chunk, err := s.CreateRawOutputChunk(ctx, store.RawOutputChunk{
-		ProjectID: fixture.project.ID,
-		IssueID: fixture.issue.ID,
-		RunID: fixture.run.ID,
-		Stream: "STDOUT",
-		Sequence: 1,
+		ProjectID:  fixture.project.ID,
+		IssueID:    fixture.issue.ID,
+		RunID:      fixture.run.ID,
+		Stream:     "STDOUT",
+		Sequence:   1,
 		StorageRef: "blob:raw-output",
-		SizeBytes: 6,
+		SizeBytes:  6,
 	})
 	if err != nil {
 		t.Fatalf("create raw output chunk: %v", err)
@@ -34,13 +34,13 @@ func TestRunScopedEvidenceGettersEnforceScope(t *testing.T) {
 	}
 
 	artifact, err := s.CreateArtifact(ctx, store.Artifact{
-		ProjectID: fixture.project.ID,
-		IssueID: fixture.issue.ID,
-		RunID: fixture.run.ID,
-		Name: "candidate.json",
-		Kind: "candidate_manifest",
+		ProjectID:  fixture.project.ID,
+		IssueID:    fixture.issue.ID,
+		RunID:      fixture.run.ID,
+		Name:       "candidate.json",
+		Kind:       "candidate_manifest",
 		StorageRef: "blob:artifact",
-		SizeBytes: 2,
+		SizeBytes:  2,
 	})
 	if err != nil {
 		t.Fatalf("create artifact: %v", err)

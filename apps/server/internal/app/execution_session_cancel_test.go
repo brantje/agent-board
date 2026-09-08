@@ -22,9 +22,9 @@ type escalatingTransport struct {
 func newEscalatingTransport(id string) *escalatingTransport {
 	return &escalatingTransport{id: id, result: make(chan struct{})}
 }
-func (t *escalatingTransport) ID() string { return t.id }
-func (t *escalatingTransport) Stdout() io.Reader { return strings.NewReader("") }
-func (t *escalatingTransport) Stderr() io.Reader { return strings.NewReader("") }
+func (t *escalatingTransport) ID() string            { return t.id }
+func (t *escalatingTransport) Stdout() io.Reader     { return strings.NewReader("") }
+func (t *escalatingTransport) Stderr() io.Reader     { return strings.NewReader("") }
 func (t *escalatingTransport) Stdin() io.WriteCloser { return nopBuffer{Buffer: nil} }
 func (t *escalatingTransport) Wait(ctx context.Context) (runner.Result, error) {
 	select {
@@ -35,7 +35,11 @@ func (t *escalatingTransport) Wait(ctx context.Context) (runner.Result, error) {
 	}
 }
 func (t *escalatingTransport) Terminate(context.Context) error { t.terminated.Store(true); return nil }
-func (t *escalatingTransport) Kill(context.Context) error { t.killed.Store(true); close(t.result); return nil }
+func (t *escalatingTransport) Kill(context.Context) error {
+	t.killed.Store(true)
+	close(t.result)
+	return nil
+}
 
 func TestCancelEscalatesTerminateToKillForExactSession(t *testing.T) {
 	service, storeFake, _ := executionServiceFixture(t)
@@ -43,8 +47,12 @@ func TestCancelEscalatesTerminateToKillForExactSession(t *testing.T) {
 	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
 	service.runners = &fakeExecutionManager{client: client}
 	process, err := service.Start(context.Background(), "project-1", "run-1", "runtime-1", ExecutionRequest{Command: []string{"sleep", "30"}})
-	if err != nil { t.Fatal(err) }
-	if process.ID() != "session-1" { t.Fatalf("process id=%q", process.ID()) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process.ID() != "session-1" {
+		t.Fatalf("process id=%q", process.ID())
+	}
 	if err := service.Cancel(context.Background(), "project-1", "session-1", 5*time.Millisecond); err != nil {
 		t.Fatalf("Cancel() error=%v", err)
 	}

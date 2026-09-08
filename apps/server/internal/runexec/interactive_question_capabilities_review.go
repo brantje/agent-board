@@ -18,7 +18,7 @@ func exposeInteractiveQuestioner(questioner *interactiveQuestioner) engine.Inter
 		return questioner
 	}
 	return interactiveQuestionerWithoutReplyTracking{
-		InteractiveQuestioner: questioner,
+		InteractiveQuestioner:      questioner,
 		InteractiveQuestionBatcher: questioner,
 	}
 }

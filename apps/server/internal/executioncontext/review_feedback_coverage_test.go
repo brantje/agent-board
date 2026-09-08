@@ -59,9 +59,18 @@ func TestResolveReviewFeedbackRejectsInvalidDecisionBindings(t *testing.T) {
 		{name: "wrong kind", review: baseReview, decision: func() *store.Decision { value := baseDecision; value.Kind = "QUESTION"; return &value }(), want: "invalid Decision binding"},
 		{name: "wrong outcome", review: baseReview, decision: func() *store.Decision { value := baseDecision; value.Outcome = "APPROVED"; return &value }(), want: "invalid Decision binding"},
 		{name: "missing run binding", review: baseReview, decision: func() *store.Decision { value := baseDecision; value.RunID = nil; return &value }(), want: "invalid Decision binding"},
-		{name: "wrong run binding", review: baseReview, decision: func() *store.Decision { value := baseDecision; other := "other-run"; value.RunID = &other; return &value }(), want: "invalid Decision binding"},
+		{name: "wrong run binding", review: baseReview, decision: func() *store.Decision {
+			value := baseDecision
+			other := "other-run"
+			value.RunID = &other
+			return &value
+		}(), want: "invalid Decision binding"},
 		{name: "malformed details", review: baseReview, decision: func() *store.Decision { value := baseDecision; value.SafeDetails = json.RawMessage(`{`); return &value }(), want: "decode Review feedback"},
-		{name: "empty feedback", review: baseReview, decision: func() *store.Decision { value := baseDecision; value.SafeDetails = json.RawMessage(`{"feedback":"  "}`); return &value }(), want: "empty feedback"},
+		{name: "empty feedback", review: baseReview, decision: func() *store.Decision {
+			value := baseDecision
+			value.SafeDetails = json.RawMessage(`{"feedback":"  "}`)
+			return &value
+		}(), want: "empty feedback"},
 	}
 
 	for _, tc := range cases {

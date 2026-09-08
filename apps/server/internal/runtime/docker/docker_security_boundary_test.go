@@ -25,7 +25,7 @@ func TestVerifyContainerRequiresNoNewPrivileges(t *testing.T) {
 	}
 
 	for name, securityOpt := range map[string][]string{
-		"missing": nil,
+		"missing":  nil,
 		"disabled": {"no-new-privileges=false"},
 	} {
 		t.Run(name, func(t *testing.T) {

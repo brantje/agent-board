@@ -39,7 +39,7 @@ func TestCoordinatorDoesNotTreatShutdownCancelledRenewalAsLeaseLoss(t *testing.T
 	base := &fakeSchedulerStore{}
 	fs := &blockingRenewalStore{
 		fakeSchedulerStore: base,
-		renewalStarted:    make(chan struct{}),
+		renewalStarted:     make(chan struct{}),
 	}
 	parent, cancel := context.WithCancel(context.Background())
 	processor := processorFunc(func(context.Context, *store.SchedulerAdmission, Lifecycle) (Result, error) {

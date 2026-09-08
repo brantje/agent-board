@@ -30,6 +30,7 @@ type Issue struct {
 	AssignedAgentID *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	LastEvent       *Event
 }
 
 type IssueRelationship struct {
@@ -72,36 +73,36 @@ type ModelProfile struct {
 type Runtime struct {
 	ID                string
 	ProjectID         *string
-	Name               string
-	Kind               string
-	Image              string
-	CPULimitMillis     *int
-	MemoryLimitBytes   *int64
-	PIDLimit           *int
-	TimeoutSeconds     *int
-	NetworkPolicy      string
-	WorkspacePolicy    string
-	AllowedSecretRefs  []string
-	Capabilities       json.RawMessage
-	Enabled            bool
-	HealthStatus       string
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	Name              string
+	Kind              string
+	Image             string
+	CPULimitMillis    *int
+	MemoryLimitBytes  *int64
+	PIDLimit          *int
+	TimeoutSeconds    *int
+	NetworkPolicy     string
+	WorkspacePolicy   string
+	AllowedSecretRefs []string
+	Capabilities      json.RawMessage
+	Enabled           bool
+	HealthStatus      string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
 
 type Agent struct {
-	ID                string
-	ProjectID         *string
-	Name              string
-	RoleInstructions  string
-	Engine            string
-	ModelProfileID    string
-	RuntimeID         string
-	EngineSettings    json.RawMessage
-	ConcurrencyLimit  int
-	State             string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	ID               string
+	ProjectID        *string
+	Name             string
+	RoleInstructions string
+	Engine           string
+	ModelProfileID   string
+	RuntimeID        string
+	EngineSettings   json.RawMessage
+	ConcurrencyLimit int
+	State            string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 type Workspace struct {
@@ -286,7 +287,7 @@ type Event struct {
 	Sequence          *int64
 	Actor             json.RawMessage
 	Payload           json.RawMessage
-	CreatedAt          time.Time
+	CreatedAt         time.Time
 }
 
 type Artifact struct {

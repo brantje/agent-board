@@ -34,39 +34,76 @@ func coverageRun() store.Run {
 func (f *fakeStore) ListProjects(context.Context) ([]store.Project, error) {
 	return []store.Project{f.project}, nil
 }
-func (f *fakeStore) CreateProject(_ context.Context, v store.Project) (store.Project, error) { return v, nil }
-func (f *fakeStore) UpdateProject(_ context.Context, v store.Project) (store.Project, error) { return v, nil }
+func (f *fakeStore) CreateProject(_ context.Context, v store.Project) (store.Project, error) {
+	return v, nil
+}
+func (f *fakeStore) UpdateProject(_ context.Context, v store.Project) (store.Project, error) {
+	return v, nil
+}
 func (f *fakeStore) ListProviders(context.Context) ([]store.Provider, error) {
 	return []store.Provider{coverageProvider()}, nil
 }
-func (f *fakeStore) CreateProvider(_ context.Context, v store.Provider) (store.Provider, error) { return v, nil }
-func (f *fakeStore) GetProvider(context.Context, string) (store.Provider, error) { return coverageProvider(), nil }
-func (f *fakeStore) UpdateProvider(_ context.Context, v store.Provider) (store.Provider, error) { return v, nil }
+func (f *fakeStore) CreateProvider(_ context.Context, v store.Provider) (store.Provider, error) {
+	return v, nil
+}
+func (f *fakeStore) GetProvider(context.Context, string) (store.Provider, error) {
+	return coverageProvider(), nil
+}
+func (f *fakeStore) UpdateProvider(_ context.Context, v store.Provider) (store.Provider, error) {
+	return v, nil
+}
 func (f *fakeStore) ListModelProfiles(context.Context, *string) ([]store.ModelProfile, error) {
 	return []store.ModelProfile{coverageModel()}, nil
 }
-func (f *fakeStore) CreateModelProfile(_ context.Context, v store.ModelProfile) (store.ModelProfile, error) { return v, nil }
-func (f *fakeStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) { return coverageModel(), nil }
-func (f *fakeStore) UpdateModelProfile(_ context.Context, _ *string, v store.ModelProfile) (store.ModelProfile, error) { return v, nil }
+func (f *fakeStore) CreateModelProfile(_ context.Context, v store.ModelProfile) (store.ModelProfile, error) {
+	return v, nil
+}
+func (f *fakeStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) {
+	return coverageModel(), nil
+}
+func (f *fakeStore) UpdateModelProfile(_ context.Context, _ *string, v store.ModelProfile) (store.ModelProfile, error) {
+	return v, nil
+}
 func (f *fakeStore) ListRuntimes(context.Context, *string) ([]store.Runtime, error) {
 	return []store.Runtime{coverageRuntime()}, nil
 }
-func (f *fakeStore) CreateRuntime(_ context.Context, v store.Runtime) (store.Runtime, error) { return v, nil }
-func (f *fakeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) { return coverageRuntime(), nil }
-func (f *fakeStore) UpdateRuntime(_ context.Context, _ *string, v store.Runtime) (store.Runtime, error) { return v, nil }
-func (f *fakeStore) ListAgents(context.Context, *string) ([]store.Agent, error) { return []store.Agent{f.agent}, nil }
+func (f *fakeStore) CreateRuntime(_ context.Context, v store.Runtime) (store.Runtime, error) {
+	return v, nil
+}
+func (f *fakeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) {
+	return coverageRuntime(), nil
+}
+func (f *fakeStore) UpdateRuntime(_ context.Context, _ *string, v store.Runtime) (store.Runtime, error) {
+	return v, nil
+}
+func (f *fakeStore) ListAgents(context.Context, *string) ([]store.Agent, error) {
+	return []store.Agent{f.agent}, nil
+}
 func (f *fakeStore) CreateAgent(_ context.Context, v store.Agent) (store.Agent, error) { return v, nil }
-func (f *fakeStore) UpdateAgent(_ context.Context, _ *string, v store.Agent) (store.Agent, error) { return v, nil }
-func (f *fakeStore) ListIssues(context.Context, string) ([]store.Issue, error) { return []store.Issue{coverageIssue()}, nil }
+func (f *fakeStore) UpdateAgent(_ context.Context, _ *string, v store.Agent) (store.Agent, error) {
+	return v, nil
+}
+func (f *fakeStore) ListIssues(context.Context, string) ([]store.Issue, error) {
+	return []store.Issue{coverageIssue()}, nil
+}
 func (f *fakeStore) CreateIssue(_ context.Context, v store.Issue) (store.Issue, error) { return v, nil }
-func (f *fakeStore) GetIssue(context.Context, string, string) (store.Issue, error) { return coverageIssue(), nil }
+func (f *fakeStore) GetIssue(context.Context, string, string) (store.Issue, error) {
+	return coverageIssue(), nil
+}
 func (f *fakeStore) UpdateIssue(_ context.Context, v store.Issue) (store.Issue, error) { return v, nil }
-func (f *fakeStore) ListRuns(context.Context, string) ([]store.Run, error) { return []store.Run{coverageRun()}, nil }
-func (f *fakeStore) GetRun(context.Context, string, string) (store.Run, error) { return coverageRun(), nil }
+func (f *fakeStore) ListRuns(context.Context, string) ([]store.Run, error) {
+	return []store.Run{coverageRun()}, nil
+}
+func (f *fakeStore) GetRun(context.Context, string, string) (store.Run, error) {
+	return coverageRun(), nil
+}
 func (f *fakeStore) AssignIssue(context.Context, string, string, string) (store.Issue, store.Run, error) {
 	i := coverageIssue()
 	i.Status = "IN_PROGRESS"
 	return i, coverageRun(), nil
+}
+func (f *fakeStore) ListProjectEventsAfter(context.Context, string, string, int) ([]store.Event, error) {
+	return nil, nil
 }
 
 func TestControlPlaneServiceHappyPaths(t *testing.T) {
@@ -87,15 +124,20 @@ func TestControlPlaneServiceHappyPaths(t *testing.T) {
 		func() error { _, e := svc.ListModelProfiles(ctx, nil); return e }, func() error { _, e := svc.ListModelProfiles(ctx, scope); return e }, func() error { _, e := svc.GetModelProfile(ctx, scope, model.ID); return e }, func() error { _, e := svc.CreateModelProfile(ctx, model); return e }, func() error { _, e := svc.UpdateModelProfile(ctx, scope, model); return e },
 		func() error { _, e := svc.ListRuntimes(ctx, scope); return e }, func() error { _, e := svc.GetRuntime(ctx, scope, runtime.ID); return e }, func() error { _, e := svc.CreateRuntime(ctx, runtime); return e }, func() error { _, e := svc.UpdateRuntime(ctx, scope, runtime); return e },
 		func() error { _, e := svc.ListAgents(ctx, scope); return e }, func() error { _, e := svc.GetAgent(ctx, scope, agent.ID); return e }, func() error { _, e := svc.CreateAgent(ctx, agent); return e }, func() error { _, e := svc.UpdateAgent(ctx, scope, agent); return e },
-		func() error { _, e := svc.ListIssues(ctx, pid); return e }, func() error { _, e := svc.GetIssue(ctx, pid, issue.ID); return e }, func() error { _, e := svc.CreateIssue(ctx, issue); return e }, func() error { _, e := svc.UpdateIssue(ctx, issue); return e }, func() error { _, e := svc.ListRuns(ctx, pid); return e }, func() error { _, e := svc.GetRun(ctx, pid, "run"); return e }, func() error { _, _, e := svc.AssignIssue(ctx, pid, issue.ID, agent.ID); return e },
+		func() error { _, e := svc.ListIssues(ctx, pid); return e }, func() error { _, e := svc.GetIssue(ctx, pid, issue.ID); return e }, func() error { _, e := svc.CreateIssue(ctx, issue); return e }, func() error { _, e := svc.UpdateIssue(ctx, issue); return e }, func() error { _, e := svc.ListRuns(ctx, pid); return e }, func() error { _, e := svc.GetRun(ctx, pid, "run"); return e }, func() error { _, _, e := svc.AssignIssue(ctx, pid, issue.ID, agent.ID); return e }, func() error { _, e := svc.ListProjectEventsAfter(ctx, pid, ""); return e },
 	}
 	for n, call := range calls {
-		if err := call(); err != nil { t.Fatalf("call %d: %v", n, err) }
+		if err := call(); err != nil {
+			t.Fatalf("call %d: %v", n, err)
+		}
 	}
 }
 
 type missingProjectStore struct{ store.ControlPlaneStore }
-func (*missingProjectStore) GetProject(context.Context, string) (store.Project, error) { return store.Project{}, store.ErrNotFound }
+
+func (*missingProjectStore) GetProject(context.Context, string) (store.Project, error) {
+	return store.Project{}, store.ErrNotFound
+}
 
 func TestControlPlaneServiceScopeAndValidationErrors(t *testing.T) {
 	ctx := context.Background()
@@ -108,7 +150,9 @@ func TestControlPlaneServiceScopeAndValidationErrors(t *testing.T) {
 	for _, call := range scopeCalls {
 		err := call()
 		ae, ok := AsError(err)
-		if !ok || ae.Code != "project_not_found" { t.Fatalf("scope error=%v", err) }
+		if !ok || ae.Code != "project_not_found" {
+			t.Fatalf("scope error=%v", err)
+		}
 	}
 	good := &fakeStore{project: store.Project{ID: pid}, agent: store.Agent{ID: "agent"}}
 	s := New(good)
@@ -117,7 +161,9 @@ func TestControlPlaneServiceScopeAndValidationErrors(t *testing.T) {
 	}
 	for _, call := range badCalls {
 		ae, ok := AsError(call())
-		if !ok || ae.Code != "invalid_argument" { t.Fatalf("validation error=%v", ae) }
+		if !ok || ae.Code != "invalid_argument" {
+			t.Fatalf("validation error=%v", ae)
+		}
 	}
 }
 
@@ -133,40 +179,86 @@ func TestValidatorsAndStoreErrorTranslation(t *testing.T) {
 		validateAgent(store.Agent{}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", RuntimeID: "r", EngineSettings: json.RawMessage(`[]`), ConcurrencyLimit: 1, State: "ENABLED"}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", RuntimeID: "r", EngineSettings: store.EmptyObject, ConcurrencyLimit: 0, State: "ENABLED"}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", RuntimeID: "r", EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "BAD"}), validateIssue(store.Issue{Status: "TODO"}), validateIssue(store.Issue{Title: "i", Status: "BAD"}),
 	}
 	for _, err := range invalids {
-		if ae, ok := AsError(err); !ok || ae.Code != "invalid_argument" { t.Fatalf("invalid=%v", err) }
+		if ae, ok := AsError(err); !ok || ae.Code != "invalid_argument" {
+			t.Fatalf("invalid=%v", err)
+		}
 	}
-	for _, tc := range []struct{ err error; code string }{{store.ErrNotFound, "issue_not_found"}, {store.ErrConflict, "conflict"}, {store.ErrInvalidArgument, "invalid_argument"}} {
+	for _, tc := range []struct {
+		err  error
+		code string
+	}{{store.ErrNotFound, "issue_not_found"}, {store.ErrConflict, "conflict"}, {store.ErrInvalidArgument, "invalid_argument"}} {
 		ae, ok := AsError(translateStoreError(tc.err, "issue"))
-		if !ok || ae.Code != tc.code || !errors.Is(ae, tc.err) { t.Fatalf("translation=%v", ae) }
+		if !ok || ae.Code != tc.code || !errors.Is(ae, tc.err) {
+			t.Fatalf("translation=%v", ae)
+		}
 	}
-	if translateStoreError(nil, "issue") != nil { t.Fatal("nil translation") }
+	if translateStoreError(nil, "issue") != nil {
+		t.Fatal("nil translation")
+	}
 	raw := errors.New("raw")
-	if !errors.Is(translateStoreError(raw, "issue"), raw) { t.Fatal("raw translation") }
+	if !errors.Is(translateStoreError(raw, "issue"), raw) {
+		t.Fatal("raw translation")
+	}
 }
 
 type doneIssueStore struct{ *fakeStore }
-func (s *doneIssueStore) GetIssue(context.Context, string, string) (store.Issue, error) { i := coverageIssue(); i.Status = "DONE"; return i, nil }
+
+func (s *doneIssueStore) GetIssue(context.Context, string, string) (store.Issue, error) {
+	i := coverageIssue()
+	i.Status = "DONE"
+	return i, nil
+}
 
 func TestAssignmentPreflightErrorsAndAppErrorString(t *testing.T) {
 	pid := coverageProjectID()
 	base := &fakeStore{project: store.Project{ID: pid}, agent: coverageAgent()}
-	for _, tc := range []struct{ svc *Service; code string }{{New(&doneIssueStore{fakeStore: base}), "issue_done"}, {New(&disabledModelStore{fakeStore: base}), "execution_configuration_invalid"}} {
+	for _, tc := range []struct {
+		svc  *Service
+		code string
+	}{{New(&doneIssueStore{fakeStore: base}), "issue_done"}, {New(&disabledModelStore{fakeStore: base}), "execution_configuration_invalid"}} {
 		_, _, err := tc.svc.AssignIssue(context.Background(), pid, "issue", "agent")
 		ae, ok := AsError(err)
-		if !ok || ae.Code != tc.code { t.Fatalf("assignment error=%v", err) }
+		if !ok || ae.Code != tc.code {
+			t.Fatalf("assignment error=%v", err)
+		}
 	}
 	err := NewError("code", "message", store.ErrConflict)
-	if err.Error() != "message" || !errors.Is(err, store.ErrConflict) { t.Fatalf("error=%v", err) }
+	if err.Error() != "message" || !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("error=%v", err)
+	}
 }
 
 type disabledAgentStore struct{ *fakeStore }
-func (s *disabledAgentStore) GetAgentInScope(context.Context, *string, string) (store.Agent, error) { a := s.agent; a.State = "DISABLED"; return a, nil }
+
+func (s *disabledAgentStore) GetAgentInScope(context.Context, *string, string) (store.Agent, error) {
+	a := s.agent
+	a.State = "DISABLED"
+	return a, nil
+}
+
 type disabledModelStore struct{ *fakeStore }
-func (s *disabledModelStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) { m := coverageModel(); m.Enabled = false; return m, nil }
+
+func (s *disabledModelStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) {
+	m := coverageModel()
+	m.Enabled = false
+	return m, nil
+}
+
 type disabledProviderStore struct{ *fakeStore }
-func (s *disabledProviderStore) GetProvider(context.Context, string) (store.Provider, error) { p := coverageProvider(); p.Enabled = false; return p, nil }
+
+func (s *disabledProviderStore) GetProvider(context.Context, string) (store.Provider, error) {
+	p := coverageProvider()
+	p.Enabled = false
+	return p, nil
+}
+
 type disabledRuntimeStore struct{ *fakeStore }
-func (s *disabledRuntimeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) { r := coverageRuntime(); r.Enabled = false; return r, nil }
+
+func (s *disabledRuntimeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) {
+	r := coverageRuntime()
+	r.Enabled = false
+	return r, nil
+}
 
 func TestAssignmentRejectsUnavailableConfiguration(t *testing.T) {
 	pid := coverageProjectID()
@@ -175,7 +267,9 @@ func TestAssignmentRejectsUnavailableConfiguration(t *testing.T) {
 	for _, svc := range cases {
 		_, _, err := svc.AssignIssue(context.Background(), pid, "issue", "agent")
 		ae, ok := AsError(err)
-		if !ok || (ae.Code != "agent_unavailable" && ae.Code != "execution_configuration_invalid") { t.Fatalf("assignment error=%v", err) }
+		if !ok || (ae.Code != "agent_unavailable" && ae.Code != "execution_configuration_invalid") {
+			t.Fatalf("assignment error=%v", err)
+		}
 	}
 }
 

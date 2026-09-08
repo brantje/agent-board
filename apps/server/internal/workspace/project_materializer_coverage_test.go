@@ -11,7 +11,7 @@ import (
 
 type projectInspectionGit struct {
 	Git
-	isRepository bool
+	isRepository  bool
 	repositoryErr error
 	branch        string
 	branchErr     error
@@ -42,9 +42,9 @@ func TestProjectMaterializerInspectExistingRejectsGitIdentityFailures(t *testing
 	cause := errors.New("git inspection failed")
 	base := projectInspectionGit{
 		isRepository: true,
-		branch:        "main",
-		origin:        "/repo",
-		revision:      "abc123",
+		branch:       "main",
+		origin:       "/repo",
+		revision:     "abc123",
 	}
 
 	cases := []struct {

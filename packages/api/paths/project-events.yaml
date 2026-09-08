@@ -1,0 +1,28 @@
+path1:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: streamProjectEvents
+    description: >
+      Live Project Event stream. Clients load persisted Issue/Run/Inbox reads first,
+      then reconnect with afterId set to the last observed Event UUID.
+      Each SSE data payload is EventEvidence JSON. The SSE id field is the Event
+      UUID and is the client idempotency key. afterId is the v0.1 reconnect
+      cursor and selects later Events on the Project timeline (created_at, id).
+    parameters:
+    - name: afterId
+      in: query
+      description: Reconnect cursor. Only Events after this Event UUID on the Project timeline are replayed, then live Events are forwarded.
+      schema:
+        type: string
+        format: uuid
+    responses:
+      '200':
+        description: Server-Sent Event stream of EventEvidence records.
+        content:
+          text/event-stream:
+            schema:
+              type: string
+              description: SSE frames. data is EventEvidence JSON; id is the Event UUID.
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

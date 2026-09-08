@@ -65,10 +65,10 @@ func TestWorkspaceServiceEnsuresReservedWorkspace(t *testing.T) {
 
 func TestWorkspaceServiceMapsScopedLookupAndBootstrapErrors(t *testing.T) {
 	tests := []struct {
-		name       string
-		lookup     *workspaceLookupFake
+		name        string
+		lookup      *workspaceLookupFake
 		materialErr error
-		wantCode   string
+		wantCode    string
 	}{
 		{
 			name:     "project missing",

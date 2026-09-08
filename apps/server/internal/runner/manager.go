@@ -42,10 +42,10 @@ type Client interface {
 type DialFunc func(context.Context, string) (Client, error)
 
 type managerEntry struct {
-	client      Client
+	client     Client
 	connecting chan struct{}
-	lastErr     error
-	generation  int64
+	lastErr    error
+	generation int64
 }
 
 type Manager struct {

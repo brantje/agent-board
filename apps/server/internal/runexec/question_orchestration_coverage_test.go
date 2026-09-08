@@ -14,13 +14,13 @@ import (
 
 type orchestrationQuestionStore struct {
 	*processTestStore
-	questions       []store.Question
-	decision        store.Decision
-	listErr         error
-	decisionErr     error
-	openErr         error
-	createErr       error
-	created         []store.Question
+	questions   []store.Question
+	decision    store.Decision
+	listErr     error
+	decisionErr error
+	openErr     error
+	createErr   error
+	created     []store.Question
 }
 
 func (s *orchestrationQuestionStore) CreateQuestion(_ context.Context, question store.Question) (store.Question, error) {
@@ -72,10 +72,10 @@ func (r *acquiringRuntime) Acquire(_ context.Context, projectID, _, runtimeID st
 
 func continuationSafeContext() executioncontext.SafeContext {
 	return executioncontext.SafeContext{
-		Project: executioncontext.ProjectContext{ID: "project-1"},
-		Issue: executioncontext.IssueContext{ID: "issue-1"},
-		Run: executioncontext.RunContext{ID: "run-1"},
-		Agent: executioncontext.AgentContext{ID: "agent-1"},
+		Project:   executioncontext.ProjectContext{ID: "project-1"},
+		Issue:     executioncontext.IssueContext{ID: "issue-1"},
+		Run:       executioncontext.RunContext{ID: "run-1"},
+		Agent:     executioncontext.AgentContext{ID: "agent-1"},
 		Workspace: executioncontext.WorkspaceContext{ID: "workspace-1"},
 	}
 }

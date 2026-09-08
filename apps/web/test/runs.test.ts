@@ -72,6 +72,30 @@ describe('RunList', () => {
     expect(wrapper.get('a[href="/projects/project-a/runs/run-1"]').exists()).toBe(true)
     wrapper.unmount()
   })
+
+  it('keeps partial Project failures visible on the global Runs index', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/projects') return new Response(JSON.stringify([project, { ...project, id: 'project-b', name: 'Other' }]))
+      if (path === '/api/projects/project-b/runs') return new Response(JSON.stringify({ error: { code: 'project_not_found' } }), { status: 404 })
+      if (path === '/api/projects/project-a/runs') return new Response(JSON.stringify([run]))
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(RunList, { global })
+    await flushPromises()
+    expect(wrapper.get('a[href="/projects/project-a/runs/run-1"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Other')
+    expect(wrapper.text()).toContain('unavailable or belongs to another project')
+    wrapper.unmount()
+  })
+
+  it('shows an error when the Project list cannot be loaded', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'project_not_found' } }), { status: 404 })))
+    const wrapper = mount(RunList, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('unavailable or belongs to another project')
+    wrapper.unmount()
+  })
 })
 
 describe('RunDetail', () => {

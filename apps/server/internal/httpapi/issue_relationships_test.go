@@ -15,9 +15,9 @@ import (
 
 type issueRelationshipHTTPStore struct {
 	*fakeControlPlaneStore
-	relationships   []store.IssueRelationship
-	duplicate       bool
-	listIssuesErr   error
+	relationships []store.IssueRelationship
+	duplicate     bool
+	listIssuesErr error
 }
 
 func (s *issueRelationshipHTTPStore) ListIssues(ctx context.Context, pid string) ([]store.Issue, error) {

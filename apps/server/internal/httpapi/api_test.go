@@ -16,18 +16,18 @@ import (
 )
 
 const (
-	projectID   = "11111111-1111-4111-8111-111111111111"
-	providerID  = "22222222-2222-4222-8222-222222222222"
-	modelID     = "33333333-3333-4333-8333-333333333333"
-	runtimeID   = "44444444-4444-4444-8444-444444444444"
-	agentID     = "66666666-6666-4666-8666-666666666666"
-	issueID     = "77777777-7777-4777-8777-777777777777"
-	issueKey    = "AB-1"
-	otherIssueKey = "AB-2"
+	projectID       = "11111111-1111-4111-8111-111111111111"
+	providerID      = "22222222-2222-4222-8222-222222222222"
+	modelID         = "33333333-3333-4333-8333-333333333333"
+	runtimeID       = "44444444-4444-4444-8444-444444444444"
+	agentID         = "66666666-6666-4666-8666-666666666666"
+	issueID         = "77777777-7777-4777-8777-777777777777"
+	issueKey        = "AB-1"
+	otherIssueKey   = "AB-2"
 	missingIssueKey = "AB-99"
-	runID       = "88888888-8888-4888-8888-888888888888"
-	workspaceID = "99999999-9999-4999-8999-999999999999"
-	otherID     = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	runID           = "88888888-8888-4888-8888-888888888888"
+	workspaceID     = "99999999-9999-4999-8999-999999999999"
+	otherID         = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 )
 
 type fakeControlPlaneStore struct{ store.ControlPlaneStore }
@@ -171,6 +171,15 @@ func (f *fakeControlPlaneStore) GetIssueUUIDByKey(_ context.Context, pid, key st
 	default:
 		return "", store.ErrNotFound
 	}
+}
+func (f *fakeControlPlaneStore) ListProjectEventsAfter(_ context.Context, pid, afterID string, limit int) ([]store.Event, error) {
+	if pid != projectID {
+		return nil, store.ErrNotFound
+	}
+	if afterID != "" {
+		return nil, store.ErrNotFound
+	}
+	return nil, nil
 }
 func (f *fakeControlPlaneStore) ListIssues(_ context.Context, pid string) ([]store.Issue, error) {
 	if pid != projectID {

@@ -81,10 +81,10 @@ type outputFallbackSession struct {
 	stderr io.Reader
 }
 
-func (s *outputFallbackSession) ID() string                    { return "fallback" }
-func (s *outputFallbackSession) Stdout() io.Reader             { return s.stdout }
-func (s *outputFallbackSession) Stderr() io.Reader             { return s.stderr }
-func (s *outputFallbackSession) Stdin() io.WriteCloser         { return nil }
+func (s *outputFallbackSession) ID() string            { return "fallback" }
+func (s *outputFallbackSession) Stdout() io.Reader     { return s.stdout }
+func (s *outputFallbackSession) Stderr() io.Reader     { return s.stderr }
+func (s *outputFallbackSession) Stdin() io.WriteCloser { return nil }
 func (s *outputFallbackSession) Wait(context.Context) (Result, error) {
 	return Result{}, nil
 }

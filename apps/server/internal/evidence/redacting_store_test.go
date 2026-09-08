@@ -32,6 +32,9 @@ func (s *captureStore) AppendEvent(_ context.Context, input store.Event) (store.
 func (s *captureStore) ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error) {
 	return nil, nil
 }
+func (s *captureStore) ListProjectEventsAfter(context.Context, string, string, int) ([]store.Event, error) {
+	return nil, nil
+}
 func (s *captureStore) CreateRawOutputChunk(_ context.Context, input store.RawOutputChunk) (store.RawOutputChunk, error) {
 	s.raw = input
 	return input, nil

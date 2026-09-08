@@ -12,7 +12,7 @@ import (
 func TestSessionConnQueuedWriteHonorsDeadlineChanges(t *testing.T) {
 	setters := map[string]func(*sessionConn, time.Time) error{
 		"write deadline": (*sessionConn).SetWriteDeadline,
-		"all deadlines": (*sessionConn).SetDeadline,
+		"all deadlines":  (*sessionConn).SetDeadline,
 	}
 	for name, setDeadline := range setters {
 		t.Run(name, func(t *testing.T) {

@@ -56,7 +56,7 @@ func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput
 	transport.stderr = "runner-error plain-secret"
 	client := &requestCapturingClient{fakeExecutionClient: &fakeExecutionClient{transport: transport, done: make(chan struct{})}}
 	storeFake := &executionSessionStoreFake{
-		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
+		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-config-1", Status: "RUNNING", RunnerStatus: "READY"},
 	}
 	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
@@ -123,7 +123,7 @@ func TestAuthorizedExecutionRedactsStartErrorsAndReleasesRegistration(t *testing
 		done:      make(chan struct{}),
 	}
 	storeFake := &executionSessionStoreFake{
-		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
+		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-config-1", Status: "RUNNING", RunnerStatus: "READY"},
 	}
 	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
@@ -155,7 +155,7 @@ func TestAuthorizedExecutionRedactsStartErrorsAndReleasesRegistration(t *testing
 
 func TestAuthorizedExecutionRejectsRuntimeMismatchBeforeSessionCreation(t *testing.T) {
 	storeFake := &executionSessionStoreFake{
-		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
+		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-a", Status: "RUNNING"},
 	}
 	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: &fakeExecutionClient{transport: newFakeExecutionTransport("session-1"), done: make(chan struct{})}})
