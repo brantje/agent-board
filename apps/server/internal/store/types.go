@@ -23,9 +23,19 @@ type Issue struct {
 	Title           string
 	Description     string
 	Status          string
+	Priority        int
 	AssignedAgentID *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+type IssueRelationship struct {
+	ID            string
+	ProjectID     string
+	SourceIssueID string
+	TargetIssueID string
+	Type          string
+	CreatedAt     time.Time
 }
 
 type Provider struct {
@@ -283,7 +293,7 @@ type Event struct {
 	Sequence          *int64
 	Actor             json.RawMessage
 	Payload           json.RawMessage
-	CreatedAt         time.Time
+	CreatedAt          time.Time
 }
 
 type Artifact struct {
