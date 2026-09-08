@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boardColumns, editableStatuses, issuePriority, latestRun, statusLabel } from '../app/utils/issues'
+import { boardColumnSurface, boardColumns, editableStatuses, issuePriority, latestRun, statusLabel } from '../app/utils/issues'
 
 const issue = (id: string, status: string) => ({
   id,
@@ -21,6 +21,15 @@ describe('durable Issue board projection', () => {
     expect(columns.find(column => column.status === 'TODO')?.issues).toEqual([])
     expect(boardColumns([issue('abc-123', 'TODO')], 'ABC-123')[1]?.issues).toHaveLength(1)
     expect(boardColumns([{ ...issue('AB-9', 'TODO'), title: 'Hidden', description: 'WebSocket notification system' }], 'websocket')[1]?.issues).toHaveLength(1)
+  })
+
+  it('maps each Board column to a named surface token without relying on color alone', () => {
+    expect(boardColumnSurface('BACKLOG')).toBe('board-column board-column-backlog')
+    expect(boardColumnSurface('TODO')).toBe('board-column board-column-todo')
+    expect(boardColumnSurface('IN_PROGRESS')).toBe('board-column board-column-in-progress')
+    expect(boardColumnSurface('BLOCKED')).toBe('board-column board-column-blocked')
+    expect(boardColumnSurface('REVIEW')).toBe('board-column board-column-review')
+    expect(boardColumnSurface('DONE')).toBe('board-column board-column-done')
   })
 
   it('projects Issue priority as labeled Low/High chips without relying on color alone', () => {
