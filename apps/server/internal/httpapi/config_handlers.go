@@ -204,7 +204,9 @@ func (a *api) updateProvider(w http.ResponseWriter, r *http.Request) {
 	current.Name = req.Name
 	current.Kind = req.Kind
 	current.BaseURL = req.BaseURL
-	current.CredentialRef = req.CredentialRef
+	if req.CredentialRef != nil {
+		current.CredentialRef = req.CredentialRef
+	}
 	current.Enabled = boolDefault(req.Enabled, current.Enabled)
 	current.SafeMetadata = req.SafeMetadata
 	v, err := a.service.UpdateProvider(r.Context(), current)
@@ -385,7 +387,7 @@ func (a *api) updateRuntime(w http.ResponseWriter, r *http.Request, scope *strin
 	}
 	writeJSON(w, 200, runtimeDTO(v))
 }
-func (a *api) listGlobalRuntimes(w http.ResponseWriter, r *http.Request)   { a.listRuntimes(w, r, nil) }
+func (a *api) listGlobalRuntimes(w http.ResponseWriter, r *http.Request)  { a.listRuntimes(w, r, nil) }
 func (a *api) createGlobalRuntime(w http.ResponseWriter, r *http.Request) { a.createRuntime(w, r, nil) }
 func (a *api) getGlobalRuntime(w http.ResponseWriter, r *http.Request)    { a.getRuntime(w, r, nil) }
 func (a *api) updateGlobalRuntime(w http.ResponseWriter, r *http.Request) { a.updateRuntime(w, r, nil) }
@@ -588,7 +590,7 @@ func (a *api) updateAgent(w http.ResponseWriter, r *http.Request, scope *string)
 	}
 	writeJSON(w, 200, agentDTO(v))
 }
-func (a *api) listGlobalAgents(w http.ResponseWriter, r *http.Request)   { a.listAgents(w, r, nil) }
+func (a *api) listGlobalAgents(w http.ResponseWriter, r *http.Request)  { a.listAgents(w, r, nil) }
 func (a *api) createGlobalAgent(w http.ResponseWriter, r *http.Request) { a.createAgent(w, r, nil) }
 func (a *api) getGlobalAgent(w http.ResponseWriter, r *http.Request)    { a.getAgent(w, r, nil) }
 func (a *api) updateGlobalAgent(w http.ResponseWriter, r *http.Request) { a.updateAgent(w, r, nil) }

@@ -27,6 +27,7 @@ path2:
         $ref: ../components/api-components.yaml#/responses/Error
   put:
     operationId: updateProvider
+    description: Omitted or null credentialRef preserves the existing write-only credential reference. Supply a reference to replace it.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/ProviderInput
     responses:

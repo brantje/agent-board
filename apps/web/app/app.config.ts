@@ -6,7 +6,7 @@ export default defineAppConfig({
     textarea: { slots: { base: 'rounded-xs' } },
     select: { slots: { base: 'rounded-xs', content: 'rounded-xs shadow-none' } },
     card: { slots: { root: 'rounded-none shadow-none', header: 'p-3 sm:p-3', body: 'p-3 sm:p-3', footer: 'p-3 sm:p-3' } },
-    modal: { slots: { content: 'rounded-none shadow-none' } },
+    modal: { slots: { content: 'rounded-none shadow-none' }, variants: { fullscreen: { false: { content: 'rounded-none shadow-none' } } } },
     slideover: { slots: { content: 'rounded-none shadow-none' } },
     alert: { slots: { root: 'rounded-none' } },
     empty: { slots: { root: 'rounded-none' } },
