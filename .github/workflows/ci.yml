@@ -185,6 +185,8 @@ jobs:
   compose:
     name: Compose smoke
     runs-on: ubuntu-latest
+    env:
+      AGENT_BOARD_DOCKER_GID: "0"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -193,6 +195,8 @@ jobs:
         run: |
           sudo mkdir -p /var/lib/agent-board/workspaces
           sudo chmod 0777 /var/lib/agent-board/workspaces
+      - name: Resolve docker group GID
+        run: echo "AGENT_BOARD_DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)" >> "$GITHUB_ENV"
       - name: Verify compose overrides
         env:
           AGENT_BOARD_REPOSITORY_MOUNT_PATH: /mnt/repositories
