@@ -74,7 +74,7 @@ func (s *Store) OpenInteractiveQuestions(ctx context.Context, inputs []store.Ope
 		`, input.Question.ProjectID, input.Question.RunID, input.Engine, input.CorrelationKey))
 		if bindingErr == nil {
 			question, getErr := scanQuestion(tx.QueryRow(ctx, `
-				SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+				SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 				FROM questions
 				WHERE project_id=$1 AND id=$2
 			`, binding.ProjectID, binding.QuestionID))
@@ -113,10 +113,10 @@ func (s *Store) OpenInteractiveQuestions(ctx context.Context, inputs []store.Ope
 				status = "OPEN"
 			}
 			question, insertErr := scanQuestion(tx.QueryRow(ctx, `
-				INSERT INTO questions (project_id, issue_id, run_id, prompt, kind, options, recommendation, blocking, status)
-				VALUES ($1, $2, $3, $4, $5, $6, $7, true, $8)
-				RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
-			`, input.Question.ProjectID, input.Question.IssueID, input.Question.RunID, input.Question.Prompt, kind, arrayJSON(input.Question.Options), input.Question.Recommendation, status))
+				INSERT INTO questions (project_id, issue_id, run_id, prompt, kind, options, recommendation, custom, blocking, status)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, $9)
+				RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
+			`, input.Question.ProjectID, input.Question.IssueID, input.Question.RunID, input.Question.Prompt, kind, arrayJSON(input.Question.Options), input.Question.Recommendation, input.Question.Custom, status))
 			if insertErr != nil {
 				return store.OpenInteractiveQuestionsResult{}, insertErr
 			}
