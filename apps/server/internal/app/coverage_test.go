@@ -24,7 +24,7 @@ func coverageExecutor() store.ExecutorProfile {
 	return store.ExecutorProfile{ID: "executor", ProjectID: coverageScope(), Name: "Executor", Engine: "test", ModelProfileID: "model", RuntimeID: "runtime", EngineSettings: store.EmptyObject, Enabled: true}
 }
 func coverageIssue() store.Issue {
-	return store.Issue{ID: "issue", ProjectID: coverageProjectID(), Title: "Issue", Status: "TODO"}
+	return store.Issue{ID: "issue", ProjectID: coverageProjectID(), Key: "AB-1", Number: 1, Title: "Issue", Status: "TODO"}
 }
 func coverageRun() store.Run {
 	a := "agent"
@@ -79,7 +79,7 @@ func TestControlPlaneServiceHappyPaths(t *testing.T) {
 	ctx := context.Background()
 	pid := coverageProjectID()
 	scope := &pid
-	f := &fakeStore{project: store.Project{ID: pid, Name: "Project", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, agent: store.Agent{ID: "agent", ProjectID: scope, Name: "Agent", ExecutorProfileID: "executor", ConcurrencyLimit: 1, State: "ENABLED"}}
+	f := &fakeStore{project: store.Project{ID: pid, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, agent: store.Agent{ID: "agent", ProjectID: scope, Name: "Agent", ExecutorProfileID: "executor", ConcurrencyLimit: 1, State: "ENABLED"}}
 	svc := New(f)
 	p := f.project
 	provider := coverageProvider()

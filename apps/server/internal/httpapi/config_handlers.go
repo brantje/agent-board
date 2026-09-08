@@ -100,7 +100,7 @@ func (a *api) createProject(w http.ResponseWriter, r *http.Request) {
 	if branch == "" {
 		branch = "main"
 	}
-	v, err := a.service.CreateProject(r.Context(), store.Project{Name: req.Name, RepositoryPath: req.RepositoryPath, DefaultBranch: branch, WorkflowSettings: req.WorkflowSettings})
+	v, err := a.service.CreateProject(r.Context(), store.Project{Name: req.Name, IssuePrefix: req.IssuePrefix, RepositoryPath: req.RepositoryPath, DefaultBranch: branch, WorkflowSettings: req.WorkflowSettings})
 	if err != nil {
 		writeAppError(w, err)
 		return

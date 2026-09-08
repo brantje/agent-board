@@ -17,6 +17,7 @@ type APIError struct {
 type ProjectDTO struct {
 	ID               string          `json:"id"`
 	Name             string          `json:"name"`
+	IssuePrefix      string          `json:"issuePrefix"`
 	RepositoryPath   string          `json:"repositoryPath"`
 	DefaultBranch    string          `json:"defaultBranch"`
 	WorkflowSettings json.RawMessage `json:"workflowSettings"`
@@ -27,6 +28,7 @@ type ProjectDTO struct {
 type IssueDTO struct {
 	ID              string    `json:"id"`
 	ProjectID       string    `json:"projectId"`
+	Number          int       `json:"number"`
 	Title           string    `json:"title"`
 	Description     string    `json:"description"`
 	Status          string    `json:"status"`
@@ -135,6 +137,7 @@ type RunDTO struct {
 
 type CreateProjectRequest struct {
 	Name             string          `json:"name"`
+	IssuePrefix      string          `json:"issuePrefix"`
 	RepositoryPath   string          `json:"repositoryPath"`
 	DefaultBranch    string          `json:"defaultBranch"`
 	WorkflowSettings json.RawMessage `json:"workflowSettings"`

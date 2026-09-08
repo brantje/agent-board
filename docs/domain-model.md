@@ -24,6 +24,8 @@ An Issue owns one authoritative Workspace in v0.1 and may have multiple executio
 
 Core Issue fields include title, description, durable Board status, priority and optional assigned Agent.
 
+Each Issue has a public key `<project.issue_prefix>-<number>` allocated atomically per Project. The prefix is configured when the Project is created, is globally unique and immutable. The key is the public Issue identifier in URLs and APIs; the internal persistence identity remains a UUID.
+
 Priority uses the numeric vocabulary `0..4`: `0` is the default/base priority and higher integers represent higher relative priority. Priority is metadata, not an execution command; it does not independently change status, bypass workflow policy or create/cancel Runs.
 
 Board workflow:

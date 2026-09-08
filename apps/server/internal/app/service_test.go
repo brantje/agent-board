@@ -26,6 +26,12 @@ func (f *fakeStore) GetAgentInScope(context.Context, *string, string) (store.Age
 	}
 	return f.agent, nil
 }
+func (f *fakeStore) GetIssueUUIDByKey(_ context.Context, projectID, key string) (string, error) {
+	if projectID != f.project.ID || key != "AB-1" {
+		return "", store.ErrNotFound
+	}
+	return "issue", nil
+}
 
 func TestCreateRuntimeRejectsInvalidPolicyBeforeStore(t *testing.T) {
 	projectID := "project"

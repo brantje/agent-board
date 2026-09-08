@@ -75,13 +75,11 @@ func (a *api) listReviews(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := store.ReviewFilter{}
-	if issueID := strings.TrimSpace(r.URL.Query().Get("issueId")); issueID != "" {
-		if !validUUID(issueID) {
-			writeError(w, http.StatusBadRequest, "invalid_id", "issueId must be a UUID")
-			return
-		}
-		filter.IssueID = &issueID
+	issueUUID, ok := queryIssueKey(w, r, "issueId", projectID, a.service.ResolveIssueUUID)
+	if !ok {
+		return
 	}
+	filter.IssueID = issueUUID
 	if status := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("status"))); status != "" {
 		switch status {
 		case "PENDING", "APPROVED", "CHANGES_REQUESTED", "CANCELLED":
@@ -96,9 +94,14 @@ func (a *api) listReviews(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	response := make([]ReviewDTO, 0, len(values))
 	for _, value := range values {
-		response = append(response, reviewDTO(value))
+		response = append(response, reviewDTO(value, keys))
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -113,10 +116,15 @@ func (a *api) getReview(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	response := ReviewDetailDTO{
-		Review:     reviewDTO(value.Review),
+		Review:     reviewDTO(value.Review, keys),
 		TestStatus: value.TestStatus,
-		Evidence:   runEvidenceDTO(value.Evidence),
+		Evidence:   runEvidenceDTO(value.Evidence, keys),
 	}
 	if value.Decision != nil {
 		decision := reviewDecisionDTO(*value.Decision)
@@ -135,10 +143,15 @@ func (a *api) approveReview(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, ReviewApprovalResponse{
-		Review:   reviewDTO(result.Review),
+		Review:   reviewDTO(result.Review, keys),
 		Decision: reviewDecisionDTO(result.Decision),
-		Run:      runDTO(result.Run),
+		Run:      runDTO(result.Run, keys),
 		Issue:    issueDTO(result.Issue),
 	})
 }
@@ -157,10 +170,15 @@ func (a *api) requestReviewChanges(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusAccepted, ReviewRequestChangesResponse{
-		Review:   reviewDTO(result.Review),
+		Review:   reviewDTO(result.Review, keys),
 		Decision: reviewDecisionDTO(result.Decision),
-		Run:      runDTO(result.Run),
+		Run:      runDTO(result.Run, keys),
 		Issue:    issueDTO(result.Issue),
 		JobID:    result.Job.ID,
 	})
@@ -178,9 +196,9 @@ func reviewPath(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 	return projectID, reviewID, true
 }
 
-func reviewDTO(value store.Review) ReviewDTO {
+func reviewDTO(value store.Review, issueKeys map[string]string) ReviewDTO {
 	return ReviewDTO{
-		ID: value.ID, ProjectID: value.ProjectID, IssueID: value.IssueID, RunID: value.RunID,
+		ID: value.ID, ProjectID: value.ProjectID, IssueID: issueKeyForUUID(issueKeys, value.IssueID), RunID: value.RunID,
 		Status: value.Status, RequestedAt: value.RequestedAt, DecidedAt: value.DecidedAt,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}

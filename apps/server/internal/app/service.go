@@ -245,6 +245,17 @@ func (s *Service) GetIssue(ctx context.Context, projectID, issueID string) (stor
 	value, err := s.store.GetIssue(ctx, projectID, issueID)
 	return value, translateStoreError(err, "issue")
 }
+
+func (s *Service) ResolveIssueUUID(ctx context.Context, projectID, key string) (string, error) {
+	if _, err := s.GetProject(ctx, projectID); err != nil {
+		return "", err
+	}
+	if !store.ValidIssueKey(key) {
+		return "", invalid("issue id must be an issue key")
+	}
+	uuid, err := s.store.GetIssueUUIDByKey(ctx, projectID, key)
+	return uuid, translateStoreError(err, "issue")
+}
 func (s *Service) CreateIssue(ctx context.Context, input store.Issue) (store.Issue, error) {
 	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
 		return store.Issue{}, err
@@ -308,6 +319,10 @@ func validObject(value json.RawMessage) bool {
 func validateProject(v store.Project) error {
 	if strings.TrimSpace(v.Name) == "" || strings.TrimSpace(v.RepositoryPath) == "" {
 		return invalid("project name and repositoryPath are required")
+	}
+	prefix := store.NormalizeIssuePrefix(v.IssuePrefix)
+	if !store.ValidIssuePrefix(prefix) {
+		return invalid("issuePrefix is required and must be 2-10 alphanumeric characters starting with a letter")
 	}
 	if v.DefaultBranch != "" && strings.TrimSpace(v.DefaultBranch) == "" {
 		return invalid("defaultBranch must not be blank")
