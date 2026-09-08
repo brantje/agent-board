@@ -91,8 +91,18 @@ func prefixForTestName(name string) string {
 	if len(clean) < 2 {
 		return "TP"
 	}
+	// Preserve suffix uniqueness when names share a long common prefix.
 	if len(clean) > 10 {
-		return clean[:10]
+		clean = clean[len(clean)-10:]
+	}
+	if clean[0] < 'A' || clean[0] > 'Z' {
+		clean = "T" + clean
+		if len(clean) > 10 {
+			clean = clean[len(clean)-10:]
+		}
+	}
+	if len(clean) < 2 {
+		return "TP"
 	}
 	return clean
 }
