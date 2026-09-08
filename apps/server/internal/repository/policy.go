@@ -63,6 +63,31 @@ func ParseRoots(value string) []string {
 	return roots
 }
 
+func (p *Policy) Ensure(path string) (string, error) {
+	if p == nil || len(p.roots) == 0 {
+		return "", ErrNoAuthorizedRoots
+	}
+	path = strings.TrimSpace(path)
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("repository path %q: %w", path, ErrPathNotAbsolute)
+	}
+	cleaned := filepath.Clean(path)
+	if err := p.authorizeCandidate(cleaned); err != nil {
+		return "", err
+	}
+	if _, err := os.Stat(cleaned); os.IsNotExist(err) {
+		if err := os.MkdirAll(cleaned, 0o755); err != nil {
+			return "", fmt.Errorf("create repository path: %w: %v", ErrPathUnavailable, err)
+		}
+	} else if err != nil {
+		return "", fmt.Errorf("stat repository path: %w: %v", ErrPathUnavailable, err)
+	}
+	if err := ensureWritable(cleaned); err != nil {
+		return "", fmt.Errorf("make repository path writable: %w: %v", ErrPathUnavailable, err)
+	}
+	return p.Resolve(cleaned)
+}
+
 func (p *Policy) Resolve(path string) (string, error) {
 	if p == nil || len(p.roots) == 0 {
 		return "", ErrNoAuthorizedRoots
@@ -106,4 +131,65 @@ func within(root, path string) bool {
 		return false
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
+}
+
+func (p *Policy) authorizeCandidate(candidate string) error {
+	existing, err := longestExistingPrefix(candidate)
+	if err != nil {
+		return fmt.Errorf("resolve repository path: %w: %v", ErrPathUnavailable, err)
+	}
+	canonicalExisting, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return fmt.Errorf("resolve repository path: %w: %v", ErrPathUnavailable, err)
+	}
+	for _, configuredRoot := range p.roots {
+		root, err := filepath.EvalSymlinks(configuredRoot)
+		if err != nil || filepath.Clean(root) != filepath.Clean(configuredRoot) {
+			continue
+		}
+		rootInfo, err := os.Stat(root)
+		if err != nil || !rootInfo.IsDir() {
+			continue
+		}
+		if within(root, canonicalExisting) && within(root, candidate) {
+			return nil
+		}
+	}
+	return fmt.Errorf("repository path %q: %w", candidate, ErrPathNotAuthorized)
+}
+
+func longestExistingPrefix(path string) (string, error) {
+	cleaned := filepath.Clean(path)
+	for current := cleaned; ; current = filepath.Dir(current) {
+		_, statErr := os.Lstat(current)
+		if statErr == nil {
+			return current, nil
+		}
+		if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+		if current == filepath.Dir(current) {
+			return "", fmt.Errorf("no existing prefix for %q", cleaned)
+		}
+	}
+}
+
+func ensureWritable(path string) error {
+	probe := filepath.Join(path, ".agent-board-write-probe")
+	if err := os.WriteFile(probe, nil, 0o600); err == nil {
+		_ = os.Remove(probe)
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	mode := info.Mode().Perm()
+	if err := os.Chmod(path, mode|0o220); err != nil {
+		return err
+	}
+	if err := os.WriteFile(probe, nil, 0o600); err != nil {
+		return err
+	}
+	return os.Remove(probe)
 }

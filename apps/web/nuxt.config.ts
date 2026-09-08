@@ -24,6 +24,15 @@ export default defineNuxtConfig({
       script: [{ innerHTML: themeBootstrap }]
     }
   },
+  icon: {
+    serverBundle: 'local',
+    localApiEndpoint: '/_nuxt_icon',
+    clientBundle: {
+      scan: {
+        globInclude: ['app/**/*.{vue,ts}']
+      }
+    }
+  },
   routeRules: {
     '/api/**': {
       proxy: `${resolveAgentBoardApiUrl(process.env.AGENT_BOARD_API_URL)}/api/**`

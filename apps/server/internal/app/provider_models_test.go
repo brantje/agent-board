@@ -1,0 +1,109 @@
+package app
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
+	"github.com/brantje/agent-board/apps/server/internal/secrets"
+	"github.com/brantje/agent-board/apps/server/internal/store"
+)
+
+const testProviderID = "22222222-2222-4222-8222-222222222222"
+
+type providerModelStore struct {
+	fakeStore
+	provider store.Provider
+}
+
+func (s *providerModelStore) GetProvider(_ context.Context, id string) (store.Provider, error) {
+	if id != s.provider.ID {
+		return store.Provider{}, store.ErrNotFound
+	}
+	return s.provider, nil
+}
+
+type fakeProviderModelSecretResolver struct {
+	values map[string][]byte
+}
+
+func (f *fakeProviderModelSecretResolver) Resolve(_ context.Context, _ secrets.Scope, ref string) ([]byte, error) {
+	value, ok := f.values[ref]
+	if !ok {
+		return nil, secrets.ErrNotFound
+	}
+	return value, nil
+}
+
+func TestListProviderModelsReturnsDiscoveredModels(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{{"id": "model-a"}, {"id": "model-b"}},
+		})
+	}))
+	defer upstream.Close()
+
+	ref := "provider:" + testProviderID
+	store := &providerModelStore{provider: store.Provider{
+		ID:            testProviderID,
+		Name:          "Provider",
+		Kind:          "openai-compatible",
+		BaseURL:       &[]string{upstream.URL}[0],
+		CredentialRef: &ref,
+		Enabled:       true,
+		SafeMetadata:  store.EmptyObject,
+	}}
+	service := New(store)
+	resolver := &fakeProviderModelSecretResolver{values: map[string][]byte{ref: []byte("secret")}}
+
+	models, err := service.ListProviderModels(context.Background(), testProviderID, resolver, upstream.Client())
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if len(models) != 2 || models[0].ID != "model-a" || models[1].ID != "model-b" {
+		t.Fatalf("models=%v", models)
+	}
+}
+
+func TestListProviderModelsRequiresSecretResolverWhenCredentialConfigured(t *testing.T) {
+	ref := "provider:" + testProviderID
+	store := &providerModelStore{provider: store.Provider{
+		ID:            testProviderID,
+		Kind:          "openai",
+		CredentialRef: &ref,
+		Enabled:       true,
+		SafeMetadata:  store.EmptyObject,
+	}}
+	service := New(store)
+	_, err := service.ListProviderModels(context.Background(), testProviderID, nil, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "provider_credential_unavailable" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListProviderModelsRejectsUnconfiguredCustomProvider(t *testing.T) {
+	store := &providerModelStore{provider: store.Provider{
+		ID:           testProviderID,
+		Kind:         "llamarack",
+		Enabled:      true,
+		SafeMetadata: store.EmptyObject,
+	}}
+	service := New(store)
+	_, err := service.ListProviderModels(context.Background(), testProviderID, &fakeProviderModelSecretResolver{}, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "provider_model_discovery_unconfigured" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+var _ executioncontext.SecretResolver = (*fakeProviderModelSecretResolver)(nil)

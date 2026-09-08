@@ -10,6 +10,11 @@ export interface Project {
   updatedAt: string
 }
 
+export interface RepositorySettings {
+  defaultRepositoryPath: string
+  repositoryRoots: string[]
+}
+
 export interface Issue {
   id: string
   projectId: string
