@@ -1,11 +1,20 @@
 JSONMap:
   type: object
   additionalProperties: true
+IssueKey:
+  type: string
+  description: Public Issue identifier in the form PREFIX-NUMBER, for example AB-12.
+  pattern: '^[A-Z][A-Z0-9]{1,9}-[1-9][0-9]*$'
+IssuePrefix:
+  type: string
+  description: Immutable per-Project Issue key prefix. Uppercase letters and digits; 2-10 characters and must start with a letter.
+  pattern: '^[A-Z][A-Z0-9]{1,9}$'
 Project:
   type: object
   required:
   - id
   - name
+  - issuePrefix
   - repositoryPath
   - defaultBranch
   - workflowSettings
@@ -14,6 +23,7 @@ Project:
   properties:
     id: {type: string, format: uuid}
     name: {type: string}
+    issuePrefix: {$ref: '#/IssuePrefix'}
     repositoryPath: {type: string}
     defaultBranch: {type: string}
     workflowSettings: {$ref: '#/JSONMap'}
@@ -22,9 +32,10 @@ Project:
 ProjectCreate:
   type: object
   additionalProperties: false
-  required: [name, repositoryPath]
+  required: [name, issuePrefix, repositoryPath]
   properties:
     name: {type: string}
+    issuePrefix: {$ref: '#/IssuePrefix'}
     repositoryPath: {type: string}
     defaultBranch: {type: string, default: main}
     workflowSettings: {$ref: '#/JSONMap'}
@@ -192,10 +203,11 @@ AgentInput:
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}
 Issue:
   type: object
-  required: [id, projectId, title, description, status, priority, assignedAgentId, createdAt, updatedAt]
+  required: [id, projectId, number, title, description, status, priority, assignedAgentId, createdAt, updatedAt]
   properties:
-    id: {type: string, format: uuid}
+    id: {$ref: '#/IssueKey'}
     projectId: {type: string, format: uuid}
+    number: {type: integer, minimum: 1}
     title: {type: string}
     description: {type: string}
     status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]}
@@ -240,8 +252,8 @@ IssueRelationship:
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
-    sourceIssueId: {type: string, format: uuid}
-    targetIssueId: {type: string, format: uuid}
+    sourceIssueId: {$ref: '#/IssueKey'}
+    targetIssueId: {$ref: '#/IssueKey'}
     type:
       type: string
       enum: [blocks, depends_on, related_to, duplicates]
@@ -253,7 +265,7 @@ IssueRelationshipCreate:
   additionalProperties: false
   required: [targetIssueId, type]
   properties:
-    targetIssueId: {type: string, format: uuid}
+    targetIssueId: {$ref: '#/IssueKey'}
     type:
       type: string
       enum: [blocks, depends_on, related_to, duplicates]
@@ -264,7 +276,7 @@ Run:
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
-    issueId: {type: string, format: uuid}
+    issueId: {$ref: '#/IssueKey'}
     workspaceId: {type: string, format: uuid}
     agentId: {type: [string, 'null'], format: uuid}
     attempt: {type: integer, minimum: 1}

@@ -5,7 +5,7 @@ Question:
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
-    issueId: {type: string, format: uuid}
+    issueId: {$ref: '../schemas/control-plane.yaml#/IssueKey'}
     runId: {type: string, format: uuid}
     prompt: {type: string}
     kind:

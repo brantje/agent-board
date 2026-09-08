@@ -21,6 +21,7 @@ export interface Field {
   min?: number
   max?: number
   help?: string
+  immutable?: boolean
 }
 
 interface Definition {
@@ -39,6 +40,7 @@ export const definitions: Record<ConfigKind, Definition> = {
     singular: 'Project',
     fields: [
       name,
+      { key: 'issuePrefix', label: 'Issue prefix', required: true, immutable: true, help: 'Immutable public prefix for Issue keys such as AB-12. Use 2-10 uppercase letters and digits; must start with a letter.' },
       { key: 'repositoryPath', label: 'Local repository path', required: true, help: 'Path visible to the backend within deployment-authorized repository roots.' },
       { key: 'defaultBranch', label: 'Default branch', initial: 'main', required: true },
       { key: 'workflowSettings', label: 'Workflow settings', type: 'json', initial: '{}', help: 'Optional workflow policy overrides supported by your Go server.' }
@@ -127,8 +129,9 @@ export function draftFor(kind: ConfigKind, source: Record<string, unknown> = {})
   })) as Draft
 }
 
-export function payloadFor(kind: ConfigKind, draft: Draft): Record<string, unknown> {
+export function payloadFor(kind: ConfigKind, draft: Draft, options?: { editing?: boolean }): Record<string, unknown> {
   return Object.fromEntries(definitions[kind].fields
+    .filter(field => !(options?.editing && field.immutable))
     .map(field => {
       const value = draft[field.key]
       return [field.key,
@@ -138,6 +141,8 @@ export function payloadFor(kind: ConfigKind, draft: Draft): Record<string, unkno
             ? JSON.parse(String(value))
             : field.type === 'lines'
               ? String(value).split('\n').map(item => item.trim()).filter(Boolean)
+              : field.key === 'issuePrefix'
+                ? String(value).trim().toUpperCase()
               : typeof value === 'string' ? value.trim() : value]
     }))
 }
@@ -151,6 +156,9 @@ export function validateDraft(kind: ConfigKind, draft: Draft) {
         || (field.min !== undefined && Number(value) < field.min)
         || (field.max !== undefined && Number(value) > field.max)
         || (field.key !== 'temperature' && !Number.isInteger(Number(value)))
+    }
+    if (field.key === 'issuePrefix') {
+      invalid ||= !/^[A-Za-z][A-Za-z0-9]{1,9}$/.test(String(value).trim())
     }
     if (field.options) invalid ||= !field.options.includes(String(value))
     if (field.type === 'json') {

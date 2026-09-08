@@ -23,6 +23,9 @@ const (
 	executorID  = "55555555-5555-4555-8555-555555555555"
 	agentID     = "66666666-6666-4666-8666-666666666666"
 	issueID     = "77777777-7777-4777-8777-777777777777"
+	issueKey    = "AB-1"
+	otherIssueKey = "AB-2"
+	missingIssueKey = "AB-99"
 	runID       = "88888888-8888-4888-8888-888888888888"
 	workspaceID = "99999999-9999-4999-8999-999999999999"
 	otherID     = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -37,11 +40,18 @@ func scoped(scope *string) *string {
 	v := *scope
 	return &v
 }
+func issueFixture(status string) store.Issue {
+	return store.Issue{ID: issueID, ProjectID: projectID, Key: issueKey, Number: 1, Title: "Issue", Status: status}
+}
+
 func (f *fakeControlPlaneStore) ListProjects(context.Context) ([]store.Project, error) {
-	return []store.Project{{ID: projectID, Name: "Project", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}}, nil
+	return []store.Project{{ID: projectID, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}}, nil
 }
 func (f *fakeControlPlaneStore) CreateProject(_ context.Context, v store.Project) (store.Project, error) {
 	v.ID = projectID
+	if v.IssuePrefix == "" {
+		v.IssuePrefix = "AB"
+	}
 	if v.WorkflowSettings == nil {
 		v.WorkflowSettings = store.EmptyObject
 	}
@@ -51,7 +61,7 @@ func (f *fakeControlPlaneStore) GetProject(_ context.Context, id string) (store.
 	if id != projectID {
 		return store.Project{}, store.ErrNotFound
 	}
-	return store.Project{ID: projectID, Name: "Project", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, nil
+	return store.Project{ID: projectID, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, nil
 }
 func (f *fakeControlPlaneStore) UpdateProject(_ context.Context, v store.Project) (store.Project, error) {
 	return v, nil
@@ -153,19 +163,37 @@ func (f *fakeControlPlaneStore) UpdateAgent(_ context.Context, _ *string, v stor
 }
 func (f *fakeControlPlaneStore) CreateIssue(_ context.Context, v store.Issue) (store.Issue, error) {
 	v.ID = issueID
+	v.Key = issueKey
+	v.Number = 1
 	return v, nil
 }
 func (f *fakeControlPlaneStore) GetIssue(_ context.Context, pid, id string) (store.Issue, error) {
 	if pid != projectID || id != issueID {
 		return store.Issue{}, store.ErrNotFound
 	}
-	return store.Issue{ID: issueID, ProjectID: projectID, Title: "Issue", Status: "TODO"}, nil
+	return issueFixture("TODO"), nil
+}
+func (f *fakeControlPlaneStore) GetIssueUUIDByKey(_ context.Context, pid, key string) (string, error) {
+	if pid != projectID {
+		return "", store.ErrNotFound
+	}
+	switch key {
+	case issueKey:
+		return issueID, nil
+	case otherIssueKey:
+		return otherID, nil
+	default:
+		return "", store.ErrNotFound
+	}
 }
 func (f *fakeControlPlaneStore) ListIssues(_ context.Context, pid string) ([]store.Issue, error) {
 	if pid != projectID {
 		return nil, store.ErrNotFound
 	}
-	return []store.Issue{{ID: issueID, ProjectID: projectID, Title: "Issue", Status: "TODO"}}, nil
+	return []store.Issue{
+		issueFixture("TODO"),
+		{ID: otherID, ProjectID: projectID, Key: otherIssueKey, Number: 2, Title: "Other", Status: "BACKLOG"},
+	}, nil
 }
 func (f *fakeControlPlaneStore) UpdateIssue(_ context.Context, v store.Issue) (store.Issue, error) {
 	return v, nil
@@ -183,13 +211,15 @@ func (f *fakeControlPlaneStore) GetRun(_ context.Context, pid, id string) (store
 	return store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 1, Status: "QUEUED"}, nil
 }
 func (f *fakeControlPlaneStore) AssignIssue(context.Context, string, string, string) (store.Issue, store.Run, error) {
-	return store.Issue{ID: issueID, ProjectID: projectID, Title: "Issue", Status: "IN_PROGRESS", AssignedAgentID: stringPtr(agentID)}, store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 1, Status: "QUEUED"}, nil
+	issue := issueFixture("IN_PROGRESS")
+	issue.AssignedAgentID = stringPtr(agentID)
+	return issue, store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 1, Status: "QUEUED"}, nil
 }
 func stringPtr(v string) *string { return &v }
 
 func TestControlPlaneRoutes(t *testing.T) {
 	router := NewRouter(app.New(&fakeControlPlaneStore{}))
-	projectBody := `{"name":"Project","repositoryPath":"/repo","workflowSettings":{}}`
+	projectBody := `{"name":"Project","issuePrefix":"AB","repositoryPath":"/repo","workflowSettings":{}}`
 	providerBody := `{"name":"Provider","kind":"test","credentialRef":"secret-ref","safeMetadata":{}}`
 	modelBody := `{"providerId":"` + providerID + `","name":"Model","model":"model","generationSettings":{}}`
 	runtimeBody := `{"name":"Runtime","kind":"docker","image":"image","networkPolicy":"none","capabilities":{}}`
@@ -252,15 +282,15 @@ func TestControlPlaneRoutes(t *testing.T) {
 		struct {
 			name, method, path, body string
 			status                   int
-		}{"get issue", "GET", "/api/projects/" + projectID + "/issues/" + issueID, "", 200},
+		}{"get issue", "GET", "/api/projects/" + projectID + "/issues/" + issueKey, "", 200},
 		struct {
 			name, method, path, body string
 			status                   int
-		}{"update issue", "PATCH", "/api/projects/" + projectID + "/issues/" + issueID, `{"status":"IN_PROGRESS"}`, 200},
+		}{"update issue", "PATCH", "/api/projects/" + projectID + "/issues/" + issueKey, `{"status":"IN_PROGRESS"}`, 200},
 		struct {
 			name, method, path, body string
 			status                   int
-		}{"assign issue", "POST", "/api/projects/" + projectID + "/issues/" + issueID + "/assignment", `{"agentId":"` + agentID + `"}`, 202},
+		}{"assign issue", "POST", "/api/projects/" + projectID + "/issues/" + issueKey + "/assignment", `{"agentId":"` + agentID + `"}`, 202},
 		struct {
 			name, method, path, body string
 			status                   int
@@ -298,12 +328,13 @@ func TestControlPlaneRejectsInvalidRequestsAndInaccessibleIDs(t *testing.T) {
 		status                         int
 	}{
 		{"invalid project id", "GET", "/api/projects/not-a-uuid", "", "invalid_id", 400},
-		{"unknown field", "POST", "/api/projects", `{"name":"P","repositoryPath":"/repo","unknown":true}`, "invalid_request", 400},
-		{"multiple objects", "POST", "/api/projects", `{"name":"P","repositoryPath":"/repo"} {}`, "invalid_request", 400},
+		{"unknown field", "POST", "/api/projects", `{"name":"P","issuePrefix":"AB","repositoryPath":"/repo","unknown":true}`, "invalid_request", 400},
+		{"multiple objects", "POST", "/api/projects", `{"name":"P","issuePrefix":"AB","repositoryPath":"/repo"} {}`, "invalid_request", 400},
 		{"invalid runtime", "POST", "/api/runtimes", `{"name":"R","kind":"podman","image":"i","networkPolicy":"none"}`, "invalid_argument", 400},
-		{"cross project issue", "GET", "/api/projects/" + projectID + "/issues/" + otherID, "", "issue_not_found", 404},
+		{"cross project issue", "GET", "/api/projects/" + projectID + "/issues/" + missingIssueKey, "", "issue_not_found", 404},
+		{"uuid issue id rejected", "GET", "/api/projects/" + projectID + "/issues/" + issueID, "", "invalid_id", 400},
 		{"missing provider", "GET", "/api/providers/" + otherID, "", "provider_not_found", 404},
-		{"invalid assignment agent", "POST", "/api/projects/" + projectID + "/issues/" + issueID + "/assignment", `{"agentId":"bad"}`, "invalid_id", 400},
+		{"invalid assignment agent", "POST", "/api/projects/" + projectID + "/issues/" + issueKey + "/assignment", `{"agentId":"bad"}`, "invalid_id", 400},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -397,7 +428,7 @@ func blockHasMethod(doc, label, method string) bool {
 }
 
 func TestDTOsMarshalAsObjects(t *testing.T) {
-	for _, value := range []any{projectDTO(store.Project{WorkflowSettings: store.EmptyObject}), issueDTO(store.Issue{}), providerDTO(store.Provider{SafeMetadata: store.EmptyObject}), modelProfileDTO(store.ModelProfile{GenerationSettings: store.EmptyObject}), runtimeDTO(store.Runtime{Capabilities: store.EmptyObject}), executorProfileDTO(store.ExecutorProfile{EngineSettings: store.EmptyObject}), agentDTO(store.Agent{}), runDTO(store.Run{})} {
+	for _, value := range []any{projectDTO(store.Project{IssuePrefix: "AB", WorkflowSettings: store.EmptyObject}), issueDTO(issueFixture("TODO")), providerDTO(store.Provider{SafeMetadata: store.EmptyObject}), modelProfileDTO(store.ModelProfile{GenerationSettings: store.EmptyObject}), runtimeDTO(store.Runtime{Capabilities: store.EmptyObject}), executorProfileDTO(store.ExecutorProfile{EngineSettings: store.EmptyObject}), agentDTO(store.Agent{}), runDTO(store.Run{IssueID: issueID}, map[string]string{issueID: issueKey})} {
 		if _, err := json.Marshal(value); err != nil {
 			t.Fatal(err)
 		}

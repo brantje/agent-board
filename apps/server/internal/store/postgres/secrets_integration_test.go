@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/secrets"
-	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 func TestSecretStoreKeepsScopesSeparate(t *testing.T) {
@@ -14,11 +13,11 @@ func TestSecretStoreKeepsScopesSeparate(t *testing.T) {
 	s := New(pool)
 	ctx := context.Background()
 
-	projectA, err := s.CreateProject(ctx, store.Project{Name: "secret-project-a", RepositoryPath: "/repo/a"})
+	projectA, err := s.CreateProject(ctx, testProjectInput("secret-project-a", "/repo/a", "SPA"))
 	if err != nil {
 		t.Fatalf("create project A: %v", err)
 	}
-	projectB, err := s.CreateProject(ctx, store.Project{Name: "secret-project-b", RepositoryPath: "/repo/b"})
+	projectB, err := s.CreateProject(ctx, testProjectInput("secret-project-b", "/repo/b", "SPB"))
 	if err != nil {
 		t.Fatalf("create project B: %v", err)
 	}
@@ -53,7 +52,7 @@ func TestSecretStoreUpsertRotatesCiphertextWithoutChangingScope(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
 	ctx := context.Background()
-	project, err := s.CreateProject(ctx, store.Project{Name: "secret-rotation-project", RepositoryPath: "/repo"})
+	project, err := s.CreateProject(ctx, testProjectInput("secret-rotation-project", "/repo", "SROT"))
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}

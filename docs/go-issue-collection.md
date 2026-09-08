@@ -34,7 +34,7 @@ Issue updates preserve the TypeScript optimistic status invariant. The handler f
 
 Issue relationships use the canonical `issue_relationships` table and preserve its Project-scoped foreign keys, source/target non-self constraint, relationship type constraint, and uniqueness key `(project_id, source_issue_id, target_issue_id, type)`. Relationship listing remains source-scoped and deterministic by `created_at asc, id asc`. Deletion is scoped by Project, source Issue, and relationship ID.
 
-The public DTO remains compatible with `packages/contracts`: Issue keys are `<issuePrefix>-<number>`, `assignedAgentId` is populated only for agent assignees, nullable execution/assignment fields remain nullable, relationship DTOs preserve their Project/source/target/type fields, and timestamps use the existing TypeScript-compatible UTC millisecond format.
+The public DTO remains compatible with `packages/api`: Issue keys are `<issuePrefix>-<number>`, `assignedAgentId` is populated only for agent assignees, nullable execution/assignment fields remain nullable, relationship DTOs preserve their Project/source/target/type fields, and timestamps use the existing TypeScript-compatible UTC millisecond format.
 
 ## HTTP compatibility
 

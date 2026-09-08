@@ -37,9 +37,9 @@ func TestProjectScopedEndpointsHideMissingProject(t *testing.T) {
 		{http.MethodPut, "/api/projects/" + otherID + "/agents/" + agentID, agentBody},
 		{http.MethodGet, "/api/projects/" + otherID + "/issues", ""},
 		{http.MethodPost, "/api/projects/" + otherID + "/issues", issueBody},
-		{http.MethodGet, "/api/projects/" + otherID + "/issues/" + issueID, ""},
-		{http.MethodPatch, "/api/projects/" + otherID + "/issues/" + issueID, `{"status":"IN_PROGRESS"}`},
-		{http.MethodPost, "/api/projects/" + otherID + "/issues/" + issueID + "/assignment", `{"agentId":"` + agentID + `"}`},
+		{http.MethodGet, "/api/projects/" + otherID + "/issues/" + issueKey, ""},
+		{http.MethodPatch, "/api/projects/" + otherID + "/issues/" + issueKey, `{"status":"IN_PROGRESS"}`},
+		{http.MethodPost, "/api/projects/" + otherID + "/issues/" + issueKey + "/assignment", `{"agentId":"` + agentID + `"}`},
 		{http.MethodGet, "/api/projects/" + otherID + "/runs", ""},
 		{http.MethodGet, "/api/projects/" + otherID + "/runs/" + runID, ""},
 	}

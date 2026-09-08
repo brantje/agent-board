@@ -13,11 +13,11 @@ func TestCoreStoreIsProjectScoped(t *testing.T) {
 	s := New(pool)
 	ctx := context.Background()
 
-	projectA, err := s.CreateProject(ctx, store.Project{Name: "A", RepositoryPath: "/repo/a"})
+	projectA, err := s.CreateProject(ctx, testProjectInput("A", "/repo/a", "PA"))
 	if err != nil {
 		t.Fatalf("create project A: %v", err)
 	}
-	projectB, err := s.CreateProject(ctx, store.Project{Name: "B", RepositoryPath: "/repo/b"})
+	projectB, err := s.CreateProject(ctx, testProjectInput("B", "/repo/b", "PB"))
 	if err != nil {
 		t.Fatalf("create project B: %v", err)
 	}
@@ -45,8 +45,8 @@ func TestConfigurationStoreAllowsGlobalButRejectsForeignProjectReferences(t *tes
 	s := New(pool)
 	ctx := context.Background()
 
-	projectA, _ := s.CreateProject(ctx, store.Project{Name: "A", RepositoryPath: "/repo/a"})
-	projectB, _ := s.CreateProject(ctx, store.Project{Name: "B", RepositoryPath: "/repo/b"})
+	projectA, _ := s.CreateProject(ctx, testProjectInput("A", "/repo/a", "PA2"))
+	projectB, _ := s.CreateProject(ctx, testProjectInput("B", "/repo/b", "PB2"))
 	provider, err := s.CreateProvider(ctx, store.Provider{Name: "provider", Kind: "openai-compatible", Enabled: true})
 	if err != nil {
 		t.Fatalf("create provider: %v", err)

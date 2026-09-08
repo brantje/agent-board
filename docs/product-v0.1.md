@@ -108,6 +108,7 @@ The first v0.1 repository source is a local Git repository accessible to the bac
 ```text
 Local repository path/source
 Default/base branch
+Issue prefix (immutable, globally unique; forms public Issue keys such as AB-12)
 ```
 
 The source path is validated against deployment-authorized repository roots; Project configuration is not arbitrary filesystem access.

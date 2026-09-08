@@ -28,7 +28,7 @@ type runFixture struct {
 func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	t.Helper()
 	ctx := context.Background()
-	project, err := s.CreateProject(ctx, store.Project{Name: "project-" + suffix, RepositoryPath: "/repo/" + suffix})
+	project, err := s.CreateProject(ctx, testProjectInput("project-"+suffix, "/repo/"+suffix, ""))
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}

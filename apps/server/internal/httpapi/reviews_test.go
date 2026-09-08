@@ -72,7 +72,7 @@ func (s *httpReviewStore) CompleteReviewApproval(_ context.Context, command stor
 		Review:   store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "APPROVED", DecisionID: &decision.ID},
 		Decision: decision,
 		Run:      store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, Status: "COMPLETED"},
-		Issue:    store.Issue{ID: issueID, ProjectID: projectID, Status: "DONE"},
+		Issue:    store.Issue{ID: issueID, ProjectID: projectID, Key: issueKey, Number: 1, Status: "DONE"},
 	}, nil
 }
 
@@ -94,7 +94,7 @@ func (s *httpReviewStore) RequestReviewChanges(_ context.Context, command store.
 		Review:   store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "CHANGES_REQUESTED", DecisionID: &decision.ID},
 		Decision: decision,
 		Run:      store.Run{ID: reviewNextRunID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, Attempt: 2, Status: "QUEUED"},
-		Issue:    store.Issue{ID: issueID, ProjectID: projectID, Status: "IN_PROGRESS"},
+		Issue:    store.Issue{ID: issueID, ProjectID: projectID, Key: issueKey, Number: 1, Status: "IN_PROGRESS"},
 		Job:      store.SchedulerJob{ID: reviewJobID, ProjectID: projectID, RunID: reviewNextRunID, Kind: "START", State: "QUEUED"},
 	}, nil
 }
@@ -140,7 +140,7 @@ func TestReviewRoutesExposeEvidenceAndCommands(t *testing.T) {
 	})
 
 	t.Run("list by issue", func(t *testing.T) {
-		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/projects/"+projectID+"/reviews?issueId="+issueID, nil)
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/projects/"+projectID+"/reviews?issueId="+issueKey, nil)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), reviewID) {

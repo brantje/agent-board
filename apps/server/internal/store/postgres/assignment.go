@@ -73,17 +73,16 @@ func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID str
 		return store.Issue{}, store.Run{}, err
 	}
 
-	priority := issue.Priority
-	issue, err = scanIssue(tx.QueryRow(ctx, `
-        UPDATE issues
+	issue, err = scanIssueJoined(tx.QueryRow(ctx, `
+        UPDATE issues AS i
         SET assigned_agent_id=$3, status='IN_PROGRESS', updated_at=now()
-        WHERE project_id=$1 AND id=$2
-        RETURNING id::text, project_id::text, title, description, status, assigned_agent_id::text, created_at, updated_at
+        FROM projects AS p
+        WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
+        RETURNING `+issueSelectColumns+`
     `, projectID, issueID, agentID))
 	if err != nil {
 		return store.Issue{}, store.Run{}, err
 	}
-	issue.Priority = priority
 
 	run, err := scanRun(tx.QueryRow(ctx, `
         INSERT INTO runs (project_id, issue_id, workspace_id, agent_id, attempt, status)
@@ -109,23 +108,22 @@ func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID str
 
 func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID string) (store.Issue, string, string, error) {
 	var issue store.Issue
-	var repositoryPath, defaultBranch string
+	var repositoryPath, defaultBranch, prefix string
 	err := tx.QueryRow(ctx, `
-        SELECT issue.id::text, issue.project_id::text, issue.title, issue.description, issue.status, issue.priority,
-               issue.assigned_agent_id::text, issue.created_at, issue.updated_at,
-               project.repository_path, project.default_branch
-        FROM issues AS issue
-        JOIN projects AS project ON project.id=issue.project_id
-        WHERE issue.project_id=$1 AND issue.id=$2
-        FOR UPDATE OF issue
+        SELECT `+issueSelectColumns+`, p.repository_path, p.default_branch
+        FROM issues AS i
+        JOIN projects AS p ON p.id=i.project_id
+        WHERE i.project_id=$1 AND i.id=$2
+        FOR UPDATE OF i
     `, projectID, issueID).Scan(
 		&issue.ID, &issue.ProjectID, &issue.Title, &issue.Description, &issue.Status, &issue.Priority,
-		&issue.AssignedAgentID, &issue.CreatedAt, &issue.UpdatedAt,
+		&issue.AssignedAgentID, &issue.Number, &prefix, &issue.CreatedAt, &issue.UpdatedAt,
 		&repositoryPath, &defaultBranch,
 	)
 	if err != nil {
 		return store.Issue{}, "", "", notFound(err)
 	}
+	issue.Key = store.FormatIssueKey(prefix, issue.Number)
 	return issue, repositoryPath, defaultBranch, nil
 }
 

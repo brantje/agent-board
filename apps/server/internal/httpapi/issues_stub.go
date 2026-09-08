@@ -81,11 +81,11 @@ func (a *api) getIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issueID, ok := pathUUID(w, r, "issueID")
+	issueUUID, ok := pathIssueKey(w, r, projectID, a.service.ResolveIssueUUID)
 	if !ok {
 		return
 	}
-	value, err := a.service.GetIssue(r.Context(), projectID, issueID)
+	value, err := a.service.GetIssue(r.Context(), projectID, issueUUID)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -98,11 +98,11 @@ func (a *api) updateIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issueID, ok := pathUUID(w, r, "issueID")
+	issueUUID, ok := pathIssueKey(w, r, projectID, a.service.ResolveIssueUUID)
 	if !ok {
 		return
 	}
-	current, err := a.service.GetIssue(r.Context(), projectID, issueID)
+	current, err := a.service.GetIssue(r.Context(), projectID, issueUUID)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -140,18 +140,23 @@ func (a *api) listIssueRelationships(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issueID, ok := pathUUID(w, r, "issueID")
+	issueUUID, ok := pathIssueKey(w, r, projectID, a.service.ResolveIssueUUID)
 	if !ok {
 		return
 	}
-	values, err := a.service.ListIssueRelationships(r.Context(), projectID, issueID)
+	values, err := a.service.ListIssueRelationships(r.Context(), projectID, issueUUID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	keys, err := a.issueKeyMap(r.Context(), projectID)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	out := make([]IssueRelationshipDTO, 0, len(values))
 	for _, value := range values {
-		out = append(out, issueRelationshipDTO(value))
+		out = append(out, issueRelationshipDTO(value, keys))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -161,7 +166,7 @@ func (a *api) createIssueRelationship(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issueID, ok := pathUUID(w, r, "issueID")
+	issueUUID, ok := pathIssueKey(w, r, projectID, a.service.ResolveIssueUUID)
 	if !ok {
 		return
 	}
@@ -169,21 +174,22 @@ func (a *api) createIssueRelationship(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if !validUUID(req.TargetIssueID) {
-		writeError(w, http.StatusBadRequest, "invalid_id", "targetIssueId must be a UUID")
+	targetUUID, ok := bodyIssueKey(w, r, projectID, req.TargetIssueID, "targetIssueId", a.service.ResolveIssueUUID)
+	if !ok {
 		return
 	}
 	value, err := a.service.CreateIssueRelationship(r.Context(), store.IssueRelationship{
 		ProjectID:     projectID,
-		SourceIssueID: issueID,
-		TargetIssueID: req.TargetIssueID,
+		SourceIssueID: issueUUID,
+		TargetIssueID: targetUUID,
 		Type:          req.Type,
 	})
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, issueRelationshipDTO(value))
+	keys := issueKeysFromResolved(issueUUID, chi.URLParam(r, "issueID"), targetUUID, req.TargetIssueID)
+	writeJSON(w, http.StatusCreated, issueRelationshipDTO(value, keys))
 }
 
 func (a *api) deleteIssueRelationship(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +197,7 @@ func (a *api) deleteIssueRelationship(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issueID, ok := pathUUID(w, r, "issueID")
+	issueUUID, ok := pathIssueKey(w, r, projectID, a.service.ResolveIssueUUID)
 	if !ok {
 		return
 	}
@@ -199,7 +205,7 @@ func (a *api) deleteIssueRelationship(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := a.service.DeleteIssueRelationship(r.Context(), projectID, issueID, relationshipID); err != nil {
+	if err := a.service.DeleteIssueRelationship(r.Context(), projectID, issueUUID, relationshipID); err != nil {
 		writeAppError(w, err)
 		return
 	}
@@ -216,9 +222,14 @@ func (a *api) listRuns(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	out := make([]RunDTO, 0, len(values))
 	for _, value := range values {
-		out = append(out, runDTO(value))
+		out = append(out, runDTO(value, keys))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -237,7 +248,12 @@ func (a *api) getRun(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runDTO(value))
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runDTO(value, keys))
 }
 
 func (a *api) assignIssue(w http.ResponseWriter, r *http.Request) {
@@ -245,7 +261,7 @@ func (a *api) assignIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issueID, ok := pathUUID(w, r, "issueID")
+	issueUUID, ok := pathIssueKey(w, r, projectID, a.service.ResolveIssueUUID)
 	if !ok {
 		return
 	}
@@ -257,10 +273,11 @@ func (a *api) assignIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_id", "agentId must be a UUID")
 		return
 	}
-	issue, run, err := a.service.AssignIssue(r.Context(), projectID, issueID, req.AgentID)
+	issue, run, err := a.service.AssignIssue(r.Context(), projectID, issueUUID, req.AgentID)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusAccepted, AssignmentResponse{Issue: issueDTO(issue), Run: runDTO(run)})
+	keys := issueKeysFromPath(issueUUID, chi.URLParam(r, "issueID"))
+	writeJSON(w, http.StatusAccepted, AssignmentResponse{Issue: issueDTO(issue), Run: runDTO(run, keys)})
 }

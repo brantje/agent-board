@@ -3,6 +3,7 @@ import type { ArtifactEvidence, EventEvidence, Project, Question, Review, Review
 export const project: Project = {
   id: 'project-a',
   name: 'Workspace',
+  issuePrefix: 'AB',
   repositoryPath: '/repo',
   defaultBranch: 'main',
   workflowSettings: {},
@@ -13,7 +14,7 @@ export const project: Project = {
 export const run: Run = {
   id: 'run-1',
   projectId: project.id,
-  issueId: 'issue-1',
+  issueId: 'AB-1',
   workspaceId: 'workspace-1',
   agentId: 'agent-1',
   attempt: 1,
@@ -89,7 +90,7 @@ export function question(partial: Partial<Question> = {}): Question {
   return {
     id: 'question-1',
     projectId: project.id,
-    issueId: 'issue-1',
+    issueId: 'AB-1',
     runId: run.id,
     prompt: 'Which strategy?',
     kind: 'SINGLE_CHOICE',
@@ -107,7 +108,7 @@ export function review(partial: Partial<Review> = {}): Review {
   return {
     id: 'review-1',
     projectId: project.id,
-    issueId: 'issue-1',
+    issueId: 'AB-1',
     runId: run.id,
     status: 'PENDING',
     requestedAt: '2026-01-01T00:10:00.000Z',

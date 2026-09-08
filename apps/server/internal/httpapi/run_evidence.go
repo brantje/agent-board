@@ -110,7 +110,12 @@ func (a *api) getRunEvidence(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, runEvidenceDTO(value))
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runEvidenceDTO(value, keys))
 }
 
 func (a *api) getRawOutputChunk(w http.ResponseWriter, r *http.Request) {
@@ -180,9 +185,9 @@ func evidenceRunPath(w http.ResponseWriter, r *http.Request) (string, string, bo
 	return projectID, runID, true
 }
 
-func runEvidenceDTO(value app.RunEvidence) RunEvidenceDTO {
+func runEvidenceDTO(value app.RunEvidence, issueKeys map[string]string) RunEvidenceDTO {
 	out := RunEvidenceDTO{
-		Run:              runDTO(value.Run),
+		Run:              runDTO(value.Run, issueKeys),
 		Provenance:       value.Provenance,
 		RuntimeInstances: make([]RuntimeInstanceEvidenceDTO, 0, len(value.RuntimeInstances)),
 		Commands:         make([]ExecutionSessionEvidenceDTO, 0, len(value.Sessions)),

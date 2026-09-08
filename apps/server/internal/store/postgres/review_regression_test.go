@@ -64,7 +64,7 @@ func TestUpdateIssueRejectsDoneWhileRunOrSchedulerJobIsActive(t *testing.T) {
 func TestUpdateRuntimeNormalizesNilAllowedSecretRefs(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
-	project, err := s.CreateProject(ctx, store.Project{Name: "runtime-update", RepositoryPath: "/repo/runtime-update"})
+	project, err := s.CreateProject(ctx, testProjectInput("runtime-update", "/repo/runtime-update", "RTUP"))
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}

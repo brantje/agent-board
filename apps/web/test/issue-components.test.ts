@@ -9,7 +9,8 @@ import { useRefresh } from '../app/composables/useRefresh'
 import { uiStubs } from './ui-stubs'
 
 const issue = {
-  id: 'issue-123456',
+  id: 'AB-12',
+  number: 12,
   projectId: 'p',
   title: 'Fix scheduler',
   description: 'Persist leases',
@@ -64,7 +65,8 @@ afterEach(() => {
 describe('Issue workflow components', () => {
   it('renders the authoritative card hierarchy and safe links for assigned/unassigned Issues', async () => {
     const wrapper = mount(IssueCard, { props: { issue }, global })
-    expect(wrapper.get('a').attributes('href')).toBe('/projects/p/issues/issue-123456')
+    expect(wrapper.get('a').attributes('href')).toBe('/projects/p/issues/AB-12')
+    expect(wrapper.text()).toContain('AB-12')
     expect(wrapper.text()).toContain('Unassigned')
     await wrapper.setProps({ issue: { ...issue, assignedAgentId: 'a' } })
     expect(wrapper.text()).toContain('Assigned Agent')

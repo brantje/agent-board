@@ -51,13 +51,11 @@ func (a *api) listQuestions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filter := store.QuestionFilter{}
-	if issueID := r.URL.Query().Get("issueId"); issueID != "" {
-		if !validUUID(issueID) {
-			writeError(w, http.StatusBadRequest, "invalid_id", "issueId must be a UUID")
-			return
-		}
-		filter.IssueID = &issueID
+	issueUUID, ok := queryIssueKey(w, r, "issueId", projectID, a.service.ResolveIssueUUID)
+	if !ok {
+		return
 	}
+	filter.IssueID = issueUUID
 	if runID := r.URL.Query().Get("runId"); runID != "" {
 		if !validUUID(runID) {
 			writeError(w, http.StatusBadRequest, "invalid_id", "runId must be a UUID")
@@ -83,9 +81,14 @@ func (a *api) listQuestions(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	response := make([]QuestionDTO, 0, len(questions))
 	for _, question := range questions {
-		response = append(response, questionDTO(question))
+		response = append(response, questionDTO(question, keys))
 	}
 	writeJSON(w, http.StatusOK, response)
 }
@@ -104,7 +107,12 @@ func (a *api) getQuestion(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, questionDTO(question))
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, questionDTO(question, keys))
 }
 
 func (a *api) answerQuestion(w http.ResponseWriter, r *http.Request) {
@@ -118,6 +126,11 @@ func (a *api) answerQuestion(w http.ResponseWriter, r *http.Request) {
 	}
 	var request QuestionAnswerRequest
 	if !decodeJSON(w, r, &request) {
+		return
+	}
+	keys, err := a.issueKeyMap(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
 		return
 	}
 	result, err := a.questions.Answer(r.Context(), projectID, questionID, store.QuestionAnswer{
@@ -135,14 +148,14 @@ func (a *api) answerQuestion(w http.ResponseWriter, r *http.Request) {
 		resumeJobID = &id
 	}
 	writeJSON(w, http.StatusOK, QuestionAnswerResponse{
-		Question:    questionDTO(result.Question),
+		Question:    questionDTO(result.Question, keys),
 		DecisionID:  result.Decision.ID,
-		Run:         runDTO(result.Run),
+		Run:         runDTO(result.Run, keys),
 		ResumeJobID: resumeJobID,
 	})
 }
 
-func questionDTO(question store.Question) QuestionDTO {
+func questionDTO(question store.Question, issueKeys map[string]string) QuestionDTO {
 	options := append(json.RawMessage(nil), question.Options...)
 	if len(options) == 0 {
 		options = json.RawMessage(`[]`)
@@ -150,7 +163,7 @@ func questionDTO(question store.Question) QuestionDTO {
 	return QuestionDTO{
 		ID:             question.ID,
 		ProjectID:      question.ProjectID,
-		IssueID:        question.IssueID,
+		IssueID:        issueKeyForUUID(issueKeys, question.IssueID),
 		RunID:          question.RunID,
 		Prompt:         question.Prompt,
 		Kind:           question.Kind,

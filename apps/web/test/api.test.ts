@@ -5,7 +5,7 @@ afterEach(() => vi.unstubAllGlobals())
 
 describe('Go API transport', () => {
   it('encodes scoped paths and refuses unsafe path segments', () => {
-    expect(apiPath('issues', 'project-1', 'issue-1')).toBe('/api/projects/project-1/issues/issue-1')
+    expect(apiPath('issues', 'project-1', 'AB-1')).toBe('/api/projects/project-1/issues/AB-1')
     expect(apiPath('providers')).toBe('/api/providers')
     expect(() => apiPath('../secrets')).toThrow()
   })
@@ -75,7 +75,7 @@ describe('Go API transport', () => {
   })
 
   it('encodes query strings and reads bounded raw-output text', async () => {
-    expect(apiQuery('/api/projects/p/questions', { issueId: 'issue-1', status: 'OPEN' })).toBe('/api/projects/p/questions?issueId=issue-1&status=OPEN')
+    expect(apiQuery('/api/projects/p/questions', { issueId: 'AB-1', status: 'OPEN' })).toBe('/api/projects/p/questions?issueId=AB-1&status=OPEN')
     expect(apiQuery('/api/projects/p/runs/r/events', { afterSequence: '3' })).toBe('/api/projects/p/runs/r/events?afterSequence=3')
     expect(() => apiQuery('/api/../x')).toThrow()
     const fetch = vi.fn().mockResolvedValue(new Response('log chunk', { headers: { 'Content-Type': 'text/plain' } }))

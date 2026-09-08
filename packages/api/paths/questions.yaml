@@ -8,8 +8,7 @@ path1:
     - name: issueId
       in: query
       schema:
-        type: string
-        format: uuid
+        $ref: ../schemas/control-plane.yaml#/IssueKey
     - name: runId
       in: query
       schema:

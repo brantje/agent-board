@@ -81,7 +81,7 @@ describe('useRunEvents', () => {
       if (path.endsWith('/evidence')) return new Response(JSON.stringify(snapshot))
       if (path.includes('/questions')) return new Response(JSON.stringify([]))
       if (path.includes('/reviews')) return new Response(JSON.stringify([]))
-      if (path.includes('/issues/')) return new Response(JSON.stringify({ id: 'issue-1', status: 'IN_PROGRESS' }))
+      if (path.includes('/issues/')) return new Response(JSON.stringify({ id: 'AB-1', status: 'IN_PROGRESS' }))
       if (path.endsWith('/runs/run-1')) return new Response(JSON.stringify({ ...snapshot.run, status: 'WAITING_FOR_INPUT' }))
       return new Response('{}', { status: 404 })
     })

@@ -13,11 +13,11 @@ func TestIssuePriorityAndRelationships(t *testing.T) {
 	s := New(pool)
 	ctx := context.Background()
 
-	project, err := s.CreateProject(ctx, store.Project{Name: "relationships", RepositoryPath: "/repo/relationships"})
+	project, err := s.CreateProject(ctx, testProjectInput("relationships", "/repo/relationships", "REL"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherProject, err := s.CreateProject(ctx, store.Project{Name: "relationships-other", RepositoryPath: "/repo/relationships-other"})
+	otherProject, err := s.CreateProject(ctx, testProjectInput("relationships-other", "/repo/relationships-other", "RELO"))
 	if err != nil {
 		t.Fatal(err)
 	}

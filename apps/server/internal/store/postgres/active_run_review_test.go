@@ -10,7 +10,7 @@ func TestAssignIssueTreatsReadyForReviewRunAsActive(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
 
-	project, err := s.CreateProject(ctx, store.Project{Name: "ready-review", RepositoryPath: "/repo/ready-review"})
+	project, err := s.CreateProject(ctx, testProjectInput("ready-review", "/repo/ready-review", "RRV"))
 	if err != nil {
 		t.Fatalf("create project: %v", err)
 	}

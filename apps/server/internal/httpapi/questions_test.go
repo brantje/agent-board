@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -84,5 +85,42 @@ func TestQuestionRoutesListAndAnswer(t *testing.T) {
 	}
 	if !strings.Contains(answer.Body.String(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb") {
 		t.Fatalf("answer response=%s", answer.Body.String())
+	}
+}
+
+type listIssuesFailingStore struct {
+	*fakeControlPlaneStore
+	err error
+}
+
+func (s *listIssuesFailingStore) ListIssues(context.Context, string) ([]store.Issue, error) {
+	return nil, s.err
+}
+
+func TestQuestionAnswerLoadsIssueKeysBeforeMutation(t *testing.T) {
+	questionStore := &apiQuestionStore{questions: []store.Question{{
+		ID:        otherID,
+		ProjectID: projectID,
+		IssueID:   issueID,
+		RunID:     runID,
+		Prompt:    "Which strategy?",
+		Kind:      "TEXT",
+		Options:   json.RawMessage(`[]`),
+		Blocking:  true,
+		Status:    "OPEN",
+	}}}
+	questionService, err := app.NewQuestionService(questionStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := newRouter(app.New(&listIssuesFailingStore{fakeControlPlaneStore: &fakeControlPlaneStore{}, err: errors.New("list issues unavailable")}), nil, nil, nil, questionService)
+
+	answer := httptest.NewRecorder()
+	router.ServeHTTP(answer, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/questions/"+otherID+"/answer", strings.NewReader(`{"kind":"TEXT","text":"Use the safe path"}`)))
+	if answer.Code != http.StatusInternalServerError {
+		t.Fatalf("answer status=%d body=%s", answer.Code, answer.Body.String())
+	}
+	if questionStore.answered != nil {
+		t.Fatal("expected Answer mutation to be skipped when issue key lookup fails")
 	}
 }

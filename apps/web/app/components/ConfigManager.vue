@@ -85,7 +85,7 @@ async function save() {
   saving.value = true
   saveError.value = undefined
   try {
-    const body = payloadFor(props.kind, draft.value)
+    const body = payloadFor(props.kind, draft.value, { editing: Boolean(selected.value) })
     if (props.kind === 'providers' && credential.value) {
       body.credential = credential.value
     }
@@ -134,7 +134,7 @@ async function save() {
           </div>
 
           <p v-if="kind === 'projects'" class="mt-2 text-sm font-mono break-all">
-            {{ item.repositoryPath }} · {{ item.defaultBranch }}
+            {{ item.issuePrefix }} · {{ item.repositoryPath }} · {{ item.defaultBranch }}
           </p>
           <div v-if="kind === 'runtimes'" class="mt-2 space-y-1 text-sm text-muted">
             <p class="font-mono break-all">{{ item.image }}</p>
@@ -162,9 +162,9 @@ async function save() {
             <div class="form-grid">
               <UFormField v-for="field in definition.fields" :key="field.key" :label="field.label" :name="field.key" :description="field.help" :required="field.required">
                 <UCheckbox v-if="field.type === 'checkbox'" :model-value="Boolean(draft[field.key])" :disabled="controlsDisabled" @update:model-value="draft[field.key] = $event === true" />
-                <USelect v-else-if="field.type === 'select'" v-model="draft[field.key] as string" :items="field.resource ? resourceOptions(references[field.key]?.data.value || []) : field.options" class="w-full" :disabled="controlsDisabled" />
-                <UTextarea v-else-if="['textarea', 'json', 'lines'].includes(field.type || '')" v-model="draft[field.key] as string" class="w-full" :disabled="controlsDisabled" />
-                <UInput v-else v-model="draft[field.key] as string" :type="field.type === 'number' ? 'number' : 'text'" :min="field.min" :max="field.max" :step="field.key === 'temperature' ? 'any' : 1" class="w-full" :disabled="controlsDisabled" />
+                <USelect v-else-if="field.type === 'select'" v-model="draft[field.key] as string" :items="field.resource ? resourceOptions(references[field.key]?.data.value || []) : field.options" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
+                <UTextarea v-else-if="['textarea', 'json', 'lines'].includes(field.type || '')" v-model="draft[field.key] as string" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
+                <UInput v-else v-model="draft[field.key] as string" :type="field.type === 'number' ? 'number' : 'text'" :min="field.min" :max="field.max" :step="field.key === 'temperature' ? 'any' : 1" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
               </UFormField>
             </div>
 

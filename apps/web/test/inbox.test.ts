@@ -26,7 +26,7 @@ describe('inbox composition', () => {
       ]
     }])
     expect(items.map(item => [item.kind, item.id, item.to])).toEqual([
-      ['question', 'question-1', '/projects/project-a/issues/issue-1'],
+      ['question', 'question-1', '/projects/project-a/issues/AB-1'],
       ['review', 'review-1', '/projects/project-a/reviews/review-1'],
       ['run', 'fail', '/projects/project-a/runs/fail'],
       ['run', 'wait', '/projects/project-a/runs/wait'],
@@ -50,7 +50,7 @@ describe('InboxView', () => {
     const wrapper = mount(InboxView, { global })
     await flushPromises()
 
-    expect(wrapper.get('a[href="/projects/project-a/issues/issue-1"]').exists()).toBe(true)
+    expect(wrapper.get('a[href="/projects/project-a/issues/AB-1"]').exists()).toBe(true)
     expect(wrapper.get('a[href="/projects/project-a/reviews/review-1"]').exists()).toBe(true)
     expect(wrapper.get('a[href="/projects/project-a/runs/run-1"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Other')
