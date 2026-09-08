@@ -272,25 +272,16 @@ func createOpenCodeIntegrationRun(
 	if err != nil {
 		t.Fatal(err)
 	}
-	executorProfile, err := control.CreateExecutorProfile(ctx, store.ExecutorProfile{
-		ProjectID:      &scope,
-		Name:           "OpenCode integration executor",
-		Engine:         opencode.Name,
-		ModelProfileID: model.ID,
-		RuntimeID:      runtimeConfig.ID,
-		EngineSettings: store.EmptyObject,
-		Enabled:        true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	agent, err := control.CreateAgent(ctx, store.Agent{
-		ProjectID:         &scope,
-		Name:              "OpenCode integration agent",
-		RoleInstructions:  "Follow the issue instructions exactly. Use OpenCode's native Question tool for the requested human choice and wait for the answer before editing.",
-		ExecutorProfileID: executorProfile.ID,
-		ConcurrencyLimit:  1,
-		State:             "ENABLED",
+		ProjectID:        &scope,
+		Name:             "OpenCode integration agent",
+		RoleInstructions: "Follow the issue instructions exactly. Use OpenCode's native Question tool for the requested human choice and wait for the answer before editing.",
+		Engine:           opencode.Name,
+		ModelProfileID:   model.ID,
+		RuntimeID:        runtimeConfig.ID,
+		EngineSettings:   store.EmptyObject,
+		ConcurrencyLimit: 1,
+		State:            "ENABLED",
 	})
 	if err != nil {
 		t.Fatal(err)

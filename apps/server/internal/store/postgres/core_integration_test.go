@@ -60,7 +60,7 @@ func TestConfigurationStoreAllowsGlobalButRejectsForeignProjectReferences(t *tes
 	if err != nil {
 		t.Fatalf("create project runtime: %v", err)
 	}
-	if _, err := s.CreateExecutorProfile(ctx, store.ExecutorProfile{ProjectID: &projectB.ID, Name: "bad", Engine: "scripted", ModelProfileID: modelA.ID, RuntimeID: runtimeA.ID, Enabled: true}); err == nil {
+	if _, err := s.CreateAgent(ctx, store.Agent{ProjectID: &projectB.ID, Name: "bad", Engine: "scripted", ModelProfileID: modelA.ID, RuntimeID: runtimeA.ID}); err == nil {
 		t.Fatal("expected foreign project configuration reference to fail")
 	}
 
@@ -72,11 +72,7 @@ func TestConfigurationStoreAllowsGlobalButRejectsForeignProjectReferences(t *tes
 	if err != nil {
 		t.Fatalf("create global runtime: %v", err)
 	}
-	profile, err := s.CreateExecutorProfile(ctx, store.ExecutorProfile{Name: "global-profile", Engine: "scripted", ModelProfileID: globalModel.ID, RuntimeID: globalRuntime.ID, Enabled: true})
-	if err != nil {
-		t.Fatalf("create global executor profile: %v", err)
-	}
-	agent, err := s.CreateAgent(ctx, store.Agent{Name: "global-agent", ExecutorProfileID: profile.ID, ConcurrencyLimit: 2})
+	agent, err := s.CreateAgent(ctx, store.Agent{Name: "global-agent", Engine: "scripted", ModelProfileID: globalModel.ID, RuntimeID: globalRuntime.ID, ConcurrencyLimit: 2})
 	if err != nil {
 		t.Fatalf("create global agent: %v", err)
 	}
@@ -84,11 +80,7 @@ func TestConfigurationStoreAllowsGlobalButRejectsForeignProjectReferences(t *tes
 		t.Fatalf("get global agent from project: got=%+v err=%v", got, err)
 	}
 
-	profileA, err := s.CreateExecutorProfile(ctx, store.ExecutorProfile{ProjectID: &projectA.ID, Name: "profile-a", Engine: "scripted", ModelProfileID: modelA.ID, RuntimeID: runtimeA.ID, Enabled: true})
-	if err != nil {
-		t.Fatalf("create project executor profile: %v", err)
-	}
-	agentA, err := s.CreateAgent(ctx, store.Agent{ProjectID: &projectA.ID, Name: "agent-a", ExecutorProfileID: profileA.ID})
+	agentA, err := s.CreateAgent(ctx, store.Agent{ProjectID: &projectA.ID, Name: "agent-a", Engine: "scripted", ModelProfileID: modelA.ID, RuntimeID: runtimeA.ID})
 	if err != nil {
 		t.Fatalf("create project agent: %v", err)
 	}

@@ -33,9 +33,6 @@ func (s *reviewFeedbackStore) GetWorkspace(context.Context, string, string) (sto
 func (s *reviewFeedbackStore) GetAgentInScope(context.Context, *string, string) (store.Agent, error) {
 	return store.Agent{}, store.ErrNotFound
 }
-func (s *reviewFeedbackStore) GetExecutorProfile(context.Context, *string, string) (store.ExecutorProfile, error) {
-	return store.ExecutorProfile{}, store.ErrNotFound
-}
 func (s *reviewFeedbackStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) {
 	return store.ModelProfile{}, store.ErrNotFound
 }

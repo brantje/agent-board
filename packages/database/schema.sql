@@ -94,31 +94,15 @@ CREATE TABLE runtimes (
 CREATE UNIQUE INDEX runtimes_global_name_uq ON runtimes (lower(name)) WHERE project_id IS NULL;
 CREATE UNIQUE INDEX runtimes_project_name_uq ON runtimes (project_id, lower(name)) WHERE project_id IS NOT NULL;
 
-CREATE TABLE executor_profiles (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
-    name text NOT NULL CHECK (btrim(name) <> ''),
-    engine text NOT NULL CHECK (btrim(engine) <> ''),
-    model_profile_id uuid NOT NULL REFERENCES model_profiles(id) ON DELETE RESTRICT,
-    runtime_id uuid NOT NULL REFERENCES runtimes(id) ON DELETE RESTRICT,
-    engine_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(engine_settings) = 'object'),
-    enabled boolean NOT NULL DEFAULT true,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (project_id, id)
-);
-
-CREATE UNIQUE INDEX executor_profiles_global_name_uq ON executor_profiles (lower(name)) WHERE project_id IS NULL;
-CREATE UNIQUE INDEX executor_profiles_project_name_uq ON executor_profiles (project_id, lower(name)) WHERE project_id IS NOT NULL;
-CREATE INDEX executor_profiles_model_profile_idx ON executor_profiles (model_profile_id);
-CREATE INDEX executor_profiles_runtime_idx ON executor_profiles (runtime_id);
-
 CREATE TABLE agents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
     name text NOT NULL CHECK (btrim(name) <> ''),
     role_instructions text NOT NULL DEFAULT '',
-    executor_profile_id uuid NOT NULL REFERENCES executor_profiles(id) ON DELETE RESTRICT,
+    engine text NOT NULL CHECK (btrim(engine) <> ''),
+    model_profile_id uuid NOT NULL REFERENCES model_profiles(id) ON DELETE RESTRICT,
+    runtime_id uuid NOT NULL REFERENCES runtimes(id) ON DELETE RESTRICT,
+    engine_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(engine_settings) = 'object'),
     concurrency_limit integer NOT NULL DEFAULT 1 CHECK (concurrency_limit >= 1),
     state text NOT NULL DEFAULT 'ENABLED' CHECK (state IN ('DRAFT', 'ENABLED', 'DISABLED', 'ARCHIVED')),
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -128,7 +112,8 @@ CREATE TABLE agents (
 
 CREATE UNIQUE INDEX agents_global_name_uq ON agents (lower(name)) WHERE project_id IS NULL;
 CREATE UNIQUE INDEX agents_project_name_uq ON agents (project_id, lower(name)) WHERE project_id IS NOT NULL;
-CREATE INDEX agents_executor_profile_idx ON agents (executor_profile_id);
+CREATE INDEX agents_model_profile_idx ON agents (model_profile_id);
+CREATE INDEX agents_runtime_idx ON agents (runtime_id);
 
 CREATE TABLE issues (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -464,19 +449,14 @@ CREATE FUNCTION enforce_configuration_scope() RETURNS trigger AS $$
 DECLARE
     referenced_project_id uuid;
 BEGIN
-    IF TG_TABLE_NAME = 'executor_profiles' THEN
+    IF TG_TABLE_NAME = 'agents' THEN
         SELECT project_id INTO referenced_project_id FROM model_profiles WHERE id = NEW.model_profile_id;
         IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
-            RAISE EXCEPTION 'executor profile cannot reference model profile from another project' USING ERRCODE = '23514';
+            RAISE EXCEPTION 'agent cannot reference model profile from another project' USING ERRCODE = '23514';
         END IF;
         SELECT project_id INTO referenced_project_id FROM runtimes WHERE id = NEW.runtime_id;
         IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
-            RAISE EXCEPTION 'executor profile cannot reference runtime from another project' USING ERRCODE = '23514';
-        END IF;
-    ELSIF TG_TABLE_NAME = 'agents' THEN
-        SELECT project_id INTO referenced_project_id FROM executor_profiles WHERE id = NEW.executor_profile_id;
-        IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
-            RAISE EXCEPTION 'agent cannot reference executor profile from another project' USING ERRCODE = '23514';
+            RAISE EXCEPTION 'agent cannot reference runtime from another project' USING ERRCODE = '23514';
         END IF;
     ELSIF TG_TABLE_NAME = 'issues' THEN
         IF NEW.assigned_agent_id IS NOT NULL THEN
@@ -510,27 +490,20 @@ BEGIN
 
     IF TG_TABLE_NAME = 'model_profiles' THEN
         IF EXISTS (
-            SELECT 1 FROM executor_profiles
+            SELECT 1 FROM agents
             WHERE model_profile_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
         ) THEN
             RAISE EXCEPTION 'model profile ownership change would cross project scope' USING ERRCODE = '23514';
         END IF;
     ELSIF TG_TABLE_NAME = 'runtimes' THEN
         IF EXISTS (
-            SELECT 1 FROM executor_profiles
+            SELECT 1 FROM agents
             WHERE runtime_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
         ) OR EXISTS (
             SELECT 1 FROM runtime_instances
             WHERE runtime_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
         ) THEN
             RAISE EXCEPTION 'runtime ownership change would cross project scope' USING ERRCODE = '23514';
-        END IF;
-    ELSIF TG_TABLE_NAME = 'executor_profiles' THEN
-        IF EXISTS (
-            SELECT 1 FROM agents
-            WHERE executor_profile_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
-        ) THEN
-            RAISE EXCEPTION 'executor profile ownership change would cross project scope' USING ERRCODE = '23514';
         END IF;
     END IF;
     RETURN NEW;
@@ -539,10 +512,8 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER model_profiles_owner_change_check BEFORE UPDATE OF project_id ON model_profiles FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 CREATE TRIGGER runtimes_owner_change_check BEFORE UPDATE OF project_id ON runtimes FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
-CREATE TRIGGER executor_profiles_owner_change_check BEFORE UPDATE OF project_id ON executor_profiles FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 
-CREATE TRIGGER executor_profiles_scope_check BEFORE INSERT OR UPDATE OF project_id, model_profile_id, runtime_id ON executor_profiles FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
-CREATE TRIGGER agents_scope_check BEFORE INSERT OR UPDATE OF project_id, executor_profile_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
+CREATE TRIGGER agents_scope_check BEFORE INSERT OR UPDATE OF project_id, model_profile_id, runtime_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER issues_scope_check BEFORE INSERT OR UPDATE OF project_id, assigned_agent_id ON issues FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER runs_scope_check BEFORE INSERT OR UPDATE OF project_id, agent_id ON runs FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER runtime_instances_scope_check BEFORE INSERT OR UPDATE OF project_id, runtime_id ON runtime_instances FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();

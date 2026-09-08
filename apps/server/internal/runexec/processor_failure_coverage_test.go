@@ -98,7 +98,7 @@ func TestProcessorProcessCoversFailureBoundaries(t *testing.T) {
 
 	t.Run("unknown engine fails after safe runtime cleanup", func(t *testing.T) {
 		missing := safe
-		missing.Executor.Engine = "missing"
+		missing.Agent.Engine = "missing"
 		processor, _, runtimes := newFailureCoverageProcessor(
 			t,
 			workspace,

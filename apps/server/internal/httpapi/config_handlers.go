@@ -33,10 +33,6 @@ func (a *api) registerGlobalConfig(r chi.Router) {
 	r.Post("/runtimes", a.createGlobalRuntime)
 	r.Get("/runtimes/{resourceID}", a.getGlobalRuntime)
 	r.Put("/runtimes/{resourceID}", a.updateGlobalRuntime)
-	r.Get("/executor-profiles", a.listGlobalExecutorProfiles)
-	r.Post("/executor-profiles", a.createGlobalExecutorProfile)
-	r.Get("/executor-profiles/{resourceID}", a.getGlobalExecutorProfile)
-	r.Put("/executor-profiles/{resourceID}", a.updateGlobalExecutorProfile)
 	r.Get("/agents", a.listGlobalAgents)
 	r.Post("/agents", a.createGlobalAgent)
 	r.Get("/agents/{resourceID}", a.getGlobalAgent)
@@ -52,10 +48,6 @@ func (a *api) registerScopedConfig(r chi.Router) {
 	r.Post("/projects/{projectID}/runtimes", a.createProjectRuntime)
 	r.Get("/projects/{projectID}/runtimes/{resourceID}", a.getProjectRuntime)
 	r.Put("/projects/{projectID}/runtimes/{resourceID}", a.updateProjectRuntime)
-	r.Get("/projects/{projectID}/executor-profiles", a.listProjectExecutorProfiles)
-	r.Post("/projects/{projectID}/executor-profiles", a.createProjectExecutorProfile)
-	r.Get("/projects/{projectID}/executor-profiles/{resourceID}", a.getProjectExecutorProfile)
-	r.Put("/projects/{projectID}/executor-profiles/{resourceID}", a.updateProjectExecutorProfile)
 	r.Get("/projects/{projectID}/agents", a.listProjectAgents)
 	r.Post("/projects/{projectID}/agents", a.createProjectAgent)
 	r.Get("/projects/{projectID}/agents/{resourceID}", a.getProjectAgent)
@@ -465,106 +457,6 @@ func (a *api) updateProjectRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (a *api) listExecutorProfiles(w http.ResponseWriter, r *http.Request, scope *string) {
-	values, err := a.service.ListExecutorProfiles(r.Context(), scope)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	out := make([]ExecutorProfileDTO, 0, len(values))
-	for _, v := range values {
-		out = append(out, executorProfileDTO(v))
-	}
-	writeJSON(w, 200, out)
-}
-func (a *api) createExecutorProfile(w http.ResponseWriter, r *http.Request, scope *string) {
-	var req CreateExecutorProfileRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	v, err := a.service.CreateExecutorProfile(r.Context(), store.ExecutorProfile{ProjectID: scope, Name: req.Name, Engine: req.Engine, ModelProfileID: req.ModelProfileID, RuntimeID: req.RuntimeID, EngineSettings: req.EngineSettings, Enabled: boolDefault(req.Enabled, true)})
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	writeJSON(w, 201, executorProfileDTO(v))
-}
-func (a *api) getExecutorProfile(w http.ResponseWriter, r *http.Request, scope *string) {
-	id, ok := resourceID(w, r)
-	if !ok {
-		return
-	}
-	v, err := a.service.GetExecutorProfile(r.Context(), scope, id)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	writeJSON(w, 200, executorProfileDTO(v))
-}
-func (a *api) updateExecutorProfile(w http.ResponseWriter, r *http.Request, scope *string) {
-	id, ok := resourceID(w, r)
-	if !ok {
-		return
-	}
-	var req CreateExecutorProfileRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	current, err := a.service.GetExecutorProfile(r.Context(), scope, id)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	current.Name = req.Name
-	current.Engine = req.Engine
-	current.ModelProfileID = req.ModelProfileID
-	current.RuntimeID = req.RuntimeID
-	current.EngineSettings = req.EngineSettings
-	current.Enabled = boolDefault(req.Enabled, current.Enabled)
-	v, err := a.service.UpdateExecutorProfile(r.Context(), scope, current)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	writeJSON(w, 200, executorProfileDTO(v))
-}
-func (a *api) listGlobalExecutorProfiles(w http.ResponseWriter, r *http.Request) {
-	a.listExecutorProfiles(w, r, nil)
-}
-func (a *api) createGlobalExecutorProfile(w http.ResponseWriter, r *http.Request) {
-	a.createExecutorProfile(w, r, nil)
-}
-func (a *api) getGlobalExecutorProfile(w http.ResponseWriter, r *http.Request) {
-	a.getExecutorProfile(w, r, nil)
-}
-func (a *api) updateGlobalExecutorProfile(w http.ResponseWriter, r *http.Request) {
-	a.updateExecutorProfile(w, r, nil)
-}
-func (a *api) listProjectExecutorProfiles(w http.ResponseWriter, r *http.Request) {
-	s, ok := scopeFromProject(w, r)
-	if ok {
-		a.listExecutorProfiles(w, r, s)
-	}
-}
-func (a *api) createProjectExecutorProfile(w http.ResponseWriter, r *http.Request) {
-	s, ok := scopeFromProject(w, r)
-	if ok {
-		a.createExecutorProfile(w, r, s)
-	}
-}
-func (a *api) getProjectExecutorProfile(w http.ResponseWriter, r *http.Request) {
-	s, ok := scopeFromProject(w, r)
-	if ok {
-		a.getExecutorProfile(w, r, s)
-	}
-}
-func (a *api) updateProjectExecutorProfile(w http.ResponseWriter, r *http.Request) {
-	s, ok := scopeFromProject(w, r)
-	if ok {
-		a.updateExecutorProfile(w, r, s)
-	}
-}
-
 func (a *api) listAgents(w http.ResponseWriter, r *http.Request, scope *string) {
 	values, err := a.service.ListAgents(r.Context(), scope)
 	if err != nil {
@@ -590,7 +482,7 @@ func (a *api) createAgent(w http.ResponseWriter, r *http.Request, scope *string)
 	if state == "" {
 		state = "ENABLED"
 	}
-	v, err := a.service.CreateAgent(r.Context(), store.Agent{ProjectID: scope, Name: req.Name, RoleInstructions: req.RoleInstructions, ExecutorProfileID: req.ExecutorProfileID, ConcurrencyLimit: limit, State: state})
+	v, err := a.service.CreateAgent(r.Context(), store.Agent{ProjectID: scope, Name: req.Name, RoleInstructions: req.RoleInstructions, Engine: req.Engine, ModelProfileID: req.ModelProfileID, RuntimeID: req.RuntimeID, EngineSettings: req.EngineSettings, ConcurrencyLimit: limit, State: state})
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -625,7 +517,10 @@ func (a *api) updateAgent(w http.ResponseWriter, r *http.Request, scope *string)
 	}
 	current.Name = req.Name
 	current.RoleInstructions = req.RoleInstructions
-	current.ExecutorProfileID = req.ExecutorProfileID
+	current.Engine = req.Engine
+	current.ModelProfileID = req.ModelProfileID
+	current.RuntimeID = req.RuntimeID
+	current.EngineSettings = req.EngineSettings
 	if req.ConcurrencyLimit != 0 {
 		current.ConcurrencyLimit = req.ConcurrencyLimit
 	}

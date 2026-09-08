@@ -58,7 +58,10 @@ export interface Agent {
   projectId: string | null
   name: string
   roleInstructions: string
-  executorProfileId: string
+  engine: string
+  modelProfileId: string
+  runtimeId: string
+  engineSettings: Record<string, unknown>
   concurrencyLimit: number
   state: string
 }

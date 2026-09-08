@@ -89,25 +89,15 @@ type Runtime struct {
 	UpdatedAt          time.Time
 }
 
-type ExecutorProfile struct {
-	ID             string
-	ProjectID      *string
-	Name           string
-	Engine         string
-	ModelProfileID string
-	RuntimeID      string
-	EngineSettings json.RawMessage
-	Enabled        bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-}
-
 type Agent struct {
 	ID                string
 	ProjectID         *string
 	Name              string
 	RoleInstructions  string
-	ExecutorProfileID string
+	Engine            string
+	ModelProfileID    string
+	RuntimeID         string
+	EngineSettings    json.RawMessage
 	ConcurrencyLimit  int
 	State             string
 	CreatedAt         time.Time

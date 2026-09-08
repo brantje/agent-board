@@ -10,7 +10,6 @@ A user configures a local Project Git repository and runnable Agent, assigns an 
 Local Project repository
   -> Issue
   -> Agent
-  -> Executor Profile
        -> Engine
        -> Model Profile -> Provider
        -> Runtime
@@ -36,8 +35,7 @@ Keep normal configuration understandable:
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Executor Profile
-Agent -> Executor Profile
+Engine + Model Profile + Runtime -> Agent
 Issue -> assignee -> Run
 ```
 
@@ -56,7 +54,6 @@ Shared/global or Project-scoped:
 - Agents
 - Model Profiles
 - Runtimes
-- Executor Profiles
 
 Providers are global in v0.1. Project repository configuration belongs to Project.
 
@@ -93,7 +90,6 @@ Infrastructure
   Runtimes
 Execution
   Agents
-  Executor Profiles
 Projects configure repository/source + workflow behavior
 ```
 
@@ -158,19 +154,6 @@ For v0.1, official Runtime images contain `agent-runner`. A Runtime Instance is 
 
 Runtime Instance, runner, Execution Session and Run remain separate identities. v0.1 permits one active Execution Session per runner while keeping the versioned WebSocket runner protocol compatible with higher future capacity.
 
-## Executor Profile
-
-```text
-Name
-Engine
-Model Profile
-Runtime
-```
-
-Executor Profile references Runtime directly. An Agent references exactly one Executor Profile.
-
-Built-in Engine settings use the Agent Board Nuxt/Nuxt UI frontend. Plugin-provided Engine settings belong to the later sandboxed Plugin boundary.
-
 ## Agent
 
 Agent form:
@@ -178,12 +161,16 @@ Agent form:
 ```text
 Name
 Role / instructions
-Executor Profile
+Engine
+Model Profile
+Runtime
 ```
 
-Operational fields such as concurrency limit may live under Advanced.
+Operational fields such as concurrency limit may live under Advanced. Engine settings are an optional JSON object on the Agent.
 
-Draft, disabled or archived Agents cannot be assigned as runnable Agents. Agent concurrency is enforced by the scheduler.
+Agents select Runtime directly. Draft, disabled or archived Agents cannot be assigned as runnable Agents. Agent concurrency is enforced by the scheduler.
+
+Built-in Engine settings use the Agent Board Nuxt/Nuxt UI frontend. Plugin-provided Engine settings belong to the later sandboxed Plugin boundary.
 
 ## Board workflow
 
@@ -285,7 +272,7 @@ Automatic merge/deploy is a separate, stronger permission and must not be implie
 
 ## Execution preflight
 
-The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Executor Profile, Engine, Model Profile/Provider credentials/health, direct Runtime health/policy, runner protocol compatibility/availability and local Project repository prerequisites.
+The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Engine, Model Profile/Provider credentials/health, direct Runtime health/policy, runner protocol compatibility/availability and local Project repository prerequisites.
 
 ## Explicitly after the v0.1 flow
 
@@ -304,7 +291,7 @@ The product distinguishes `configured` from `runnable`. Preflight evaluates Agen
 
 ## Implementation priority
 
-1. direct Executor Profile -> Runtime configuration
+1. direct Agent -> Runtime configuration
 2. durable async scheduler/restart-safe continuation
 3. local repository-backed Issue Workspaces
 4. Runtime Instance lifecycle with same-Workspace reuse

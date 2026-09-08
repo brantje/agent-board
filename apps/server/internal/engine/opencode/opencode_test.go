@@ -252,8 +252,7 @@ func TestEngineAnswersNativeQuestionWithoutSecondPrompt(t *testing.T) {
 	_, err = adapter.Execute(executeCtx, engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Implement native adapter", Description: "Keep the same native session alive."},
-			Agent:    executioncontext.AgentContext{RoleInstructions: "Make maintainable changes."},
-			Executor: executioncontext.ExecutorContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{RoleInstructions: "Make maintainable changes.", Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "claude-sonnet"},
 			Provider: executioncontext.ProviderContext{Kind: "anthropic", BaseURL: &baseURL},
 		},

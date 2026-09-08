@@ -292,9 +292,9 @@ type settings struct {
 
 func resolveSettings(safe executioncontext.SafeContext) (settings, error) {
 	resolved := settings{ProviderID: strings.TrimSpace(safe.Provider.Kind)}
-	if len(safe.Executor.EngineSettings) != 0 {
+	if len(safe.Agent.EngineSettings) != 0 {
 		var configured settings
-		if err := json.Unmarshal(safe.Executor.EngineSettings, &configured); err != nil {
+		if err := json.Unmarshal(safe.Agent.EngineSettings, &configured); err != nil {
 			return settings{}, fmt.Errorf("opencode engine: decode engine settings: %w", err)
 		}
 		if strings.TrimSpace(configured.ProviderID) != "" {

@@ -10,7 +10,6 @@ Reach the complete v0.1 coding flow as quickly as possible:
 Local Project repository
  -> Issue
  -> Agent
- -> Executor Profile
       -> Engine
       -> Model Profile -> Provider
       -> Runtime
@@ -60,7 +59,7 @@ The Go backend owns:
 - Project/Issue/Agent configuration and commands
 - Provider/Model Profile configuration
 - Runtime configuration and health
-- Executor Profiles and Engine registry/adapters
+- Engine registry/adapters
 - durable Run scheduling/claiming/reconciliation
 - canonical execution-context resolution
 - Workspace/Git orchestration
@@ -94,11 +93,10 @@ Large stdout/stderr, protocol output and Artifacts use durable opaque blob/outpu
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Executor Profile
-Agent -> Executor Profile
+Engine + Model Profile + Runtime -> Agent
 ```
 
-Runtime is a reusable configured execution environment and owns the complete execution policy. Executor Profile references Runtime directly.
+Runtime is a reusable configured execution environment and owns the complete execution policy. Agents select Runtime directly.
 
 ## Runtime model
 
@@ -155,7 +153,7 @@ See `scheduler.md`.
 ## Runtime execution
 
 ```text
-Executor Profile
+Agent
  -> Runtime
  -> verify accessible/enabled/runnable
  -> validated Runtime Spec
@@ -204,7 +202,7 @@ The browser reconstructs live state from persisted reads plus SSE and is never t
 
 ## Provenance and Review evidence
 
-Every Run stores immutable safe execution provenance including the direct Runtime selected through its Executor Profile. Run inspection and Review use this durable evidence rather than mutable current configuration.
+Every Run stores immutable safe execution provenance including the direct Runtime selected by its Agent. Run inspection and Review use this durable evidence rather than mutable current configuration.
 
 Review represents the complete candidate: staged, unstaged, new/untracked, deleted/renamed files, tests, commands, Artifacts and relevant messages where available.
 
@@ -241,7 +239,7 @@ Plugins are deliberately late roadmap work.
 5. A Runtime Instance is bound to exactly one Workspace for its lifetime.
 6. One runner may execute many Execution Sessions over time against that Workspace.
 7. One Execution Session owns one process tree.
-8. Runtime is selected directly by Executor Profile.
+8. Runtime is selected directly by Agent.
 9. Runtime owns complete execution environment/policy configuration.
 10. PostgreSQL owns durable scheduling state.
 11. Browser/request lifetime never owns execution or continuation.

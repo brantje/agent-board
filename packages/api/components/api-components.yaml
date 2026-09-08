@@ -76,12 +76,6 @@ requestBodies:
       application/json:
         schema:
           $ref: ../schemas/control-plane.yaml#/RuntimeInput
-  ExecutorProfileInput:
-    required: true
-    content:
-      application/json:
-        schema:
-          $ref: ../schemas/control-plane.yaml#/ExecutorProfileInput
   AgentInput:
     required: true
     content:
@@ -181,20 +175,6 @@ responses:
           type: array
           items:
             $ref: ../schemas/control-plane.yaml#/Runtime
-  ExecutorProfile:
-    description: ExecutorProfile response.
-    content:
-      application/json:
-        schema:
-          $ref: ../schemas/control-plane.yaml#/ExecutorProfile
-  ExecutorProfileList:
-    description: ExecutorProfile list response.
-    content:
-      application/json:
-        schema:
-          type: array
-          items:
-            $ref: ../schemas/control-plane.yaml#/ExecutorProfile
   Agent:
     description: Agent response.
     content:

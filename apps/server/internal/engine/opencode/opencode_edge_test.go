@@ -41,7 +41,7 @@ func TestResolveSettingsUsesProviderDefaultsAndEngineOverrides(t *testing.T) {
 		t.Fatalf("settings=%+v", resolved)
 	}
 
-	base.Executor.EngineSettings = []byte(`{"providerId":"custom-openrouter","variant":"high"}`)
+	base.Agent.EngineSettings = []byte(`{"providerId":"custom-openrouter","variant":"high"}`)
 	resolved, err = resolveSettings(base)
 	if err != nil {
 		t.Fatal(err)
@@ -50,11 +50,11 @@ func TestResolveSettingsUsesProviderDefaultsAndEngineOverrides(t *testing.T) {
 		t.Fatalf("override settings=%+v", resolved)
 	}
 
-	base.Executor.EngineSettings = []byte(`{`)
+	base.Agent.EngineSettings = []byte(`{`)
 	if _, err := resolveSettings(base); err == nil || !strings.Contains(err.Error(), "decode engine settings") {
 		t.Fatalf("malformed settings error=%v", err)
 	}
-	base.Executor.EngineSettings = nil
+	base.Agent.EngineSettings = nil
 	base.Provider.Kind = " "
 	if _, err := resolveSettings(base); err == nil || !strings.Contains(err.Error(), "provider id and model are required") {
 		t.Fatalf("missing provider error=%v", err)

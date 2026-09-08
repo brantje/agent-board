@@ -15,7 +15,6 @@ type Store interface {
 	GetRun(context.Context, string, string) (store.Run, error)
 	GetWorkspace(context.Context, string, string) (store.Workspace, error)
 	GetAgentInScope(context.Context, *string, string) (store.Agent, error)
-	GetExecutorProfile(context.Context, *string, string) (store.ExecutorProfile, error)
 	GetModelProfile(context.Context, *string, string) (store.ModelProfile, error)
 	GetProvider(context.Context, string) (store.Provider, error)
 	GetRuntime(context.Context, *string, string) (store.Runtime, error)
@@ -81,14 +80,7 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 	if agent.State != "ENABLED" || !scopeAllows(agent.ProjectID, projectID) {
 		return Resolved{}, fail("execution_agent_unavailable", "Agent is not available for execution", nil)
 	}
-	executor, err := r.store.GetExecutorProfile(ctx, scope, agent.ExecutorProfileID)
-	if err != nil {
-		return Resolved{}, fail("execution_executor_unavailable", "Executor Profile configuration is unavailable", err)
-	}
-	if !executor.Enabled || !scopeAllows(executor.ProjectID, projectID) {
-		return Resolved{}, fail("execution_executor_unavailable", "Executor Profile is not available for execution", nil)
-	}
-	model, err := r.store.GetModelProfile(ctx, scope, executor.ModelProfileID)
+	model, err := r.store.GetModelProfile(ctx, scope, agent.ModelProfileID)
 	if err != nil {
 		return Resolved{}, fail("execution_model_unavailable", "Model Profile configuration is unavailable", err)
 	}
@@ -102,7 +94,7 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 	if !provider.Enabled {
 		return Resolved{}, fail("execution_provider_unavailable", "Provider is not available for execution", nil)
 	}
-	runtime, err := r.store.GetRuntime(ctx, scope, executor.RuntimeID)
+	runtime, err := r.store.GetRuntime(ctx, scope, agent.RuntimeID)
 	if err != nil {
 		return Resolved{}, fail("execution_runtime_unavailable", "Runtime configuration is unavailable", err)
 	}
@@ -119,8 +111,7 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 			Project:        ProjectContext{ID: project.ID, Name: project.Name, RepositoryPath: project.RepositoryPath, DefaultBranch: project.DefaultBranch, WorkflowSettings: cloneJSON(project.WorkflowSettings)},
 			Issue:          IssueContext{ID: issue.ID, Title: issue.Title, Description: issue.Description, Status: issue.Status},
 			Run:            RunContext{ID: run.ID, Attempt: run.Attempt},
-			Agent:          AgentContext{ID: agent.ID, Name: agent.Name, RoleInstructions: agent.RoleInstructions},
-			Executor:       ExecutorContext{ID: executor.ID, Name: executor.Name, Engine: executor.Engine, EngineSettings: cloneJSON(executor.EngineSettings)},
+			Agent:          AgentContext{ID: agent.ID, Name: agent.Name, RoleInstructions: agent.RoleInstructions, Engine: agent.Engine, EngineSettings: cloneJSON(agent.EngineSettings)},
 			Model:          ModelContext{ID: model.ID, Name: model.Name, Model: model.Model, Temperature: cloneFloat64(model.Temperature), MaxTokens: cloneInt(model.MaxTokens), GenerationSettings: cloneJSON(model.GenerationSettings)},
 			Provider:       ProviderContext{ID: provider.ID, Name: provider.Name, Kind: provider.Kind, BaseURL: cloneString(provider.BaseURL), SafeMetadata: cloneJSON(provider.SafeMetadata)},
 			Runtime:        RuntimeContext{ID: runtime.ID, Name: runtime.Name, Kind: runtime.Kind, Image: runtime.Image, CPULimitMillis: cloneInt(runtime.CPULimitMillis), MemoryLimitBytes: cloneInt64(runtime.MemoryLimitBytes), PIDLimit: cloneInt(runtime.PIDLimit), TimeoutSeconds: cloneInt(runtime.TimeoutSeconds), NetworkPolicy: runtime.NetworkPolicy, WorkspacePolicy: runtime.WorkspacePolicy, Capabilities: cloneJSON(runtime.Capabilities)},

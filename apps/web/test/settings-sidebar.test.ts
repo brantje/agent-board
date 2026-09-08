@@ -43,6 +43,7 @@ describe('settings navigation helper', () => {
     expect(links.find(item => item.label === 'Providers')?.to).toBe('/settings/providers')
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/settings/model-profiles')
     expect(links.find(item => item.label === 'Agents')?.to).toBe('/agents')
+    expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
   })
 
   it('builds project-scoped settings links while keeping providers global', () => {
@@ -52,6 +53,7 @@ describe('settings navigation helper', () => {
     expect(links.find(item => item.label === 'Providers')?.to).toBe('/settings/providers')
     expect(links.find(item => item.label === 'Runtimes')?.to).toBe('/projects/p/settings/runtimes')
     expect(links.find(item => item.label === 'Agents')?.to).toBe('/projects/p/agents')
+    expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
   })
 })
 

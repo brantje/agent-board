@@ -94,29 +94,19 @@ type RuntimeDTO struct {
 	UpdatedAt         time.Time       `json:"updatedAt"`
 }
 
-type ExecutorProfileDTO struct {
-	ID             string          `json:"id"`
-	ProjectID      *string         `json:"projectId"`
-	Name           string          `json:"name"`
-	Engine         string          `json:"engine"`
-	ModelProfileID string          `json:"modelProfileId"`
-	RuntimeID      string          `json:"runtimeId"`
-	EngineSettings json.RawMessage `json:"engineSettings"`
-	Enabled        bool            `json:"enabled"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	UpdatedAt      time.Time       `json:"updatedAt"`
-}
-
 type AgentDTO struct {
-	ID                string    `json:"id"`
-	ProjectID         *string   `json:"projectId"`
-	Name              string    `json:"name"`
-	RoleInstructions  string    `json:"roleInstructions"`
-	ExecutorProfileID string    `json:"executorProfileId"`
-	ConcurrencyLimit  int       `json:"concurrencyLimit"`
-	State             string    `json:"state"`
-	CreatedAt         time.Time `json:"createdAt"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	ID               string          `json:"id"`
+	ProjectID        *string         `json:"projectId"`
+	Name             string          `json:"name"`
+	RoleInstructions string          `json:"roleInstructions"`
+	Engine           string          `json:"engine"`
+	ModelProfileID   string          `json:"modelProfileId"`
+	RuntimeID        string          `json:"runtimeId"`
+	EngineSettings   json.RawMessage `json:"engineSettings"`
+	ConcurrencyLimit int             `json:"concurrencyLimit"`
+	State            string          `json:"state"`
+	CreatedAt        time.Time       `json:"createdAt"`
+	UpdatedAt        time.Time       `json:"updatedAt"`
 }
 
 type RunDTO struct {
@@ -213,21 +203,15 @@ type CreateRuntimeRequest struct {
 	Enabled           *bool           `json:"enabled"`
 }
 
-type CreateExecutorProfileRequest struct {
-	Name           string          `json:"name"`
-	Engine         string          `json:"engine"`
-	ModelProfileID string          `json:"modelProfileId"`
-	RuntimeID      string          `json:"runtimeId"`
-	EngineSettings json.RawMessage `json:"engineSettings"`
-	Enabled        *bool           `json:"enabled"`
-}
-
 type CreateAgentRequest struct {
-	Name              string `json:"name"`
-	RoleInstructions  string `json:"roleInstructions"`
-	ExecutorProfileID string `json:"executorProfileId"`
-	ConcurrencyLimit  int    `json:"concurrencyLimit"`
-	State             string `json:"state"`
+	Name             string          `json:"name"`
+	RoleInstructions string          `json:"roleInstructions"`
+	Engine           string          `json:"engine"`
+	ModelProfileID   string          `json:"modelProfileId"`
+	RuntimeID        string          `json:"runtimeId"`
+	EngineSettings   json.RawMessage `json:"engineSettings"`
+	ConcurrencyLimit int             `json:"concurrencyLimit"`
+	State            string          `json:"state"`
 }
 
 type AssignmentRequest struct {

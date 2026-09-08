@@ -14,7 +14,7 @@ All stages use `codex/17-nuxt-vertical-slice` and are committed/pushed separatel
 
 ## Stage 2 — #37
 
-- Shared and Project-scoped configuration routes cover Providers, Model Profiles, Runtimes, Executor Profiles, Agents and local Projects. Forms use Nuxt UI validation/controls and intentional public fields.
+- Shared and Project-scoped configuration routes cover Providers, Model Profiles, Runtimes, Agents and local Projects. Forms use Nuxt UI validation/controls and intentional public fields.
 - Shared resources are read-only inside a Project, disabled resources cannot be selected for new references, and empty Model Profile capacity submits `null` (unlimited).
 - Provider credential input is write-only, requires the existing deployment secret-write capability, and is cleared after each save attempt. A regression test exposed the Go Provider update handler dropping omitted credentials; omission now preserves the stored reference and the OpenAPI contract documents it.
 - No model discovery/preflight metrics are fabricated where the API does not expose them. Health remains explicitly separate from configured state.

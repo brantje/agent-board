@@ -21,8 +21,10 @@ describe('intentional configuration inputs', () => {
     expect(payloadFor('runtimes', draftFor('runtimes', { name: 'Runtime', workspacePolicy: 'issue' }))).not.toHaveProperty('workspacePolicy')
   })
 
-  it('uses direct Runtime selection and omits server-owned credential references', () => {
-    expect(definitions['executor-profiles'].fields.map(field => field.key)).toContain('runtimeId')
+  it('uses direct Runtime selection on Agents and omits server-owned credential references', () => {
+    expect(definitions.agents.fields.map(field => field.key)).toEqual(expect.arrayContaining(['engine', 'modelProfileId', 'runtimeId', 'engineSettings']))
+    expect(definitions.agents.fields.map(field => field.key)).not.toContain('executorProfileId')
+    expect(definitions).not.toHaveProperty('executor-profiles')
     expect(definitions).not.toHaveProperty('runtime-profiles')
     expect(definitions.providers.fields.map(field => field.key)).not.toContain('credentialRef')
     expect(payloadFor('providers', draftFor('providers'))).not.toHaveProperty('credentialRef')
@@ -100,9 +102,8 @@ describe('intentional configuration inputs', () => {
     expect(definitions.projects.emptyDescription).toBe('Create a Project with a local repository, default branch, and Issue prefix to open a board.')
     expect(definitions.providers.emptyDescription).toBe('Add a Provider with encrypted credentials so Model Profiles can call a model API.')
     expect(definitions['model-profiles'].emptyDescription).toBe('Create a Model Profile to select a Provider, model, and optional concurrent Run capacity.')
-    expect(definitions.runtimes.emptyDescription).toBe('Define a Runtime image and execution policy so Executor Profiles can start agent-runner.')
-    expect(definitions['executor-profiles'].emptyDescription).toBe('Combine an Engine, Model Profile, and Runtime into an Executor Profile that Agents can use.')
-    expect(definitions.agents.emptyDescription).toBe('Create an Agent with role instructions and an Executor Profile before assigning Issues.')
+    expect(definitions.runtimes.emptyDescription).toBe('Define a Runtime image and execution policy so Agents can start agent-runner.')
+    expect(definitions.agents.emptyDescription).toBe('Create an Agent with role instructions, Engine, Model Profile, and Runtime before assigning Issues.')
     for (const kind of Object.keys(definitions) as (keyof typeof definitions)[]) {
       expect(definitions[kind].emptyDescription).not.toContain('New work will appear here')
     }

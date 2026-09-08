@@ -228,36 +228,9 @@ func (s *Store) UpdateRuntime(ctx context.Context, scope *string, input store.Ru
 	return scanRuntime(s.pool.QueryRow(ctx, `UPDATE runtimes SET name=$3, kind=$4, image=$5, cpu_limit_millis=$6, memory_limit_bytes=$7, pid_limit=$8, timeout_seconds=$9, network_policy=$10, workspace_policy=$11, allowed_secret_refs=$12, capabilities=$13, enabled=$14, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status, created_at, updated_at`, scope, input.ID, input.Name, input.Kind, input.Image, input.CPULimitMillis, input.MemoryLimitBytes, input.PIDLimit, input.TimeoutSeconds, input.NetworkPolicy, input.WorkspacePolicy, allowedSecretRefs, objectJSON(input.Capabilities), input.Enabled))
 }
 
-func (s *Store) ListExecutorProfiles(ctx context.Context, projectID *string) ([]store.ExecutorProfile, error) {
-	project, scoped := visibleScope(projectID)
-	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, engine, model_profile_id::text, runtime_id::text, engine_settings, enabled, created_at, updated_at FROM executor_profiles WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []store.ExecutorProfile
-	for rows.Next() {
-		value, err := scanExecutorProfile(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, value)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) GetExecutorProfile(ctx context.Context, projectID *string, id string) (store.ExecutorProfile, error) {
-	project, scoped := visibleScope(projectID)
-	return scanExecutorProfile(s.pool.QueryRow(ctx, `SELECT id::text, project_id::text, name, engine, model_profile_id::text, runtime_id::text, engine_settings, enabled, created_at, updated_at FROM executor_profiles WHERE id=$3 AND (($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL))`, nullableUUID(project, scoped), scoped, id))
-}
-
-func (s *Store) UpdateExecutorProfile(ctx context.Context, scope *string, input store.ExecutorProfile) (store.ExecutorProfile, error) {
-	return scanExecutorProfile(s.pool.QueryRow(ctx, `UPDATE executor_profiles SET name=$3, engine=$4, model_profile_id=$5, runtime_id=$6, engine_settings=$7, enabled=$8, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, name, engine, model_profile_id::text, runtime_id::text, engine_settings, enabled, created_at, updated_at`, scope, input.ID, input.Name, input.Engine, input.ModelProfileID, input.RuntimeID, objectJSON(input.EngineSettings), input.Enabled))
-}
-
 func (s *Store) ListAgents(ctx context.Context, projectID *string) ([]store.Agent, error) {
 	project, scoped := visibleScope(projectID)
-	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, role_instructions, executor_profile_id::text, concurrency_limit, state, created_at, updated_at FROM agents WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
+	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, runtime_id::text, engine_settings, concurrency_limit, state, created_at, updated_at FROM agents WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
 	if err != nil {
 		return nil, err
 	}
@@ -275,9 +248,9 @@ func (s *Store) ListAgents(ctx context.Context, projectID *string) ([]store.Agen
 
 func (s *Store) GetAgentInScope(ctx context.Context, projectID *string, id string) (store.Agent, error) {
 	project, scoped := visibleScope(projectID)
-	return scanAgent(s.pool.QueryRow(ctx, `SELECT id::text, project_id::text, name, role_instructions, executor_profile_id::text, concurrency_limit, state, created_at, updated_at FROM agents WHERE id=$3 AND (($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL))`, nullableUUID(project, scoped), scoped, id))
+	return scanAgent(s.pool.QueryRow(ctx, `SELECT id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, runtime_id::text, engine_settings, concurrency_limit, state, created_at, updated_at FROM agents WHERE id=$3 AND (($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL))`, nullableUUID(project, scoped), scoped, id))
 }
 
 func (s *Store) UpdateAgent(ctx context.Context, scope *string, input store.Agent) (store.Agent, error) {
-	return scanAgent(s.pool.QueryRow(ctx, `UPDATE agents SET name=$3, role_instructions=$4, executor_profile_id=$5, concurrency_limit=$6, state=$7, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, name, role_instructions, executor_profile_id::text, concurrency_limit, state, created_at, updated_at`, scope, input.ID, input.Name, input.RoleInstructions, input.ExecutorProfileID, input.ConcurrencyLimit, input.State))
+	return scanAgent(s.pool.QueryRow(ctx, `UPDATE agents SET name=$3, role_instructions=$4, engine=$5, model_profile_id=$6, runtime_id=$7, engine_settings=$8, concurrency_limit=$9, state=$10, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, runtime_id::text, engine_settings, concurrency_limit, state, created_at, updated_at`, scope, input.ID, input.Name, input.RoleInstructions, input.Engine, input.ModelProfileID, input.RuntimeID, objectJSON(input.EngineSettings), input.ConcurrencyLimit, input.State))
 }

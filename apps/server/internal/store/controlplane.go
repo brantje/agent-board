@@ -32,10 +32,6 @@ type ControlPlaneStore interface {
 	GetRuntime(context.Context, *string, string) (Runtime, error)
 	UpdateRuntime(context.Context, *string, Runtime) (Runtime, error)
 
-	ListExecutorProfiles(context.Context, *string) ([]ExecutorProfile, error)
-	GetExecutorProfile(context.Context, *string, string) (ExecutorProfile, error)
-	UpdateExecutorProfile(context.Context, *string, ExecutorProfile) (ExecutorProfile, error)
-
 	ListAgents(context.Context, *string) ([]Agent, error)
 	GetAgentInScope(context.Context, *string, string) (Agent, error)
 	UpdateAgent(context.Context, *string, Agent) (Agent, error)

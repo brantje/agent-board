@@ -33,12 +33,8 @@ func runtimeDTO(v store.Runtime) RuntimeDTO {
 	return RuntimeDTO{v.ID, v.ProjectID, v.Name, v.Kind, v.Image, v.CPULimitMillis, v.MemoryLimitBytes, v.PIDLimit, v.TimeoutSeconds, v.NetworkPolicy, v.WorkspacePolicy, v.AllowedSecretRefs, v.Capabilities, v.Enabled, v.HealthStatus, v.CreatedAt, v.UpdatedAt}
 }
 
-func executorProfileDTO(v store.ExecutorProfile) ExecutorProfileDTO {
-	return ExecutorProfileDTO{v.ID, v.ProjectID, v.Name, v.Engine, v.ModelProfileID, v.RuntimeID, v.EngineSettings, v.Enabled, v.CreatedAt, v.UpdatedAt}
-}
-
 func agentDTO(v store.Agent) AgentDTO {
-	return AgentDTO{v.ID, v.ProjectID, v.Name, v.RoleInstructions, v.ExecutorProfileID, v.ConcurrencyLimit, v.State, v.CreatedAt, v.UpdatedAt}
+	return AgentDTO{v.ID, v.ProjectID, v.Name, v.RoleInstructions, v.Engine, v.ModelProfileID, v.RuntimeID, v.EngineSettings, v.ConcurrencyLimit, v.State, v.CreatedAt, v.UpdatedAt}
 }
 
 func runDTO(v store.Run, issueKeys map[string]string) RunDTO {

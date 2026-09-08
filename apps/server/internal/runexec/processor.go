@@ -137,7 +137,7 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		return scheduler.Result{}, err
 	}
 
-	adapter, err := p.engines.Get(safe.Executor.Engine)
+	adapter, err := p.engines.Get(safe.Agent.Engine)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 		return failed(errors.Join(err, cleanupErr)), nil

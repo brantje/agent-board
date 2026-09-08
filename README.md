@@ -12,7 +12,6 @@ The near-term milestone is one complete real coding-agent flow using a local Git
 Local Project repository
   -> Issue
   -> Agent
-  -> Executor Profile
        -> Engine
        -> Model Profile -> Provider
        -> Runtime
@@ -80,12 +79,11 @@ Official v0.1 Runtime images include `agent-runner`, which communicates with the
 
 1. In **Settings**, create a **Provider** and **Model Profile**.
 2. Create a **Runtime**.
-3. Create an **Executor Profile** by selecting an Engine, Model Profile, and Runtime.
-4. Create and enable an **Agent** using that Executor Profile.
-5. Create a **Project** and configure its local Git repository/default branch.
-6. Create an Issue and assign the Agent.
-7. Agent Board creates/reuses the Issue Workspace and schedules a Run.
-8. Inspect the Run, answer Questions if needed, then Review the result.
+3. Create and enable an **Agent**, selecting an Engine, Model Profile, and Runtime.
+4. Create a **Project** and configure its local Git repository/default branch.
+5. Create an Issue and assign the Agent.
+6. Agent Board creates/reuses the Issue Workspace and schedules a Run.
+7. Inspect the Run, answer Questions if needed, then Review the result.
 
 The scripted Engine is a deterministic walking skeleton. v0.1 is complete only when a real coding Engine can modify a real Project repository inside the selected Runtime and produce trustworthy Review evidence.
 
@@ -124,12 +122,11 @@ scheduler -> Workspace -> Runtime -> Runtime Instance -> agent-runner -> Engine
 | --- | --- |
 | **Project / Board** | Top-level work and repository boundary. |
 | **Issue** | Durable unit of work. |
-| **Agent** | Durable worker identity/configuration. |
+| **Agent** | Durable worker identity/configuration, including Engine, Model Profile and Runtime. |
 | **Run** | One execution attempt for an Issue by an Agent. |
 | **Provider** | Configured model connection and credentials. |
 | **Model Profile** | Reusable model selection/settings and optional capacity. |
 | **Runtime** | Reusable execution environment and complete execution policy. |
-| **Executor Profile** | Engine + Model Profile + Runtime. |
 | **Workspace** | Durable repository state owned by an Issue. |
 | **Runtime Instance** | Disposable compute materialized from Runtime and bound to one Workspace. |
 | **Execution Session** | One runner-supervised process-tree execution. |
@@ -142,8 +139,7 @@ Canonical configuration:
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Executor Profile
-Agent -> Executor Profile
+Engine + Model Profile + Runtime -> Agent
 ```
 
 ## Architecture
@@ -219,7 +215,7 @@ agent-board/
 - runner, Runtime Instance, Execution Session and Run identities remain separate
 - a runner may execute many sequential sessions against its bound Workspace
 - v0.1 allows one active Execution Session per runner while the protocol remains capacity-extensible
-- Executor Profile selects Runtime directly
+- Agents select Runtime directly
 - Engine adapters remain server-side
 - Engine processes execute inside the selected Runtime Instance through `agent-runner`
 - runner/server transport is versioned WebSocket

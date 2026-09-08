@@ -66,20 +66,7 @@ Relationships are server-authoritative workflow inputs. Creating or deleting a r
 
 Durable worker identity/configuration, not a process or container.
 
-An Agent references one Executor Profile and may define operational policy such as concurrency.
-
-### Executor Profile
-
-Reusable execution selection:
-
-```text
-Name
-Engine
-Model Profile
-Runtime
-```
-
-Executor Profile references Runtime directly.
+An Agent selects Engine, Model Profile and Runtime directly and may define operational policy such as concurrency.
 
 ### Provider
 
@@ -141,8 +128,7 @@ Later Project delivery policy may allow explicit autonomous PR/MR delivery witho
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Executor Profile
-Agent -> Executor Profile
+Engine + Model Profile + Runtime -> Agent
 ```
 
 There is no Runtime Profile layer.

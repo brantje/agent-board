@@ -10,7 +10,6 @@ Nothing below this phase should delay it.
 Local Project repository
  -> Issue
  -> Agent
- -> Executor Profile
       -> Engine
       -> Model Profile -> Provider
       -> Runtime
@@ -28,7 +27,7 @@ Local Project repository
 
 Required work includes:
 
-- direct Executor Profile -> Runtime configuration
+- direct Agent -> Runtime configuration
 - durable asynchronous/restart-safe scheduling
 - Agent concurrency + Model Profile capacity admission
 - local repository-backed Issue Workspaces

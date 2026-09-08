@@ -52,22 +52,15 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	runtime.Image = "agent-board:test2"
 	if _, err = s.UpdateRuntime(ctx, scope1, runtime); err != nil { t.Fatal(err) }
 
-	executor, err := s.CreateExecutorProfile(ctx, store.ExecutorProfile{ProjectID: scope1, Name: "Executor", Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject, Enabled: true})
-	if err != nil { t.Fatal(err) }
-	if _, err = s.GetExecutorProfile(ctx, scope1, executor.ID); err != nil { t.Fatal(err) }
-	if _, err = s.GetExecutorProfile(ctx, scope2, executor.ID); !errors.Is(err, store.ErrNotFound) { t.Fatalf("cross-project executor err=%v", err) }
-	executors, err := s.ListExecutorProfiles(ctx, scope1)
-	if err != nil || len(executors) != 1 { t.Fatalf("executors=%d err=%v", len(executors), err) }
-	executor.Engine = "test-v2"
-	if _, err = s.UpdateExecutorProfile(ctx, scope1, executor); err != nil { t.Fatal(err) }
-
-	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Agent", ExecutorProfileID: executor.ID, ConcurrencyLimit: 1, State: "ENABLED"})
+	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Agent", Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
 	if err != nil { t.Fatal(err) }
 	if _, err = s.GetAgentInScope(ctx, scope1, agent.ID); err != nil { t.Fatal(err) }
 	if _, err = s.GetAgentInScope(ctx, scope2, agent.ID); !errors.Is(err, store.ErrNotFound) { t.Fatalf("cross-project agent err=%v", err) }
 	agents, err := s.ListAgents(ctx, scope1)
 	if err != nil || len(agents) != 1 { t.Fatalf("agents=%d err=%v", len(agents), err) }
 	agent.RoleInstructions = "updated"
+	if _, err = s.UpdateAgent(ctx, scope1, agent); err != nil { t.Fatal(err) }
+	agent.Engine = "test-v2"
 	if _, err = s.UpdateAgent(ctx, scope1, agent); err != nil { t.Fatal(err) }
 
 	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: p1.ID, Title: "Issue", Status: "TODO"})
@@ -94,7 +87,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_jobs WHERE run_id=$1 AND kind='START' AND state='QUEUED'`, run.ID).Scan(&jobCount); err != nil { t.Fatal(err) }
 	if runCount != 1 || jobCount != 1 { t.Fatalf("runCount=%d jobCount=%d", runCount, jobCount) }
 
-	otherAgent, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Agent Two", ExecutorProfileID: executor.ID, ConcurrencyLimit: 1, State: "ENABLED"})
+	otherAgent, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Agent Two", Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
 	if err != nil { t.Fatal(err) }
 	_, replacement, err := s.AssignIssue(ctx, p1.ID, issue.ID, otherAgent.ID)
 	if err != nil { t.Fatal(err) }
@@ -107,7 +100,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	done, err := s.CreateIssue(ctx, store.Issue{ProjectID: p1.ID, Title: "Done", Status: "DONE"})
 	if err != nil { t.Fatal(err) }
 	if _, _, err = s.AssignIssue(ctx, p1.ID, done.ID, otherAgent.ID); !errors.Is(err, store.ErrConflict) { t.Fatalf("done assignment err=%v", err) }
-	disabled, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Disabled", ExecutorProfileID: executor.ID, ConcurrencyLimit: 1, State: "DISABLED"})
+	disabled, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Disabled", Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "DISABLED"})
 	if err != nil { t.Fatal(err) }
 	blocked, err := s.CreateIssue(ctx, store.Issue{ProjectID: p1.ID, Title: "Blocked", Status: "TODO"})
 	if err != nil { t.Fatal(err) }

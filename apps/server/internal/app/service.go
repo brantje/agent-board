@@ -146,52 +146,6 @@ func (s *Service) UpdateRuntime(ctx context.Context, scope *string, input store.
 	return value, translateStoreError(err, "runtime")
 }
 
-func (s *Service) ListExecutorProfiles(ctx context.Context, scope *string) ([]store.ExecutorProfile, error) {
-	if err := s.ensureScope(ctx, scope); err != nil {
-		return nil, err
-	}
-	return s.store.ListExecutorProfiles(ctx, scope)
-}
-func (s *Service) GetExecutorProfile(ctx context.Context, scope *string, id string) (store.ExecutorProfile, error) {
-	if err := s.ensureScope(ctx, scope); err != nil {
-		return store.ExecutorProfile{}, err
-	}
-	value, err := s.store.GetExecutorProfile(ctx, scope, id)
-	return value, translateStoreError(err, "executor_profile")
-}
-func (s *Service) CreateExecutorProfile(ctx context.Context, input store.ExecutorProfile) (store.ExecutorProfile, error) {
-	if err := s.ensureScope(ctx, input.ProjectID); err != nil {
-		return store.ExecutorProfile{}, err
-	}
-	if err := validateExecutorProfile(input); err != nil {
-		return store.ExecutorProfile{}, err
-	}
-	if _, err := s.GetModelProfile(ctx, input.ProjectID, input.ModelProfileID); err != nil {
-		return store.ExecutorProfile{}, err
-	}
-	if _, err := s.GetRuntime(ctx, input.ProjectID, input.RuntimeID); err != nil {
-		return store.ExecutorProfile{}, err
-	}
-	value, err := s.store.CreateExecutorProfile(ctx, input)
-	return value, translateStoreError(err, "executor_profile")
-}
-func (s *Service) UpdateExecutorProfile(ctx context.Context, scope *string, input store.ExecutorProfile) (store.ExecutorProfile, error) {
-	if err := s.ensureScope(ctx, scope); err != nil {
-		return store.ExecutorProfile{}, err
-	}
-	if err := validateExecutorProfile(input); err != nil {
-		return store.ExecutorProfile{}, err
-	}
-	if _, err := s.GetModelProfile(ctx, scope, input.ModelProfileID); err != nil {
-		return store.ExecutorProfile{}, err
-	}
-	if _, err := s.GetRuntime(ctx, scope, input.RuntimeID); err != nil {
-		return store.ExecutorProfile{}, err
-	}
-	value, err := s.store.UpdateExecutorProfile(ctx, scope, input)
-	return value, translateStoreError(err, "executor_profile")
-}
-
 func (s *Service) ListAgents(ctx context.Context, scope *string) ([]store.Agent, error) {
 	if err := s.ensureScope(ctx, scope); err != nil {
 		return nil, err
@@ -212,7 +166,10 @@ func (s *Service) CreateAgent(ctx context.Context, input store.Agent) (store.Age
 	if err := validateAgent(input); err != nil {
 		return store.Agent{}, err
 	}
-	if _, err := s.GetExecutorProfile(ctx, input.ProjectID, input.ExecutorProfileID); err != nil {
+	if _, err := s.GetModelProfile(ctx, input.ProjectID, input.ModelProfileID); err != nil {
+		return store.Agent{}, err
+	}
+	if _, err := s.GetRuntime(ctx, input.ProjectID, input.RuntimeID); err != nil {
 		return store.Agent{}, err
 	}
 	value, err := s.store.CreateAgent(ctx, input)
@@ -225,7 +182,10 @@ func (s *Service) UpdateAgent(ctx context.Context, scope *string, input store.Ag
 	if err := validateAgent(input); err != nil {
 		return store.Agent{}, err
 	}
-	if _, err := s.GetExecutorProfile(ctx, scope, input.ExecutorProfileID); err != nil {
+	if _, err := s.GetModelProfile(ctx, scope, input.ModelProfileID); err != nil {
+		return store.Agent{}, err
+	}
+	if _, err := s.GetRuntime(ctx, scope, input.RuntimeID); err != nil {
 		return store.Agent{}, err
 	}
 	value, err := s.store.UpdateAgent(ctx, scope, input)
@@ -386,18 +346,12 @@ func validateRuntime(v store.Runtime) error {
 	}
 	return nil
 }
-func validateExecutorProfile(v store.ExecutorProfile) error {
+func validateAgent(v store.Agent) error {
 	if strings.TrimSpace(v.Name) == "" || strings.TrimSpace(v.Engine) == "" || strings.TrimSpace(v.ModelProfileID) == "" || strings.TrimSpace(v.RuntimeID) == "" {
-		return invalid("executor profile fields are required")
+		return invalid("agent name, engine, modelProfileId and runtimeId are required")
 	}
 	if !validObject(v.EngineSettings) {
 		return invalid("engineSettings must be a JSON object")
-	}
-	return nil
-}
-func validateAgent(v store.Agent) error {
-	if strings.TrimSpace(v.Name) == "" || strings.TrimSpace(v.ExecutorProfileID) == "" {
-		return invalid("agent name and executorProfileId are required")
 	}
 	if v.ConcurrencyLimit < 1 {
 		return invalid("concurrencyLimit must be positive")

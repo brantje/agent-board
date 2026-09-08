@@ -41,7 +41,7 @@ func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.Saf
 			eventReader:       eventReader,
 			safe:              safe,
 			runtimeInstanceID: runtimeInstanceID,
-			engine:            safe.Executor.Engine,
+			engine:            safe.Agent.Engine,
 		}
 		request.InteractiveQuestions = exposeInteractiveQuestioner(interactive)
 	}

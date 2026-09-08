@@ -14,7 +14,7 @@ func TestCanonicalSchemaCreatesRequiredTables(t *testing.T) {
 
 	required := []string{
 		"projects", "issues", "providers", "model_profiles", "runtimes",
-		"executor_profiles", "agents", "workspaces", "runs", "scheduler_jobs",
+		"agents", "workspaces", "runs", "scheduler_jobs",
 		"scheduler_leases", "scheduler_capacity_reservations", "runtime_instances",
 		"execution_sessions", "questions", "decisions", "reviews", "run_provenance",
 		"events", "raw_output_chunks", "artifacts",

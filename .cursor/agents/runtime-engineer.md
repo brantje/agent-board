@@ -10,14 +10,14 @@ Read `AGENTS.md`, `docs/architecture.md`, `docs/domain-model.md`, `docs/runtime-
 Canonical configuration is:
 
 ```text
-Executor Profile
+Agent
  -> Runtime
  -> Runtime Spec
  -> Runtime implementation
  -> Runtime Instance
 ```
 
-Executor Profile references Runtime directly. Do not introduce a Runtime Profile domain, persistence, API, UI, or resolution layer.
+Agents select Runtime directly. Do not introduce a Runtime Profile domain, persistence, API, UI, or resolution layer.
 
 Agent is not compute. Run is not compute. Runtime is reusable configuration/policy. Runtime Instance is disposable compute. Workspace survives Runtime Instance replacement and a Run may resume in a new Runtime Instance materialized from the same Runtime.
 
