@@ -73,6 +73,7 @@ func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID str
 		return store.Issue{}, store.Run{}, err
 	}
 
+	priority := issue.Priority
 	issue, err = scanIssue(tx.QueryRow(ctx, `
         UPDATE issues
         SET assigned_agent_id=$3, status='IN_PROGRESS', updated_at=now()
@@ -82,6 +83,7 @@ func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID str
 	if err != nil {
 		return store.Issue{}, store.Run{}, err
 	}
+	issue.Priority = priority
 
 	run, err := scanRun(tx.QueryRow(ctx, `
         INSERT INTO runs (project_id, issue_id, workspace_id, agent_id, attempt, status)
@@ -109,7 +111,7 @@ func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID stri
 	var issue store.Issue
 	var repositoryPath, defaultBranch string
 	err := tx.QueryRow(ctx, `
-        SELECT issue.id::text, issue.project_id::text, issue.title, issue.description, issue.status,
+        SELECT issue.id::text, issue.project_id::text, issue.title, issue.description, issue.status, issue.priority,
                issue.assigned_agent_id::text, issue.created_at, issue.updated_at,
                project.repository_path, project.default_branch
         FROM issues AS issue
@@ -117,7 +119,7 @@ func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID stri
         WHERE issue.project_id=$1 AND issue.id=$2
         FOR UPDATE OF issue
     `, projectID, issueID).Scan(
-		&issue.ID, &issue.ProjectID, &issue.Title, &issue.Description, &issue.Status,
+		&issue.ID, &issue.ProjectID, &issue.Title, &issue.Description, &issue.Status, &issue.Priority,
 		&issue.AssignedAgentID, &issue.CreatedAt, &issue.UpdatedAt,
 		&repositoryPath, &defaultBranch,
 	)
