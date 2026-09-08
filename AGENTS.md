@@ -182,6 +182,22 @@ pnpm build
 - Keep Engine adapters server-side and independent from raw runner WebSocket framing.
 - Keep `agent-runner` Engine-neutral and free of PostgreSQL, scheduler, Review and control-plane authorization logic.
 
+## Maintainability: DRY and YAGNI
+
+Write maintainable code. Follow DRY and YAGNI by default.
+
+- Reuse existing logic before adding new code paths.
+- If behavior is needed by multiple adapters or interfaces, move it into shared application/domain code and have all callers reuse it.
+- Do not duplicate business logic across HTTP, MCP, workers, runners, CLI, frontend server routes or other transports.
+- Do not introduce abstractions, services, interfaces, models, extension points or configuration for hypothetical future use.
+- Extract shared code only when there is a concrete current need.
+- Prefer the smallest maintainable change that preserves existing architectural invariants.
+- Before adding a new concept, check whether the existing domain model, command, query, service or transport already supports the requirement.
+- Keep transport-specific code thin; durable product behavior belongs in the authoritative backend/application layer.
+- When reviewing or planning work, actively flag unnecessary duplication and speculative architecture.
+
+In short: do not repeat yourself, and do not build things until the product actually needs them.
+
 ## Database
 
 `packages/database/schema.sql` is the one canonical pre-release schema. Executor Profile persists `runtime_id` directly. Recreate development databases when incompatible schema changes require it.
