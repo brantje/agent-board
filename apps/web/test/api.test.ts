@@ -2,12 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apiRequest, ApiError, apiPath } from '../app/utils/api'
 
 afterEach(() => vi.unstubAllGlobals())
+
 describe('Go API transport', () => {
   it('encodes scoped paths and refuses unsafe path segments', () => {
     expect(apiPath('issues', 'project-1', 'issue-1')).toBe('/api/projects/project-1/issues/issue-1')
     expect(apiPath('providers')).toBe('/api/providers')
     expect(() => apiPath('../secrets')).toThrow()
   })
+
   it('sends JSON mutations to the same-origin Go API without ambient privilege', async () => {
     const fetch = vi.fn().mockResolvedValue(new Response('{"id":"saved"}'))
     vi.stubGlobal('fetch', fetch)
@@ -15,15 +17,48 @@ describe('Go API transport', () => {
     expect(fetch).toHaveBeenCalledWith('/api/projects', expect.objectContaining({ method: 'POST', body: '{"name":"P"}', credentials: 'same-origin' }))
     expect(() => apiPath('providers', '..')).toThrow()
   })
-  it.each([401, 403, 404, 409, 422, 500])('returns a safe actionable error for %s without reflecting payloads', async status => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"error":{"code":"unsafe","message":"sk-secret"}}', { status })))
-    try { await apiRequest('/api/providers'); throw new Error('expected rejection') } catch (error) {
+
+  it('uses stable backend error codes for actionable messages without reflecting server payload text', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"error":{"code":"invalid_argument","message":"sk-secret"}}', { status: 400 })))
+    try {
+      await apiRequest('/api/providers')
+      throw new Error('expected rejection')
+    } catch (error) {
       expect(error).toBeInstanceOf(ApiError)
-      expect((error as ApiError).status).toBe(status)
+      expect((error as ApiError).status).toBe(400)
+      expect((error as ApiError).code).toBe('invalid_argument')
+      expect((error as Error).message).toContain('server rejected')
       expect((error as Error).message).not.toContain('sk-secret')
     }
   })
-  it('handles network failures, malformed responses, and no-content', async () => {
+
+  it.each([
+    [403, 'forbidden'],
+    [404, 'runtime_not_found'],
+    [409, 'conflict'],
+    [422, 'execution_configuration_invalid'],
+    [500, 'internal_error']
+  ] as const)('returns a safe actionable error for status %s and code %s', async (status, code) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: { code, message: 'never reflect me' } }), { status })))
+    try {
+      await apiRequest('/api/providers')
+      throw new Error('expected rejection')
+    } catch (error) {
+      expect(error).toBeInstanceOf(ApiError)
+      expect((error as ApiError).status).toBe(status)
+      expect((error as ApiError).code).toBe(code)
+      expect((error as Error).message).not.toContain('never reflect me')
+    }
+  })
+
+  it('ignores malformed or unsafe error envelopes', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"error":{"code":"<script>","message":"unsafe"}}', { status: 400 })))
+    await expect(apiRequest('/api/providers')).rejects.toMatchObject({ code: 'request_failed' })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not json', { status: 400 })))
+    await expect(apiRequest('/api/providers')).rejects.toMatchObject({ code: 'request_failed' })
+  })
+
+  it('handles network failures, malformed success responses, and no-content', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('secret-url')))
     await expect(apiRequest('/api/projects')).rejects.toThrow('Unable to reach')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('not json')))
@@ -31,6 +66,7 @@ describe('Go API transport', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
     expect(await apiRequest('/api/projects')).toBeUndefined()
   })
+
   it('refuses external and non-API requests', async () => {
     await expect(apiRequest('https://evil.test/api')).rejects.toThrow('API path')
     await expect(apiRequest('/api/../private')).rejects.toThrow('API path')
