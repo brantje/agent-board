@@ -123,6 +123,12 @@ func TestWaitDrainedReturnsBoundedly(t *testing.T) {
 		t.Fatalf("waitDrained blocked for %v", elapsed)
 	}
 
+	started = time.Now()
+	waitDrained(blocked, 0)
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("waitDrained with zero timeout blocked for %v", elapsed)
+	}
+
 	drained := make(chan struct{})
 	close(drained)
 	started = time.Now()
