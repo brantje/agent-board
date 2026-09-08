@@ -194,6 +194,8 @@ BACKLOG -> TODO -> IN_PROGRESS -> BLOCKED -> REVIEW -> DONE
 
 Board status and Run status are separate. Run states such as `QUEUED`, `RUNNING`, `WAITING_FOR_INPUT` and `FAILED` do not become additional Board columns.
 
+Issue priority uses one numeric v0.1 vocabulary: `0`, `1`, `2`, `3`, `4`. `0` is the default/base priority and larger values mean higher relative priority. Priority is durable Issue metadata; by itself it does not bypass blockers, change Board state, create/cancel a Run or override scheduler admission policy.
+
 Assigning a runnable Agent normally creates/schedules a Run and moves the Issue into active work. The request returns after durable scheduling; execution continues server-side.
 
 Changing assignee during active work cancels the current attempt and starts a new attempt on the same Issue Workspace.
@@ -216,10 +218,16 @@ Scheduler capacity waiting is not a board blocker.
 
 ## Issue relationships
 
-- blocks
-- depends on
-- related to
-- duplicates
+Issue relationships are durable, Project-scoped, server-authoritative records. Every stored relationship has an explicit source Issue and target Issue. v0.1 does not synthesize an inverse relationship row, and the frontend must not infer or persist one.
+
+The canonical relationship types and source -> target meanings are:
+
+- `blocks`: the source Issue declares that it blocks the target Issue.
+- `depends_on`: the source Issue declares that it depends on the target Issue.
+- `related_to`: the source Issue records the target as related. The durable record is still directional even though the human meaning may be symmetric.
+- `duplicates`: the source Issue declares that it duplicates the target Issue.
+
+A relationship record does not itself mutate Issue status, start/cancel Runs, or perform browser-side orchestration. Any workflow effect from blockers or dependencies is evaluated by trusted server-side policy. Self-links, duplicates and cross-Project targets are rejected by the server.
 
 ## Questions and Inbox
 
