@@ -52,7 +52,7 @@ function itemStatus(item: InboxItem) {
 
 <template>
   <PageFrame title="Inbox" description="Blocking questions, pending Reviews, and Runs that need attention. This list is composed from project APIs.">
-    <AsyncState :pending="pending" :error="error" :empty="empty" empty-title="Nothing needs attention" @retry="load">
+    <AsyncState :pending="pending" :error="error" :empty="empty" empty-title="Nothing needs attention" empty-description="Blocking questions, pending Reviews, and Runs that need a decision will appear here." @retry="load">
       <UAlert
         v-for="failure in partialErrors"
         :key="failure.id"

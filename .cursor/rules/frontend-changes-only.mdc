@@ -1,6 +1,31 @@
 ---
-description: Only allow the frontend to be modified
+description: Strict frontend-only modification boundary
 alwaysApply: true
 ---
-Rule:
-- Never touch backend code when editing frontend pages.
+
+# FRONTEND-ONLY MODIFICATION RULE
+
+You are ONLY allowed to modify frontend files.
+
+## Forbidden
+- Do NOT edit, create, delete, rename, move, format, or otherwise modify ANY backend file.
+- Do NOT modify backend code even if doing so would make the frontend task easier.
+- Do NOT modify API endpoints, database code, migrations, models, schemas, server configuration, backend tests, backend dependencies, or backend environment files.
+- Do NOT make "small", "necessary", "supporting", or "cleanup" backend changes.
+
+## Required behavior
+If a frontend task appears to require a backend change:
+1. STOP before modifying the backend.
+2. Explain exactly what backend change would be required.
+3. Leave the backend untouched.
+4. Continue with frontend-only work where possible.
+
+## Allowed paths
+Only modify files inside:
+- `frontend/**`
+
+## Forbidden paths
+Never modify files inside:
+- `backend/**`
+
+Before completing any task, verify that every changed file is inside `frontend/**`.

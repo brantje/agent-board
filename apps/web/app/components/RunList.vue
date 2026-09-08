@@ -46,7 +46,7 @@ const empty = computed(() => !pending.value && !error.value && !rows.value.lengt
 
 <template>
   <PageFrame :title="projectId ? 'Project Runs' : 'Runs'" description="Run status is not a Board column. Execution continues on the server.">
-    <AsyncState :pending="pending" :error="error" :empty="empty" empty-title="No Runs yet" @retry="load">
+    <AsyncState :pending="pending" :error="error" :empty="empty" empty-title="No Runs yet" empty-description="Runs appear after an Agent is assigned to an Issue. Execution continues on the server." @retry="load">
       <UAlert
         v-for="failure in partialErrors"
         :key="failure.id"

@@ -104,4 +104,13 @@ describe('QuestionPanel', () => {
     await flushPromises()
     expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({ kind: 'MULTI_CHOICE', optionIds: ['safe', 'fast'] })
   })
+
+  it('shows a Question-specific empty state instead of generic new-work copy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('[]')))
+    const wrapper = mount(QuestionPanel, { props: { projectId: 'project-a', issueId: 'AB-1' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('No open questions')
+    expect(wrapper.text()).toContain('When a Run needs a human decision, the Agent\'s question will appear here.')
+    expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
+  })
 })

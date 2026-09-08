@@ -27,6 +27,7 @@ export interface Field {
 interface Definition {
   title: string
   singular: string
+  emptyDescription: string
   fields: Field[]
 }
 
@@ -38,6 +39,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   projects: {
     title: 'Projects',
     singular: 'Project',
+    emptyDescription: 'Create a Project with a local repository, default branch, and Issue prefix to open a board.',
     fields: [
       name,
       { key: 'issuePrefix', label: 'Issue prefix', required: true, immutable: true, help: 'Immutable public prefix for Issue keys such as AB-12. Use 2-10 uppercase letters and digits; must start with a letter.' },
@@ -49,6 +51,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   providers: {
     title: 'Providers',
     singular: 'Provider',
+    emptyDescription: 'Add a Provider with encrypted credentials so Model Profiles can call a model API.',
     fields: [
       name,
       { key: 'kind', label: 'Provider kind', initial: 'openai-compatible', required: true },
@@ -60,6 +63,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   'model-profiles': {
     title: 'Model Profiles',
     singular: 'Model Profile',
+    emptyDescription: 'Create a Model Profile to select a Provider, model, and optional concurrent Run capacity.',
     fields: [
       name,
       reference('providerId', 'Provider', 'providers'),
@@ -74,6 +78,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   runtimes: {
     title: 'Runtimes',
     singular: 'Runtime',
+    emptyDescription: 'Define a Runtime image and execution policy so Executor Profiles can start agent-runner.',
     fields: [
       name,
       { key: 'kind', label: 'Kind', type: 'select', options: ['docker'], initial: 'docker' },
@@ -91,6 +96,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   'executor-profiles': {
     title: 'Executor Profiles',
     singular: 'Executor Profile',
+    emptyDescription: 'Combine an Engine, Model Profile, and Runtime into an Executor Profile that Agents can use.',
     fields: [
       name,
       { key: 'engine', label: 'Engine', type: 'select', options: ['opencode', 'scripted'], initial: 'opencode' },
@@ -103,6 +109,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   agents: {
     title: 'Agents',
     singular: 'Agent',
+    emptyDescription: 'Create an Agent with role instructions and an Executor Profile before assigning Issues.',
     fields: [
       name,
       { key: 'roleInstructions', label: 'Role / instructions', type: 'textarea' },

@@ -115,7 +115,7 @@ async function save() {
 
     <UAlert v-if="saved" title="Saved" color="success" class="mb-4" />
 
-    <AsyncState :pending="pending" :error="error" :empty="!visible?.length" :empty-title="`No ${definition.title.toLowerCase()} yet`" @retry="retry">
+    <AsyncState :pending="pending" :error="error" :empty="!visible?.length" :empty-title="`No ${definition.title.toLowerCase()} yet`" :empty-description="definition.emptyDescription" @retry="retry">
       <div class="grid w-full gap-3">
         <UCard v-for="item in visible" :key="item.id">
           <div class="flex flex-wrap items-center gap-3">

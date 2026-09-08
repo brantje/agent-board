@@ -194,6 +194,8 @@ describe('Issue workflow components', () => {
 
     expect(wrapper.text()).toContain('Priority 0')
     expect(wrapper.text()).toContain('No Runs yet')
+    expect(wrapper.text()).toContain('Assign an Agent to this Issue to schedule the first Run.')
+    expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
     expect(wrapper.text()).toContain('Questions')
     expect(wrapper.find('option[value=draft]').exists()).toBe(false)
     expect(wrapper.find('option[value=disabled]').exists()).toBe(false)

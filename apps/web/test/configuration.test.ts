@@ -61,6 +61,18 @@ describe('intentional configuration inputs', () => {
     expect(canEdit({ id: 'a', name: 'A' })).toBe(true)
   })
 
+  it('describes each empty configuration list in product terms', () => {
+    expect(definitions.projects.emptyDescription).toBe('Create a Project with a local repository, default branch, and Issue prefix to open a board.')
+    expect(definitions.providers.emptyDescription).toBe('Add a Provider with encrypted credentials so Model Profiles can call a model API.')
+    expect(definitions['model-profiles'].emptyDescription).toBe('Create a Model Profile to select a Provider, model, and optional concurrent Run capacity.')
+    expect(definitions.runtimes.emptyDescription).toBe('Define a Runtime image and execution policy so Executor Profiles can start agent-runner.')
+    expect(definitions['executor-profiles'].emptyDescription).toBe('Combine an Engine, Model Profile, and Runtime into an Executor Profile that Agents can use.')
+    expect(definitions.agents.emptyDescription).toBe('Create an Agent with role instructions and an Executor Profile before assigning Issues.')
+    for (const kind of Object.keys(definitions) as (keyof typeof definitions)[]) {
+      expect(definitions[kind].emptyDescription).not.toContain('New work will appear here')
+    }
+  })
+
   it('roundtrips supported fields for every resource without mutating source', () => {
     for (const kind of Object.keys(definitions) as (keyof typeof definitions)[]) {
       const initial = draftFor(kind)

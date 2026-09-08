@@ -161,5 +161,17 @@ describe('configuration screens', () => {
     expect(wrapper.text()).not.toContain('Shared')
     await wrapper.setProps({ resourceId: 'missing' })
     expect(wrapper.text()).toContain('No projects yet')
+    expect(wrapper.text()).toContain(definitions.projects.emptyDescription)
+    expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
+  })
+
+  it.each(Object.keys(definitions) as ConfigKind[])('shows a resource-specific empty state for %s', async kind => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('[]')))
+    const wrapper = mount(ConfigManager, { props: { kind }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain(`No ${definitions[kind].title.toLowerCase()} yet`)
+    expect(wrapper.text()).toContain(definitions[kind].emptyDescription)
+    expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
+    wrapper.unmount()
   })
 })
