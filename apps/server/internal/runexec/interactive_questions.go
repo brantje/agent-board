@@ -51,7 +51,7 @@ func (q *interactiveQuestioner) Open(ctx context.Context, correlationKey string,
 	if err := q.recordOpenResult(ctx, result); err != nil {
 		return engine.Question{}, err
 	}
-	return engine.Question{ID: result.Question.ID, Blocking: true}, nil
+	return engine.Question{ID: result.Question.ID, Blocking: true, Custom: result.Question.Custom}, nil
 }
 
 func (q *interactiveQuestioner) OpenBatch(ctx context.Context, requests []engine.CorrelatedQuestionRequest) ([]engine.Question, error) {
@@ -101,7 +101,7 @@ func (q *interactiveQuestioner) OpenBatch(ctx context.Context, requests []engine
 				return nil, err
 			}
 		}
-		opened[index] = engine.Question{ID: result.Question.ID, Blocking: true}
+		opened[index] = engine.Question{ID: result.Question.ID, Blocking: true, Custom: result.Question.Custom}
 	}
 	if batch.EnteredWaiting && !storeOwnsEvidence {
 		questionID := batch.Questions[0].Question.ID
@@ -146,6 +146,7 @@ func (q *interactiveQuestioner) prepareOpenCommand(correlationKey string, reques
 			Kind:           request.Kind,
 			Options:        encodedOptions,
 			Recommendation: request.Recommendation,
+			Custom:         request.Custom,
 			Blocking:       true,
 			Status:         "OPEN",
 		},
