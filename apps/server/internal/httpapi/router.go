@@ -9,6 +9,8 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
+	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
+	"github.com/brantje/agent-board/apps/server/internal/repository"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -19,7 +21,9 @@ type api struct {
 	runEvidence           *app.RunEvidenceService
 	eventHub              *evidence.Hub
 	secrets               app.SecretWriter
+	secretResolver        executioncontext.SecretResolver
 	secretWriteAuthorizer SecretWriteAuthorizer
+	repositorySettings    repository.Settings
 }
 
 type healthResponse struct {
@@ -31,7 +35,7 @@ func NewRouter(services ...*app.Service) http.Handler {
 	if len(services) > 0 {
 		service = services[0]
 	}
-	return newRouter(service, nil, nil, nil)
+	return newRouter(service, nil, nil, nil, nil)
 }
 
 func NewRouterWithSecrets(service *app.Service, secrets app.SecretWriter, authorizers ...SecretWriteAuthorizer) http.Handler {
@@ -39,12 +43,16 @@ func NewRouterWithSecrets(service *app.Service, secrets app.SecretWriter, author
 	if len(authorizers) > 0 {
 		authorizer = authorizers[0]
 	}
-	return newRouter(service, nil, secrets, authorizer)
+	var resolver executioncontext.SecretResolver
+	if secretResolver, ok := secrets.(executioncontext.SecretResolver); ok {
+		resolver = secretResolver
+	}
+	return newRouter(service, nil, secrets, resolver, authorizer)
 }
 
 func NewRouterWithApplication(services *app.Services, authorizers ...SecretWriteAuthorizer) http.Handler {
 	if services == nil {
-		return newRouter(nil, nil, nil, nil)
+		return newRouter(nil, nil, nil, nil, nil)
 	}
 	var authorizer SecretWriteAuthorizer
 	if len(authorizers) > 0 {
@@ -54,6 +62,7 @@ func NewRouterWithApplication(services *app.Services, authorizers ...SecretWrite
 		services.ControlPlane,
 		services.RunEvidence,
 		services.Secrets,
+		secretResolverFromWriter(services.Secrets),
 		authorizer,
 		services.Questions,
 		app.ReviewServiceFromServices(services),
@@ -61,21 +70,38 @@ func NewRouterWithApplication(services *app.Services, authorizers ...SecretWrite
 	)
 }
 
-func newRouter(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretWriteAuthorizer SecretWriteAuthorizer, questionServices ...*app.QuestionService) http.Handler {
+func secretResolverFromWriter(writer app.SecretWriter) executioncontext.SecretResolver {
+	if resolver, ok := writer.(executioncontext.SecretResolver); ok {
+		return resolver
+	}
+	return nil
+}
+
+func newRouter(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretResolver executioncontext.SecretResolver, secretWriteAuthorizer SecretWriteAuthorizer, questionServices ...*app.QuestionService) http.Handler {
 	var questions *app.QuestionService
 	if len(questionServices) > 0 {
 		questions = questionServices[0]
 	}
-	return newRouterWithReviews(service, runEvidence, secretWriter, secretWriteAuthorizer, questions, nil, nil)
+	return newRouterWithReviews(service, runEvidence, secretWriter, secretResolver, secretWriteAuthorizer, questions, nil, nil)
 }
 
-func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretWriteAuthorizer SecretWriteAuthorizer, questions *app.QuestionService, reviews *app.ReviewService, eventHub *evidence.Hub) http.Handler {
+func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretResolver executioncontext.SecretResolver, secretWriteAuthorizer SecretWriteAuthorizer, questions *app.QuestionService, reviews *app.ReviewService, eventHub *evidence.Hub) http.Handler {
 	router := chi.NewRouter()
 	router.Get("/healthz", handleHealth)
 	if service == nil {
 		return router
 	}
-	a := &api{service: service, questions: questions, reviews: reviews, runEvidence: runEvidence, eventHub: eventHub, secrets: secretWriter, secretWriteAuthorizer: secretWriteAuthorizer}
+	a := &api{
+		service:               service,
+		questions:             questions,
+		reviews:               reviews,
+		runEvidence:           runEvidence,
+		eventHub:              eventHub,
+		secrets:               secretWriter,
+		secretResolver:        secretResolver,
+		secretWriteAuthorizer: secretWriteAuthorizer,
+		repositorySettings:    repository.SettingsFromEnv(),
+	}
 	router.Route("/api", func(r chi.Router) {
 		a.registerConfigurationRoutes(r)
 		a.registerIssueRunRoutes(r)
@@ -158,8 +184,12 @@ func writeAppError(w http.ResponseWriter, err error) {
 			status = http.StatusNotFound
 		case apiErr.Code == "conflict", apiErr.Code == "issue_done", apiErr.Code == "agent_unavailable", apiErr.Code == "review_apply_failed", apiErr.Code == "review_evidence_invalid", apiErr.Code == "issue_relationship_exists":
 			status = http.StatusConflict
-		case apiErr.Code == "execution_configuration_invalid":
+		case apiErr.Code == "execution_configuration_invalid", apiErr.Code == "provider_model_discovery_unconfigured":
 			status = http.StatusUnprocessableEntity
+		case apiErr.Code == "provider_credential_unavailable":
+			status = http.StatusServiceUnavailable
+		case apiErr.Code == "provider_model_discovery_failed":
+			status = http.StatusBadGateway
 		}
 		writeError(w, status, apiErr.Code, apiErr.Message)
 		return

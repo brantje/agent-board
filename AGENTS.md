@@ -57,7 +57,7 @@ Before finalizing the plan, ask concise clarification questions when those decis
 
 Rules:
 
-- normally ask **1–3 questions in one batch**
+- normally ask **1–10 questions in one batch**
 - prefer concrete choices or multiple-choice options when useful, and include a recommended default
 - focus on decisions that affect scope, UX, domain behavior, API/contracts, persistence, security or architecture
 - keep each question short; explain why it matters only when that is not obvious

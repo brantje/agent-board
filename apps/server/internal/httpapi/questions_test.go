@@ -67,7 +67,7 @@ func TestQuestionRoutesListAndAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := newRouter(app.New(&fakeControlPlaneStore{}), nil, nil, nil, questionService)
+	router := newRouter(app.New(&fakeControlPlaneStore{}), nil, nil, nil, nil, questionService)
 
 	list := httptest.NewRecorder()
 	router.ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID+"/questions?runId="+runID+"&status=OPEN", nil))
@@ -113,7 +113,7 @@ func TestQuestionAnswerLoadsIssueKeysBeforeMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := newRouter(app.New(&listIssuesFailingStore{fakeControlPlaneStore: &fakeControlPlaneStore{}, err: errors.New("list issues unavailable")}), nil, nil, nil, questionService)
+	router := newRouter(app.New(&listIssuesFailingStore{fakeControlPlaneStore: &fakeControlPlaneStore{}, err: errors.New("list issues unavailable")}), nil, nil, nil, nil, questionService)
 
 	answer := httptest.NewRecorder()
 	router.ServeHTTP(answer, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/questions/"+otherID+"/answer", strings.NewReader(`{"kind":"TEXT","text":"Use the safe path"}`)))
