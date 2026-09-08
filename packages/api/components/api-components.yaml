@@ -26,6 +26,13 @@ parameters:
     schema:
       type: string
       format: uuid
+  RelationshipID:
+    name: relationshipID
+    in: path
+    required: true
+    schema:
+      type: string
+      format: uuid
   RunID:
     name: runID
     in: path
@@ -94,6 +101,12 @@ requestBodies:
       application/json:
         schema:
           $ref: ../schemas/control-plane.yaml#/IssueUpdate
+  IssueRelationshipCreate:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/IssueRelationshipCreate
   Assignment:
     required: true
     content:
@@ -211,6 +224,20 @@ responses:
           type: array
           items:
             $ref: ../schemas/control-plane.yaml#/Issue
+  IssueRelationship:
+    description: Issue relationship response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/IssueRelationship
+  IssueRelationshipList:
+    description: Source-scoped Issue relationship list.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/IssueRelationship
   Run:
     description: Run response.
     content:
