@@ -14,6 +14,7 @@ const issue = {
   title: 'Fix scheduler',
   description: 'Persist leases',
   status: 'TODO',
+  priority: 0,
   assignedAgentId: null,
   createdAt: '',
   updatedAt: ''
@@ -47,6 +48,7 @@ const global = {
     ...uiStubs,
     IssueCard,
     IssueEditor,
+    IssueRelationships: { template: '<section>Relationships</section>' },
     NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' }
   }
 }
@@ -68,7 +70,7 @@ describe('Issue workflow components', () => {
     expect(wrapper.text()).toContain('Coder')
   })
 
-  it('creates only valid Issues and cannot submit protected Review/Done transitions', async () => {
+  it('creates only valid Issues, round-trips priority, and cannot submit protected Review/Done transitions', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(issue)))
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(IssueEditor, { props: { projectId: 'p' }, global })
@@ -77,27 +79,28 @@ describe('Issue workflow components', () => {
     expect(fetch).not.toHaveBeenCalled()
     await wrapper.get('input').setValue('New task')
     await wrapper.get('textarea').setValue('Details')
-    await wrapper.get('select').setValue('TODO')
+    await wrapper.get('[data-field=status] select').setValue('TODO')
+    await wrapper.get('[data-field=priority] select').setValue('3')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
     expect(wrapper.emitted('saved')?.[0]).toEqual([issue])
     expect(fetch.mock.calls[0]?.[1]).toMatchObject({
       method: 'POST',
-      body: JSON.stringify({ title: 'New task', description: 'Details', status: 'TODO' })
+      body: JSON.stringify({ title: 'New task', description: 'Details', status: 'TODO', priority: 3 })
     })
     await button(wrapper, 'Cancel').trigger('click')
     expect(wrapper.emitted('cancel')).toHaveLength(1)
 
     const done = mount(IssueEditor, { props: { projectId: 'p', issue: { ...issue, status: 'DONE' } }, global })
-    expect(done.findAll('option').map(option => option.text())).toEqual(['Select…', 'Done', 'Todo'])
-    await done.get('select').setValue('TODO')
+    expect(done.get('[data-field=status]').findAll('option').map(option => option.text())).toEqual(['Select…', 'Done', 'Todo'])
+    await done.get('[data-field=status] select').setValue('TODO')
     await done.get('form').trigger('submit')
     await flushPromises()
     expect(fetch.mock.calls.at(-1)?.[1]).toMatchObject({ method: 'PATCH' })
 
     const review = mount(IssueEditor, { props: { projectId: 'p', issue: { ...issue, status: 'REVIEW' } }, global })
-    expect(review.findAll('option').map(option => option.text())).toEqual(['Select…', 'Review'])
+    expect(review.get('[data-field=status]').findAll('option').map(option => option.text())).toEqual(['Select…', 'Review'])
     expect(review.text()).toContain('Review decision')
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'conflict', message: 'raw detail' } }), { status: 409 })))
@@ -185,21 +188,22 @@ describe('Issue workflow components', () => {
     const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
     await flushPromises()
 
+    expect(wrapper.text()).toContain('Priority 0')
     expect(wrapper.text()).toContain('No Runs yet')
     expect(wrapper.find('option[value=draft]').exists()).toBe(false)
     expect(wrapper.find('option[value=disabled]').exists()).toBe(false)
-    await wrapper.get('form').trigger('submit')
+    await wrapper.get('[data-field=agent]').closest('form')!.trigger('submit')
     expect(fetch.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0)
 
-    await wrapper.get('select').setValue('a')
+    await wrapper.get('[data-field=agent] select').setValue('a')
     fail = true
-    await wrapper.get('form').trigger('submit')
+    await wrapper.get('[data-field=agent]').closest('form')!.trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('selected execution configuration is not runnable')
     expect(wrapper.text()).not.toContain('unsafe backend detail')
 
     fail = false
-    await wrapper.get('form').trigger('submit')
+    await wrapper.get('[data-field=agent]').closest('form')!.trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Assignment accepted')
     expect(wrapper.text()).toContain('Board status: In Progress')
