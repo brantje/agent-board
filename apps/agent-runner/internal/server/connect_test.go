@@ -121,6 +121,12 @@ func TestValidateConnectDestination(t *testing.T) {
 			return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}, {IP: net.ParseIP("::1")}}, nil
 		case "example.com":
 			return []net.IPAddr{{IP: net.ParseIP("203.0.113.10")}}, nil
+		case "empty.local":
+			return []net.IPAddr{}, nil
+		case "ipv6-only.local":
+			return []net.IPAddr{{IP: net.ParseIP("::1")}}, nil
+		case "mixed.local":
+			return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}, {IP: net.ParseIP("203.0.113.11")}}, nil
 		default:
 			return nil, &net.DNSError{Err: "not found", Name: host}
 		}
@@ -131,10 +137,13 @@ func TestValidateConnectDestination(t *testing.T) {
 			t.Fatalf("validateConnectDestination(%q)=%v", address, err)
 		}
 	}
-	for _, address := range []string{"0.0.0.0:4096", "10.0.0.1:4096", "example.com:4096", "127.0.0.1:0"} {
+	for _, address := range []string{"0.0.0.0:4096", "10.0.0.1:4096", "example.com:4096", "empty.local:4096", "mixed.local:4096", "127.0.0.1:0"} {
 		if err := validateConnectDestination("tcp", address); err == nil {
 			t.Fatalf("validateConnectDestination(%q) succeeded", address)
 		}
+	}
+	if err := validateConnectDestination("tcp4", "ipv6-only.local:4096"); err == nil {
+		t.Fatal("tcp4 unexpectedly accepted an IPv6-only loopback hostname")
 	}
 	if err := validateConnectDestination("udp", "127.0.0.1:4096"); err == nil {
 		t.Fatal("udp destination unexpectedly allowed")
