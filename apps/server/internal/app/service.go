@@ -340,6 +340,13 @@ func (s *Service) ListProjectEventsAfter(ctx context.Context, projectID, afterID
 			return events, nil
 		}
 	}
+	more, err := s.store.ListProjectEventsAfter(ctx, projectID, cursor, 1)
+	if err != nil {
+		return nil, translateStoreError(err, "event")
+	}
+	if len(more) == 0 {
+		return events, nil
+	}
 	return nil, NewError("replay_truncated", "project event replay exceeds the catch-up window; reload persisted state", nil)
 }
 
