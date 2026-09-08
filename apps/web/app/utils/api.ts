@@ -22,7 +22,11 @@ const codeMessages: Record<string, string> = {
   project_not_found: 'This Project is unavailable or belongs to another project scope.',
   execution_configuration_invalid: 'The selected execution configuration is not runnable. Check the Agent, Executor Profile, Model Profile, Runtime and Provider.',
   agent_unavailable: 'The selected Agent is not currently runnable. Check its state and referenced configuration.',
-  issue_done: 'Done Issues cannot start Runs. Reopen the Issue into Todo before assigning an Agent.'
+  issue_done: 'Done Issues cannot start Runs. Reopen the Issue into Todo before assigning an Agent.',
+  issue_relationship_target_not_found: 'The target Issue no longer exists in this Project. Refresh and choose another Issue.',
+  issue_relationship_self_reference: 'An Issue cannot be related to itself.',
+  issue_relationship_exists: 'That Issue relationship already exists. Refresh the relationship list.',
+  issue_relationship_not_found: 'That Issue relationship no longer exists. Refresh the relationship list.'
 }
 
 type ErrorEnvelope = {
