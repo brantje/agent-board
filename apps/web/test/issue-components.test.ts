@@ -140,6 +140,19 @@ describe('Issue workflow components', () => {
 
     expect(wrapper.text()).toContain('Workspace / Board')
     expect(wrapper.findAll('header h2')).toHaveLength(6)
+    const columns = wrapper.findAll('[data-status]')
+    expect(columns.map(column => column.attributes('data-status'))).toEqual(['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE'])
+    expect(columns.map(column => column.classes().filter(name => name.startsWith('board-column')).sort().join(' '))).toEqual([
+      'board-column board-column-backlog',
+      'board-column board-column-todo',
+      'board-column board-column-in-progress',
+      'board-column board-column-blocked',
+      'board-column board-column-review',
+      'board-column board-column-done'
+    ])
+    expect(columns.every(column => !column.classes().includes('bg-muted/40'))).toBe(true)
+    expect(wrapper.text()).toContain('Backlog')
+    expect(wrapper.text()).toContain('Blocked')
     expect(wrapper.text()).toContain('Fix scheduler')
     await wrapper.get('input').setValue('absent')
     expect(wrapper.text()).not.toContain('Fix scheduler')

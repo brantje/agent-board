@@ -107,4 +107,25 @@ describe('durable API resource lifecycle', () => {
     const last = resource.refresh(); wrapper.unmount(); resolvers[4]!(new Response('bad', {status:500})); await last
     expect(resource.data.value?.name).toBe('B2')
   })
+  it('does not pending-flash or clear last data while a later refresh is in flight', async () => {
+    const resolvers: ((response: Response) => void)[] = []
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => resolvers.push(resolve))))
+    let resource!: ReturnType<typeof useResource<{name:string}[]>>
+    const wrapper = mount(defineComponent({
+      setup() {
+        resource = useResource(() => '/api/projects')
+        return () => h('div', resource.pending.value ? 'Loading' : (resource.data.value?.map(item => item.name).join(',') || 'Empty'))
+      }
+    }))
+    expect(resource.pending.value).toBe(true)
+    resolvers[0]!(new Response('[{"name":"A"}]')); await flushPromises()
+    expect(wrapper.text()).toBe('A')
+    const refresh = resource.refresh()
+    expect(resource.pending.value).toBe(false)
+    expect(resource.data.value?.map(item => item.name)).toEqual(['A'])
+    expect(wrapper.text()).toBe('A')
+    resolvers[1]!(new Response('[{"name":"A2"}]')); await refresh
+    expect(wrapper.text()).toBe('A2')
+    expect(resource.pending.value).toBe(false)
+  })
 })

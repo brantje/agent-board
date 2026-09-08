@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import type { Agent, Issue, Project } from '../types/api'
 import { apiPath } from '../utils/api'
-import { boardColumns } from '../utils/issues'
+import { boardColumnSurface, boardColumns } from '../utils/issues'
 import { useResource } from '../composables/useResource'
 import { useRefresh } from '../composables/useRefresh'
 
@@ -44,7 +44,12 @@ useRefresh(refreshAll)
 
     <AsyncState :pending="pending" :error="error" @retry="refreshAll">
       <div class="flex min-h-[calc(100dvh-10rem)] gap-3 overflow-x-auto pb-3" role="region" aria-label="Issue board" tabindex="0">
-        <section v-for="column in columns" :key="column.status" class="w-64 min-w-64 flex-1 border border-default bg-muted/40">
+        <section
+          v-for="column in columns"
+          :key="column.status"
+          :data-status="column.status"
+          :class="['w-64 min-w-64 flex-1 border border-default', boardColumnSurface(column.status)]"
+        >
           <header class="flex items-center justify-between gap-2 border-b border-default p-3">
             <h2 class="section-label">{{ column.label }}</h2>
             <UBadge :label="String(column.issues.length)" color="neutral" variant="subtle" />

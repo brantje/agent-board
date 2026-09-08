@@ -136,6 +136,17 @@ pre {
   color: var(--ui-text-muted);
 }
 
+.board-column {
+  background-color: var(--board-column-bg);
+}
+
+.board-column-backlog { --board-column-bg: var(--board-column-backlog); }
+.board-column-todo { --board-column-bg: var(--board-column-todo); }
+.board-column-in-progress { --board-column-bg: var(--board-column-in-progress); }
+.board-column-blocked { --board-column-bg: var(--board-column-blocked); }
+.board-column-review { --board-column-bg: var(--board-column-review); }
+.board-column-done { --board-column-bg: var(--board-column-done); }
+
 .detail-grid {
   display: grid;
   gap: 1rem;

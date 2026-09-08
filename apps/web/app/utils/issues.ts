@@ -21,6 +21,10 @@ export function statusLabel(status: string) {
     .replace(/(^|\s)\S/g, value => value.toUpperCase())
 }
 
+export function boardColumnSurface(status: string) {
+  return `board-column board-column-${status.toLowerCase().replaceAll('_', '-')}`
+}
+
 export function boardColumns(issues: Issue[], search = '') {
   const query = search.trim().toLowerCase()
   return issueStatuses.map(status => ({

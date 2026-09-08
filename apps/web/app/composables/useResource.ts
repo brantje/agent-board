@@ -12,7 +12,7 @@ export function useResource<T>(path: MaybeRefOrGetter<string>) {
     const current = ++generation
     controller?.abort()
     controller = new AbortController()
-    pending.value = true
+    pending.value = data.value === undefined
     error.value = undefined
     try {
       const result = await apiRequest<T>(toValue(path), { signal: controller.signal })

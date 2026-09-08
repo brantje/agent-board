@@ -88,9 +88,9 @@ export function useRunEvents(projectId: MaybeRefOrGetter<string>, runId: MaybeRe
     closeSource()
     controller?.abort()
     controller = new AbortController()
-    pending.value = true
+    pending.value = evidence.value === undefined
     error.value = undefined
-    connection.value = 'connecting'
+    if (!evidence.value) connection.value = 'connecting'
     try {
       const snapshot = await apiRequest<RunEvidence>(`${apiPath('runs', ids.projectId, ids.runId)}/evidence`, { signal: controller.signal })
       if (current !== generation) return
