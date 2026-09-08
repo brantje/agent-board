@@ -59,21 +59,21 @@ type ModelProfile struct {
 type Runtime struct {
 	ID                string
 	ProjectID         *string
-	Name              string
-	Kind              string
-	Image             string
-	CPULimitMillis    *int
-	MemoryLimitBytes  *int64
-	PIDLimit          *int
-	TimeoutSeconds    *int
-	NetworkPolicy     string
-	WorkspacePolicy   string
-	AllowedSecretRefs []string
-	Capabilities      json.RawMessage
-	Enabled           bool
-	HealthStatus      string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	Name               string
+	Kind               string
+	Image              string
+	CPULimitMillis     *int
+	MemoryLimitBytes   *int64
+	PIDLimit           *int
+	TimeoutSeconds     *int
+	NetworkPolicy      string
+	WorkspacePolicy    string
+	AllowedSecretRefs  []string
+	Capabilities       json.RawMessage
+	Enabled            bool
+	HealthStatus       string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type ExecutorProfile struct {
@@ -233,6 +233,7 @@ type Question struct {
 	Kind           string
 	Options        json.RawMessage
 	Recommendation *string
+	Custom         bool
 	Blocking       bool
 	Status         string
 	CreatedAt      time.Time

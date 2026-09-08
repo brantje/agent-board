@@ -19,6 +19,7 @@ type QuestionDTO struct {
 	Kind           string          `json:"kind"`
 	Options        json.RawMessage `json:"options"`
 	Recommendation *string         `json:"recommendation,omitempty"`
+	Custom         bool            `json:"custom"`
 	Blocking       bool            `json:"blocking"`
 	Status         string          `json:"status"`
 	CreatedAt      time.Time       `json:"createdAt"`
@@ -32,10 +33,10 @@ type QuestionAnswerRequest struct {
 }
 
 type QuestionAnswerResponse struct {
-	Question   QuestionDTO `json:"question"`
-	DecisionID string      `json:"decisionId"`
-	Run        RunDTO      `json:"run"`
-	ResumeJobID *string    `json:"resumeJobId,omitempty"`
+	Question    QuestionDTO `json:"question"`
+	DecisionID  string      `json:"decisionId"`
+	Run         RunDTO      `json:"run"`
+	ResumeJobID *string     `json:"resumeJobId,omitempty"`
 }
 
 func (a *api) registerQuestionRoutes(r chi.Router) {
@@ -155,6 +156,7 @@ func questionDTO(question store.Question) QuestionDTO {
 		Kind:           question.Kind,
 		Options:        options,
 		Recommendation: question.Recommendation,
+		Custom:         question.Custom,
 		Blocking:       question.Blocking,
 		Status:         question.Status,
 		CreatedAt:      question.CreatedAt,

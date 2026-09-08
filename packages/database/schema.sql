@@ -288,17 +288,36 @@ CREATE TABLE questions (
     kind text NOT NULL DEFAULT 'TEXT' CHECK (kind IN ('TEXT', 'SINGLE_CHOICE', 'MULTI_CHOICE')),
     options jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(options) = 'array'),
     recommendation text,
+    custom boolean NOT NULL DEFAULT false,
     blocking boolean NOT NULL DEFAULT true,
     status text NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'ANSWERED', 'CANCELLED')),
     created_at timestamptz NOT NULL DEFAULT now(),
     answered_at timestamptz,
     CONSTRAINT questions_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
     CONSTRAINT questions_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
-    UNIQUE (project_id, id)
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, run_id, id)
 );
 
 CREATE INDEX questions_open_idx ON questions (project_id, status, created_at) WHERE status = 'OPEN';
 CREATE INDEX questions_run_idx ON questions (run_id, created_at);
+
+CREATE TABLE engine_question_bindings (
+    question_id uuid NOT NULL,
+    project_id uuid NOT NULL,
+    run_id uuid NOT NULL,
+    engine text NOT NULL CHECK (btrim(engine) <> ''),
+    correlation_key text NOT NULL CHECK (btrim(correlation_key) <> ''),
+    state text NOT NULL DEFAULT 'OPEN' CHECK (state IN ('OPEN', 'ANSWERED', 'RESOLVED', 'CANCELLED')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT engine_question_bindings_question_fk FOREIGN KEY (project_id, run_id, question_id) REFERENCES questions(project_id, run_id, id) ON DELETE CASCADE,
+    CONSTRAINT engine_question_bindings_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
+    PRIMARY KEY (question_id),
+    UNIQUE (project_id, run_id, engine, correlation_key)
+);
+
+CREATE INDEX engine_question_bindings_run_state_idx ON engine_question_bindings (project_id, run_id, state);
 
 CREATE TABLE decisions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -376,6 +395,7 @@ CREATE UNIQUE INDEX events_run_sequence_uq ON events (run_id, sequence) WHERE ru
 CREATE INDEX events_run_timeline_idx ON events (run_id, sequence) WHERE run_id IS NOT NULL;
 CREATE INDEX events_project_timeline_idx ON events (project_id, created_at, id);
 CREATE INDEX events_correlation_idx ON events (correlation_id) WHERE correlation_id IS NOT NULL;
+CREATE INDEX events_question_id_lookup_idx ON events (project_id, run_id, type, (payload->>'questionId'));
 
 CREATE TABLE raw_output_chunks (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

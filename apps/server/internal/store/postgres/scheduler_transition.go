@@ -50,6 +50,12 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 		return store.Run{}, err
 	}
 
+	if terminal && current.Status == "WAITING_FOR_INPUT" {
+		if err := cleanupTerminalInteractiveQuestions(ctx, tx, run); err != nil {
+			return store.Run{}, err
+		}
+	}
+
 	if input.RunStatus == "WAITING_FOR_INPUT" {
 		command, err := tx.Exec(ctx, `
 			UPDATE issues
@@ -158,6 +164,16 @@ func validSchedulerRunTransition(from, to string) bool {
 	case "RUNNING":
 		switch to {
 		case "WAITING_FOR_INPUT", "PAUSED", "READY_FOR_REVIEW", "COMPLETED", "FAILED", "CANCELLED":
+			return true
+		}
+	case "WAITING_FOR_INPUT":
+		// A live interactive Engine keeps the scheduler claim while the Run is
+		// waiting. If that in-flight execution fails or is cancelled before the
+		// native question is resolved, the claimed job still needs a fenced path
+		// to a terminal state. Recovery-oriented waiting never reaches this path
+		// because its claim was already released.
+		switch to {
+		case "FAILED", "CANCELLED":
 			return true
 		}
 	}

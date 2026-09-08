@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -11,7 +12,7 @@ import (
 
 func (s *Store) GetQuestion(ctx context.Context, projectID, questionID string) (store.Question, error) {
 	return scanQuestion(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1 AND id = $2
 	`, projectID, questionID))
@@ -19,7 +20,7 @@ func (s *Store) GetQuestion(ctx context.Context, projectID, questionID string) (
 
 func (s *Store) ListQuestions(ctx context.Context, projectID string, filter store.QuestionFilter) ([]store.Question, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1
 		  AND ($2::uuid IS NULL OR issue_id = $2)
@@ -58,7 +59,7 @@ func (s *Store) GetDecisionByQuestion(ctx context.Context, projectID, questionID
 
 func (s *Store) GetOpenBlockingQuestion(ctx context.Context, projectID, runID string) (store.Question, error) {
 	return scanQuestion(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1 AND run_id = $2 AND blocking AND status = 'OPEN'
 		ORDER BY created_at, id
@@ -77,11 +78,8 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Read the immutable routing identity first, then acquire locks in the same
-	// Run -> Question order used by scheduler reconciliation. The Question is
-	// re-read under lock below before any state or answer validation is applied.
 	initialQuestion, err := scanQuestion(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1 AND id = $2
 	`, input.ProjectID, input.QuestionID))
@@ -100,7 +98,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 	}
 
 	question, err := scanQuestion(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		SELECT id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 		FROM questions
 		WHERE project_id = $1 AND id = $2
 		FOR UPDATE
@@ -128,21 +126,48 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		return store.AnswerQuestionResult{}, notFound(err)
 	}
 
+	binding, bindingErr := scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
+		SELECT question_id::text, project_id::text, run_id::text, engine, correlation_key, state, created_at, updated_at
+		FROM engine_question_bindings
+		WHERE project_id=$1 AND question_id=$2
+		FOR UPDATE
+	`, question.ProjectID, question.ID))
+	interactive := bindingErr == nil
+	if bindingErr != nil && !errors.Is(bindingErr, store.ErrNotFound) {
+		return store.AnswerQuestionResult{}, bindingErr
+	}
+	if interactive && binding.State != store.InteractiveQuestionOpen {
+		return store.AnswerQuestionResult{}, store.ErrConflict
+	}
+
+	interactiveLive := false
 	if question.Blocking {
 		if run.Status != "WAITING_FOR_INPUT" || (issueStatus != "BLOCKED" && issueStatus != "DONE") {
 			return store.AnswerQuestionResult{}, store.ErrConflict
 		}
-		var activeJob bool
-		if err := tx.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM scheduler_jobs
-				WHERE project_id = $1 AND run_id = $2 AND state IN ('QUEUED', 'CLAIMED')
-			)
-		`, question.ProjectID, question.RunID).Scan(&activeJob); err != nil {
-			return store.AnswerQuestionResult{}, err
-		}
-		if activeJob {
-			return store.AnswerQuestionResult{}, store.ErrConflict
+		if interactive {
+			interactiveLive, err = hasLiveClaim(ctx, tx, question.ProjectID, question.RunID)
+			if err != nil {
+				return store.AnswerQuestionResult{}, err
+			}
+			if !interactiveLive {
+				if err := retireExpiredInteractiveClaims(ctx, tx, question.ProjectID, question.RunID); err != nil {
+					return store.AnswerQuestionResult{}, err
+				}
+			}
+		} else {
+			var activeJob bool
+			if err := tx.QueryRow(ctx, `
+				SELECT EXISTS (
+					SELECT 1 FROM scheduler_jobs
+					WHERE project_id = $1 AND run_id = $2 AND state IN ('QUEUED', 'CLAIMED')
+				)
+			`, question.ProjectID, question.RunID).Scan(&activeJob); err != nil {
+				return store.AnswerQuestionResult{}, err
+			}
+			if activeJob {
+				return store.AnswerQuestionResult{}, store.ErrConflict
+			}
 		}
 	}
 
@@ -150,7 +175,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		UPDATE questions
 		SET status = 'ANSWERED', answered_at = now()
 		WHERE project_id = $1 AND id = $2 AND status = 'OPEN'
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, blocking, status, created_at, answered_at
+		RETURNING id::text, project_id::text, issue_id::text, run_id::text, prompt, kind, options, recommendation, custom, blocking, status, created_at, answered_at
 	`, question.ProjectID, question.ID))
 	if err != nil {
 		return store.AnswerQuestionResult{}, err
@@ -170,33 +195,87 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		return store.AnswerQuestionResult{}, err
 	}
 
+	answerPayload, err := json.Marshal(map[string]any{
+		"questionId": question.ID,
+		"answer":     input.Answer,
+		"actorType":  input.ActorType,
+		"actorId":    input.ActorID,
+	})
+	if err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+	decisionPayload, err := json.Marshal(map[string]any{
+		"decisionId": decision.ID,
+		"questionId": question.ID,
+		"kind":       decision.Kind,
+		"outcome":    decision.Outcome,
+		"actorType":  decision.ActorType,
+		"actorId":    decision.ActorID,
+	})
+	if err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+	workspaceID := run.WorkspaceID
+	if _, err := appendEventTx(ctx, tx, store.Event{
+		Type:        "question.answered",
+		ProjectID:   question.ProjectID,
+		IssueID:     &issueID,
+		RunID:       &runID,
+		AgentID:     run.AgentID,
+		WorkspaceID: &workspaceID,
+		Actor:       store.EmptyObject,
+		Payload:     answerPayload,
+	}); err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+	if _, err := appendEventTx(ctx, tx, store.Event{
+		Type:        "decision.recorded",
+		ProjectID:   question.ProjectID,
+		IssueID:     &issueID,
+		RunID:       &runID,
+		AgentID:     run.AgentID,
+		WorkspaceID: &workspaceID,
+		Actor:       store.EmptyObject,
+		Payload:     decisionPayload,
+	}); err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+
 	result := store.AnswerQuestionResult{Question: question, Decision: decision, Run: run}
-	if question.Blocking {
-		run, err = scanRun(tx.QueryRow(ctx, `
-			UPDATE runs
-			SET status = 'QUEUED', queue_reason = NULL, failure_reason = NULL, completed_at = NULL, updated_at = now()
-			WHERE project_id = $1 AND id = $2 AND status = 'WAITING_FOR_INPUT'
-			RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-		`, question.ProjectID, question.RunID))
+	if interactive {
+		binding, err = scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
+			UPDATE engine_question_bindings
+			SET state='ANSWERED', updated_at=now()
+			WHERE project_id=$1 AND question_id=$2 AND state='OPEN'
+			RETURNING question_id::text, project_id::text, run_id::text, engine, correlation_key, state, created_at, updated_at
+		`, question.ProjectID, question.ID))
 		if err != nil {
 			return store.AnswerQuestionResult{}, err
 		}
-		if _, err := tx.Exec(ctx, `
-			UPDATE issues
-			SET status = 'IN_PROGRESS', updated_at = now()
-			WHERE project_id = $1 AND id = $2 AND status = 'BLOCKED'
-		`, question.ProjectID, question.IssueID); err != nil {
+		_ = binding
+	}
+
+	queueResume := question.Blocking && (!interactive || !interactiveLive)
+	if queueResume && interactive {
+		// All Questions in a native request must remain answerable after lease
+		// loss. Queue recovery only after the final outstanding answer commits.
+		var pending bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM engine_question_bindings
+				WHERE project_id=$1 AND run_id=$2 AND state='OPEN'
+			)
+		`, question.ProjectID, question.RunID).Scan(&pending); err != nil {
 			return store.AnswerQuestionResult{}, err
 		}
-		job, err := scanSchedulerJob(tx.QueryRow(ctx, `
-			INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key, available_at)
-			VALUES ($1, $2, 'RESUME', 'QUEUED', $3, now())
-			RETURNING id::text, project_id::text, run_id::text, kind, state, wait_reason, idempotency_key, available_at, created_at, updated_at
-		`, question.ProjectID, question.RunID, "question:"+question.ID+":resume"))
+		queueResume = !pending
+	}
+	if queueResume {
+		resumedRun, job, err := queueBlockingQuestionResume(ctx, tx, question)
 		if err != nil {
 			return store.AnswerQuestionResult{}, err
 		}
-		result.Run = run
+		result.Run = resumedRun
 		result.Job = &job
 	}
 
@@ -216,7 +295,13 @@ func validateQuestionAnswer(question store.Question, answer store.QuestionAnswer
 			return store.ErrInvalidArgument
 		}
 	case "SINGLE_CHOICE", "MULTI_CHOICE":
-		if answer.Text != nil || len(answer.OptionIDs) == 0 || (question.Kind == "SINGLE_CHOICE" && len(answer.OptionIDs) != 1) {
+		if answer.Text != nil {
+			if !question.Custom || strings.TrimSpace(*answer.Text) == "" || len(answer.OptionIDs) != 0 {
+				return store.ErrInvalidArgument
+			}
+			return nil
+		}
+		if len(answer.OptionIDs) == 0 || (question.Kind == "SINGLE_CHOICE" && len(answer.OptionIDs) != 1) {
 			return store.ErrInvalidArgument
 		}
 		var options []store.QuestionOption

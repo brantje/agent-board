@@ -43,12 +43,20 @@ func (r *Recorder) Record(ctx context.Context, event store.Event) (store.Event, 
 	if err != nil {
 		return store.Event{}, err
 	}
-	if r.publisher != nil {
-		if err := r.publisher.Publish(ctx, persisted); err != nil && r.reportPublishError != nil {
-			r.reportPublishError(fmt.Errorf("evidence: publish persisted event: %w", err))
-		}
-	}
+	r.PublishPersisted(ctx, persisted)
 	return persisted, nil
+}
+
+// PublishPersisted publishes an Event that was committed by another durable
+// transaction. Publication is best-effort and never changes the outcome of the
+// already-committed operation; subscribers can recover from the Event sequence.
+func (r *Recorder) PublishPersisted(ctx context.Context, event store.Event) {
+	if r == nil || r.publisher == nil {
+		return
+	}
+	if err := r.publisher.Publish(ctx, event); err != nil && r.reportPublishError != nil {
+		r.reportPublishError(fmt.Errorf("evidence: publish persisted event: %w", err))
+	}
 }
 
 func EncodePayload(value any) (json.RawMessage, error) {

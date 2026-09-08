@@ -38,6 +38,9 @@ type Server struct {
 	deliveryMu sync.Mutex
 	deliveries map[string]*sessionDelivery
 
+	connectMu  sync.Mutex
+	connectors map[string]map[string]*sessionConnector
+
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
 	lifecycleMu    sync.Mutex
@@ -61,6 +64,7 @@ func New(config Config) *Server {
 		mux:            http.NewServeMux(),
 		stdinPumps:     make(map[string]*stdinPump),
 		deliveries:     make(map[string]*sessionDelivery),
+		connectors:     make(map[string]map[string]*sessionConnector),
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
 		connections:    make(map[*websocket.Conn]struct{}),
@@ -103,6 +107,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	writer := &connectionWriter{conn: conn}
 	defer s.detachDeliveries(writer)
+	defer s.detachConnectors(writer)
 	pingStop := make(chan struct{})
 	pingDone := make(chan struct{})
 	go func() {
@@ -204,7 +209,7 @@ func (s *Server) handshake(conn *websocket.Conn, writer *connectionWriter) bool 
 		Version: protocol.Version1,
 		Capabilities: protocol.Capabilities{
 			MaxActiveSessions: s.manager.Capacity(),
-			Features:          []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"},
+			Features:          []string{"stdin", "stdout", "stderr", "terminate", "kill", "health", "session_connect"},
 		},
 	})
 	_ = writer.send(protocol.TypeHealth, "", s.health())
@@ -224,6 +229,12 @@ func (s *Server) handleMessage(writer *connectionWriter, msg protocol.Message) {
 		s.handleSignal(writer, msg.SessionID, false)
 	case protocol.TypeKill:
 		s.handleSignal(writer, msg.SessionID, true)
+	case protocol.TypeConnect:
+		s.handleConnect(writer, msg)
+	case protocol.TypeConnectData:
+		s.handleConnectData(writer, msg)
+	case protocol.TypeConnectClose:
+		s.handleConnectClose(writer, msg)
 	case protocol.TypeHealth:
 		_ = writer.send(protocol.TypeHealth, "", s.health())
 	default:

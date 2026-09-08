@@ -49,17 +49,29 @@ type QuestionRequest struct {
 	Options        []QuestionOption
 	Recommendation *string
 	Blocking       bool
+	Custom         bool
+}
+
+type CorrelatedQuestionRequest struct {
+	CorrelationKey string
+	Question       QuestionRequest
 }
 
 type Question struct {
 	ID       string
 	Blocking bool
+	Custom   bool
 }
 
 type QuestionAnswer struct {
 	Kind      string
 	Text      *string
 	OptionIDs []string
+}
+
+type AcceptedInteractiveQuestionReply struct {
+	QuestionID     string `json:"questionId"`
+	CorrelationKey string `json:"correlationKey"`
 }
 
 type Continuation struct {
@@ -69,17 +81,42 @@ type Continuation struct {
 	Answer     QuestionAnswer
 }
 
-// Questioner is the narrow human-input capability available to Engine adapters.
-// Durable Question persistence and Run lifecycle changes remain server-owned.
+// Questioner is the recovery-oriented human-input capability. A blocking Ask
+// unwinds the Engine so the durable scheduler can later execute a continuation.
 type Questioner interface {
 	Ask(context.Context, QuestionRequest) (Question, error)
 }
 
+// InteractiveQuestioner keeps a native Engine session alive while durable
+// human input is collected. Correlation keys are opaque Engine-owned values;
+// persistence, Run state and recovery remain server-owned.
+type InteractiveQuestioner interface {
+	Open(context.Context, string, QuestionRequest) (Question, error)
+	WaitAnswer(context.Context, string) (QuestionAnswer, error)
+	Resolve(context.Context, string) error
+}
+
+// InteractiveQuestionBatcher opens one native Question request atomically. It
+// is a separate capability so existing single-Question adapters remain valid
+// while engines with multi-Question native requests can require batch safety.
+type InteractiveQuestionBatcher interface {
+	OpenBatch(context.Context, []CorrelatedQuestionRequest) ([]Question, error)
+}
+
+// InteractiveQuestionReplyTracker durably journals that a native engine has
+// accepted a reply before canonical bindings are resolved. ListReplyAccepted
+// returns journaled bindings that still need a durable resolution marker.
+type InteractiveQuestionReplyTracker interface {
+	MarkReplyAccepted(context.Context, []AcceptedInteractiveQuestionReply) error
+	ListReplyAccepted(context.Context) ([]AcceptedInteractiveQuestionReply, error)
+}
+
 type Request struct {
-	Context      executioncontext.SafeContext
-	Launcher     ProcessLauncher
-	Questions    Questioner
-	Continuation *Continuation
+	Context              executioncontext.SafeContext
+	Launcher             ProcessLauncher
+	Questions            Questioner
+	InteractiveQuestions InteractiveQuestioner
+	Continuation         *Continuation
 }
 
 type Result struct {

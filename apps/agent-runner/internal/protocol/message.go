@@ -19,6 +19,10 @@ const (
 	TypeExit           = runnerprotocol.TypeExit
 	TypeTerminate      = runnerprotocol.TypeTerminate
 	TypeKill           = runnerprotocol.TypeKill
+	TypeConnect        = runnerprotocol.TypeConnect
+	TypeConnected      = runnerprotocol.TypeConnected
+	TypeConnectData    = runnerprotocol.TypeConnectData
+	TypeConnectClose   = runnerprotocol.TypeConnectClose
 	TypeError          = runnerprotocol.TypeError
 )
 
@@ -34,6 +38,10 @@ type Capabilities = runnerprotocol.Capabilities
 type Health = runnerprotocol.Health
 type StartRequest = runnerprotocol.StartRequest
 type StreamData = runnerprotocol.StreamData
+type ConnectRequest = runnerprotocol.ConnectRequest
+type Connected = runnerprotocol.Connected
+type ConnectData = runnerprotocol.ConnectData
+type ConnectClose = runnerprotocol.ConnectClose
 type ExitResult = runnerprotocol.ExitResult
 type ErrorPayload = runnerprotocol.ErrorPayload
 
