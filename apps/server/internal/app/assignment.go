@@ -54,6 +54,7 @@ func (s *Service) AssignIssue(ctx context.Context, projectID, issueID, agentID s
 		return store.Issue{}, store.Run{}, translateStoreError(err, "issue")
 	}
 	if issue.AssignedAgentID != nil && *issue.AssignedAgentID == agentID {
+		assigned.LastEvent = issue.LastEvent
 		return assigned, run, nil
 	}
 	event, err := s.recordIssueEvent(ctx, "issue.assigned", assigned, map[string]any{"agentId": agentID})
