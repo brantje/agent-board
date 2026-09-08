@@ -133,6 +133,7 @@ CREATE TABLE issues (
     title text NOT NULL CHECK (btrim(title) <> ''),
     description text NOT NULL DEFAULT '',
     status text NOT NULL DEFAULT 'BACKLOG' CHECK (status IN ('BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE')),
+    priority integer NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 4),
     assigned_agent_id uuid REFERENCES agents(id) ON DELETE SET NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -141,6 +142,21 @@ CREATE TABLE issues (
 
 CREATE INDEX issues_project_status_idx ON issues (project_id, status, created_at);
 CREATE INDEX issues_assigned_agent_idx ON issues (assigned_agent_id) WHERE assigned_agent_id IS NOT NULL;
+
+CREATE TABLE issue_relationships (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid NOT NULL,
+    source_issue_id uuid NOT NULL,
+    target_issue_id uuid NOT NULL,
+    type text NOT NULL CHECK (type IN ('blocks', 'depends_on', 'related_to', 'duplicates')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT issue_relationships_source_fk FOREIGN KEY (project_id, source_issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT issue_relationships_target_fk FOREIGN KEY (project_id, target_issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
+    CHECK (source_issue_id <> target_issue_id),
+    UNIQUE (project_id, source_issue_id, target_issue_id, type)
+);
+
+CREATE INDEX issue_relationships_source_idx ON issue_relationships (project_id, source_issue_id, created_at, id);
 
 CREATE TABLE workspaces (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
