@@ -65,8 +65,27 @@ export function apiPath(resource: string, projectId?: string, id?: string) {
   return `/api/${projectId ? `projects/${segment(projectId)}/` : ''}${segment(resource)}${id ? `/${segment(id)}` : ''}`
 }
 
-export async function apiRequest<T>(path: string, options: { method?: string; body?: unknown; signal?: AbortSignal; headers?: Record<string, string> } = {}): Promise<T> {
+function assertApiPath(path: string) {
   if (!path.startsWith('/api/') || path.includes('..') || path.includes('\\')) throw new Error('Invalid API path')
+}
+
+export function apiQuery(path: string, params: Record<string, string | undefined | null> = {}) {
+  assertApiPath(path)
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value) search.set(key, value)
+  }
+  const query = search.toString()
+  return query ? `${path}?${query}` : path
+}
+
+async function parseFailedResponse(response: Response) {
+  const code = await errorCodeFor(response)
+  throw new ApiError(response.status, code, messageFor(response.status, code))
+}
+
+export async function apiRequest<T>(path: string, options: { method?: string; body?: unknown; signal?: AbortSignal; headers?: Record<string, string> } = {}): Promise<T> {
+  assertApiPath(path)
   let response: Response
   try {
     response = await fetch(path, {
@@ -83,13 +102,31 @@ export async function apiRequest<T>(path: string, options: { method?: string; bo
   } catch {
     throw new ApiError(0, 'network', 'Unable to reach the server. Check your connection and retry.')
   }
-  if (!response.ok) {
-    const code = await errorCodeFor(response)
-    throw new ApiError(response.status, code, messageFor(response.status, code))
-  }
+  if (!response.ok) await parseFailedResponse(response)
   if (response.status === 204) return undefined as T
   try {
     return await response.json() as T
+  } catch {
+    throw new ApiError(502, 'invalid_response', 'The server returned an invalid response. Retry or check deployment configuration.')
+  }
+}
+
+export async function apiText(path: string, options: { signal?: AbortSignal } = {}): Promise<string> {
+  assertApiPath(path)
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: 'GET',
+      credentials: 'same-origin',
+      signal: options.signal,
+      headers: { Accept: 'text/plain' }
+    })
+  } catch {
+    throw new ApiError(0, 'network', 'Unable to reach the server. Check your connection and retry.')
+  }
+  if (!response.ok) await parseFailedResponse(response)
+  try {
+    return await response.text()
   } catch {
     throw new ApiError(502, 'invalid_response', 'The server returned an invalid response. Retry or check deployment configuration.')
   }

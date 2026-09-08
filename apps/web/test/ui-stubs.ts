@@ -14,5 +14,8 @@ export const uiStubs = {
   UCheckbox: {props:['modelValue','disabled'],emits:['update:modelValue'],template:'<input type="checkbox" :checked="modelValue" :disabled="disabled" @change="$emit(\'update:modelValue\', $event.target.checked)"/>'},
   USelect: {props:['modelValue','items','disabled'],emits:['update:modelValue'],template:'<select :value="modelValue" :disabled="disabled" @change="$emit(\'update:modelValue\', $event.target.value)"><option value="">Select…</option><option v-for="item in items" :value="typeof item === \'object\' ? item.value : item" :disabled="item.disabled">{{typeof item === \'object\' ? item.label : item}}</option></select>'},
   UAccordion: defineComponent({props:['items'],setup(props,{slots}) { return ()=> h('div',(props.items as {slot?:string;label?:string}[]).map(item=>h('section',[h('h3',item.label), item.slot ? slots[item.slot]?.({item}) : slots.body?.({item})]))) }}),
+  UTimeline: {props:['items'],template:'<ol><li v-for="item in items" :key="item.value"><h4>{{item.title}}</h4><time>{{item.date}}</time><p>{{item.description}}</p><slot :name="(item.slot || \'item\') + \'-description\'" :item="item"/></li></ol>'},
+  URadioGroup: {props:['modelValue','items','disabled'],emits:['update:modelValue'],template:'<div><label v-for="item in items" :key="item.value"><input type="radio" :value="item.value" :checked="modelValue===item.value" :disabled="disabled" @change="$emit(\'update:modelValue\', item.value)"/>{{item.label}}</label></div>'},
+  UEmpty: {props:['title','description'],template:'<div>{{title}} {{description}}</div>'},
   UNavigationMenu: {props:['items'],template:'<nav><a v-for="item in items" :href="item.to">{{item.label}}</a></nav>'}
 }

@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"net/http"
+	"strings"
 
+	"github.com/brantje/agent-board/apps/server/internal/secrets"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -168,10 +170,30 @@ func (a *api) createProvider(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	if hasProviderCredential(req.Credential) && a.secrets == nil {
+		writeError(w, http.StatusServiceUnavailable, "secret_storage_unavailable", "Secret storage is not configured for this deployment.")
+		return
+	}
 	v, err := a.service.CreateProvider(r.Context(), store.Provider{Name: req.Name, Kind: req.Kind, BaseURL: req.BaseURL, CredentialRef: req.CredentialRef, Enabled: boolDefault(req.Enabled, true), SafeMetadata: req.SafeMetadata})
 	if err != nil {
 		writeAppError(w, err)
 		return
+	}
+	if hasProviderCredential(req.Credential) {
+		ref := providerCredentialRef(req.CredentialRef, v.ID, v.CredentialRef)
+		if _, err := a.secrets.Put(r.Context(), secrets.Scope{}, ref, []byte(strings.TrimSpace(*req.Credential))); err != nil {
+			writeAppError(w, err)
+			return
+		}
+		if v.CredentialRef == nil || *v.CredentialRef != ref {
+			refValue := ref
+			v.CredentialRef = &refValue
+			v, err = a.service.UpdateProvider(r.Context(), v)
+			if err != nil {
+				writeAppError(w, err)
+				return
+			}
+		}
 	}
 	writeJSON(w, 201, providerDTO(v))
 }
@@ -196,6 +218,10 @@ func (a *api) updateProvider(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	if hasProviderCredential(req.Credential) && a.secrets == nil {
+		writeError(w, http.StatusServiceUnavailable, "secret_storage_unavailable", "Secret storage is not configured for this deployment.")
+		return
+	}
 	current, err := a.service.GetProvider(r.Context(), id)
 	if err != nil {
 		writeAppError(w, err)
@@ -209,12 +235,35 @@ func (a *api) updateProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	current.Enabled = boolDefault(req.Enabled, current.Enabled)
 	current.SafeMetadata = req.SafeMetadata
+	if hasProviderCredential(req.Credential) {
+		ref := providerCredentialRef(req.CredentialRef, current.ID, current.CredentialRef)
+		if _, err := a.secrets.Put(r.Context(), secrets.Scope{}, ref, []byte(strings.TrimSpace(*req.Credential))); err != nil {
+			writeAppError(w, err)
+			return
+		}
+		refValue := ref
+		current.CredentialRef = &refValue
+	}
 	v, err := a.service.UpdateProvider(r.Context(), current)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	writeJSON(w, 200, providerDTO(v))
+}
+
+func hasProviderCredential(credential *string) bool {
+	return credential != nil && strings.TrimSpace(*credential) != ""
+}
+
+func providerCredentialRef(explicit *string, providerID string, existing *string) string {
+	if explicit != nil && strings.TrimSpace(*explicit) != "" {
+		return strings.TrimSpace(*explicit)
+	}
+	if existing != nil && strings.TrimSpace(*existing) != "" {
+		return strings.TrimSpace(*existing)
+	}
+	return "provider:" + providerID
 }
 
 func (a *api) listModelProfiles(w http.ResponseWriter, r *http.Request, scope *string) {

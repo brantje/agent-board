@@ -74,6 +74,14 @@ paths:
     $ref: ./paths/run-evidence.yaml#/path2
   /api/projects/{projectID}/runs/{runID}/artifacts/{artifactID}:
     $ref: ./paths/run-evidence.yaml#/path3
+  /api/projects/{projectID}/runs/{runID}/events:
+    $ref: ./paths/run-evidence.yaml#/path4
+  /api/projects/{projectID}/questions:
+    $ref: ./paths/questions.yaml#/path1
+  /api/projects/{projectID}/questions/{questionID}:
+    $ref: ./paths/questions.yaml#/path2
+  /api/projects/{projectID}/questions/{questionID}/answer:
+    $ref: ./paths/questions.yaml#/path3
   /api/projects/{projectID}/reviews:
     $ref: ./paths/reviews.yaml#/path1
   /api/projects/{projectID}/reviews/{reviewID}:

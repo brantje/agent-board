@@ -52,7 +52,27 @@ On a fresh PostgreSQL volume, Compose initializes `packages/database/schema.sql`
 
 The v0.1 self-hosted deployment uses the host Docker daemon for Runtime Instances. The trusted Go backend may access Docker; Agent Runtime Instances never receive the Docker socket or equivalent daemon credentials.
 
+Before `docker compose up`, set `AGENT_BOARD_DOCKER_GID` in `.env` to the host Docker group GID:
+
+```bash
+stat -c '%g' /var/run/docker.sock
+```
+
+When the server runs in Compose, Runtime Instances must join the same Docker network so the control plane can reach `agent-runner`. The default Compose setup uses `agent-board_default` via `AGENT_BOARD_DOCKER_NETWORK`.
+
 Runtime Workspaces must be visible to the host Docker daemon at the same absolute path used by the server. The default Compose setup uses `/var/lib/agent-board/workspaces`.
+
+### Provider credentials for OpenCode
+
+OpenCode Runs require encrypted Provider credential storage. With the default Compose setup, the deployment encryption key and secret-write token are generated automatically on first startup.
+
+Save each Provider credential from **Settings → Providers**:
+
+1. Create or edit a Provider.
+2. Expand **Set or replace API key** and paste the Provider API key.
+3. Save the Provider.
+
+The API key is encrypted server-side and never shown again after save.
 
 Official v0.1 Runtime images include `agent-runner`, which communicates with the server over a versioned WebSocket protocol and executes Engine process sessions inside the Runtime Instance.
 

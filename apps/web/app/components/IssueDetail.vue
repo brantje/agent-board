@@ -95,7 +95,9 @@ async function saved(savedIssue: Issue) {
             </AsyncState>
           </UCard>
 
-          <slot name="questions" />
+          <slot name="questions">
+            <QuestionPanel :project-id="projectId" :issue-id="issueId" />
+          </slot>
         </section>
 
         <aside class="space-y-4">

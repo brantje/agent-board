@@ -28,9 +28,31 @@ const (
 	nativeStatePollInterval     = 250 * time.Millisecond
 	nativeStatePollFailureLimit = 3
 	inactivePollsBeforeComplete = 2
+	promptAdmissionPollLimit    = 40
 	serviceTerminateGrace       = time.Second
 	serviceStopTimeout          = 5 * time.Second
 )
+
+var builtInOpenCodeProviders = map[string]struct{}{
+	"amazon-bedrock": {},
+	"anthropic":      {},
+	"azure":          {},
+	"cerebras":       {},
+	"deepseek":       {},
+	"fireworks":      {},
+	"github-copilot": {},
+	"gitlab":         {},
+	"google":         {},
+	"google-vertex":  {},
+	"groq":           {},
+	"mistral":        {},
+	"openai":         {},
+	"openrouter":     {},
+	"opencode":       {},
+	"perplexity":     {},
+	"together":       {},
+	"xai":            {},
+}
 
 type Engine struct {
 	address string
@@ -158,6 +180,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	defer statePoll.Stop()
 	executionObserved := false
 	inactivePolls := 0
+	promptStallPolls := 0
 	statePollFailures := 0
 	for {
 		select {
@@ -186,6 +209,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			statePollFailures = 0
 			if active {
 				executionObserved = true
+				promptStallPolls = 0
 				inactivePolls = 0
 				continue
 			}
@@ -194,6 +218,10 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			// briefly before its drain starts. Treat inactivity as completion only after
 			// this exact session has been observed running (or asking a Question).
 			if !executionObserved {
+				promptStallPolls++
+				if promptStallPolls >= promptAdmissionPollLimit {
+					return engine.Result{}, fmt.Errorf("opencode engine: native session did not start execution after prompt")
+				}
 				inactivePolls = 0
 				continue
 			}
@@ -222,6 +250,18 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				return engine.Result{}, err
 			}
 			if idle {
+				if !executionObserved {
+					active, err := native.SessionActive(ctx, session.ID)
+					if err != nil {
+						return engine.Result{}, fmt.Errorf("opencode engine: query native session activity before idle handling: %w", err)
+					}
+					if !active {
+						return engine.Result{}, fmt.Errorf("opencode engine: native session became idle before execution started")
+					}
+					executionObserved = true
+					promptStallPolls = 0
+					inactivePolls = 0
+				}
 				hadPending, err := reconcilePendingQuestions(ctx, native, session.ID, state)
 				if err != nil {
 					return engine.Result{}, err
@@ -268,18 +308,36 @@ func resolveSettings(safe executioncontext.SafeContext) (settings, error) {
 	return resolved, nil
 }
 
+func isBuiltInOpenCodeProvider(providerID string) bool {
+	_, ok := builtInOpenCodeProviders[strings.TrimSpace(providerID)]
+	return ok
+}
+
 func serverEnvironment(safe executioncontext.SafeContext, providerID string) (map[string]string, error) {
+	modelID := strings.TrimSpace(safe.Model.Model)
 	options := map[string]any{
 		"apiKey": "{env:" + providerCredentialEnv + "}",
 	}
 	if safe.Provider.BaseURL != nil && strings.TrimSpace(*safe.Provider.BaseURL) != "" {
 		options["baseURL"] = strings.TrimSpace(*safe.Provider.BaseURL)
 	}
+	providerConfig := map[string]any{
+		"options": options,
+		"models": map[string]any{
+			modelID: map[string]any{
+				"name": modelID,
+			},
+		},
+	}
+	if !isBuiltInOpenCodeProvider(providerID) {
+		providerConfig["npm"] = "@ai-sdk/openai-compatible"
+		if name := strings.TrimSpace(safe.Provider.Name); name != "" {
+			providerConfig["name"] = name
+		}
+	}
 	config := map[string]any{
 		"provider": map[string]any{
-			providerID: map[string]any{
-				"options": options,
-			},
+			providerID: providerConfig,
 		},
 	}
 	encoded, err := json.Marshal(config)

@@ -137,6 +137,10 @@ func (s *RunEvidenceService) OpenArtifact(ctx context.Context, projectID, runID,
 	return artifact, reader, nil
 }
 
+func (s *RunEvidenceService) RequireRun(ctx context.Context, projectID, runID string) (store.Run, error) {
+	return s.requireRun(ctx, projectID, runID)
+}
+
 func (s *RunEvidenceService) requireRun(ctx context.Context, projectID, runID string) (store.Run, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" {
 		return store.Run{}, NewError("invalid_argument", "projectId and runId are required", store.ErrInvalidArgument)
@@ -148,6 +152,35 @@ func (s *RunEvidenceService) requireRun(ctx context.Context, projectID, runID st
 func (s *RunEvidenceService) listAllRunEvents(ctx context.Context, projectID, runID string) ([]store.Event, error) {
 	events := make([]store.Event, 0)
 	var after int64
+	for {
+		batch, err := s.store.ListRunEvents(ctx, projectID, runID, after, runEvidenceEventPageSize)
+		if err != nil {
+			return nil, fmt.Errorf("list run events: %w", err)
+		}
+		if len(batch) == 0 {
+			return events, nil
+		}
+		events = append(events, batch...)
+		last := batch[len(batch)-1].Sequence
+		if last == nil || *last <= after {
+			return nil, fmt.Errorf("run evidence: invalid event sequence while reading run %s", runID)
+		}
+		after = *last
+		if len(batch) < runEvidenceEventPageSize {
+			return events, nil
+		}
+	}
+}
+
+func (s *RunEvidenceService) ListEventsAfter(ctx context.Context, projectID, runID string, afterSequence int64) ([]store.Event, error) {
+	if _, err := s.requireRun(ctx, projectID, runID); err != nil {
+		return nil, err
+	}
+	if afterSequence < 0 {
+		return nil, NewError("invalid_argument", "afterSequence must be >= 0", store.ErrInvalidArgument)
+	}
+	events := make([]store.Event, 0)
+	after := afterSequence
 	for {
 		batch, err := s.store.ListRunEvents(ctx, projectID, runID, after, runEvidenceEventPageSize)
 		if err != nil {

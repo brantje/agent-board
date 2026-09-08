@@ -18,6 +18,7 @@ func TestRunEvidenceOpenAPIPathsAndSchemas(t *testing.T) {
 		"/api/projects/{projectID}/runs/{runID}/evidence:",
 		"/api/projects/{projectID}/runs/{runID}/raw-output/{chunkID}:",
 		"/api/projects/{projectID}/runs/{runID}/artifacts/{artifactID}:",
+		"/api/projects/{projectID}/runs/{runID}/events:",
 	} {
 		if !strings.Contains(mainDoc, route) {
 			t.Fatalf("OpenAPI missing run evidence route %s", route)
@@ -28,8 +29,11 @@ func TestRunEvidenceOpenAPIPathsAndSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	pathsDoc := string(pathsData)
-	if strings.Count(pathsDoc, "operationId:") != 3 {
-		t.Fatalf("run evidence path document must define three operations: %s", pathsData)
+	if strings.Count(pathsDoc, "operationId:") != 4 {
+		t.Fatalf("run evidence path document must define four operations: %s", pathsData)
+	}
+	if !strings.Contains(pathsDoc, "text/event-stream:") || !strings.Contains(pathsDoc, "afterSequence") || !strings.Contains(pathsDoc, "streamRunEvents") {
+		t.Fatalf("run event stream contract is missing: %s", pathsData)
 	}
 	if !strings.Contains(pathsDoc, "'*/*':") {
 		t.Fatalf("artifact download must document its validated dynamic response media type: %s", pathsData)

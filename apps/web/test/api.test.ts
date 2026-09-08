@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiRequest, ApiError, apiPath } from '../app/utils/api'
+import { apiRequest, ApiError, apiPath, apiQuery, apiText } from '../app/utils/api'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -72,5 +72,15 @@ describe('Go API transport', () => {
   it('refuses external and non-API requests', async () => {
     await expect(apiRequest('https://evil.test/api')).rejects.toThrow('API path')
     await expect(apiRequest('/api/../private')).rejects.toThrow('API path')
+  })
+
+  it('encodes query strings and reads bounded raw-output text', async () => {
+    expect(apiQuery('/api/projects/p/questions', { issueId: 'issue-1', status: 'OPEN' })).toBe('/api/projects/p/questions?issueId=issue-1&status=OPEN')
+    expect(apiQuery('/api/projects/p/runs/r/events', { afterSequence: '3' })).toBe('/api/projects/p/runs/r/events?afterSequence=3')
+    expect(() => apiQuery('/api/../x')).toThrow()
+    const fetch = vi.fn().mockResolvedValue(new Response('log chunk', { headers: { 'Content-Type': 'text/plain' } }))
+    vi.stubGlobal('fetch', fetch)
+    expect(await apiText('/api/projects/p/runs/r/raw-output/chunk-1')).toBe('log chunk')
+    expect(fetch).toHaveBeenCalledWith('/api/projects/p/runs/r/raw-output/chunk-1', expect.objectContaining({ credentials: 'same-origin' }))
   })
 })

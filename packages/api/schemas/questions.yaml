@@ -1,0 +1,58 @@
+Question:
+  type: object
+  additionalProperties: false
+  required: [id, projectId, issueId, runId, prompt, kind, options, custom, blocking, status, createdAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: string, format: uuid}
+    issueId: {type: string, format: uuid}
+    runId: {type: string, format: uuid}
+    prompt: {type: string}
+    kind:
+      type: string
+      enum: [TEXT, SINGLE_CHOICE, MULTI_CHOICE]
+    options:
+      type: array
+      items:
+        $ref: '#/QuestionOption'
+    recommendation: {type: [string, 'null']}
+    custom: {type: boolean}
+    blocking: {type: boolean}
+    status:
+      type: string
+      enum: [OPEN, ANSWERED, CANCELLED]
+    createdAt: {type: string, format: date-time}
+    answeredAt: {type: [string, 'null'], format: date-time}
+
+QuestionOption:
+  type: object
+  additionalProperties: false
+  required: [id, label]
+  properties:
+    id: {type: string}
+    label: {type: string}
+
+QuestionAnswerRequest:
+  type: object
+  additionalProperties: false
+  required: [kind]
+  properties:
+    kind:
+      type: string
+      enum: [TEXT, SINGLE_CHOICE, MULTI_CHOICE]
+    text: {type: string}
+    optionIds:
+      type: array
+      items: {type: string}
+
+QuestionAnswerResponse:
+  type: object
+  additionalProperties: false
+  required: [question, decisionId, run]
+  properties:
+    question:
+      $ref: '#/Question'
+    decisionId: {type: string, format: uuid}
+    run:
+      $ref: ./control-plane.yaml#/Run
+    resumeJobId: {type: [string, 'null'], format: uuid}

@@ -37,6 +37,32 @@ func TestRunnerEndpointResolvesInspectedContainerAddress(t *testing.T) {
 	}
 }
 
+func TestRunnerEndpointUsesConfiguredControlNetwork(t *testing.T) {
+	spec := dockerSpec()
+	spec.Network = runtimepkg.NetworkOutbound
+	handle, err := handleFromSpec(spec, "container-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeMoby{}
+	fake.inspectFn = func(string) (client.ContainerInspectResult, error) {
+		result := ownedInspect(spec, "container-id", "running")
+		result.Container.NetworkSettings = &container.NetworkSettings{Networks: map[string]*network.EndpointSettings{
+			"agent-board_default": {IPAddress: netip.MustParseAddr("172.18.0.42")},
+			"bridge":              {IPAddress: netip.MustParseAddr("172.17.0.23")},
+		}}
+		return result, nil
+	}
+	runtime, _ := newWithClientAndControlNetwork(fake, "agent-board_default")
+	endpoint, err := runtime.RunnerEndpoint(context.Background(), handle)
+	if err != nil {
+		t.Fatalf("RunnerEndpoint() error=%v", err)
+	}
+	if endpoint.URL != "ws://172.18.0.42:8080/v1/ws" {
+		t.Fatalf("RunnerEndpoint() URL=%q", endpoint.URL)
+	}
+}
+
 func TestRunnerEndpointSelectsBridgeWhenContainerHasMultipleNetworks(t *testing.T) {
 	spec := dockerSpec()
 	spec.Network = runtimepkg.NetworkOutbound

@@ -30,6 +30,7 @@ type CompleteReviewApprovalResult struct {
 	Decision Decision
 	Run      Run
 	Issue    Issue
+	Events   []Event
 }
 
 type FailReviewApprovalCommand struct {
@@ -51,6 +52,7 @@ type RequestReviewChangesResult struct {
 	Run      Run
 	Job      SchedulerJob
 	Issue    Issue
+	Events   []Event
 }
 
 type ReviewStore interface {

@@ -96,7 +96,7 @@ func dockerSpec() runtimepkg.RuntimeSpec {
 }
 
 func ownedInspect(spec runtimepkg.RuntimeSpec, id, state string) client.ContainerInspectResult {
-	options := buildCreateOptions(spec)
+	options := new(Runtime).buildCreateOptions(spec)
 	return client.ContainerInspectResult{Container: container.InspectResponse{
 		ID:         id,
 		Name:       "/" + options.Name,
@@ -114,7 +114,7 @@ func ownedInspect(spec runtimepkg.RuntimeSpec, id, state string) client.Containe
 
 func TestBuildCreateOptionsEnforcesWorkspaceResourcesAndIsolation(t *testing.T) {
 	spec := dockerSpec()
-	options := buildCreateOptions(spec)
+	options := new(Runtime).buildCreateOptions(spec)
 	if options.Name != containerName(spec.RuntimeInstanceID) {
 		t.Fatalf("container name=%q", options.Name)
 	}
@@ -144,10 +144,20 @@ func TestBuildCreateOptionsEnforcesWorkspaceResourcesAndIsolation(t *testing.T) 
 	}
 }
 
+func TestBuildCreateOptionsUsesConfiguredControlNetwork(t *testing.T) {
+	spec := dockerSpec()
+	spec.Network = runtimepkg.NetworkOutbound
+	runtime, _ := newWithClientAndControlNetwork(&fakeMoby{}, "agent-board_default")
+	options := runtime.buildCreateOptions(spec)
+	if options.HostConfig.NetworkMode != container.NetworkMode("agent-board_default") {
+		t.Fatalf("network mode=%q", options.HostConfig.NetworkMode)
+	}
+}
+
 func TestBuildCreateOptionsAllowsOutboundWithoutHostNetworking(t *testing.T) {
 	spec := dockerSpec()
 	spec.Network = runtimepkg.NetworkOutbound
-	options := buildCreateOptions(spec)
+	options := new(Runtime).buildCreateOptions(spec)
 	if options.Config.NetworkDisabled || options.HostConfig.NetworkMode.IsHost() || options.HostConfig.NetworkMode.IsNone() {
 		t.Fatalf("network config=%+v", options.HostConfig.NetworkMode)
 	}

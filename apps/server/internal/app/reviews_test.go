@@ -268,3 +268,24 @@ func TestReviewServiceRequestChangesForwardsFeedback(t *testing.T) {
 		t.Fatalf("command=%+v", s.requestCommand)
 	}
 }
+
+func TestReviewServicePublishesPersistedEventsAfterCommit(t *testing.T) {
+	runID := "run-1"
+	s := &reviewServiceStore{request: store.RequestReviewChangesResult{
+		Review: store.Review{ID: "review-1", Status: "CHANGES_REQUESTED"},
+		Events: []store.Event{{ID: "event-review", Type: "review.changes_requested", RunID: &runID}},
+	}}
+	service := newReviewServiceForTest(t, s, &reviewBlobStore{values: map[string][]byte{}}, &reviewCandidateApplierFake{})
+	publisher := &capturingPublisher{}
+	service.publisher = publisher
+	result, err := service.RequestChanges(context.Background(), "project-1", "review-1", "fix", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 1 || result.Events[0].ID != "event-review" {
+		t.Fatalf("result events=%+v", result.Events)
+	}
+	if len(publisher.events) != 1 || publisher.events[0].Type != "review.changes_requested" {
+		t.Fatalf("published=%+v", publisher.events)
+	}
+}
