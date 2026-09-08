@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { ApiError, apiPath, apiRequest } from '../utils/api'
 import { useResource } from '../composables/useResource'
-import { definitions, draftFor, payloadFor, validateDraft, resourceOptions, canEdit, type ConfigKind, type ConfigRecord } from '../utils/configuration'
+import { definitions, draftFor, payloadFor, validateDraft, resourceOptions, canEdit, CUSTOM_PROVIDER_KIND, isBuiltInProviderKind, providerKindSelectValue, type ConfigKind, type ConfigRecord } from '../utils/configuration'
 
 const props = defineProps<{kind: ConfigKind; projectId?: string; resourceId?: string}>()
 const definition = definitions[props.kind]
@@ -20,6 +20,7 @@ const saving = ref(false)
 const saveError = ref<Error>()
 const saved = ref(false)
 const credential = ref('')
+const providerKindChoice = ref('')
 const visible = computed(() => props.resourceId ? data.value?.filter(item => item.id === props.resourceId) : data.value)
 const pageDescription = computed(() => {
   if (props.kind === 'projects') return props.resourceId ? 'Project settings · backend-managed repository context' : 'Projects · backend-managed repository contexts'
@@ -36,9 +37,26 @@ const saveErrorDescription = computed(() => {
   return saveError.value.message
 })
 
+function syncProviderKindChoice() {
+  if (props.kind !== 'providers') return
+  providerKindChoice.value = providerKindSelectValue(String(draft.value.kind ?? ''))
+}
+
+function setProviderKindChoice(value: string) {
+  providerKindChoice.value = value
+  if (value === CUSTOM_PROVIDER_KIND) {
+    if (isBuiltInProviderKind(String(draft.value.kind ?? ''))) {
+      draft.value.kind = ''
+    }
+    return
+  }
+  draft.value.kind = value
+}
+
 function edit(item?: ConfigRecord) {
   selected.value = item
   draft.value = draftFor(props.kind, item)
+  syncProviderKindChoice()
   saveError.value = undefined
   saved.value = false
   open.value = true
@@ -55,6 +73,9 @@ function readable(value: unknown, fallback = 'Unavailable') {
 
 function formErrors() {
   const errors = validateDraft(props.kind, draft.value)
+  if (props.kind === 'providers' && !providerKindChoice.value) {
+    errors.push({ name: 'kind', message: 'Select a provider kind.' })
+  }
   for (const field of definition.fields) {
     if (!field.resource) continue
     const selectedId = String(draft.value[field.key] ?? '')
@@ -95,6 +116,7 @@ async function save() {
       body
     })
     draft.value = draftFor(props.kind)
+    providerKindChoice.value = ''
     open.value = false
     saved.value = true
     await refresh()
@@ -115,7 +137,7 @@ async function save() {
 
     <UAlert v-if="saved" title="Saved" color="success" class="mb-4" />
 
-    <AsyncState :pending="pending" :error="error" :empty="!visible?.length" :empty-title="`No ${definition.title.toLowerCase()} yet`" @retry="retry">
+    <AsyncState :pending="pending" :error="error" :empty="!visible?.length" :empty-title="`No ${definition.title.toLowerCase()} yet`" :empty-description="definition.emptyDescription" @retry="retry">
       <div class="grid w-full gap-3">
         <UCard v-for="item in visible" :key="item.id">
           <div class="flex flex-wrap items-center gap-3">
@@ -160,12 +182,32 @@ async function save() {
             <UAlert v-if="kind === 'runtimes'" title="Workspace policy" description="Runtimes use the Issue workspace policy in v0.1. This is server-controlled and is shown on saved Runtime records." color="neutral" />
 
             <div class="form-grid">
-              <UFormField v-for="field in definition.fields" :key="field.key" :label="field.label" :name="field.key" :description="field.help" :required="field.required">
-                <UCheckbox v-if="field.type === 'checkbox'" :model-value="Boolean(draft[field.key])" :disabled="controlsDisabled" @update:model-value="draft[field.key] = $event === true" />
-                <USelect v-else-if="field.type === 'select'" v-model="draft[field.key] as string" :items="field.resource ? resourceOptions(references[field.key]?.data.value || []) : field.options" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
-                <UTextarea v-else-if="['textarea', 'json', 'lines'].includes(field.type || '')" v-model="draft[field.key] as string" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
-                <UInput v-else v-model="draft[field.key] as string" :type="field.type === 'number' ? 'number' : 'text'" :min="field.min" :max="field.max" :step="field.key === 'temperature' ? 'any' : 1" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
-              </UFormField>
+              <template v-for="field in definition.fields" :key="field.key">
+                <UFormField v-if="field.key === 'kind' && field.allowCustom" :label="field.label" :name="field.key" :description="field.help" :required="field.required">
+                  <USelect
+                    :model-value="providerKindChoice"
+                    :items="field.selectItems"
+                    class="w-full"
+                    :disabled="controlsDisabled"
+                    @update:model-value="setProviderKindChoice($event as string)"
+                  />
+                </UFormField>
+                <UFormField
+                  v-if="field.key === 'kind' && providerKindChoice === CUSTOM_PROVIDER_KIND"
+                  label="Provider ID"
+                  name="providerKindId"
+                  description="Unique OpenCode provider ID for a custom OpenAI-compatible endpoint."
+                  required
+                >
+                  <UInput v-model="draft.kind as string" class="w-full font-mono" :disabled="controlsDisabled" />
+                </UFormField>
+                <UFormField v-else-if="field.key !== 'kind'" :label="field.label" :name="field.key" :description="field.help" :required="field.required">
+                  <UCheckbox v-if="field.type === 'checkbox'" :model-value="Boolean(draft[field.key])" :disabled="controlsDisabled" @update:model-value="draft[field.key] = $event === true" />
+                  <USelect v-else-if="field.type === 'select'" v-model="draft[field.key] as string" :items="field.resource ? resourceOptions(references[field.key]?.data.value || []) : field.options" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
+                  <UTextarea v-else-if="['textarea', 'json', 'lines'].includes(field.type || '')" v-model="draft[field.key] as string" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
+                  <UInput v-else v-model="draft[field.key] as string" :type="field.type === 'number' ? 'number' : 'text'" :min="field.min" :max="field.max" :step="field.key === 'temperature' ? 'any' : 1" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
+                </UFormField>
+              </template>
             </div>
 
             <UAccordion v-if="kind === 'providers'" :items="[{ label: 'Set or replace API key', slot: 'credential' }]">

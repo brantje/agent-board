@@ -16,6 +16,8 @@ export interface Field {
   type?: 'number'|'select'|'textarea'|'checkbox'|'json'|'lines'
   required?: boolean
   options?: string[]
+  selectItems?: Array<{ label: string; value: string }>
+  allowCustom?: boolean
   resource?: ConfigKind
   initial?: string|boolean|number
   min?: number
@@ -27,6 +29,7 @@ export interface Field {
 interface Definition {
   title: string
   singular: string
+  emptyDescription: string
   fields: Field[]
 }
 
@@ -34,10 +37,49 @@ const name: Field = { key: 'name', label: 'Name', required: true }
 const enabled: Field = { key: 'enabled', label: 'Enabled', type: 'checkbox', initial: true }
 const reference = (key: string, label: string, resource: ConfigKind): Field => ({ key, label, resource, type: 'select', required: true })
 
+export const CUSTOM_PROVIDER_KIND = '__custom__'
+
+const builtInOpenCodeProviderLabels: Record<string, string> = {
+  'amazon-bedrock': 'Amazon Bedrock',
+  anthropic: 'Anthropic',
+  azure: 'Azure OpenAI',
+  cerebras: 'Cerebras',
+  deepseek: 'DeepSeek',
+  fireworks: 'Fireworks AI',
+  'github-copilot': 'GitHub Copilot',
+  gitlab: 'GitLab',
+  google: 'Google',
+  'google-vertex': 'Google Vertex AI',
+  groq: 'Groq',
+  mistral: 'Mistral',
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
+  opencode: 'OpenCode Zen',
+  perplexity: 'Perplexity',
+  together: 'Together AI',
+  xai: 'xAI'
+}
+
+export const providerKindSelectItems = [
+  ...Object.entries(builtInOpenCodeProviderLabels).map(([value, label]) => ({ label, value })),
+  { label: 'Custom (OpenAI-compatible)', value: CUSTOM_PROVIDER_KIND }
+]
+
+export function isBuiltInProviderKind(kind: string) {
+  return Object.prototype.hasOwnProperty.call(builtInOpenCodeProviderLabels, kind.trim())
+}
+
+export function providerKindSelectValue(kind: string) {
+  const trimmed = String(kind ?? '').trim()
+  if (!trimmed) return ''
+  return isBuiltInProviderKind(trimmed) ? trimmed : CUSTOM_PROVIDER_KIND
+}
+
 export const definitions: Record<ConfigKind, Definition> = {
   projects: {
     title: 'Projects',
     singular: 'Project',
+    emptyDescription: 'Create a Project with a local repository, default branch, and Issue prefix to open a board.',
     fields: [
       name,
       { key: 'issuePrefix', label: 'Issue prefix', required: true, immutable: true, help: 'Immutable public prefix for Issue keys such as AB-12. Use 2-10 uppercase letters and digits; must start with a letter.' },
@@ -49,10 +91,23 @@ export const definitions: Record<ConfigKind, Definition> = {
   providers: {
     title: 'Providers',
     singular: 'Provider',
+    emptyDescription: 'Add a Provider with encrypted credentials so Model Profiles can call a model API.',
     fields: [
       name,
-      { key: 'kind', label: 'Provider kind', initial: 'openai-compatible', required: true },
-      { key: 'baseUrl', label: 'Base URL' },
+      {
+        key: 'kind',
+        label: 'Provider kind',
+        type: 'select',
+        required: true,
+        allowCustom: true,
+        selectItems: providerKindSelectItems,
+        help: 'OpenCode provider used when an Executor Profile runs with the OpenCode engine.'
+      },
+      {
+        key: 'baseUrl',
+        label: 'Base URL',
+        help: 'Optional for built-in providers with default endpoints. Usually required for custom OpenAI-compatible endpoints.'
+      },
       { key: 'safeMetadata', label: 'Safe metadata', type: 'json', initial: '{}', help: 'Non-secret provider metadata exposed by the public API.' },
       enabled
     ]
@@ -60,6 +115,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   'model-profiles': {
     title: 'Model Profiles',
     singular: 'Model Profile',
+    emptyDescription: 'Create a Model Profile to select a Provider, model, and optional concurrent Run capacity.',
     fields: [
       name,
       reference('providerId', 'Provider', 'providers'),
@@ -74,6 +130,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   runtimes: {
     title: 'Runtimes',
     singular: 'Runtime',
+    emptyDescription: 'Define a Runtime image and execution policy so Executor Profiles can start agent-runner.',
     fields: [
       name,
       { key: 'kind', label: 'Kind', type: 'select', options: ['docker'], initial: 'docker' },
@@ -91,6 +148,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   'executor-profiles': {
     title: 'Executor Profiles',
     singular: 'Executor Profile',
+    emptyDescription: 'Combine an Engine, Model Profile, and Runtime into an Executor Profile that Agents can use.',
     fields: [
       name,
       { key: 'engine', label: 'Engine', type: 'select', options: ['opencode', 'scripted'], initial: 'opencode' },
@@ -103,6 +161,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   agents: {
     title: 'Agents',
     singular: 'Agent',
+    emptyDescription: 'Create an Agent with role instructions and an Executor Profile before assigning Issues.',
     fields: [
       name,
       { key: 'roleInstructions', label: 'Role / instructions', type: 'textarea' },
@@ -160,7 +219,11 @@ export function validateDraft(kind: ConfigKind, draft: Draft) {
     if (field.key === 'issuePrefix') {
       invalid ||= !/^[A-Za-z][A-Za-z0-9]{1,9}$/.test(String(value).trim())
     }
-    if (field.options) invalid ||= !field.options.includes(String(value))
+    if (field.allowCustom) {
+      invalid ||= !String(value ?? '').trim() || String(value).trim() === CUSTOM_PROVIDER_KIND
+    } else if (field.options) {
+      invalid ||= !field.options.includes(String(value))
+    }
     if (field.type === 'json') {
       try {
         const parsed = JSON.parse(String(value))

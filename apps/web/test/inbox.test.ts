@@ -66,6 +66,8 @@ describe('InboxView', () => {
     const wrapper = mount(InboxView, { global })
     await flushPromises()
     expect(wrapper.text()).toContain('Nothing needs attention')
+    expect(wrapper.text()).toContain('Blocking questions, pending Reviews, and Runs that need a decision will appear here.')
+    expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
     wrapper.unmount()
   })
 })

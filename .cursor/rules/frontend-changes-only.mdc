@@ -1,6 +1,0 @@
----
-description: Only allow the frontend to be modified
-alwaysApply: true
----
-Rule:
-- Never touch backend code when editing frontend pages.

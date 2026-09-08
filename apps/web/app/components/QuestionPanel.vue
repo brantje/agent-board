@@ -89,7 +89,7 @@ async function answer(question: Question) {
         color="success"
         class="mb-4"
       />
-      <AsyncState :empty="!openQuestions.length" empty-title="No open questions">
+      <AsyncState :empty="!openQuestions.length" empty-title="No open questions" empty-description="When a Run needs a human decision, the Agent's question will appear here.">
       <div class="space-y-4">
         <UCard v-for="question in openQuestions" :key="question.id">
           <div class="mb-3 flex flex-wrap items-center gap-2">

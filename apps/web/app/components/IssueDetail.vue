@@ -82,7 +82,7 @@ async function saved(savedIssue: Issue) {
 
           <UCard>
             <h2 class="section-label mb-3">Latest Run</h2>
-            <AsyncState :pending="runs.pending.value" :error="runs.error.value" :empty="!latest" empty-title="No Runs yet" @retry="runs.refresh">
+            <AsyncState :pending="runs.pending.value" :error="runs.error.value" :empty="!latest" empty-title="No Runs yet" empty-description="Assign an Agent to this Issue to schedule the first Run." @retry="runs.refresh">
               <template v-if="latest">
                 <div class="flex flex-wrap items-center gap-3">
                   <UBadge :label="statusLabel(latest.status)" color="neutral" />

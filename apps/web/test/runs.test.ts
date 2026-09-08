@@ -52,6 +52,16 @@ describe('RunList', () => {
     wrapper.unmount()
   })
 
+  it('shows a Run-specific empty state instead of generic new-work copy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => new Response(JSON.stringify(path === '/api/projects' ? [project] : []))))
+    const wrapper = mount(RunList, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('No Runs yet')
+    expect(wrapper.text()).toContain('Runs appear after an Agent is assigned to an Issue. Execution continues on the server.')
+    expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
+    wrapper.unmount()
+  })
+
   it('scopes a project Runs index without a global API', async () => {
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       if (path === '/api/projects/project-a/runs') return new Response(JSON.stringify([run]))

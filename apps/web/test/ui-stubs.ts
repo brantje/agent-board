@@ -1,7 +1,7 @@
 import { defineComponent, h } from 'vue'
 export const uiStubs = {
   PageFrame: {props:['title','description'],template:'<main><h1>{{title}}</h1><p>{{description}}</p><slot name="actions"/><slot/></main>'},
-  AsyncState: {props:['pending','error','empty','emptyTitle'],emits:['retry'],template:'<div><p v-if="pending">Loading</p><p v-else-if="error">{{error.message}}<button @click="$emit(\'retry\')">Retry</button></p><p v-else-if="empty">{{emptyTitle}}</p><slot v-else/></div>'},
+  AsyncState: {props:['pending','error','empty','emptyTitle','emptyDescription'],emits:['retry'],template:'<div><p v-if="pending">Loading</p><p v-else-if="error">{{error.message}}<button @click="$emit(\'retry\')">Retry</button></p><p v-else-if="empty">{{emptyTitle}} {{emptyDescription}}</p><slot v-else/></div>'},
   UCard: {template:'<section><slot name="header"/><slot/><slot name="footer"/></section>'},
   UButton: {props:['label','to','disabled','loading','type'],emits:['click'],template:'<button :type="type || \'button\'" :disabled="disabled || loading" @click="$emit(\'click\')">{{label}}<slot/></button>'},
   UAlert: {props:['title','description'],template:'<div role="alert">{{title}} {{description}}</div>'},
