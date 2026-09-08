@@ -326,5 +326,25 @@ describe('useProjectEvents', () => {
     expect(seen).toEqual(['evt-1', 'boom', 'evt-2'])
     wrapper.unmount()
   })
+
+  it('replaces a pending reconnect timer when onerror fires twice', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', MockEventSource)
+    const wrapper = mount(defineComponent({
+      setup() {
+        useProjectEvents('project-a', () => {})
+        return () => h('div')
+      }
+    }))
+    await flushPromises()
+    const source = MockEventSource.instances[0]
+    source?.fail()
+    source?.fail()
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(MockEventSource.instances).toHaveLength(2)
+    expect(MockEventSource.instances.at(-1)?.url).toBe('/api/projects/project-a/events')
+    wrapper.unmount()
+  })
 })
 
