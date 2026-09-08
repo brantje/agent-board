@@ -11,7 +11,7 @@ provide(settingsShellKey, { projectId })
 </script>
 
 <template>
-  <div data-testid="settings-shell">
+  <div class="min-w-0 w-full flex-1" data-testid="settings-shell">
     <slot />
   </div>
 </template>

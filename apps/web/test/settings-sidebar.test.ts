@@ -73,6 +73,19 @@ describe('settings sidebar shell', () => {
     expect(wrapper.get('[data-testid="settings-shell"]').exists()).toBe(true)
     expect(wrapper.get('[data-child]').exists()).toBe(true)
   })
+
+  it('fills remaining dashboard width instead of shrinking to content', () => {
+    vi.stubGlobal('useRoute', () => ({ path: '/settings/model-profiles', params: {} }))
+    const wrapper = mount(SettingsShell, {
+      slots: { default: '<div data-child>content</div>' },
+      global
+    })
+    const classes = wrapper.get('[data-testid="settings-shell"]').classes()
+    expect(classes).toContain('min-w-0')
+    expect(classes).toContain('flex-1')
+    expect(classes).toContain('w-full')
+    expect(classes.join(' ')).not.toMatch(/max-w-|mx-auto/)
+  })
 })
 
 describe('settings route wiring', () => {

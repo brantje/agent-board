@@ -12,9 +12,9 @@ const links = computed(() => navigation(projectId.value))
       <template #default="{ collapsed }">
         <UNavigationMenu aria-label="Primary navigation" orientation="vertical" :collapsed="collapsed" :items="links.global" />
         <template v-if="projectId"><USeparator label="Project" /><UNavigationMenu aria-label="Project navigation" orientation="vertical" :collapsed="collapsed" :items="links.project" /></template>
+        <UNavigationMenu aria-label="Settings navigation" orientation="vertical" :collapsed="collapsed" :items="links.settings" class="mt-auto" data-testid="settings-main-nav" />
       </template>
-      <template #footer="{ collapsed }">
-        <UNavigationMenu aria-label="Settings navigation" orientation="vertical" :collapsed="collapsed" :items="links.settings" data-testid="settings-main-nav" />
+      <template #footer>
         <UColorModeButton />
         <span class="text-xs text-muted">Self-hosted · v0.1</span>
       </template>

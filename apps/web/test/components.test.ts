@@ -38,9 +38,31 @@ describe('application foundation', () => {
     expect(navigation().global.map(item => item.label)).toEqual(['Projects','Agents','Runs','Inbox'])
     expect(navigation().settings.map(item => item.label)).toEqual(['Settings'])
   })
+  it('pins Settings above the sidebar footer divider', () => {
+    vi.stubGlobal('useRoute', () => ({ params: {} }))
+    const sidebar = {
+      template: '<aside><div data-testid="sidebar-body"><slot name="default" :collapsed="false" /></div><div data-testid="sidebar-footer"><slot name="footer" :collapsed="false" /></div></aside>'
+    }
+    const wrapper = mount(Shell, {
+      global: {
+        stubs: {
+          ...global.stubs,
+          UDashboardSidebar: sidebar,
+          UColorModeButton: { template: '<button type="button" aria-label="Color mode">Color mode</button>' }
+        }
+      }
+    })
+    const settings = wrapper.get('[data-testid="sidebar-body"] [data-testid="settings-main-nav"]')
+    expect(settings.classes()).toContain('mt-auto')
+    expect(wrapper.find('[data-testid="sidebar-footer"] [data-testid="settings-main-nav"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="sidebar-footer"]').text()).toContain('Self-hosted')
+    expect(wrapper.find('[data-testid="sidebar-footer"] [aria-label="Color mode"]').exists()).toBe(true)
+  })
   it('provides a viewport page and compact action slots', () => {
     const wrapper = mount(Page, { props: { title: 'Board', description: 'Project context' }, slots: { actions: '<span>New issue</span>', default: '<p>Work</p>' }, global })
     expect(wrapper.get('main').attributes('id')).toBe('main-content')
+    expect(wrapper.get('main').classes()).toContain('w-full')
+    expect(wrapper.get('#main-content').element.parentElement?.className).toContain('w-full')
     expect(wrapper.text()).toContain('Project context')
     expect(wrapper.text()).toContain('New issue')
     expect(mount(Page, { props: { title:'Empty' }, global }).text()).not.toContain('Project context')
