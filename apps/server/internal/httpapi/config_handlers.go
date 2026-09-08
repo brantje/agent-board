@@ -10,6 +10,7 @@ import (
 )
 
 func (a *api) registerConfigurationRoutes(r chi.Router) {
+	r.Get("/repository-settings", a.getRepositorySettings)
 	r.Get("/projects", a.listProjects)
 	r.Post("/projects", a.createProject)
 	r.Get("/projects/{projectID}", a.getProject)
@@ -20,6 +21,7 @@ func (a *api) registerConfigurationRoutes(r chi.Router) {
 	r.Post("/providers", a.createProvider)
 	r.Get("/providers/{resourceID}", a.getProvider)
 	r.Put("/providers/{resourceID}", a.updateProvider)
+	r.Get("/providers/{resourceID}/models", a.listProviderModels)
 
 	a.registerGlobalConfig(r)
 }
@@ -264,6 +266,23 @@ func providerCredentialRef(explicit *string, providerID string, existing *string
 		return strings.TrimSpace(*existing)
 	}
 	return "provider:" + providerID
+}
+
+func (a *api) listProviderModels(w http.ResponseWriter, r *http.Request) {
+	id, ok := resourceID(w, r)
+	if !ok {
+		return
+	}
+	models, err := a.service.ListProviderModels(r.Context(), id, a.secretResolver, nil)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	out := make([]ProviderModelDTO, 0, len(models))
+	for _, model := range models {
+		out = append(out, ProviderModelDTO{ID: model.ID, Name: model.Name})
+	}
+	writeJSON(w, 200, ProviderModelListDTO{Models: out})
 }
 
 func (a *api) listModelProfiles(w http.ResponseWriter, r *http.Request, scope *string) {

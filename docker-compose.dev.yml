@@ -1,0 +1,88 @@
+# Local development stack with hot reload.
+#
+#   docker compose -f compose.yaml -f docker-compose.dev.yml up --build
+#
+# - PostgreSQL on localhost:5432 (password: agent_board_dev)
+# - Go API with air on http://localhost:${AGENT_BOARD_SERVER_PORT:-3001}
+# - Nuxt dev server on http://localhost:${AGENT_BOARD_WEB_PORT:-3000}
+#
+# Recreate the database volume when switching from the production compose file:
+#   docker compose -f compose.yaml -f docker-compose.dev.yml down -v
+
+services:
+  credential-init:
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        credential_file=/run/agent-board/postgres-password
+        encryption_key_file=/run/agent-board/secret-encryption-key
+        write_token_file=/run/agent-board/secret-write-token
+        umask 077
+        printf '%s' 'agent_board_dev' > "$$credential_file"
+        chmod 0444 "$$credential_file"
+        if [ ! -s "$$encryption_key_file" ]; then
+          printf '%s' 'a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s=' > "$$encryption_key_file"
+        fi
+        chmod 0444 "$$encryption_key_file"
+        if [ ! -s "$$write_token_file" ]; then
+          printf '%s' 'dev-agent-board-secret-write-token!!' > "$$write_token_file"
+        fi
+        chmod 0444 "$$write_token_file"
+
+  postgres:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile.dev
+    working_dir: /src/apps/server
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        password="$$(cat /run/agent-board/postgres-password)"
+        export AGENT_BOARD_DATABASE_URL="postgres://$${POSTGRES_USER}:$${password}@postgres:5432/$${POSTGRES_DB}?sslmode=disable"
+        if [ -z "$$AGENT_BOARD_SECRET_ENCRYPTION_KEY" ] && [ -s /run/agent-board/secret-encryption-key ]; then
+          export AGENT_BOARD_SECRET_ENCRYPTION_KEY="$$(cat /run/agent-board/secret-encryption-key)"
+        fi
+        if [ -z "$$AGENT_BOARD_SECRET_WRITE_TOKEN" ] && [ -s /run/agent-board/secret-write-token ]; then
+          export AGENT_BOARD_SECRET_WRITE_TOKEN="$$(cat /run/agent-board/secret-write-token)"
+        fi
+        exec air -c .air.toml
+    volumes:
+      - ./apps/server:/src/apps/server
+      - ./packages/redact:/src/packages/redact
+      - ./packages/runnerprotocol:/src/packages/runnerprotocol
+      - server-go-mod:/go/pkg/mod
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3001/healthz"]
+      start_period: 120s
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile.dev
+    volumes:
+      - ./package.json:/src/package.json:ro
+      - ./pnpm-workspace.yaml:/src/pnpm-workspace.yaml:ro
+      - ./pnpm-lock.yaml:/src/pnpm-lock.yaml:ro
+      - ./apps/web:/src/apps/web
+      - web-root-node-modules:/src/node_modules
+      - web-app-node-modules:/src/apps/web/node_modules
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3000/"]
+      start_period: 180s
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  server-go-mod:
+  web-root-node-modules:
+  web-app-node-modules:

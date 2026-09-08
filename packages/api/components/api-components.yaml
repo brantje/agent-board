@@ -133,6 +133,12 @@ responses:
           type: array
           items:
             $ref: ../schemas/control-plane.yaml#/Project
+  RepositorySettings:
+    description: Deployment repository defaults for Project configuration.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/RepositorySettings
   SecretMetadata:
     description: Safe secret reference metadata. Plaintext is never returned.
     content:
@@ -153,6 +159,12 @@ responses:
           type: array
           items:
             $ref: ../schemas/control-plane.yaml#/Provider
+  ProviderModelList:
+    description: Provider model discovery response.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/ProviderModelList
   ModelProfile:
     description: ModelProfile response.
     content:

@@ -58,6 +58,7 @@ services:
       AGENT_BOARD_EVIDENCE_ROOT: ${AGENT_BOARD_EVIDENCE_ROOT:-/var/lib/agent-board/evidence}
       AGENT_BOARD_SCHEDULER_OWNER_ID: ${AGENT_BOARD_SCHEDULER_OWNER_ID:-}
       AGENT_BOARD_REPOSITORY_ROOTS: ${AGENT_BOARD_REPOSITORY_ROOTS:-${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}}
+      AGENT_BOARD_REPOSITORY_MOUNT_PATH: ${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}
       AGENT_BOARD_SECRET_ENCRYPTION_KEY: ${AGENT_BOARD_SECRET_ENCRYPTION_KEY:-}
       AGENT_BOARD_SECRET_WRITE_TOKEN: ${AGENT_BOARD_SECRET_WRITE_TOKEN:-}
       AGENT_BOARD_DOCKER_NETWORK: ${AGENT_BOARD_DOCKER_NETWORK:-agent-board_default}
@@ -89,7 +90,7 @@ services:
     volumes:
       - ${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}:${AGENT_BOARD_WORKSPACE_ROOT:-/var/lib/agent-board/workspaces}
       - ${AGENT_BOARD_EVIDENCE_ROOT:-/var/lib/agent-board/evidence}:${AGENT_BOARD_EVIDENCE_ROOT:-/var/lib/agent-board/evidence}
-      - ${AGENT_BOARD_REPOSITORY_ROOT:-.}:${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}:ro
+      - ${AGENT_BOARD_REPOSITORY_ROOT:-.}:${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}
       - ${AGENT_BOARD_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - postgres-credentials:/run/agent-board:ro
 

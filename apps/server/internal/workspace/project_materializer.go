@@ -18,19 +18,19 @@ type ProjectWorkspaceLockStore interface {
 
 type ProjectMaterializer struct {
 	locks         ProjectWorkspaceLockStore
-	repositories  RepositoryResolver
+	provisioner   ProjectRepositoryProvisioner
 	git           Git
 	workspaceRoot string
 }
 
-func NewProjectMaterializer(lockStore ProjectWorkspaceLockStore, repositories RepositoryResolver, git Git, workspaceRoot string) (*ProjectMaterializer, error) {
-	if lockStore == nil || repositories == nil || git == nil {
+func NewProjectMaterializer(lockStore ProjectWorkspaceLockStore, provisioner ProjectRepositoryProvisioner, git Git, workspaceRoot string) (*ProjectMaterializer, error) {
+	if lockStore == nil || provisioner == nil || git == nil {
 		return nil, fmt.Errorf("Project Workspace materializer dependencies: %w", ErrInvalidMetadata)
 	}
 	if strings.TrimSpace(workspaceRoot) == "" || !filepath.IsAbs(workspaceRoot) {
 		return nil, ErrInvalidRoot
 	}
-	return &ProjectMaterializer{locks: lockStore, repositories: repositories, git: git, workspaceRoot: filepath.Clean(workspaceRoot)}, nil
+	return &ProjectMaterializer{locks: lockStore, provisioner: provisioner, git: git, workspaceRoot: filepath.Clean(workspaceRoot)}, nil
 }
 
 // EnsureProjectWorkspace returns the single durable accepted checkout for a
@@ -71,7 +71,7 @@ func (m *ProjectMaterializer) EnsureProjectWorkspace(ctx context.Context, projec
 		return existing, nil
 	}
 
-	source, err := m.repositories.Resolve(project.RepositoryPath)
+	source, err := m.provisioner.EnsureProjectRepository(ctx, project.RepositoryPath, project.DefaultBranch)
 	if err != nil {
 		return store.ProjectWorkspace{}, fmt.Errorf("%w: validate Project repository source: %v", ErrBootstrapFailed, err)
 	}
@@ -97,6 +97,9 @@ func (m *ProjectMaterializer) EnsureProjectWorkspace(ctx context.Context, projec
 		return store.ProjectWorkspace{}, fmt.Errorf("%w: publish Project Workspace checkout: %v", ErrBootstrapFailed, err)
 	}
 	published = true
+	if err := PreparePublishedWorkspace(finalPath, RuntimeIdentityFromEnv()); err != nil {
+		return store.ProjectWorkspace{}, fmt.Errorf("%w: prepare Project Workspace for runtime access: %v", ErrBootstrapFailed, err)
+	}
 
 	ready, ok, err := m.inspectExisting(ctx, project.ID, finalPath)
 	if err != nil {

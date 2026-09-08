@@ -25,7 +25,7 @@ func TestQuestionRouteGetsSingleQuestionAndValidatesFilters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := newRouter(app.New(&fakeControlPlaneStore{}), nil, nil, nil, questionService)
+	router := newRouter(app.New(&fakeControlPlaneStore{}), nil, nil, nil, nil, questionService)
 
 	get := httptest.NewRecorder()
 	router.ServeHTTP(get, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/projects/"+projectID+"/questions/"+otherID, nil))

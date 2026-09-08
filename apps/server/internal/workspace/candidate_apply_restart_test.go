@@ -25,7 +25,7 @@ func TestCandidateApprovalRetryAfterRestartReusesAcceptanceCommit(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	projectMaterializer, err := NewProjectMaterializer(&projectWorkspaceLockStore{}, policy, git, filepath.Join(parent, "project-workspaces"))
+	projectMaterializer, err := NewProjectMaterializer(&projectWorkspaceLockStore{}, requireProvisioner(t, policy, git), git, filepath.Join(parent, "project-workspaces"))
 	if err != nil {
 		t.Fatal(err)
 	}

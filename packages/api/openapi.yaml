@@ -10,6 +10,8 @@ components:
     SecretWriteCapability:
       $ref: ./components/api-components.yaml#/securitySchemes/SecretWriteCapability
 paths:
+  /api/repository-settings:
+    $ref: ./paths/repository-settings.yaml#/path1
   /api/projects:
     $ref: ./paths/projects.yaml#/path1
   /api/projects/{projectID}:
@@ -20,6 +22,8 @@ paths:
     $ref: ./paths/providers.yaml#/path1
   /api/providers/{resourceID}:
     $ref: ./paths/providers.yaml#/path2
+  /api/providers/{resourceID}/models:
+    $ref: ./paths/providers.yaml#/path3
   /api/model-profiles:
     $ref: ./paths/model-profiles.yaml#/path1
   /api/model-profiles/{resourceID}:

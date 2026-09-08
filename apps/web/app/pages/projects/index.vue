@@ -1,1 +1,1 @@
-<template><ConfigManager kind="projects" /></template>
+<template><ProjectList /></template>

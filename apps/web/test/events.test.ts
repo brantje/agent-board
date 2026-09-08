@@ -147,4 +147,32 @@ describe('useRunEvents', () => {
     expect(failed.text()).not.toContain('FAILED')
     failed.unmount()
   })
+
+  it('does not pending-flash last evidence while a later refresh is in flight', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    const snapshot = evidence({ events: [event({ id: 'one', type: 'run.started', sequence: 1 })] })
+    const resolvers: ((response: Response) => void)[] = []
+    vi.stubGlobal('fetch', vi.fn((path: string) => {
+      if (String(path).endsWith('/evidence')) return new Promise<Response>(resolve => resolvers.push(resolve))
+      return Promise.resolve(new Response(JSON.stringify([])))
+    }))
+    let live!: ReturnType<typeof useRunEvents>
+    const wrapper = mount(defineComponent({
+      setup() {
+        live = useRunEvents('project-a', 'run-1')
+        return () => h('div', live.pending.value ? 'Loading' : live.evidence.value?.run.status)
+      }
+    }))
+    resolvers[0]!(new Response(JSON.stringify(snapshot)))
+    await flushPromises()
+    expect(wrapper.text()).toBe('RUNNING')
+    const refresh = live.refresh()
+    expect(live.pending.value).toBe(false)
+    expect(live.evidence.value?.run.status).toBe('RUNNING')
+    expect(wrapper.text()).toBe('RUNNING')
+    resolvers[1]!(new Response(JSON.stringify({ ...snapshot, run: { ...snapshot.run, status: 'WAITING_FOR_INPUT' } })))
+    await refresh
+    expect(wrapper.text()).toBe('WAITING_FOR_INPUT')
+    wrapper.unmount()
+  })
 })

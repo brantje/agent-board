@@ -59,6 +59,15 @@ type ProviderDTO struct {
 	UpdatedAt    time.Time       `json:"updatedAt"`
 }
 
+type ProviderModelDTO struct {
+	ID   string  `json:"id"`
+	Name *string `json:"name"`
+}
+
+type ProviderModelListDTO struct {
+	Models []ProviderModelDTO `json:"models"`
+}
+
 type ModelProfileDTO struct {
 	ID                 string          `json:"id"`
 	ProjectID          *string         `json:"projectId"`
