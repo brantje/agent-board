@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"io"
 	"net"
 	"testing"
@@ -112,6 +113,19 @@ func TestSessionConnectRejectsNonLoopbackDestination(t *testing.T) {
 }
 
 func TestValidateConnectDestination(t *testing.T) {
+	originalLookup := connectLookupIPAddr
+	t.Cleanup(func() { connectLookupIPAddr = originalLookup })
+	connectLookupIPAddr = func(_ context.Context, host string) ([]net.IPAddr, error) {
+		switch host {
+		case "localhost":
+			return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}, {IP: net.ParseIP("::1")}}, nil
+		case "example.com":
+			return []net.IPAddr{{IP: net.ParseIP("203.0.113.10")}}, nil
+		default:
+			return nil, &net.DNSError{Err: "not found", Name: host}
+		}
+	}
+
 	for _, address := range []string{"127.0.0.1:4096", "[::1]:4096", "localhost:4096"} {
 		if err := validateConnectDestination("tcp", address); err != nil {
 			t.Fatalf("validateConnectDestination(%q)=%v", address, err)
