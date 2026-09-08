@@ -76,12 +76,15 @@ ExecutionSessionEvidence:
 EventEvidence:
   type: object
   additionalProperties: false
-  required: [id, schemaVersion, type, occurredAt, sequence, agentId, workspaceId, runtimeInstanceId, correlationId, parentEventId, actor, payload]
+  required: [id, schemaVersion, type, occurredAt, projectId, issueId, runId, sequence, agentId, workspaceId, runtimeInstanceId, correlationId, parentEventId, actor, payload]
   properties:
     id: {type: string, format: uuid}
     schemaVersion: {type: integer, minimum: 1}
     type: {type: string, minLength: 1}
     occurredAt: {type: string, format: date-time}
+    projectId: {type: string, format: uuid}
+    issueId: {type: [string, 'null'], format: uuid}
+    runId: {type: [string, 'null'], format: uuid}
     sequence: {type: [integer, 'null'], minimum: 1}
     agentId: {type: [string, 'null'], format: uuid}
     workspaceId: {type: [string, 'null'], format: uuid}

@@ -361,6 +361,24 @@ func TestEvidencePersistenceIsImmutableOrderedAndScoped(t *testing.T) {
 		t.Fatalf("cross-project run event error=%v", err)
 	}
 
+	afterProject, err := s.ListProjectEventsAfter(ctx, f.project.ID, projectEvent.ID, 0)
+	if err != nil {
+		t.Fatalf("list project events after: %v", err)
+	}
+	if len(afterProject) < n {
+		t.Fatalf("project timeline after seed len=%d", len(afterProject))
+	}
+	if _, err := s.ListProjectEventsAfter(ctx, f.project.ID, foreignParent.ID, 0); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-project afterId error=%v", err)
+	}
+	if _, err := s.ListProjectEventsAfter(ctx, other.project.ID, projectEvent.ID, 0); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("foreign project afterId error=%v", err)
+	}
+	emptyAfter, err := s.ListProjectEventsAfter(ctx, f.project.ID, "", 0)
+	if err != nil || len(emptyAfter) != 0 {
+		t.Fatalf("empty afterId=%+v err=%v", emptyAfter, err)
+	}
+
 	chunk, err := s.CreateRawOutputChunk(ctx, store.RawOutputChunk{
 		ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID,
 		Stream: "STDOUT", Sequence: 1, StorageRef: "raw/1", SizeBytes: 3,

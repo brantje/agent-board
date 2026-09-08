@@ -56,6 +56,9 @@ type EventEvidenceDTO struct {
 	SchemaVersion     int             `json:"schemaVersion"`
 	Type              string          `json:"type"`
 	OccurredAt        time.Time       `json:"occurredAt"`
+	ProjectID         string          `json:"projectId"`
+	IssueID           *string         `json:"issueId"`
+	RunID             *string         `json:"runId"`
 	Sequence          *int64          `json:"sequence"`
 	AgentID           *string         `json:"agentId"`
 	WorkspaceID       *string         `json:"workspaceId"`
@@ -240,6 +243,7 @@ func executionSessionEvidenceDTO(value store.ExecutionSession) ExecutionSessionE
 func eventEvidenceDTO(value store.Event) EventEvidenceDTO {
 	return EventEvidenceDTO{
 		ID: value.ID, SchemaVersion: value.SchemaVersion, Type: value.Type, OccurredAt: value.OccurredAt,
+		ProjectID: value.ProjectID, IssueID: value.IssueID, RunID: value.RunID,
 		Sequence: value.Sequence, AgentID: value.AgentID, WorkspaceID: value.WorkspaceID,
 		RuntimeInstanceID: value.RuntimeInstanceID, CorrelationID: value.CorrelationID, ParentEventID: value.ParentEventID,
 		Actor: append(json.RawMessage(nil), value.Actor...), Payload: append(json.RawMessage(nil), value.Payload...),

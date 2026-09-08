@@ -7,7 +7,12 @@ func projectDTO(v store.Project) ProjectDTO {
 }
 
 func issueDTO(v store.Issue) IssueDTO {
-	return IssueDTO{v.Key, v.ProjectID, v.Number, v.Title, v.Description, v.Status, v.Priority, v.AssignedAgentID, v.CreatedAt, v.UpdatedAt}
+	dto := IssueDTO{v.Key, v.ProjectID, v.Number, v.Title, v.Description, v.Status, v.Priority, v.AssignedAgentID, v.CreatedAt, v.UpdatedAt, nil}
+	if v.LastEvent != nil {
+		event := eventEvidenceDTO(*v.LastEvent)
+		dto.LastEvent = &event
+	}
+	return dto
 }
 
 func issueRelationshipDTO(v store.IssueRelationship, issueKeys map[string]string) IssueRelationshipDTO {
