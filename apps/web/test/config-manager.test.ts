@@ -1,7 +1,7 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ConfigManager from '../app/components/ConfigManager.vue'
-import { definitions, type ConfigKind } from '../app/utils/configuration'
+import { CUSTOM_PROVIDER_KIND, definitions, type ConfigKind } from '../app/utils/configuration'
 import { uiStubs } from './ui-stubs'
 
 const global = { stubs: uiStubs }
@@ -36,7 +36,11 @@ describe('configuration screens', () => {
     for (const field of definitions[kind].fields) {
       const control = wrapper.find(`[data-field="${field.key}"] input, [data-field="${field.key}"] textarea, [data-field="${field.key}"] select`)
       if (field.required && field.type !== 'number') {
-        await control.setValue(field.resource ? 'one' : field.key === 'repositoryPath' ? '/repo' : field.key === 'issuePrefix' ? 'AB' : 'Value')
+        if (kind === 'providers' && field.key === 'kind') {
+          await control.setValue('anthropic')
+        } else {
+          await control.setValue(field.resource ? 'one' : field.key === 'repositoryPath' ? '/repo' : field.key === 'issuePrefix' ? 'AB' : 'Value')
+        }
       }
     }
     await wrapper.get('form').trigger('submit')
@@ -47,7 +51,11 @@ describe('configuration screens', () => {
     for (const field of definitions[kind].fields) {
       if (field.required && !['name', 'repositoryPath', 'defaultBranch', 'issuePrefix'].includes(field.key)) {
         const control = wrapper.find(`[data-field="${field.key}"] input, [data-field="${field.key}"] select`)
-        await control.setValue(field.resource ? 'one' : field.type === 'number' ? '1' : 'value')
+        if (kind === 'providers' && field.key === 'kind') {
+          await control.setValue('anthropic')
+        } else {
+          await control.setValue(field.resource ? 'one' : field.type === 'number' ? '1' : 'value')
+        }
       }
     }
     await wrapper.get('form').trigger('submit')
@@ -101,6 +109,7 @@ describe('configuration screens', () => {
     await wrapper.get('form').trigger('submit')
     expect(wrapper.text()).toContain('Check the highlighted')
     await wrapper.get('[data-field=name] input').setValue('Provider')
+    await wrapper.get('[data-field=kind] select').setValue('anthropic')
     await wrapper.get('input[type=password]').setValue('never-show')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -108,8 +117,66 @@ describe('configuration screens', () => {
     expect(wrapper.text()).not.toContain('do not reflect never-show')
     expect((wrapper.get('input[type=password]').element as HTMLInputElement).value).toBe('')
     const providerCall = fetch.mock.calls.find(([path, options]) => path === '/api/providers' && options.method === 'POST')!
-    expect(JSON.parse(String(providerCall[1].body))).toMatchObject({ name: 'Provider', kind: 'openai-compatible', credential: 'never-show' })
+    expect(JSON.parse(String(providerCall[1].body))).toMatchObject({ name: 'Provider', kind: 'anthropic', credential: 'never-show' })
     expect(fetch.mock.calls.some(([path]) => path === '/api/secrets')).toBe(false)
+  })
+
+  it('shows labeled provider kinds and a custom provider id field', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('[]')))
+    const wrapper = mount(ConfigManager, { props: { kind: 'providers' }, global })
+    await flushPromises()
+    await button(wrapper, 'New provider').trigger('click')
+    const kindSelect = wrapper.get('[data-field=kind] select')
+    expect(kindSelect.text()).toContain('Anthropic')
+    expect(kindSelect.text()).toContain('Custom (OpenAI-compatible)')
+    await kindSelect.setValue('anthropic')
+    expect(wrapper.find('[data-field=providerKindId]').exists()).toBe(false)
+    await kindSelect.setValue(CUSTOM_PROVIDER_KIND)
+    expect(wrapper.find('[data-field=providerKindId] input').exists()).toBe(true)
+  })
+
+  it('saves built-in and custom provider kinds', async () => {
+    const fetch = vi.fn(async (_path: string, options: RequestInit = {}) => {
+      if (options.method === 'GET' || !options.method) return new Response('[]')
+      return new Response('{"id":"one","name":"Provider","kind":"anthropic","enabled":true}')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ConfigManager, { props: { kind: 'providers' }, global })
+    await flushPromises()
+    await button(wrapper, 'New provider').trigger('click')
+    await wrapper.get('[data-field=name] input').setValue('Built-in provider')
+    await wrapper.get('[data-field=kind] select').setValue('anthropic')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const builtInCall = fetch.mock.calls.find(([path, options]) => path === '/api/providers' && options.method === 'POST')!
+    expect(JSON.parse(String(builtInCall[1].body))).toMatchObject({ name: 'Built-in provider', kind: 'anthropic' })
+
+    await button(wrapper, 'New provider').trigger('click')
+    await wrapper.get('[data-field=name] input').setValue('Custom provider')
+    await wrapper.get('[data-field=kind] select').setValue(CUSTOM_PROVIDER_KIND)
+    await wrapper.get('[data-field=providerKindId] input').setValue('lmstudio')
+    await wrapper.get('[data-field=baseUrl] input').setValue('http://127.0.0.1:1234/v1')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const customCall = fetch.mock.calls.filter(([path, options]) => path === '/api/providers' && options.method === 'POST').at(-1)!
+    expect(JSON.parse(String(customCall[1].body))).toMatchObject({
+      name: 'Custom provider',
+      kind: 'lmstudio',
+      baseUrl: 'http://127.0.0.1:1234/v1'
+    })
+  })
+
+  it('hydrates custom provider kind when editing an unknown built-in id', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (_path: string, options: RequestInit = {}) => new Response(JSON.stringify(
+      options.method === 'GET' || !options.method
+        ? [{ id: 'one', name: 'Local', kind: 'lmstudio', enabled: true, safeMetadata: {} }]
+        : { id: 'one', name: 'Local', kind: 'lmstudio', enabled: true, safeMetadata: {} }
+    ))))
+    const wrapper = mount(ConfigManager, { props: { kind: 'providers' }, global })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    expect((wrapper.get('[data-field=kind] select').element as HTMLSelectElement).value).toBe(CUSTOM_PROVIDER_KIND)
+    expect((wrapper.get('[data-field=providerKindId] input').element as HTMLInputElement).value).toBe('lmstudio')
   })
 
   it('preserves response-backed metadata when editing provider and model profile', async () => {

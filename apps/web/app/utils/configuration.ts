@@ -16,6 +16,8 @@ export interface Field {
   type?: 'number'|'select'|'textarea'|'checkbox'|'json'|'lines'
   required?: boolean
   options?: string[]
+  selectItems?: Array<{ label: string; value: string }>
+  allowCustom?: boolean
   resource?: ConfigKind
   initial?: string|boolean|number
   min?: number
@@ -34,6 +36,44 @@ interface Definition {
 const name: Field = { key: 'name', label: 'Name', required: true }
 const enabled: Field = { key: 'enabled', label: 'Enabled', type: 'checkbox', initial: true }
 const reference = (key: string, label: string, resource: ConfigKind): Field => ({ key, label, resource, type: 'select', required: true })
+
+export const CUSTOM_PROVIDER_KIND = '__custom__'
+
+const builtInOpenCodeProviderLabels: Record<string, string> = {
+  'amazon-bedrock': 'Amazon Bedrock',
+  anthropic: 'Anthropic',
+  azure: 'Azure OpenAI',
+  cerebras: 'Cerebras',
+  deepseek: 'DeepSeek',
+  fireworks: 'Fireworks AI',
+  'github-copilot': 'GitHub Copilot',
+  gitlab: 'GitLab',
+  google: 'Google',
+  'google-vertex': 'Google Vertex AI',
+  groq: 'Groq',
+  mistral: 'Mistral',
+  openai: 'OpenAI',
+  openrouter: 'OpenRouter',
+  opencode: 'OpenCode Zen',
+  perplexity: 'Perplexity',
+  together: 'Together AI',
+  xai: 'xAI'
+}
+
+export const providerKindSelectItems = [
+  ...Object.entries(builtInOpenCodeProviderLabels).map(([value, label]) => ({ label, value })),
+  { label: 'Custom (OpenAI-compatible)', value: CUSTOM_PROVIDER_KIND }
+]
+
+export function isBuiltInProviderKind(kind: string) {
+  return Object.prototype.hasOwnProperty.call(builtInOpenCodeProviderLabels, kind.trim())
+}
+
+export function providerKindSelectValue(kind: string) {
+  const trimmed = String(kind ?? '').trim()
+  if (!trimmed) return ''
+  return isBuiltInProviderKind(trimmed) ? trimmed : CUSTOM_PROVIDER_KIND
+}
 
 export const definitions: Record<ConfigKind, Definition> = {
   projects: {
@@ -54,8 +94,20 @@ export const definitions: Record<ConfigKind, Definition> = {
     emptyDescription: 'Add a Provider with encrypted credentials so Model Profiles can call a model API.',
     fields: [
       name,
-      { key: 'kind', label: 'Provider kind', initial: 'openai-compatible', required: true },
-      { key: 'baseUrl', label: 'Base URL' },
+      {
+        key: 'kind',
+        label: 'Provider kind',
+        type: 'select',
+        required: true,
+        allowCustom: true,
+        selectItems: providerKindSelectItems,
+        help: 'OpenCode provider used when an Executor Profile runs with the OpenCode engine.'
+      },
+      {
+        key: 'baseUrl',
+        label: 'Base URL',
+        help: 'Optional for built-in providers with default endpoints. Usually required for custom OpenAI-compatible endpoints.'
+      },
       { key: 'safeMetadata', label: 'Safe metadata', type: 'json', initial: '{}', help: 'Non-secret provider metadata exposed by the public API.' },
       enabled
     ]
@@ -167,7 +219,11 @@ export function validateDraft(kind: ConfigKind, draft: Draft) {
     if (field.key === 'issuePrefix') {
       invalid ||= !/^[A-Za-z][A-Za-z0-9]{1,9}$/.test(String(value).trim())
     }
-    if (field.options) invalid ||= !field.options.includes(String(value))
+    if (field.allowCustom) {
+      invalid ||= !String(value ?? '').trim() || String(value) === CUSTOM_PROVIDER_KIND
+    } else if (field.options) {
+      invalid ||= !field.options.includes(String(value))
+    }
     if (field.type === 'json') {
       try {
         const parsed = JSON.parse(String(value))
