@@ -8,7 +8,7 @@ afterEach(()=>vi.unstubAllGlobals())
 it('binds configuration routes to the correct scope and resource',()=>{
   vi.stubGlobal('useRoute',()=>({params:{projectID:'project-a'}}))
   for(const [path,page] of Object.entries(pages)) {
-    if(path.endsWith('/pages/index.vue')) continue
+    if(path.endsWith('/pages/index.vue') || path.includes('/issues/') || path.endsWith('/board.vue')) continue
     const wrapper=mount(page,{global:{stubs:{...uiStubs,ConfigManager:{props:['kind','projectId','resourceId'],template:'<div :data-kind="kind" :data-project="projectId" :data-resource="resourceId"/>'},SettingsNav:true}}})
     if(path.endsWith('/settings/index.vue') && !path.includes('[projectID]')) { expect(wrapper.find('settings-nav-stub').exists()).toBe(true);continue }
     const manager=wrapper.get('[data-kind]')
@@ -22,4 +22,13 @@ it('settings navigation follows global and scoped configuration hierarchy',()=>{
   expect(wrapper.get('a[href="/settings/providers"]').text()).toBe('Providers')
   const scoped=mount(SettingsNav,{props:{projectId:'p'},global:{stubs:uiStubs}})
   expect(scoped.get('a[href="/projects/p/settings/runtimes"]').text()).toBe('Runtimes')
+})
+
+it('binds Issue and Board routes to Project and Issue IDs', async()=>{
+ vi.stubGlobal('useRoute',()=>({params:{projectID:'p',issueID:'i'}}))
+ for(const path of Object.keys(pages).filter(p=>p.includes('/issues/') || p.endsWith('/board.vue'))){
+  const w=mount(pages[path]!,{global:{stubs:{ProjectBoard:{props:['projectId'],template:'<div :data-project="projectId"/>'},IssueDetail:{props:['projectId','issueId'],template:'<div :data-project="projectId" :data-issue="issueId"/>'}}}})
+  expect(w.get('[data-project]').attributes('data-project')).toBe('p')
+  if(path.includes('/issues/'))expect(w.get('[data-issue]').attributes('data-issue')).toBe('i')
+ }
 })
