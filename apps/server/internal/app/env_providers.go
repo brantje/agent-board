@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	openRouterEnvKey         = "OPENROUTER_API_KEY"
-	openRouterModelsEnvKey   = "OPENROUTER_MODELS"
-	openRouterProviderName   = "OpenRouter"
-	openRouterProviderKind   = "openrouter"
+	openRouterEnvKey       = "OPENROUTER_API_KEY"
+	openRouterModelsEnvKey = "OPENROUTER_MODELS"
+	openRouterProviderName = "OpenRouter"
+	openRouterProviderKind = "openrouter"
 )
 
 func EnsureOpenRouterFromEnv(ctx context.Context, control *Service, secretWriter SecretWriter, getenv func(string) string) error {
@@ -52,10 +52,7 @@ func EnsureOpenRouterFromEnv(ctx context.Context, control *Service, secretWriter
 
 func ensureOpenRouterProviderFromEnv(ctx context.Context, control *Service, secretWriter SecretWriter, apiKey string, providers []store.Provider) (store.Provider, error) {
 	if provider, found := findOpenRouterProvider(providers); found {
-		if apiKey != "" {
-			slog.Info("OpenRouter provider already exists; skipping env bootstrap")
-		}
-		return provider, nil
+		return reconcileOpenRouterProviderCredential(ctx, control, secretWriter, apiKey, provider)
 	}
 	if apiKey == "" {
 		return store.Provider{}, nil
@@ -72,25 +69,62 @@ func ensureOpenRouterProviderFromEnv(ctx context.Context, control *Service, secr
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
-			slog.Info("OpenRouter provider already exists; skipping env bootstrap")
-			return store.Provider{}, nil
+			reloaded, listErr := control.ListProviders(ctx)
+			if listErr != nil {
+				return store.Provider{}, fmt.Errorf("list providers after OpenRouter create conflict: %w", listErr)
+			}
+			provider, found := findOpenRouterProvider(reloaded)
+			if !found {
+				return store.Provider{}, fmt.Errorf("create OpenRouter provider: %w", err)
+			}
+			return reconcileOpenRouterProviderCredential(ctx, control, secretWriter, apiKey, provider)
 		}
 		return store.Provider{}, fmt.Errorf("create OpenRouter provider: %w", err)
 	}
 
+	provider, err = completeOpenRouterProviderCredential(ctx, control, secretWriter, apiKey, provider)
+	if err != nil {
+		return store.Provider{}, err
+	}
+	slog.Info("created OpenRouter provider from env bootstrap")
+	return provider, nil
+}
+
+func reconcileOpenRouterProviderCredential(ctx context.Context, control *Service, secretWriter SecretWriter, apiKey string, provider store.Provider) (store.Provider, error) {
+	if apiKey == "" {
+		return provider, nil
+	}
+	if openRouterProviderCredentialConfigured(provider) {
+		slog.Info("OpenRouter provider already exists; skipping env bootstrap")
+		return provider, nil
+	}
+	if secretWriter == nil {
+		return store.Provider{}, fmt.Errorf("%s is set but secret storage is not configured", openRouterEnvKey)
+	}
+	provider, err := completeOpenRouterProviderCredential(ctx, control, secretWriter, apiKey, provider)
+	if err != nil {
+		return store.Provider{}, err
+	}
+	slog.Info("completed OpenRouter provider credential from env bootstrap")
+	return provider, nil
+}
+
+func completeOpenRouterProviderCredential(ctx context.Context, control *Service, secretWriter SecretWriter, apiKey string, provider store.Provider) (store.Provider, error) {
 	ref := "provider:" + provider.ID
 	if _, err := secretWriter.Put(ctx, secrets.Scope{}, ref, []byte(apiKey)); err != nil {
 		return store.Provider{}, fmt.Errorf("store OpenRouter credential: %w", err)
 	}
 	refValue := ref
 	provider.CredentialRef = &refValue
-	provider, err = control.UpdateProvider(ctx, provider)
+	provider, err := control.UpdateProvider(ctx, provider)
 	if err != nil {
 		return store.Provider{}, fmt.Errorf("update OpenRouter credential ref: %w", err)
 	}
-
-	slog.Info("created OpenRouter provider from env bootstrap")
 	return provider, nil
+}
+
+func openRouterProviderCredentialConfigured(provider store.Provider) bool {
+	return provider.CredentialRef != nil && strings.TrimSpace(*provider.CredentialRef) != ""
 }
 
 func ensureOpenRouterModelProfilesFromEnv(ctx context.Context, control *Service, provider store.Provider, modelIDs []string) error {

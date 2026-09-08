@@ -65,7 +65,7 @@ Runtime Workspaces must be visible to the host Docker daemon at the same absolut
 
 OpenCode Runs require encrypted Provider credential storage. With the default Compose setup, the deployment encryption key and secret-write token are generated automatically on first startup.
 
-When `OPENROUTER_API_KEY` is set in the Compose environment (for example via `.env`), the server creates a global Provider named **OpenRouter** on startup if one does not already exist. An existing Provider with that name is left unchanged. After changing the key, recreate the server container so Compose injects the updated env var.
+When `OPENROUTER_API_KEY` is set in the Compose environment (for example via `.env`), the server creates a global Provider named **OpenRouter** on startup if one does not already exist. If that provider already exists but is missing its stored credential, startup completes that step. An existing provider with a credential is left unchanged. This env var is creation/resume-only; rotate an existing key from **Settings → Providers**. Recreate the server container after adding env vars so Compose injects them.
 
 When `OPENROUTER_MODELS` is set to a comma-separated list of OpenRouter model IDs, the server also creates global Model Profiles linked to the OpenRouter provider on startup if they do not already exist. Each profile uses the full model ID as its model field and a display name derived from the last path segment (for example `anthropic/claude-3.5-sonnet` becomes `claude-3.5-sonnet`). Existing profiles with the same name or model are left unchanged. `OPENROUTER_MODELS` requires an existing OpenRouter provider or `OPENROUTER_API_KEY` on the same startup.
 

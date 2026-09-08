@@ -12,18 +12,39 @@ import (
 
 type envProviderStore struct {
 	store.ControlPlaneStore
-	providers         []store.Provider
-	modelProfiles     []store.ModelProfile
-	created           store.Provider
-	updated           store.Provider
-	createdModels     []store.ModelProfile
-	createErr         error
-	createModelErr    error
+	providers          []store.Provider
+	modelProfiles      []store.ModelProfile
+	created            store.Provider
+	updated            store.Provider
+	createdModels      []store.ModelProfile
+	createErr          error
+	createModelErr     error
+	updateErr          error
+	putErr             error
+	listCalls          int
+	deferProvidersUntilRelist bool
 	nextModelProfileID int
 }
 
 func (s *envProviderStore) ListProviders(_ context.Context) ([]store.Provider, error) {
-	return append([]store.Provider(nil), s.providers...), nil
+	s.listCalls++
+	if s.deferProvidersUntilRelist && s.listCalls == 1 {
+		return nil, nil
+	}
+	out := append([]store.Provider(nil), s.providers...)
+	if s.created.ID != "" {
+		found := false
+		for _, provider := range out {
+			if provider.ID == s.created.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, s.created)
+		}
+	}
+	return out, nil
 }
 
 func (s *envProviderStore) GetProvider(_ context.Context, id string) (store.Provider, error) {
@@ -52,7 +73,18 @@ func (s *envProviderStore) CreateProvider(_ context.Context, p store.Provider) (
 }
 
 func (s *envProviderStore) UpdateProvider(_ context.Context, p store.Provider) (store.Provider, error) {
+	if s.updateErr != nil {
+		return store.Provider{}, s.updateErr
+	}
 	s.updated = p
+	if s.created.ID == p.ID {
+		s.created = p
+	}
+	for i, provider := range s.providers {
+		if provider.ID == p.ID {
+			s.providers[i] = p
+		}
+	}
 	return p, nil
 }
 
@@ -80,12 +112,16 @@ type captureEnvSecretWriter struct {
 	ref   string
 	value []byte
 	calls int
+	err   error
 }
 
 func (w *captureEnvSecretWriter) Put(_ context.Context, _ secrets.Scope, ref string, value []byte) (secrets.Metadata, error) {
 	w.calls++
 	w.ref = ref
 	w.value = append([]byte(nil), value...)
+	if w.err != nil {
+		return secrets.Metadata{}, w.err
+	}
 	return secrets.Metadata{Ref: ref}, nil
 }
 
@@ -187,9 +223,10 @@ func TestEnsureOpenRouterFromEnvCreatesProviderWithCredential(t *testing.T) {
 }
 
 func TestEnsureOpenRouterFromEnvSkipsExistingProviderCaseInsensitive(t *testing.T) {
+	credentialRef := "provider:existing"
 	for _, name := range []string{"OpenRouter", "openrouter", "OPENROUTER"} {
 		t.Run(name, func(t *testing.T) {
-			st := &envProviderStore{providers: []store.Provider{{ID: "existing", Name: name, Kind: "openrouter"}}}
+			st := &envProviderStore{providers: []store.Provider{{ID: "existing", Name: name, Kind: "openrouter", CredentialRef: &credentialRef}}}
 			writer := &captureEnvSecretWriter{}
 			svc := New(st)
 
@@ -208,8 +245,8 @@ func TestEnsureOpenRouterFromEnvSkipsExistingProviderCaseInsensitive(t *testing.
 	}
 }
 
-func TestEnsureOpenRouterFromEnvSkipsOnCreateConflict(t *testing.T) {
-	st := &envProviderStore{createErr: store.ErrConflict}
+func TestEnsureOpenRouterFromEnvResumesCredentialForProviderWithoutCredentialRef(t *testing.T) {
+	st := &envProviderStore{providers: []store.Provider{{ID: "existing", Name: "OpenRouter", Kind: "openrouter"}}}
 	writer := &captureEnvSecretWriter{}
 	svc := New(st)
 
@@ -218,8 +255,86 @@ func TestEnsureOpenRouterFromEnvSkipsOnCreateConflict(t *testing.T) {
 	})); err != nil {
 		t.Fatalf("EnsureOpenRouterFromEnv() error = %v", err)
 	}
-	if writer.calls != 0 {
-		t.Fatalf("secret writes = %d, want 0", writer.calls)
+	if writer.calls != 1 {
+		t.Fatalf("secret writes = %d, want 1", writer.calls)
+	}
+	if st.updated.CredentialRef == nil || *st.updated.CredentialRef != "provider:existing" {
+		t.Fatalf("updated credential ref = %v", st.updated.CredentialRef)
+	}
+}
+
+func TestEnsureOpenRouterFromEnvCreateConflictReloadsProvider(t *testing.T) {
+	st := &envProviderStore{
+		createErr:                 store.ErrConflict,
+		deferProvidersUntilRelist: true,
+		providers:                 []store.Provider{{ID: "existing-from-race", Name: "OpenRouter", Kind: "openrouter"}},
+	}
+	writer := &captureEnvSecretWriter{}
+	svc := New(st)
+
+	if err := EnsureOpenRouterFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
+		openRouterEnvKey:       "sk-openrouter-key",
+		openRouterModelsEnvKey: "openai/gpt-4o-mini",
+	})); err != nil {
+		t.Fatalf("EnsureOpenRouterFromEnv() error = %v", err)
+	}
+	if st.listCalls < 2 {
+		t.Fatalf("list calls = %d, want at least 2", st.listCalls)
+	}
+	if writer.calls != 1 {
+		t.Fatalf("secret writes = %d, want 1", writer.calls)
+	}
+	if len(st.createdModels) != 1 {
+		t.Fatalf("created models = %d, want 1", len(st.createdModels))
+	}
+}
+
+func TestEnsureOpenRouterFromEnvPropagatesCredentialStoreFailure(t *testing.T) {
+	st := &envProviderStore{}
+	writer := &captureEnvSecretWriter{err: errors.New("secret store unavailable")}
+	svc := New(st)
+
+	err := EnsureOpenRouterFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
+		openRouterEnvKey: "sk-openrouter-key",
+	}))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if st.updated.ID != "" {
+		t.Fatal("expected provider credential ref not to be updated after secret failure")
+	}
+}
+
+func TestEnsureOpenRouterFromEnvResumesAfterUpdateProviderFailure(t *testing.T) {
+	st := &envProviderStore{
+		providers: []store.Provider{{ID: "existing", Name: "OpenRouter", Kind: "openrouter"}},
+		updateErr: errors.New("database unavailable"),
+	}
+	writer := &captureEnvSecretWriter{}
+	svc := New(st)
+
+	err := EnsureOpenRouterFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
+		openRouterEnvKey: "sk-openrouter-key",
+	}))
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if writer.calls != 1 {
+		t.Fatalf("secret writes = %d, want 1", writer.calls)
+	}
+
+	st.updateErr = nil
+	writer.calls = 0
+	if err := EnsureOpenRouterFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
+		openRouterEnvKey: "sk-openrouter-key",
+	})); err != nil {
+		t.Fatalf("EnsureOpenRouterFromEnv() retry error = %v", err)
+	}
+	if writer.calls != 1 {
+		t.Fatalf("retry secret writes = %d, want 1", writer.calls)
+	}
+	if st.updated.CredentialRef == nil || *st.updated.CredentialRef != "provider:existing" {
+		t.Fatalf("updated credential ref = %v", st.updated.CredentialRef)
 	}
 }
 
@@ -366,8 +481,9 @@ func TestEnsureOpenRouterFromEnvModelsWithExistingProvider(t *testing.T) {
 }
 
 func TestEnsureOpenRouterFromEnvExistingProviderWithAPIKeyAndModels(t *testing.T) {
+	credentialRef := "provider:openrouter-provider-id"
 	st := &envProviderStore{
-		providers: []store.Provider{{ID: "openrouter-provider-id", Name: "OpenRouter", Kind: "openrouter"}},
+		providers: []store.Provider{{ID: "openrouter-provider-id", Name: "OpenRouter", Kind: "openrouter", CredentialRef: &credentialRef}},
 	}
 	writer := &captureEnvSecretWriter{}
 	svc := New(st)
