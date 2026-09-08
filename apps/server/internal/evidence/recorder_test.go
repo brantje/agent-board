@@ -78,6 +78,66 @@ func TestRecorderDoesNotMakeCommittedEventRetryableAfterPublishFailure(t *testin
 	}
 }
 
+type failingEventStore struct{}
+
+func (failingEventStore) AppendEvent(context.Context, store.Event) (store.Event, error) {
+	return store.Event{}, errors.New("append rejected")
+}
+
+func TestRecorderReturnsAppendFailureWithoutPublishing(t *testing.T) {
+	publisher := &failingPublisher{}
+	recorder, err := NewRecorder(failingEventStore{}, publisher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = recorder.Record(context.Background(), storeEvent("run.started"))
+	if err == nil {
+		t.Fatal("expected append failure")
+	}
+	if publisher.calls != 0 {
+		t.Fatalf("publish called %d times after append failure", publisher.calls)
+	}
+}
+
+func TestPublishPersistedIsNoOpWithoutPublisher(t *testing.T) {
+	var nilRecorder *Recorder
+	nilRecorder.PublishPersisted(context.Background(), storeEvent("run.started"))
+
+	recorder, err := NewRecorder(&memoryEventStore{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder.PublishPersisted(context.Background(), storeEvent("run.started"))
+}
+
+func TestPublishPersistedNotifiesAfterExternalCommit(t *testing.T) {
+	hub := NewHub()
+	recorder, err := NewRecorder(&memoryEventStore{}, hub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events, unsubscribe := hub.Subscribe(ctx, "run-1")
+	defer unsubscribe()
+
+	runID := "run-1"
+	sequence := int64(9)
+	committed := store.Event{ID: "tx-event", Type: "question.answered", ProjectID: "project", RunID: &runID, Sequence: &sequence}
+	recorder.PublishPersisted(context.Background(), committed)
+	got := receiveEvent(t, events)
+	if got.ID != committed.ID || got.Sequence == nil || *got.Sequence != sequence {
+		t.Fatalf("live fan-out=%+v want %+v", got, committed)
+	}
+}
+
+func TestEncodePayloadRejectsUnmarshalableValues(t *testing.T) {
+	_, err := EncodePayload(make(chan int))
+	if err == nil {
+		t.Fatal("expected encode failure for channel payload")
+	}
+}
+
 func storeEvent(kind string) store.Event {
 	return store.Event{Type: kind, ProjectID: "project"}
 }

@@ -9,7 +9,8 @@ import (
 )
 
 type QuestionService struct {
-	store store.QuestionStore
+	store     store.QuestionStore
+	publisher persistedEventPublisher
 }
 
 func NewQuestionService(questionStore store.QuestionStore) (*QuestionService, error) {
@@ -17,6 +18,13 @@ func NewQuestionService(questionStore store.QuestionStore) (*QuestionService, er
 		return nil, fmt.Errorf("question store is required")
 	}
 	return &QuestionService{store: questionStore}, nil
+}
+
+func (s *QuestionService) SetPersistedEventPublisher(publisher persistedEventPublisher) {
+	if s == nil {
+		return
+	}
+	s.publisher = publisher
 }
 
 func (s *QuestionService) List(ctx context.Context, projectID string, filter store.QuestionFilter) ([]store.Question, error) {
@@ -55,5 +63,6 @@ func (s *QuestionService) Answer(ctx context.Context, projectID, questionID stri
 	if err != nil {
 		return store.AnswerQuestionResult{}, translateStoreError(err, "question")
 	}
+	publishPersistedEvents(ctx, s.publisher, result.Events)
 	return result, nil
 }

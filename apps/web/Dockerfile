@@ -1,6 +1,10 @@
 FROM node:24-alpine AS build
 
 WORKDIR /src
+
+ARG AGENT_BOARD_API_URL=http://127.0.0.1:3001
+ENV AGENT_BOARD_API_URL=$AGENT_BOARD_API_URL
+
 RUN npm install --global pnpm@11.25.0
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./

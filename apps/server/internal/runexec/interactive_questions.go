@@ -94,6 +94,9 @@ func (q *interactiveQuestioner) OpenBatch(ctx context.Context, requests []engine
 	// delivery. Only use the recorder as a compatibility fallback for stores
 	// that do not persist those events themselves.
 	storeOwnsEvidence := len(batch.Events) != 0
+	if storeOwnsEvidence {
+		q.publishPersisted(ctx, batch.Events)
+	}
 	opened := make([]engine.Question, len(batch.Questions))
 	for index, result := range batch.Questions {
 		if result.Created && !storeOwnsEvidence {
@@ -158,6 +161,7 @@ func (q *interactiveQuestioner) prepareOpenCommand(correlationKey string, reques
 
 func (q *interactiveQuestioner) recordOpenResult(ctx context.Context, result store.OpenInteractiveQuestionResult) error {
 	if len(result.Events) != 0 {
+		q.publishPersisted(ctx, result.Events)
 		return nil
 	}
 	if result.Created {
@@ -353,6 +357,7 @@ func (q *interactiveQuestioner) Resolve(ctx context.Context, questionID string) 
 		return err
 	}
 	if len(result.Events) != 0 {
+		q.publishPersisted(ctx, result.Events)
 		return nil
 	}
 	if err := q.record(ctx, interactiveQuestionResolvedEvent, map[string]any{
@@ -365,6 +370,15 @@ func (q *interactiveQuestioner) Resolve(ctx context.Context, questionID string) 
 		return q.record(ctx, "run.resumed", map[string]any{"questionId": questionID})
 	}
 	return nil
+}
+
+func (q *interactiveQuestioner) publishPersisted(ctx context.Context, events []store.Event) {
+	if q == nil || q.events == nil {
+		return
+	}
+	for _, event := range events {
+		q.events.PublishPersisted(ctx, event)
+	}
 }
 
 func (q *interactiveQuestioner) record(ctx context.Context, eventType string, payload any) error {

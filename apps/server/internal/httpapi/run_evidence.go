@@ -95,6 +95,9 @@ func (a *api) registerRunEvidenceRoutes(r chi.Router) {
 	r.Get("/projects/{projectID}/runs/{runID}/evidence", a.getRunEvidence)
 	r.Get("/projects/{projectID}/runs/{runID}/raw-output/{chunkID}", a.getRawOutputChunk)
 	r.Get("/projects/{projectID}/runs/{runID}/artifacts/{artifactID}", a.getRunArtifact)
+	if a.eventHub != nil {
+		r.Get("/projects/{projectID}/runs/{runID}/events", a.streamRunEvents)
+	}
 }
 
 func (a *api) getRunEvidence(w http.ResponseWriter, r *http.Request) {

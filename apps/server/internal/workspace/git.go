@@ -116,13 +116,7 @@ func (g *GitCLI) run(ctx context.Context, args ...string) (string, error) {
 	commandCtx, cancel := context.WithTimeout(ctx, g.commandTimeout)
 	defer cancel()
 
-	hardened := []string{
-		"-c", "core.hooksPath=/dev/null",
-		"-c", "core.fsmonitor=false",
-		"-c", "credential.helper=",
-		"-c", "protocol.ext.allow=never",
-		"-c", "protocol.file.allow=user",
-	}
+	hardened := hardenedGitConfig()
 	commandArgs := append(hardened, args...)
 	cmd := exec.CommandContext(commandCtx, g.binary, commandArgs...)
 	cmd.Env = hardenedGitEnv()
@@ -170,6 +164,17 @@ func isFullCommitRevision(revision string) bool {
 		}
 	}
 	return true
+}
+
+func hardenedGitConfig() []string {
+	return []string{
+		"-c", "safe.directory=*",
+		"-c", "core.hooksPath=/dev/null",
+		"-c", "core.fsmonitor=false",
+		"-c", "credential.helper=",
+		"-c", "protocol.ext.allow=never",
+		"-c", "protocol.file.allow=user",
+	}
 }
 
 func hardenedGitEnv() []string {

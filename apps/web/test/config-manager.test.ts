@@ -56,12 +56,16 @@ describe('configuration screens', () => {
   })
 
   it('shows Runtime configured health and server-owned workspace policy without relying on color', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{ id: 'r', name: 'Docker', projectId: 'p', enabled: false, healthStatus: 'UNHEALTHY', image: 'runner:latest', networkPolicy: 'restricted', workspacePolicy: 'issue' }]))))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{ id: 'r', name: 'Docker', projectId: 'p', enabled: false, healthStatus: 'UNHEALTHY', kind: 'docker', image: 'runner:latest', networkPolicy: 'restricted', workspacePolicy: 'issue', capabilities: { git: true }, cpuLimitMillis: 1000, memoryLimitBytes: 256, pidLimit: 128, timeoutSeconds: 60 }]))))
     const wrapper = mount(ConfigManager, { props: { kind: 'runtimes', projectId: 'p' }, global })
     await flushPromises()
     expect(wrapper.text()).toContain('Configuration: Disabled')
     expect(wrapper.text()).toContain('Health: Unhealthy')
     expect(wrapper.text()).toContain('Network: Restricted · Workspace: Issue')
+    expect(wrapper.text()).toContain('Identity')
+    expect(wrapper.text()).toContain('r')
+    expect(wrapper.text()).toContain('Kind')
+    expect(wrapper.text()).toContain('Capabilities')
     await button(wrapper, 'Edit').trigger('click')
     expect(wrapper.text()).toContain('server-controlled')
   })
@@ -84,10 +88,9 @@ describe('configuration screens', () => {
     expect(wrapper.find('[role=dialog]').exists()).toBe(false)
   })
 
-  it('validates drafts and never keeps provider secret plaintext in the form or provider request', async () => {
+  it('validates drafts and sends provider API keys on the provider request only', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
       if (options.method === 'GET' || !options.method) return new Response('[]')
-      if (path === '/api/secrets') return new Response('{"ref":"key","projectId":null}')
       return new Response('{"error":{"code":"invalid_argument","message":"do not reflect never-show"}}', { status: 400 })
     })
     vi.stubGlobal('fetch', fetch)
@@ -97,21 +100,15 @@ describe('configuration screens', () => {
     await wrapper.get('form').trigger('submit')
     expect(wrapper.text()).toContain('Check the highlighted')
     await wrapper.get('[data-field=name] input').setValue('Provider')
-    await wrapper.findAll('input[type=password]')[0]!.setValue('never-show')
-    await wrapper.get('form').trigger('submit')
-    expect(wrapper.text()).toContain('capability are required')
-    await wrapper.get('[data-field=credentialRef] input').setValue('key')
-    await wrapper.findAll('input[type=password]')[1]!.setValue('capability')
+    await wrapper.get('input[type=password]').setValue('never-show')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Server code: invalid_argument')
     expect(wrapper.text()).not.toContain('do not reflect never-show')
-    expect(wrapper.findAll('input[type=password]').map(input => (input.element as HTMLInputElement).value)).toEqual(['', ''])
-    const secretCall = fetch.mock.calls.find(([path]) => path === '/api/secrets')!
-    expect(JSON.parse(String(secretCall[1].body))).toEqual({ ref: 'key', value: 'never-show' })
+    expect((wrapper.get('input[type=password]').element as HTMLInputElement).value).toBe('')
     const providerCall = fetch.mock.calls.find(([path, options]) => path === '/api/providers' && options.method === 'POST')!
-    expect(String(providerCall[1].body)).not.toContain('never-show')
-    expect(String(providerCall[1].body)).not.toContain('capability')
+    expect(JSON.parse(String(providerCall[1].body))).toMatchObject({ name: 'Provider', kind: 'openai-compatible', credential: 'never-show' })
+    expect(fetch.mock.calls.some(([path]) => path === '/api/secrets')).toBe(false)
   })
 
   it('preserves response-backed metadata when editing provider and model profile', async () => {

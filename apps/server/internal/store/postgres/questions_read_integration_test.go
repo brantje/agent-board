@@ -75,6 +75,9 @@ func TestQuestionReadsAndNonBlockingAnswer(t *testing.T) {
 	if answered.Question.Status != "ANSWERED" || answered.Job != nil || answered.Run.ID != f.run.ID {
 		t.Fatalf("AnswerQuestion(non-blocking)=%+v", answered)
 	}
+	if len(answered.Events) != 2 || answered.Events[0].Type != "question.answered" || answered.Events[1].Type != "decision.recorded" {
+		t.Fatalf("AnswerQuestion events=%+v", answered.Events)
+	}
 	decision, err := s.GetDecisionByQuestion(ctx, f.project.ID, choice.ID)
 	if err != nil || decision.ID != answered.Decision.ID {
 		t.Fatalf("GetDecisionByQuestion()=%+v err=%v", decision, err)
@@ -93,9 +96,9 @@ func TestValidateQuestionAnswerShapes(t *testing.T) {
 		t.Fatalf("valid TEXT answer: %v", err)
 	}
 	for name, answer := range map[string]store.QuestionAnswer{
-		"wrong kind": {Kind: "SINGLE_CHOICE", OptionIDs: []string{"a"}},
-		"missing text": {Kind: "TEXT"},
-		"blank text": {Kind: "TEXT", Text: &blank},
+		"wrong kind":       {Kind: "SINGLE_CHOICE", OptionIDs: []string{"a"}},
+		"missing text":     {Kind: "TEXT"},
+		"blank text":       {Kind: "TEXT", Text: &blank},
 		"text plus option": {Kind: "TEXT", Text: &text, OptionIDs: []string{"a"}},
 	} {
 		t.Run("text "+name, func(t *testing.T) {
@@ -111,10 +114,10 @@ func TestValidateQuestionAnswerShapes(t *testing.T) {
 		t.Fatalf("valid SINGLE_CHOICE answer: %v", err)
 	}
 	for name, answer := range map[string]store.QuestionAnswer{
-		"missing option": {Kind: "SINGLE_CHOICE"},
+		"missing option":   {Kind: "SINGLE_CHOICE"},
 		"multiple options": {Kind: "SINGLE_CHOICE", OptionIDs: []string{"a", "b"}},
-		"unknown option": {Kind: "SINGLE_CHOICE", OptionIDs: []string{"missing"}},
-		"text included": {Kind: "SINGLE_CHOICE", Text: &text, OptionIDs: []string{"a"}},
+		"unknown option":   {Kind: "SINGLE_CHOICE", OptionIDs: []string{"missing"}},
+		"text included":    {Kind: "SINGLE_CHOICE", Text: &text, OptionIDs: []string{"a"}},
 	} {
 		t.Run("single "+name, func(t *testing.T) {
 			if err := validateQuestionAnswer(single, answer); !errors.Is(err, store.ErrInvalidArgument) {

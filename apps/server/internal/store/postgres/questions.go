@@ -216,7 +216,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		return store.AnswerQuestionResult{}, err
 	}
 	workspaceID := run.WorkspaceID
-	if _, err := appendEventTx(ctx, tx, store.Event{
+	answeredEvent, err := appendEventTx(ctx, tx, store.Event{
 		Type:        "question.answered",
 		ProjectID:   question.ProjectID,
 		IssueID:     &issueID,
@@ -225,10 +225,11 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		WorkspaceID: &workspaceID,
 		Actor:       store.EmptyObject,
 		Payload:     answerPayload,
-	}); err != nil {
+	})
+	if err != nil {
 		return store.AnswerQuestionResult{}, err
 	}
-	if _, err := appendEventTx(ctx, tx, store.Event{
+	decisionEvent, err := appendEventTx(ctx, tx, store.Event{
 		Type:        "decision.recorded",
 		ProjectID:   question.ProjectID,
 		IssueID:     &issueID,
@@ -237,11 +238,12 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		WorkspaceID: &workspaceID,
 		Actor:       store.EmptyObject,
 		Payload:     decisionPayload,
-	}); err != nil {
+	})
+	if err != nil {
 		return store.AnswerQuestionResult{}, err
 	}
 
-	result := store.AnswerQuestionResult{Question: question, Decision: decision, Run: run}
+	result := store.AnswerQuestionResult{Question: question, Decision: decision, Run: run, Events: []store.Event{answeredEvent, decisionEvent}}
 	if interactive {
 		binding, err = scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
 			UPDATE engine_question_bindings

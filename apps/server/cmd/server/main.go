@@ -254,9 +254,17 @@ func configureExecutionScheduler(services *app.Services) error {
 		return err
 	}
 	services.RunEvidence = runEvidence
-	events, err := evidence.NewRecorder(services.ExecutionStore, nil)
+	hub := evidence.NewHub()
+	events, err := evidence.NewRecorder(services.ExecutionStore, hub, func(err error) {
+		slog.Error("publish persisted event", "error", err)
+	})
 	if err != nil {
 		return err
+	}
+	services.EventHub = hub
+	services.Events = events
+	if services.Questions != nil {
+		services.Questions.SetPersistedEventPublisher(events)
 	}
 	output, err := evidence.NewOutputRecorder(services.ExecutionStore, blobs, defaultOutputChunkSize)
 	if err != nil {

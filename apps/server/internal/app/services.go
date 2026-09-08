@@ -29,6 +29,8 @@ type Services struct {
 	Scheduler         *scheduler.Coordinator
 	Redaction         *redaction.Registry
 	Secrets           SecretWriter
+	EventHub          *evidencepkg.Hub
+	Events            *evidencepkg.Recorder
 }
 
 func NewServices(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer) (*Services, error) {

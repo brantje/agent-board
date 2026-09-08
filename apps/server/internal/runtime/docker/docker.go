@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -36,8 +37,9 @@ type mobyAPI interface {
 }
 
 type Runtime struct {
-	api   mobyAPI
-	close func() error
+	api            mobyAPI
+	close          func() error
+	controlNetwork string
 }
 
 type handleMetadata struct {
@@ -54,18 +56,26 @@ type handleMetadata struct {
 }
 
 func New() (*Runtime, error) {
+	return NewWithControlNetwork(strings.TrimSpace(os.Getenv("AGENT_BOARD_DOCKER_NETWORK")))
+}
+
+func NewWithControlNetwork(controlNetwork string) (*Runtime, error) {
 	api, err := client.New(client.FromEnv)
 	if err != nil {
 		return nil, fmt.Errorf("create Docker client: %w", err)
 	}
-	return &Runtime{api: api, close: api.Close}, nil
+	return &Runtime{api: api, close: api.Close, controlNetwork: strings.TrimSpace(controlNetwork)}, nil
 }
 
 func newWithClient(api mobyAPI) (*Runtime, error) {
+	return newWithClientAndControlNetwork(api, "")
+}
+
+func newWithClientAndControlNetwork(api mobyAPI, controlNetwork string) (*Runtime, error) {
 	if api == nil {
 		return nil, fmt.Errorf("docker client is required")
 	}
-	return &Runtime{api: api}, nil
+	return &Runtime{api: api, controlNetwork: strings.TrimSpace(controlNetwork)}, nil
 }
 
 func (r *Runtime) Close() error {
@@ -93,7 +103,7 @@ func (r *Runtime) Create(ctx context.Context, spec runtimepkg.RuntimeSpec) (runt
 		return runtimepkg.Handle{}, fmt.Errorf("inspect existing Docker container %s: %w", name, err)
 	}
 
-	created, err := r.api.ContainerCreate(ctx, buildCreateOptions(spec))
+	created, err := r.api.ContainerCreate(ctx, r.buildCreateOptions(spec))
 	if err != nil {
 		if cerrdefs.IsAlreadyExists(err) || cerrdefs.IsConflict(err) {
 			inspected, inspectErr := r.api.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
@@ -257,6 +267,13 @@ func (r *Runtime) inspectOwned(ctx context.Context, handle runtimepkg.Handle) (c
 	return inspected.Container, meta, nil
 }
 
+func (r *Runtime) runnerControlNetwork() string {
+	if strings.TrimSpace(r.controlNetwork) != "" {
+		return r.controlNetwork
+	}
+	return "bridge"
+}
+
 func validateDockerSpec(spec runtimepkg.RuntimeSpec) error {
 	if err := runtimepkg.ValidateSpec(spec); err != nil {
 		return err
@@ -270,7 +287,7 @@ func validateDockerSpec(spec runtimepkg.RuntimeSpec) error {
 	return nil
 }
 
-func buildCreateOptions(spec runtimepkg.RuntimeSpec) client.ContainerCreateOptions {
+func (r *Runtime) buildCreateOptions(spec runtimepkg.RuntimeSpec) client.ContainerCreateOptions {
 	labels := make(map[string]string, len(spec.Labels)+5)
 	for key, value := range spec.Labels {
 		labels[key] = value
@@ -280,6 +297,9 @@ func buildCreateOptions(spec runtimepkg.RuntimeSpec) client.ContainerCreateOptio
 	}
 
 	networkMode := container.NetworkMode("bridge")
+	if strings.TrimSpace(r.controlNetwork) != "" {
+		networkMode = container.NetworkMode(r.controlNetwork)
+	}
 	networkDisabled := false
 	if spec.Network == runtimepkg.NetworkNone {
 		networkMode = container.NetworkMode("none")

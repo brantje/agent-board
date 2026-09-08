@@ -88,12 +88,18 @@ func TestRequestReviewChangesCreatesNextAttemptOnSameWorkspaceAtomically(t *test
 	if result.Job.Kind != "START" || result.Job.RunID != result.Run.ID || result.Issue.Status != "IN_PROGRESS" {
 		t.Fatalf("follow-up job/issue=%+v %+v", result.Job, result.Issue)
 	}
+	if len(result.Events) != 2 || result.Events[0].Type != "review.changes_requested" || result.Events[1].Type != "decision.recorded" {
+		t.Fatalf("RequestReviewChanges events=%+v", result.Events)
+	}
 
 	retry, err := s.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{
 		ProjectID: f.project.ID, ReviewID: review.ID, Feedback: "Please add the missing regression test.", ActorID: &actor,
 	})
 	if err != nil || retry.Run.ID != result.Run.ID || retry.Job.ID != result.Job.ID {
 		t.Fatalf("idempotent RequestReviewChanges()=%+v err=%v", retry, err)
+	}
+	if len(retry.Events) != 0 {
+		t.Fatalf("idempotent RequestReviewChanges published extra events=%+v", retry.Events)
 	}
 }
 

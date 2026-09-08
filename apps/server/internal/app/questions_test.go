@@ -9,12 +9,13 @@ import (
 )
 
 type questionServiceStore struct {
-	questions   []store.Question
-	listErr     error
-	getErr      error
-	answerErr   error
-	lastFilter  store.QuestionFilter
-	lastCommand store.AnswerQuestionCommand
+	questions    []store.Question
+	listErr      error
+	getErr       error
+	answerErr    error
+	lastFilter   store.QuestionFilter
+	lastCommand  store.AnswerQuestionCommand
+	answerEvents []store.Event
 }
 
 func (s *questionServiceStore) CreateQuestion(context.Context, store.Question) (store.Question, error) {
@@ -54,7 +55,7 @@ func (s *questionServiceStore) AnswerQuestion(_ context.Context, command store.A
 	if s.answerErr != nil {
 		return store.AnswerQuestionResult{}, s.answerErr
 	}
-	return store.AnswerQuestionResult{Question: store.Question{ID: command.QuestionID, ProjectID: command.ProjectID, Status: "ANSWERED"}}, nil
+	return store.AnswerQuestionResult{Question: store.Question{ID: command.QuestionID, ProjectID: command.ProjectID, Status: "ANSWERED"}, Events: append([]store.Event(nil), s.answerEvents...)}, nil
 }
 
 func TestQuestionServiceRoutesStoreOperations(t *testing.T) {
@@ -90,6 +91,39 @@ func TestQuestionServiceRoutesStoreOperations(t *testing.T) {
 	}
 	if questionStore.lastCommand.ActorType != "HUMAN" || questionStore.lastCommand.ActorID == nil || *questionStore.lastCommand.ActorID != actorID {
 		t.Fatalf("Answer() command=%+v", questionStore.lastCommand)
+	}
+}
+
+type capturingPublisher struct {
+	events []store.Event
+}
+
+func (p *capturingPublisher) PublishPersisted(_ context.Context, event store.Event) {
+	p.events = append(p.events, event)
+}
+
+func TestQuestionServiceAnswerPublishesPersistedEvents(t *testing.T) {
+	runID := "run-1"
+	seq := int64(4)
+	questionStore := &questionServiceStore{
+		answerEvents: []store.Event{{ID: "event-1", Type: "question.answered", RunID: &runID, Sequence: &seq}},
+	}
+	service, err := NewQuestionService(questionStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher := &capturingPublisher{}
+	service.SetPersistedEventPublisher(publisher)
+
+	result, err := service.Answer(context.Background(), "project-1", "question-1", store.QuestionAnswer{Kind: "TEXT"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 1 || result.Events[0].ID != "event-1" {
+		t.Fatalf("result events=%+v", result.Events)
+	}
+	if len(publisher.events) != 1 || publisher.events[0].ID != "event-1" {
+		t.Fatalf("published=%+v", publisher.events)
 	}
 }
 

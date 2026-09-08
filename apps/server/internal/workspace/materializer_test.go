@@ -195,7 +195,7 @@ func TestMaterializerRecoversPublishedCheckoutAfterPersistenceFailure(t *testing
 	}
 }
 
-func TestMaterializerUsesWorkspaceRepositorySnapshot(t *testing.T) {
+func TestMaterializerUsesProjectRepositoryUntilReady(t *testing.T) {
 	git := requireGit(t)
 	parent := t.TempDir()
 	sourceRoot := filepath.Join(parent, "sources")
@@ -203,18 +203,23 @@ func TestMaterializerUsesWorkspaceRepositorySnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := createFixtureRepository(t, git.GitCLI, sourceRoot)
+	stale := filepath.Join(sourceRoot, "stale")
+	if err := os.Mkdir(stale, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	policy, _ := repository.NewPolicy([]string{sourceRoot})
-	state := &memoryStateStore{workspace: fixtureWorkspace(source)}
+	state := &memoryStateStore{workspace: fixtureWorkspace(stale)}
+	state.workspace.BaseBranch = ptr("stale")
 	materializer, _ := NewMaterializer(state, policy, git, filepath.Join(parent, "workspaces"))
 
-	project := store.Project{ID: "project-1", RepositoryPath: filepath.Join(sourceRoot, "changed"), DefaultBranch: "changed"}
+	project := store.Project{ID: "project-1", RepositoryPath: source, DefaultBranch: "main"}
 	issue := store.Issue{ID: "issue-1", ProjectID: project.ID}
 	got, err := materializer.Ensure(context.Background(), project, issue, state.workspace)
 	if err != nil {
 		t.Fatalf("Ensure() error = %v", err)
 	}
 	if got.RepositoryPath == nil || *got.RepositoryPath != source || got.BaseBranch == nil || *got.BaseBranch != "main" {
-		t.Fatalf("workspace source snapshot changed: %+v", got)
+		t.Fatalf("pending bootstrap should follow project source: %+v", got)
 	}
 }
 
@@ -261,9 +266,8 @@ func TestMaterializerRejectsMissingBaseBranch(t *testing.T) {
 	source := createFixtureRepository(t, git.GitCLI, sourceRoot)
 	policy, _ := repository.NewPolicy([]string{sourceRoot})
 	state := &memoryStateStore{workspace: fixtureWorkspace(source)}
-	state.workspace.BaseBranch = ptr("missing")
 	materializer, _ := NewMaterializer(state, policy, git, filepath.Join(parent, "workspaces"))
-	_, err := materializer.Ensure(context.Background(), store.Project{ID: "project-1", RepositoryPath: source, DefaultBranch: "main"}, store.Issue{ID: "issue-1", ProjectID: "project-1"}, state.workspace)
+	_, err := materializer.Ensure(context.Background(), store.Project{ID: "project-1", RepositoryPath: source, DefaultBranch: "missing"}, store.Issue{ID: "issue-1", ProjectID: "project-1"}, state.workspace)
 	if !errors.Is(err, ErrBootstrapFailed) || !strings.Contains(err.Error(), "clone repository") {
 		t.Fatalf("Ensure() error = %v, want clone failure", err)
 	}

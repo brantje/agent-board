@@ -20,7 +20,6 @@ const saving = ref(false)
 const saveError = ref<Error>()
 const saved = ref(false)
 const credential = ref('')
-const capability = ref('')
 const visible = computed(() => props.resourceId ? data.value?.filter(item => item.id === props.resourceId) : data.value)
 const pageDescription = computed(() => {
   if (props.kind === 'projects') return props.resourceId ? 'Project settings · backend-managed repository context' : 'Projects · backend-managed repository contexts'
@@ -47,7 +46,6 @@ function edit(item?: ConfigRecord) {
 
 function clearSecrets() {
   credential.value = ''
-  capability.value = ''
 }
 
 function readable(value: unknown, fallback = 'Unavailable') {
@@ -83,25 +81,18 @@ async function save() {
     saveError.value = new Error('Check the highlighted form values.')
     return
   }
-  if (credential.value && (!draft.value.credentialRef || !capability.value)) {
-    saveError.value = new Error('A credential reference and deployment secret-write capability are required.')
-    return
-  }
 
   saving.value = true
   saveError.value = undefined
   try {
-    if (credential.value) {
-      await apiRequest('/api/secrets', {
-        method: 'PUT',
-        body: { ref: draft.value.credentialRef, value: credential.value },
-        headers: { 'X-Agent-Board-Secret-Write-Token': capability.value }
-      })
+    const body = payloadFor(props.kind, draft.value)
+    if (props.kind === 'providers' && credential.value) {
+      body.credential = credential.value
     }
     clearSecrets()
     await apiRequest(`${path.value}${selected.value ? `/${selected.value.id}` : ''}`, {
       method: selected.value ? (props.kind === 'projects' ? 'PATCH' : 'PUT') : 'POST',
-      body: payloadFor(props.kind, draft.value)
+      body
     })
     draft.value = draftFor(props.kind)
     open.value = false
@@ -119,9 +110,6 @@ async function save() {
 <template>
   <PageFrame :title="definition.title" :description="pageDescription">
     <template #actions>
-      <template v-if="resourceId">
-        <UButton v-for="section in ['model-profiles', 'runtimes', 'executor-profiles']" :key="section" :label="definitions[section as ConfigKind].title" :to="`/projects/${resourceId}/settings/${section}`" variant="outline" />
-      </template>
       <UButton :label="`New ${definition.singular.toLowerCase()}`" icon="i-lucide-plus" @click="edit()" />
     </template>
 
@@ -151,6 +139,13 @@ async function save() {
           <div v-if="kind === 'runtimes'" class="mt-2 space-y-1 text-sm text-muted">
             <p class="font-mono break-all">{{ item.image }}</p>
             <p>Network: {{ readable(item.networkPolicy) }} · Workspace: {{ readable(item.workspacePolicy) }}</p>
+            <p>Identity <span class="font-mono break-all">{{ item.id }}</span></p>
+            <p v-if="item.kind">Kind: {{ readable(item.kind) }}</p>
+            <p v-if="item.cpuLimitMillis || item.memoryLimitBytes || item.pidLimit || item.timeoutSeconds">
+              CPU {{ item.cpuLimitMillis ?? '—' }} · Memory {{ item.memoryLimitBytes ?? '—' }} · PID {{ item.pidLimit ?? '—' }} · Timeout {{ item.timeoutSeconds ?? '—' }}
+            </p>
+            <p>Capabilities</p>
+            <pre>{{ JSON.stringify(item.capabilities ?? {}, null, 2) }}</pre>
           </div>
         </UCard>
       </div>
@@ -173,14 +168,11 @@ async function save() {
               </UFormField>
             </div>
 
-            <UAccordion v-if="kind === 'providers'" :items="[{ label: 'Set or replace credential', slot: 'credential' }]">
+            <UAccordion v-if="kind === 'providers'" :items="[{ label: 'Set or replace API key', slot: 'credential' }]">
               <template #credential>
-                <div class="space-y-3 py-2">
-                  <UFormField label="Credential value">
+                <div class="py-2">
+                  <UFormField label="API key" description="Saved credentials are encrypted and never shown again after save.">
                     <UInput v-model="credential" type="password" autocomplete="new-password" class="w-full" :disabled="controlsDisabled" />
-                  </UFormField>
-                  <UFormField label="Deployment secret-write capability" description="Required by the deployment to authorize secret storage. Used only for this save.">
-                    <UInput v-model="capability" type="password" autocomplete="off" class="w-full" :disabled="controlsDisabled" />
                   </UFormField>
                 </div>
               </template>

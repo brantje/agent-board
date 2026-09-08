@@ -202,10 +202,14 @@ func (s *Store) CompleteReviewApproval(ctx context.Context, input store.Complete
 	if err != nil {
 		return store.CompleteReviewApprovalResult{}, err
 	}
+	events, err := appendReviewDecisionEvents(ctx, tx, run, review, decision, "review.approved")
+	if err != nil {
+		return store.CompleteReviewApprovalResult{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.CompleteReviewApprovalResult{}, err
 	}
-	return store.CompleteReviewApprovalResult{Review: review, Decision: decision, Run: run, Issue: issue}, nil
+	return store.CompleteReviewApprovalResult{Review: review, Decision: decision, Run: run, Issue: issue, Events: events}, nil
 }
 
 func (s *Store) FailReviewApproval(ctx context.Context, input store.FailReviewApprovalCommand) (store.Review, error) {
@@ -352,10 +356,14 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
+	events, err := appendReviewDecisionEvents(ctx, tx, run, review, decision, "review.changes_requested")
+	if err != nil {
+		return store.RequestReviewChangesResult{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
-	return store.RequestReviewChangesResult{Review: review, Decision: decision, Run: nextRun, Job: job, Issue: issue}, nil
+	return store.RequestReviewChangesResult{Review: review, Decision: decision, Run: nextRun, Job: job, Issue: issue, Events: events}, nil
 }
 
 func lockReviewCommandState(ctx context.Context, tx pgx.Tx, projectID, reviewID string) (store.Review, store.Run, store.Issue, error) {
@@ -450,4 +458,53 @@ func existingRequestedChanges(ctx context.Context, tx pgx.Tx, review store.Revie
 		return store.RequestReviewChangesResult{}, err
 	}
 	return store.RequestReviewChangesResult{Review: review, Decision: decision, Run: run, Job: job, Issue: issue}, nil
+}
+
+func appendReviewDecisionEvents(ctx context.Context, tx pgx.Tx, run store.Run, review store.Review, decision store.Decision, reviewEventType string) ([]store.Event, error) {
+	reviewPayload, err := json.Marshal(map[string]any{
+		"reviewId":   review.ID,
+		"decisionId": decision.ID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	decisionPayload, err := json.Marshal(map[string]any{
+		"decisionId": decision.ID,
+		"reviewId":   review.ID,
+		"kind":       decision.Kind,
+		"outcome":    decision.Outcome,
+		"actorType":  decision.ActorType,
+		"actorId":    decision.ActorID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	issueID, runID, workspaceID := run.IssueID, run.ID, run.WorkspaceID
+	reviewEvent, err := appendEventTx(ctx, tx, store.Event{
+		Type:        reviewEventType,
+		ProjectID:   review.ProjectID,
+		IssueID:     &issueID,
+		RunID:       &runID,
+		AgentID:     run.AgentID,
+		WorkspaceID: &workspaceID,
+		Actor:       store.EmptyObject,
+		Payload:     reviewPayload,
+	})
+	if err != nil {
+		return nil, err
+	}
+	decisionEvent, err := appendEventTx(ctx, tx, store.Event{
+		Type:        "decision.recorded",
+		ProjectID:   review.ProjectID,
+		IssueID:     &issueID,
+		RunID:       &runID,
+		AgentID:     run.AgentID,
+		WorkspaceID: &workspaceID,
+		Actor:       store.EmptyObject,
+		Payload:     decisionPayload,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return []store.Event{reviewEvent, decisionEvent}, nil
 }
