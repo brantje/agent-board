@@ -35,3 +35,14 @@ path2:
         $ref: ../components/api-components.yaml#/responses/Provider
       default:
         $ref: ../components/api-components.yaml#/responses/Error
+path3:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: listProviderModels
+    description: Discover models from the Provider API using stored credentials. Results are not persisted.
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ProviderModelList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

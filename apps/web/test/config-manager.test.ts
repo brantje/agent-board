@@ -27,7 +27,13 @@ describe('configuration screens', () => {
       safeMetadata: {},
       generationSettings: {}
     }]
-    const fetch = vi.fn(async (_path: string, options: RequestInit) => new Response(JSON.stringify(options.method === 'GET' ? records : records[0])))
+    const fetch = vi.fn(async (path: string, options: RequestInit) => {
+      if (path.includes('/models')) return new Response(JSON.stringify({ models: [{ id: 'discovered-model' }] }))
+      if (kind === 'model-profiles' && path === '/api/providers') {
+        return new Response(JSON.stringify([{ id: 'one', name: 'Provider', enabled: true }]))
+      }
+      return new Response(JSON.stringify(options.method === 'GET' ? records : records[0]))
+    })
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(ConfigManager, { props: { kind }, global })
     await flushPromises()
@@ -38,6 +44,13 @@ describe('configuration screens', () => {
       if (field.required && field.type !== 'number') {
         if (kind === 'providers' && field.key === 'kind') {
           await control.setValue('anthropic')
+        } else if (field.type === 'provider-model') {
+          if (kind === 'model-profiles') {
+            await wrapper.get('[data-field=providerId] select').setValue('one')
+            await flushPromises()
+          }
+          const modelControl = wrapper.find('[data-field=model] input, [data-field=model] select')
+          await modelControl.setValue('discovered-model')
         } else {
           await control.setValue(field.resource ? 'one' : field.key === 'repositoryPath' ? '/repo' : field.key === 'issuePrefix' ? 'AB' : 'Value')
         }
@@ -53,6 +66,13 @@ describe('configuration screens', () => {
         const control = wrapper.find(`[data-field="${field.key}"] input, [data-field="${field.key}"] select`)
         if (kind === 'providers' && field.key === 'kind') {
           await control.setValue('anthropic')
+        } else if (field.type === 'provider-model') {
+          if (kind === 'model-profiles') {
+            await wrapper.get('[data-field=providerId] select').setValue('one')
+            await flushPromises()
+          }
+          const modelControl = wrapper.find('[data-field=model] input, [data-field=model] select')
+          await modelControl.setValue('discovered-model')
         } else {
           await control.setValue(field.resource ? 'one' : field.type === 'number' ? '1' : 'value')
         }
@@ -187,6 +207,7 @@ describe('configuration screens', () => {
     for (const testCase of cases) {
       const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
         if (testCase.kind === 'model-profiles' && path === '/api/providers') return new Response('[{"id":"provider","name":"Provider","enabled":true}]')
+        if (testCase.kind === 'model-profiles' && path.includes('/models')) return new Response('{"models":[{"id":"gpt-test"}]}')
         return new Response(JSON.stringify(options.method === 'GET' || !options.method ? [testCase.record] : testCase.record))
       })
       vi.stubGlobal('fetch', fetch)
@@ -200,6 +221,96 @@ describe('configuration screens', () => {
       wrapper.unmount()
       vi.unstubAllGlobals()
     }
+  })
+
+  it('loads provider models when selecting a provider for model profiles', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/model-profiles') return new Response('[]')
+      if (path === '/api/providers') return new Response('[{"id":"provider","name":"Provider","enabled":true}]')
+      if (path === '/api/providers/provider/models') return new Response('{"models":[{"id":"model-a","name":"Model A"},{"id":"model-b"}]}')
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ConfigManager, { props: { kind: 'model-profiles' }, global })
+    await flushPromises()
+    await button(wrapper, 'New model profile').trigger('click')
+    await wrapper.get('[data-field=providerId] select').setValue('provider')
+    await flushPromises()
+    expect(fetch.mock.calls.some(([calledPath]) => calledPath === '/api/providers/provider/models')).toBe(true)
+    const modelSelect = wrapper.get('[data-field=model] select')
+    expect(modelSelect.text()).toContain('Model A (model-a)')
+    expect(modelSelect.text()).toContain('model-b')
+    await modelSelect.setValue('model-a')
+    await wrapper.get('[data-field=name] input').setValue('Profile')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const createCall = fetch.mock.calls.find(([calledPath, options]) => calledPath === '/api/model-profiles' && options.method === 'POST')!
+    expect(JSON.parse(String(createCall[1].body))).toMatchObject({ providerId: 'provider', model: 'model-a', name: 'Profile' })
+  })
+
+  it('clears model and refetches when provider changes', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/model-profiles') return new Response('[]')
+      if (path === '/api/providers') return new Response('[{"id":"provider-a","name":"A","enabled":true},{"id":"provider-b","name":"B","enabled":true}]')
+      if (path === '/api/providers/provider-a/models') return new Response('{"models":[{"id":"model-a"}]}')
+      if (path === '/api/providers/provider-b/models') return new Response('{"models":[{"id":"model-b"}]}')
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ConfigManager, { props: { kind: 'model-profiles' }, global })
+    await flushPromises()
+    await button(wrapper, 'New model profile').trigger('click')
+    await wrapper.get('[data-field=providerId] select').setValue('provider-a')
+    await flushPromises()
+    await wrapper.get('[data-field=model] select').setValue('model-a')
+    await wrapper.get('[data-field=providerId] select').setValue('provider-b')
+    await flushPromises()
+    expect((wrapper.get('[data-field=model] select').element as HTMLSelectElement).value).toBe('')
+    expect(fetch.mock.calls.filter(([calledPath]) => calledPath.endsWith('/models')).length).toBe(2)
+  })
+
+  it('falls back to manual model entry when discovery fails', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/model-profiles') return new Response('[]')
+      if (path === '/api/providers') return new Response('[{"id":"provider","name":"Provider","enabled":true}]')
+      if (path.includes('/models')) return new Response('{"error":{"code":"provider_model_discovery_failed","message":"Unable to discover models from the Provider API."}}', { status: 502 })
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ConfigManager, { props: { kind: 'model-profiles' }, global })
+    await flushPromises()
+    await button(wrapper, 'New model profile').trigger('click')
+    await wrapper.get('[data-field=providerId] select').setValue('provider')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to load models')
+    const modelInput = wrapper.get('[data-field=model] input')
+    await modelInput.setValue('custom-model')
+    await wrapper.get('[data-field=name] input').setValue('Profile')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const createCall = fetch.mock.calls.find(([calledPath, options]) => calledPath === '/api/model-profiles' && options.method === 'POST')!
+    expect(JSON.parse(String(createCall[1].body))).toMatchObject({ model: 'custom-model' })
+  })
+
+  it('preserves an existing model during edit when it is missing from discovery', async () => {
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      if (path === '/api/providers') return new Response('[{"id":"provider","name":"Provider","enabled":true}]')
+      if (path.includes('/models')) return new Response('{"models":[{"id":"listed-model"}]}')
+      if (options.method === 'GET' || !options.method) {
+        return new Response('[{"id":"one","name":"M","providerId":"provider","model":"legacy-model","enabled":true,"generationSettings":{}}]')
+      }
+      return new Response('{"id":"one","name":"M","providerId":"provider","model":"legacy-model","enabled":true,"generationSettings":{}}')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ConfigManager, { props: { kind: 'model-profiles' }, global })
+    await flushPromises()
+    await button(wrapper, 'Edit').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-field=model] select').text()).toContain('legacy-model')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const updateCall = fetch.mock.calls.find(([calledPath, options]) => options.method === 'PUT')!
+    expect(JSON.parse(String(updateCall[1].body))).toMatchObject({ model: 'legacy-model' })
   })
 
   it('rejects saving an existing configuration that references a disabled dependency', async () => {
@@ -217,6 +328,21 @@ describe('configuration screens', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Check the highlighted form values')
     expect(fetch.mock.calls.some(([, options]) => options.method === 'PUT')).toBe(false)
+  })
+
+  it('prefills project repository path from deployment settings for new projects', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/repository-settings') {
+        return new Response(JSON.stringify({ defaultRepositoryPath: '/repositories', repositoryRoots: ['/repositories'] }))
+      }
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ConfigManager, { props: { kind: 'projects' }, global })
+    await flushPromises()
+    await button(wrapper, 'New project').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('[data-field=repositoryPath] input').element as HTMLInputElement).value).toBe('/repositories')
   })
 
   it('supports project settings selection and empty state', async () => {

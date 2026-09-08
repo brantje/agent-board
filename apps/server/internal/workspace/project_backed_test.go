@@ -28,7 +28,7 @@ func TestProjectBackedMaterializerUsesAcceptedProjectWorkspace(t *testing.T) {
 	}
 	source := createFixtureRepository(t, git.GitCLI, sourceRoot)
 	policy, _ := repository.NewPolicy([]string{sourceRoot})
-	projectMaterializer, _ := NewProjectMaterializer(&projectWorkspaceLockStore{}, policy, git, filepath.Join(parent, "project-workspaces"))
+	projectMaterializer, _ := NewProjectMaterializer(&projectWorkspaceLockStore{}, requireProvisioner(t, policy, git), git, filepath.Join(parent, "project-workspaces"))
 	project := store.Project{ID: "project-1", RepositoryPath: source, DefaultBranch: "main"}
 	accepted, err := projectMaterializer.EnsureProjectWorkspace(context.Background(), project)
 	if err != nil {
@@ -101,7 +101,7 @@ func TestProjectBackedMaterializerKeepsPersistedPendingRevisionAcrossRetry(t *te
 	}
 	source := createFixtureRepository(t, git.GitCLI, sourceRoot)
 	policy, _ := repository.NewPolicy([]string{sourceRoot})
-	projectMaterializer, _ := NewProjectMaterializer(&projectWorkspaceLockStore{}, policy, git, filepath.Join(parent, "project-workspaces"))
+	projectMaterializer, _ := NewProjectMaterializer(&projectWorkspaceLockStore{}, requireProvisioner(t, policy, git), git, filepath.Join(parent, "project-workspaces"))
 	project := store.Project{ID: "project-1", RepositoryPath: source, DefaultBranch: "main"}
 	accepted, err := projectMaterializer.EnsureProjectWorkspace(context.Background(), project)
 	if err != nil {

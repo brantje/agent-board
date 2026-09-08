@@ -47,6 +47,15 @@ ProjectUpdate:
     repositoryPath: {type: string}
     defaultBranch: {type: string}
     workflowSettings: {$ref: '#/JSONMap'}
+RepositorySettings:
+  type: object
+  additionalProperties: false
+  required: [defaultRepositoryPath, repositoryRoots]
+  properties:
+    defaultRepositoryPath: {type: string}
+    repositoryRoots:
+      type: array
+      items: {type: string}
 SecretUpsertInput:
   type: object
   additionalProperties: false
@@ -87,6 +96,19 @@ ProviderInput:
     credential: {type: string, minLength: 1, writeOnly: true}
     enabled: {type: boolean, default: true}
     safeMetadata: {$ref: '#/JSONMap'}
+ProviderModel:
+  type: object
+  required: [id]
+  properties:
+    id: {type: string}
+    name: {type: [string, 'null']}
+ProviderModelList:
+  type: object
+  required: [models]
+  properties:
+    models:
+      type: array
+      items: {$ref: '#/ProviderModel'}
 ModelProfile:
   type: object
   required: [id, projectId, providerId, name, model, temperature, maxTokens, maxConcurrent, enabled, generationSettings, createdAt, updatedAt]

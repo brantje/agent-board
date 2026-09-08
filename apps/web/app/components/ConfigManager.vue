@@ -2,7 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import { ApiError, apiPath, apiRequest } from '../utils/api'
 import { useResource } from '../composables/useResource'
+import { useProviderModels } from '../composables/useProviderModels'
 import { definitions, draftFor, payloadFor, validateDraft, resourceOptions, canEdit, CUSTOM_PROVIDER_KIND, isBuiltInProviderKind, providerKindSelectValue, type ConfigKind, type ConfigRecord } from '../utils/configuration'
+import type { RepositorySettings } from '../types/api'
 
 const props = defineProps<{kind: ConfigKind; projectId?: string; resourceId?: string}>()
 const definition = definitions[props.kind]
@@ -21,6 +23,25 @@ const saveError = ref<Error>()
 const saved = ref(false)
 const credential = ref('')
 const providerKindChoice = ref('')
+const suppressProviderModelReset = ref(false)
+const providerIdForModels = computed(() => props.kind === 'model-profiles' && open.value ? String(draft.value.providerId ?? '') : '')
+const { models: providerModels, error: providerModelsError, pending: providerModelsPending, refresh: refreshProviderModels } = useProviderModels(providerIdForModels)
+const modelOptions = computed(() => {
+  const options = providerModels.value.map(model => ({
+    label: model.name?.trim() ? `${model.name} (${model.id})` : model.id,
+    value: model.id
+  }))
+  const current = String(draft.value.model ?? '').trim()
+  if (current && !options.some(option => option.value === current)) {
+    options.unshift({ label: current, value: current })
+  }
+  return options
+})
+const showModelSelect = computed(() => {
+  if (props.kind !== 'model-profiles' || !String(draft.value.providerId ?? '').trim()) return false
+  if (providerModelsPending.value || providerModelsError.value) return false
+  return modelOptions.value.length > 0
+})
 const visible = computed(() => props.resourceId ? data.value?.filter(item => item.id === props.resourceId) : data.value)
 const pageDescription = computed(() => {
   if (props.kind === 'projects') return props.resourceId ? 'Project settings · backend-managed repository context' : 'Projects · backend-managed repository contexts'
@@ -54,12 +75,28 @@ function setProviderKindChoice(value: string) {
 }
 
 function edit(item?: ConfigRecord) {
+  suppressProviderModelReset.value = true
   selected.value = item
   draft.value = draftFor(props.kind, item)
   syncProviderKindChoice()
   saveError.value = undefined
   saved.value = false
+  if (props.kind === 'projects' && !item) {
+    void prefillProjectRepositoryPath()
+  }
   open.value = true
+  queueMicrotask(() => { suppressProviderModelReset.value = false })
+}
+
+async function prefillProjectRepositoryPath() {
+  try {
+    const settings = await apiRequest<RepositorySettings>('/api/repository-settings')
+    if (settings.defaultRepositoryPath && !String(draft.value.repositoryPath ?? '').trim()) {
+      draft.value.repositoryPath = settings.defaultRepositoryPath
+    }
+  } catch {
+    // Server remains authoritative when deployment settings are unavailable.
+  }
 }
 
 function clearSecrets() {
@@ -90,6 +127,11 @@ function formErrors() {
 
 watch(open, value => {
   if (!value) clearSecrets()
+})
+
+watch(() => draft.value.providerId, (next, previous) => {
+  if (suppressProviderModelReset.value || props.kind !== 'model-profiles' || !open.value) return
+  if (previous !== undefined && previous !== next) draft.value.model = ''
 })
 
 async function retry() {
@@ -184,9 +226,10 @@ async function save() {
             <div class="form-grid">
               <template v-for="field in definition.fields" :key="field.key">
                 <UFormField v-if="field.key === 'kind' && field.allowCustom" :label="field.label" :name="field.key" :description="field.help" :required="field.required">
-                  <USelect
+                  <USelectMenu
                     :model-value="providerKindChoice"
                     :items="field.selectItems"
+                    value-key="value"
                     class="w-full"
                     :disabled="controlsDisabled"
                     @update:model-value="setProviderKindChoice($event as string)"
@@ -203,7 +246,34 @@ async function save() {
                 </UFormField>
                 <UFormField v-else-if="field.key !== 'kind'" :label="field.label" :name="field.key" :description="field.help" :required="field.required">
                   <UCheckbox v-if="field.type === 'checkbox'" :model-value="Boolean(draft[field.key])" :disabled="controlsDisabled" @update:model-value="draft[field.key] = $event === true" />
-                  <USelect v-else-if="field.type === 'select'" v-model="draft[field.key] as string" :items="field.resource ? resourceOptions(references[field.key]?.data.value || []) : field.options" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
+                  <template v-else-if="field.type === 'provider-model'">
+                    <div class="space-y-2">
+                      <UAlert
+                        v-if="providerModelsError"
+                        color="neutral"
+                        title="Unable to load models"
+                        :description="providerModelsError.message"
+                      />
+                      <USelectMenu
+                        v-if="showModelSelect"
+                        v-model="draft[field.key] as string"
+                        :items="modelOptions"
+                        value-key="value"
+                        class="w-full"
+                        :disabled="controlsDisabled || providerModelsPending"
+                      />
+                      <UInput
+                        v-else
+                        v-model="draft[field.key] as string"
+                        class="w-full font-mono"
+                        :disabled="controlsDisabled || providerModelsPending"
+                      />
+                      <div v-if="providerModelsError" class="flex justify-end">
+                        <UButton label="Retry model discovery" color="neutral" variant="outline" size="xs" :loading="providerModelsPending" @click="refreshProviderModels()" />
+                      </div>
+                    </div>
+                  </template>
+                  <USelectMenu v-else-if="field.type === 'select'" v-model="draft[field.key] as string" :items="field.resource ? resourceOptions(references[field.key]?.data.value || []) : field.options" :value-key="field.resource ? 'value' : undefined" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
                   <UTextarea v-else-if="['textarea', 'json', 'lines'].includes(field.type || '')" v-model="draft[field.key] as string" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
                   <UInput v-else v-model="draft[field.key] as string" :type="field.type === 'number' ? 'number' : 'text'" :min="field.min" :max="field.max" :step="field.key === 'temperature' ? 'any' : 1" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
                 </UFormField>

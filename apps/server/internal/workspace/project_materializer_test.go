@@ -36,6 +36,14 @@ type projectWorkspaceErrorLock struct{ err error }
 
 func (l projectWorkspaceErrorLock) Release() error { return l.err }
 
+func requireProvisioner(t *testing.T, policy *repository.Policy, git Git) ProjectRepositoryProvisioner {
+	provisioner, err := repository.NewProvisioner(policy, git)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return provisioner
+}
+
 func TestProjectMaterializerCreatesDurableAcceptedCheckout(t *testing.T) {
 	git := requireGit(t)
 	parent := t.TempDir()
@@ -48,7 +56,7 @@ func TestProjectMaterializerCreatesDurableAcceptedCheckout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	materializer, err := NewProjectMaterializer(&projectWorkspaceLockStore{}, policy, git, filepath.Join(parent, "workspaces"))
+	materializer, err := NewProjectMaterializer(&projectWorkspaceLockStore{}, requireProvisioner(t, policy, git), git, filepath.Join(parent, "workspaces"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +91,7 @@ func TestProjectMaterializerPreservesInitializedRepositorySnapshot(t *testing.T)
 	}
 	source := createFixtureRepository(t, git.GitCLI, sourceRoot)
 	policy, _ := repository.NewPolicy([]string{sourceRoot})
-	materializer, _ := NewProjectMaterializer(&projectWorkspaceLockStore{}, policy, git, filepath.Join(parent, "workspaces"))
+	materializer, _ := NewProjectMaterializer(&projectWorkspaceLockStore{}, requireProvisioner(t, policy, git), git, filepath.Join(parent, "workspaces"))
 
 	project := store.Project{ID: "project-1", RepositoryPath: source, DefaultBranch: "main"}
 	first, err := materializer.EnsureProjectWorkspace(context.Background(), project)
@@ -112,21 +120,21 @@ func TestNewProjectMaterializerValidatesDependenciesAndRoot(t *testing.T) {
 	locks := &projectWorkspaceLockStore{}
 
 	cases := []struct {
-		name         string
-		locks        ProjectWorkspaceLockStore
-		repositories RepositoryResolver
-		git          Git
-		workspace    string
-		want         error
+		name        string
+		locks       ProjectWorkspaceLockStore
+		provisioner ProjectRepositoryProvisioner
+		git         Git
+		workspace   string
+		want        error
 	}{
-		{name: "missing lock store", repositories: policy, git: git, workspace: root, want: ErrInvalidMetadata},
-		{name: "missing repository resolver", locks: locks, git: git, workspace: root, want: ErrInvalidMetadata},
-		{name: "missing git", locks: locks, repositories: policy, workspace: root, want: ErrInvalidMetadata},
-		{name: "relative workspace root", locks: locks, repositories: policy, git: git, workspace: "relative", want: ErrInvalidRoot},
+		{name: "missing lock store", provisioner: requireProvisioner(t, policy, git), git: git, workspace: root, want: ErrInvalidMetadata},
+		{name: "missing repository provisioner", locks: locks, git: git, workspace: root, want: ErrInvalidMetadata},
+		{name: "missing git", locks: locks, provisioner: requireProvisioner(t, policy, git), workspace: root, want: ErrInvalidMetadata},
+		{name: "relative workspace root", locks: locks, provisioner: requireProvisioner(t, policy, git), git: git, workspace: "relative", want: ErrInvalidRoot},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := NewProjectMaterializer(tc.locks, tc.repositories, tc.git, tc.workspace)
+			_, err := NewProjectMaterializer(tc.locks, tc.provisioner, tc.git, tc.workspace)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("NewProjectMaterializer() error=%v want=%v", err, tc.want)
 			}
@@ -147,7 +155,7 @@ func TestProjectMaterializerValidatesProjectAndLockLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	workspaceRoot := filepath.Join(parent, "workspaces")
-	materializer, err := NewProjectMaterializer(&projectWorkspaceLockStore{}, policy, git, workspaceRoot)
+	materializer, err := NewProjectMaterializer(&projectWorkspaceLockStore{}, requireProvisioner(t, policy, git), git, workspaceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +173,7 @@ func TestProjectMaterializerValidatesProjectAndLockLifecycle(t *testing.T) {
 	}
 
 	acquireErr := errors.New("lock unavailable")
-	locked, err := NewProjectMaterializer(projectWorkspaceErrorLockStore{acquireErr: acquireErr}, policy, git, workspaceRoot)
+	locked, err := NewProjectMaterializer(projectWorkspaceErrorLockStore{acquireErr: acquireErr}, requireProvisioner(t, policy, git), git, workspaceRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +183,7 @@ func TestProjectMaterializerValidatesProjectAndLockLifecycle(t *testing.T) {
 	}
 
 	releaseErr := errors.New("lock release failed")
-	locked, err = NewProjectMaterializer(projectWorkspaceErrorLockStore{releaseErr: releaseErr}, policy, git, filepath.Join(parent, "release-workspaces"))
+	locked, err = NewProjectMaterializer(projectWorkspaceErrorLockStore{releaseErr: releaseErr}, requireProvisioner(t, policy, git), git, filepath.Join(parent, "release-workspaces"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +208,7 @@ func TestProjectMaterializerRejectsCorruptExistingWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	materializer, err := NewProjectMaterializer(&projectWorkspaceLockStore{}, policy, git, filepath.Join(parent, "workspaces"))
+	materializer, err := NewProjectMaterializer(&projectWorkspaceLockStore{}, requireProvisioner(t, policy, git), git, filepath.Join(parent, "workspaces"))
 	if err != nil {
 		t.Fatal(err)
 	}

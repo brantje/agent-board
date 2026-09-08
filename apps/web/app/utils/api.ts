@@ -1,3 +1,9 @@
+export type ProviderModel = { id: string; name?: string | null }
+
+export function providerModelsPath(providerId: string) {
+  return `/api/providers/${providerId}/models`
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) {
     super(message)

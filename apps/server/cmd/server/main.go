@@ -199,7 +199,11 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 		return nil, err
 	}
 	workspaceRoot := configuredWorkspaceRoot()
-	projectMaterializer, err := workspace.NewProjectMaterializer(database, policy, git, workspaceRoot)
+	provisioner, err := repository.NewProvisioner(policy, git)
+	if err != nil {
+		return nil, err
+	}
+	projectMaterializer, err := workspace.NewProjectMaterializer(database, provisioner, git, workspaceRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -225,6 +229,7 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 		_ = dockerRuntime.Close()
 		return nil, err
 	}
+	services.ControlPlane.SetProjectRepositoryProvisioner(provisioner)
 	if err := configureExecutionScheduler(services); err != nil {
 		_ = services.Close()
 		return nil, err

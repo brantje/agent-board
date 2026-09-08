@@ -6,15 +6,23 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/brantje/agent-board/apps/server/internal/repository"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type Service struct {
-	store store.ControlPlaneStore
+	store               store.ControlPlaneStore
+	projectRepositories repository.ProjectRepositoryProvisioner
 }
 
 func New(controlPlaneStore store.ControlPlaneStore) *Service {
 	return &Service{store: controlPlaneStore}
+}
+
+func (s *Service) SetProjectRepositoryProvisioner(provisioner repository.ProjectRepositoryProvisioner) {
+	if s != nil {
+		s.projectRepositories = provisioner
+	}
 }
 
 func (s *Service) ListProjects(ctx context.Context) ([]store.Project, error) {
@@ -23,6 +31,10 @@ func (s *Service) ListProjects(ctx context.Context) ([]store.Project, error) {
 
 func (s *Service) CreateProject(ctx context.Context, input store.Project) (store.Project, error) {
 	if err := validateProject(input); err != nil {
+		return store.Project{}, err
+	}
+	input, err := s.ensureProjectRepository(ctx, input)
+	if err != nil {
 		return store.Project{}, err
 	}
 	value, err := s.store.CreateProject(ctx, input)
@@ -36,6 +48,10 @@ func (s *Service) GetProject(ctx context.Context, id string) (store.Project, err
 
 func (s *Service) UpdateProject(ctx context.Context, input store.Project) (store.Project, error) {
 	if err := validateProject(input); err != nil {
+		return store.Project{}, err
+	}
+	input, err := s.ensureProjectRepository(ctx, input)
+	if err != nil {
 		return store.Project{}, err
 	}
 	value, err := s.store.UpdateProject(ctx, input)
@@ -308,6 +324,39 @@ func translateStoreError(err error, resource string) error {
 
 func invalid(message string) error {
 	return NewError("invalid_argument", message, store.ErrInvalidArgument)
+}
+
+func (s *Service) ensureProjectRepository(ctx context.Context, input store.Project) (store.Project, error) {
+	if s == nil || s.projectRepositories == nil {
+		return input, nil
+	}
+	branch := strings.TrimSpace(input.DefaultBranch)
+	if branch == "" {
+		branch = "main"
+	}
+	canonical, err := s.projectRepositories.EnsureProjectRepository(ctx, input.RepositoryPath, branch)
+	if err != nil {
+		return store.Project{}, translateRepositoryProvisionerError(err)
+	}
+	input.RepositoryPath = canonical
+	if strings.TrimSpace(input.DefaultBranch) == "" {
+		input.DefaultBranch = branch
+	}
+	return input, nil
+}
+
+func translateRepositoryProvisionerError(err error) error {
+	switch {
+	case errors.Is(err, repository.ErrPathNotAbsolute),
+		errors.Is(err, repository.ErrPathNotAuthorized),
+		errors.Is(err, repository.ErrPathNotDirectory),
+		errors.Is(err, repository.ErrNoAuthorizedRoots):
+		return NewError("repository_path_invalid", "repository path is outside deployment-authorized roots", err)
+	case errors.Is(err, repository.ErrPathUnavailable):
+		return NewError("repository_path_unavailable", "repository path is unavailable", err)
+	default:
+		return NewError("repository_provision_failed", "repository could not be prepared", err)
+	}
 }
 func validObject(value json.RawMessage) bool {
 	if len(value) == 0 {

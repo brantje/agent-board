@@ -1,0 +1,17 @@
+FROM golang:1.25-alpine
+
+RUN apk add --no-cache git \
+    && go install github.com/air-verse/air@v1.62.0
+
+WORKDIR /src
+
+COPY packages/redact/ ./packages/redact/
+COPY packages/runnerprotocol/ ./packages/runnerprotocol/
+COPY apps/server/go.mod apps/server/go.sum ./apps/server/
+
+WORKDIR /src/apps/server
+RUN go mod download
+
+ENV PATH="/go/bin:${PATH}"
+
+WORKDIR /src/apps/server

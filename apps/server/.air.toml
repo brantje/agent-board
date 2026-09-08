@@ -1,0 +1,18 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  bin = "./tmp/main"
+  cmd = "go build -o ./tmp/main ./cmd/server"
+  delay = 1000
+  exclude_dir = ["tmp", "vendor", "testdata"]
+  exclude_regex = ["_test\\.go"]
+  include_dir = ["../../packages/redact", "../../packages/runnerprotocol"]
+  include_ext = ["go", "mod", "sum", "tpl", "tmpl", "html"]
+  stop_on_error = true
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true

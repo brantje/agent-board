@@ -166,8 +166,8 @@ func splitNUL(data []byte) []string {
 }
 
 func gitOutput(ctx context.Context, workspace string, args ...string) ([]byte, error) {
-	safeArgs := make([]string, 0, len(args)+8)
-	safeArgs = append(safeArgs, "-c", "core.fsmonitor=false", "-c", "diff.external=")
+	safeArgs := make([]string, 0, len(args)+len(hardenedGitConfig())+4)
+	safeArgs = append(safeArgs, hardenedGitConfig()...)
 	if len(args) > 0 && args[0] == "diff" {
 		safeArgs = append(safeArgs, "diff", "--no-ext-diff", "--no-textconv")
 		safeArgs = append(safeArgs, args[1:]...)
@@ -177,6 +177,7 @@ func gitOutput(ctx context.Context, workspace string, args ...string) ([]byte, e
 
 	command := exec.CommandContext(ctx, "git", safeArgs...)
 	command.Dir = workspace
+	command.Env = hardenedGitEnv()
 	out, err := command.Output()
 	if err != nil {
 		return nil, fmt.Errorf("evidence: git %s: %w", strings.Join(args, " "), err)
