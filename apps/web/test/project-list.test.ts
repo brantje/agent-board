@@ -2,7 +2,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ProjectList from '../app/components/ProjectList.vue'
 import ProjectEditor from '../app/components/ProjectEditor.vue'
-import { project } from './execution-fixtures'
+import { event, MockEventSource, project } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
 const global = {
@@ -14,6 +14,7 @@ const global = {
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(candidate => candidate.text() === label)!
 
 afterEach(() => {
+  MockEventSource.reset()
   vi.unstubAllGlobals()
   vi.useRealTimers()
 })
@@ -177,6 +178,23 @@ describe('ProjectList', () => {
 
     expect(fetch.mock.calls.some(([, options]) => options.method === 'PATCH')).toBe(true)
     expect(wrapper.find('[role=dialog]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('refreshes listed projects from Project SSE without a loading skeleton', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    let listed = [project]
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(listed))))
+    const wrapper = mount(ProjectList, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Workspace')
+    expect(MockEventSource.instances[0]?.url).toBe('/api/projects/project-a/events')
+
+    listed = [{ ...project, name: 'Renamed live' }]
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-1', type: 'issue.updated', sequence: null }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Loading')
+    expect(wrapper.text()).toContain('Renamed live')
     wrapper.unmount()
   })
 

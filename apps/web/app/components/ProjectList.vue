@@ -2,8 +2,9 @@
 import { computed, ref } from 'vue'
 import type { Project } from '../types/api'
 import { apiPath } from '../utils/api'
+import { isBoardActivityEvent } from '../utils/events'
 import { useResource } from '../composables/useResource'
-import { useRefresh } from '../composables/useRefresh'
+import { useProjectEvents } from '../composables/useProjectEvents'
 import ProjectEditor from './ProjectEditor.vue'
 
 const { data, pending, error, refresh } = useResource<Project[]>(() => apiPath('projects'))
@@ -12,6 +13,7 @@ const selected = ref<Project>()
 const saved = ref(false)
 
 const visible = computed(() => data.value ?? [])
+const projectIds = computed(() => visible.value.map(item => item.id))
 
 function edit(item?: Project) {
   selected.value = item
@@ -28,7 +30,10 @@ async function savedProject() {
   await refresh()
 }
 
-useRefresh(refresh)
+useProjectEvents(projectIds, event => {
+  if (!isBoardActivityEvent(event.type)) return
+  void refresh()
+})
 </script>
 
 <template>
