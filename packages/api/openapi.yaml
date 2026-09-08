@@ -58,6 +58,10 @@ paths:
     $ref: ./paths/issues-runs.yaml#/path1
   /api/projects/{projectID}/issues/{issueID}:
     $ref: ./paths/issues-runs.yaml#/path2
+  /api/projects/{projectID}/issues/{issueID}/relationships:
+    $ref: ./paths/issues-runs.yaml#/path6
+  /api/projects/{projectID}/issues/{issueID}/relationships/{relationshipID}:
+    $ref: ./paths/issues-runs.yaml#/path7
   /api/projects/{projectID}/issues/{issueID}/assignment:
     $ref: ./paths/issues-runs.yaml#/path3
   /api/projects/{projectID}/runs:
