@@ -76,8 +76,7 @@ export function useProjectEvents(
     }
     source.onerror = () => {
       if (disposed || current !== generation) return
-      source.close()
-      sources.delete(id)
+      closeOne(id)
       reconnectTimers.set(id, setTimeout(() => {
         reconnectTimers.delete(id)
         if (!disposed && current === generation) openOne(id, current)
