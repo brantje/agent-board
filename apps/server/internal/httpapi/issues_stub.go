@@ -7,6 +7,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+func validIssuePriority(priority int) bool {
+	return priority >= 0 && priority <= 4
+}
+
 func (a *api) registerIssueRunRoutes(r chi.Router) {
 	r.Get("/projects/{projectID}/issues", a.listIssues)
 	r.Post("/projects/{projectID}/issues", a.createIssue)
@@ -53,6 +57,10 @@ func (a *api) createIssue(w http.ResponseWriter, r *http.Request) {
 	priority := 0
 	if req.Priority != nil {
 		priority = *req.Priority
+	}
+	if !validIssuePriority(priority) {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
+		return
 	}
 	value, err := a.service.CreateIssue(r.Context(), store.Issue{
 		ProjectID:   projectID,
@@ -113,6 +121,10 @@ func (a *api) updateIssue(w http.ResponseWriter, r *http.Request) {
 		current.Status = *req.Status
 	}
 	if req.Priority != nil {
+		if !validIssuePriority(*req.Priority) {
+			writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
+			return
+		}
 		current.Priority = *req.Priority
 	}
 	value, err := a.service.UpdateIssue(r.Context(), current)
