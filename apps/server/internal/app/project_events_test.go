@@ -100,7 +100,29 @@ func TestListProjectEventsAfterCapsReplayPages(t *testing.T) {
 	if !ok || appErr.Code != "replay_truncated" {
 		t.Fatalf("error=%v", err)
 	}
-	if base.calls != 2 {
+	if base.calls != 3 {
+		t.Fatalf("calls=%d", base.calls)
+	}
+}
+
+func TestListProjectEventsAfterAllowsExactReplayWindow(t *testing.T) {
+	restore := SetProjectEventReplayLimitsForTest(2, 2)
+	t.Cleanup(restore)
+
+	const projectID = "project"
+	events := make([]store.Event, 0, 5)
+	for i := 0; i < 5; i++ {
+		events = append(events, store.Event{ID: "e" + strconv.Itoa(i), ProjectID: projectID, Type: "issue.updated"})
+	}
+	base := &projectEventListStore{
+		fakeStore: fakeStore{project: store.Project{ID: projectID, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}},
+		events:    events,
+	}
+	got, err := New(base).ListProjectEventsAfter(context.Background(), projectID, events[0].ID)
+	if err != nil || len(got) != 4 {
+		t.Fatalf("len=%d err=%v", len(got), err)
+	}
+	if base.calls != 3 {
 		t.Fatalf("calls=%d", base.calls)
 	}
 }
