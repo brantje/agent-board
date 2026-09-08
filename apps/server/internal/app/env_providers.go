@@ -216,7 +216,7 @@ func findOpenRouterProvider(providers []store.Provider) (store.Provider, bool, e
 		if !strings.EqualFold(provider.Name, openRouterProviderName) {
 			continue
 		}
-		if strings.EqualFold(provider.Kind, openRouterProviderKind) {
+		if provider.Kind == openRouterProviderKind {
 			return provider, true, nil
 		}
 		wrongKind = provider

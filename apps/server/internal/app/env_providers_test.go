@@ -546,6 +546,22 @@ func TestEnsureOpenRouterFromEnvFailsWhenProviderNameMatchesWrongKind(t *testing
 	}
 }
 
+func TestEnsureOpenRouterFromEnvFailsWhenProviderKindHasWrongCasing(t *testing.T) {
+	st := &envProviderStore{providers: []store.Provider{{ID: "custom", Name: "OpenRouter", Kind: "OpenRouter"}}}
+	writer := newCaptureEnvSecretWriter()
+	svc := New(st)
+
+	err := EnsureOpenRouterFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
+		openRouterEnvKey: "sk-openrouter-key",
+	}))
+	if err == nil {
+		t.Fatal("expected error for non-canonical provider kind casing")
+	}
+	if writer.calls != 0 {
+		t.Fatalf("secret writes = %d, want 0", writer.calls)
+	}
+}
+
 func TestEnsureOpenRouterFromEnvResumesWhenCredentialRefDangling(t *testing.T) {
 	credentialRef := "provider:existing"
 	st := &envProviderStore{providers: []store.Provider{{ID: "existing", Name: "OpenRouter", Kind: "openrouter", CredentialRef: &credentialRef}}}
