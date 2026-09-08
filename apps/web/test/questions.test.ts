@@ -22,13 +22,13 @@ describe('QuestionPanel', () => {
           resumeJobId: 'job-1'
         }))
       }
-      if (path !== '/api/projects/project-a/questions?issueId=issue-1&status=OPEN') {
+      if (path !== '/api/projects/project-a/questions?issueId=AB-1&status=OPEN') {
         throw new Error(`unexpected path ${path}`)
       }
       return new Response(JSON.stringify([open]))
     })
     vi.stubGlobal('fetch', fetch)
-    const wrapper = mount(QuestionPanel, { props: { projectId: 'project-a', issueId: 'issue-1' }, global })
+    const wrapper = mount(QuestionPanel, { props: { projectId: 'project-a', issueId: 'AB-1' }, global })
     await flushPromises()
 
     expect(wrapper.text()).toContain('Which strategy?')
@@ -89,7 +89,7 @@ describe('QuestionPanel', () => {
       return new Response(JSON.stringify([text, multi]))
     })
     vi.stubGlobal('fetch', fetch)
-    const wrapper = mount(QuestionPanel, { props: { projectId: 'project-a', issueId: 'issue-1' }, global })
+    const wrapper = mount(QuestionPanel, { props: { projectId: 'project-a', issueId: 'AB-1' }, global })
     await flushPromises()
 
     await wrapper.get('textarea').setValue('Because the lease must persist')

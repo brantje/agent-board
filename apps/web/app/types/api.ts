@@ -2,6 +2,7 @@
 export interface Project {
   id: string
   name: string
+  issuePrefix: string
   repositoryPath: string
   defaultBranch: string
   workflowSettings: Record<string, unknown>
@@ -12,6 +13,7 @@ export interface Project {
 export interface Issue {
   id: string
   projectId: string
+  number: number
   title: string
   description: string
   status: string

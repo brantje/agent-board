@@ -4,7 +4,8 @@ import IssueRelationships from '../app/components/IssueRelationships.vue'
 import { uiStubs } from './ui-stubs'
 
 const source = {
-  id: 'source',
+  id: 'AB-1',
+  number: 1,
   projectId: 'p',
   title: 'Source Issue',
   description: '',
@@ -14,7 +15,7 @@ const source = {
   createdAt: '',
   updatedAt: ''
 }
-const target = { ...source, id: 'target', title: 'Target Issue', priority: 2 }
+const target = { ...source, id: 'AB-2', number: 2, title: 'Target Issue', priority: 2 }
 const relationship = {
   id: 'relationship-1',
   projectId: 'p',
@@ -39,12 +40,12 @@ describe('IssueRelationships', () => {
     let relationships: typeof relationship[] = []
     const fetch = vi.fn(async (path: string, options: RequestInit) => {
       if (path === '/api/projects/p/issues' && options.method === 'GET') return new Response(JSON.stringify([source, target]))
-      if (path === '/api/projects/p/issues/source/relationships' && options.method === 'GET') return new Response(JSON.stringify(relationships))
-      if (path === '/api/projects/p/issues/source/relationships' && options.method === 'POST') {
+      if (path === '/api/projects/p/issues/AB-1/relationships' && options.method === 'GET') return new Response(JSON.stringify(relationships))
+      if (path === '/api/projects/p/issues/AB-1/relationships' && options.method === 'POST') {
         relationships = [relationship]
         return new Response(JSON.stringify(relationship), { status: 201 })
       }
-      if (path === '/api/projects/p/issues/source/relationships/relationship-1' && options.method === 'DELETE') {
+      if (path === '/api/projects/p/issues/AB-1/relationships/relationship-1' && options.method === 'DELETE') {
         relationships = []
         return new Response(null, { status: 204 })
       }
@@ -56,8 +57,8 @@ describe('IssueRelationships', () => {
     await flushPromises()
 
     const targetSelect = wrapper.get('[data-field=relationshipTarget] select')
-    expect(targetSelect.find('option[value=source]').exists()).toBe(false)
-    expect(targetSelect.find('option[value=target]').text()).toBe('Target Issue')
+    expect(targetSelect.find('option[value=AB-1]').exists()).toBe(false)
+    expect(targetSelect.find('option[value=AB-2]').text()).toBe('Target Issue')
     expect(wrapper.text()).toContain('No relationships authored from this Issue')
 
     await targetSelect.setValue(target.id)
@@ -66,15 +67,15 @@ describe('IssueRelationships', () => {
     await flushPromises()
 
     const post = fetch.mock.calls.find(([, options]) => options.method === 'POST')
-    expect(post?.[0]).toBe('/api/projects/p/issues/source/relationships')
-    expect(post?.[1]).toMatchObject({ body: JSON.stringify({ targetIssueId: 'target', type: 'blocks' }) })
+    expect(post?.[0]).toBe('/api/projects/p/issues/AB-1/relationships')
+    expect(post?.[1]).toMatchObject({ body: JSON.stringify({ targetIssueId: 'AB-2', type: 'blocks' }) })
     expect(wrapper.text()).toContain('blocks')
     expect(wrapper.text()).toContain('Target Issue')
-    expect(wrapper.get('a').attributes('href')).toBe('/projects/p/issues/target')
+    expect(wrapper.get('a').attributes('href')).toBe('/projects/p/issues/AB-2')
 
     await button(wrapper, 'Remove').trigger('click')
     await flushPromises()
-    expect(fetch).toHaveBeenCalledWith('/api/projects/p/issues/source/relationships/relationship-1', expect.objectContaining({ method: 'DELETE' }))
+    expect(fetch).toHaveBeenCalledWith('/api/projects/p/issues/AB-1/relationships/relationship-1', expect.objectContaining({ method: 'DELETE' }))
     expect(wrapper.text()).toContain('No relationships authored from this Issue')
   })
 

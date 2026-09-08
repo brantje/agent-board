@@ -20,6 +20,7 @@ describe('configuration screens', () => {
       healthStatus: 'UNKNOWN',
       repositoryPath: '/repo',
       defaultBranch: 'main',
+      issuePrefix: 'AB',
       image: 'runner',
       networkPolicy: 'none',
       workspacePolicy: 'issue',
@@ -35,7 +36,7 @@ describe('configuration screens', () => {
     for (const field of definitions[kind].fields) {
       const control = wrapper.find(`[data-field="${field.key}"] input, [data-field="${field.key}"] textarea, [data-field="${field.key}"] select`)
       if (field.required && field.type !== 'number') {
-        await control.setValue(field.resource ? 'one' : field.key === 'repositoryPath' ? '/repo' : 'Value')
+        await control.setValue(field.resource ? 'one' : field.key === 'repositoryPath' ? '/repo' : field.key === 'issuePrefix' ? 'AB' : 'Value')
       }
     }
     await wrapper.get('form').trigger('submit')
@@ -44,7 +45,7 @@ describe('configuration screens', () => {
     expect(wrapper.text()).toContain('Saved')
     await button(wrapper, 'Edit').trigger('click')
     for (const field of definitions[kind].fields) {
-      if (field.required && !['name', 'repositoryPath', 'defaultBranch'].includes(field.key)) {
+      if (field.required && !['name', 'repositoryPath', 'defaultBranch', 'issuePrefix'].includes(field.key)) {
         const control = wrapper.find(`[data-field="${field.key}"] input, [data-field="${field.key}"] select`)
         await control.setValue(field.resource ? 'one' : field.type === 'number' ? '1' : 'value')
       }
@@ -152,7 +153,7 @@ describe('configuration screens', () => {
   })
 
   it('supports project settings selection and empty state', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('[{"id":"p","name":"Project"}]')))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('[{"id":"p","name":"Project","issuePrefix":"AB","repositoryPath":"/repo","defaultBranch":"main"}]')))
     const wrapper = mount(ConfigManager, { props: { kind: 'projects', resourceId: 'p' }, global })
     await flushPromises()
     expect(wrapper.text()).toContain('Project')

@@ -24,6 +24,15 @@ describe('intentional configuration inputs', () => {
     expect(payloadFor('model-profiles', model).generationSettings).toEqual({ seed: 7 })
   })
 
+  it('requires a valid immutable issue prefix on project create and omits it on edit', () => {
+    expect(validateDraft('projects', draftFor('projects')).map(error => error.name)).toContain('issuePrefix')
+    const draft = draftFor('projects', { name: 'Workspace', issuePrefix: 'ab', repositoryPath: '/repo', defaultBranch: 'main' })
+    expect(validateDraft('projects', draft)).toEqual([])
+    expect(payloadFor('projects', draft)).toMatchObject({ issuePrefix: 'AB' })
+    expect(payloadFor('projects', draft, { editing: true })).not.toHaveProperty('issuePrefix')
+    expect(validateDraft('projects', { ...draft, issuePrefix: '1A' }).map(error => error.name)).toContain('issuePrefix')
+  })
+
   it('validates required, numeric, enum, JSON and array inputs', () => {
     expect(validateDraft('projects', draftFor('projects')).length).toBeGreaterThan(0)
     const draft = { ...draftFor('runtimes'), name: 'Docker', image: 'runner', cpuLimitMillis: 'bad', networkPolicy: 'invalid', capabilities: '[]' }

@@ -98,7 +98,7 @@ describe('RunDetail', () => {
     expect(wrapper.text()).toContain('git status')
     expect(wrapper.text()).toContain('go test')
     expect(wrapper.text()).toContain('Questions for run-1')
-    expect(wrapper.get('a[href="/projects/project-a/issues/issue-1"]').exists()).toBe(true)
+    expect(wrapper.get('a[href="/projects/project-a/issues/AB-1"]').exists()).toBe(true)
     expect(wrapper.get('a[href="/api/projects/project-a/runs/run-1/artifacts/art-1"]').exists()).toBe(true)
 
     await wrapper.findAll('button').find(value => value.text() === 'Load log')!.trigger('click')
