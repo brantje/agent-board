@@ -39,6 +39,14 @@ func TestSessionConnQueuedWriteHonorsDeadlineChanges(t *testing.T) {
 			case <-time.After(500 * time.Millisecond):
 				t.Fatal("queued Write did not observe updated deadline")
 			}
+			select {
+			case <-connection.done:
+				t.Fatal("local write deadline unexpectedly closed the session connection")
+			default:
+			}
+			if err := parent.Err(); err != nil {
+				t.Fatalf("local write deadline unexpectedly failed parent connection: %v", err)
+			}
 		})
 	}
 }
