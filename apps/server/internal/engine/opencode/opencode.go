@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -61,8 +62,12 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	if err != nil {
 		return engine.Result{}, err
 	}
+	host, port, err := net.SplitHostPort(e.address)
+	if err != nil {
+		return engine.Result{}, fmt.Errorf("opencode engine: parse native server address: %w", err)
+	}
 	process, err := request.Launcher.Start(ctx, engine.ProcessRequest{
-		Command: []string{"opencode", "serve", "--hostname", "127.0.0.1", "--port", "4096"},
+		Command: []string{"opencode", "serve", "--hostname", host, "--port", port},
 		CWD:                   "/workspace",
 		Env:                   env,
 		ProviderCredentialEnv: providerCredentialEnv,
@@ -81,12 +86,19 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			_, _ = io.Copy(io.Discard, source)
 		}(source)
 	}
+	drainDone := make(chan struct{})
+	go func() {
+		drainWG.Wait()
+		close(drainDone)
+	}()
+
 	stopped := false
 	defer func() {
 		if !stopped {
+			stopped = true
 			_ = stopService(ctx, process)
 		}
-		drainWG.Wait()
+		waitDrained(drainDone, serviceStopTimeout)
 	}()
 
 	connector, ok := process.(engine.SessionConnector)
@@ -129,11 +141,12 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 
 	finish := func() (engine.Result, error) {
 		_ = stream.Close()
+		stopped = true
 		if err := stopService(ctx, process); err != nil {
+			waitDrained(drainDone, serviceStopTimeout)
 			return engine.Result{}, err
 		}
-		stopped = true
-		drainWG.Wait()
+		waitDrained(drainDone, serviceStopTimeout)
 		if state.activity != nil {
 			return engine.Result{}, nil
 		}
@@ -399,6 +412,18 @@ func cancelNativeSession(parent context.Context, native *client.Client, sessionI
 		_ = native.RejectQuestion(ctx, sessionID, requestID)
 	}
 	_ = native.InterruptSession(ctx, sessionID)
+}
+
+func waitDrained(done <-chan struct{}, timeout time.Duration) {
+	if timeout <= 0 {
+		return
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+	}
 }
 
 func stopService(parent context.Context, process engine.Process) error {
