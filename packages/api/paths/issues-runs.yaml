@@ -72,3 +72,36 @@ path5:
         $ref: ../components/api-components.yaml#/responses/Run
       default:
         $ref: ../components/api-components.yaml#/responses/Error
+path6:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  get:
+    operationId: listIssueRelationships
+    description: Lists relationships authored from this source Issue in deterministic creation order.
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/IssueRelationshipList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createIssueRelationship
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/IssueRelationshipCreate
+    responses:
+      '201':
+        $ref: ../components/api-components.yaml#/responses/IssueRelationship
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path7:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  - $ref: ../components/api-components.yaml#/parameters/RelationshipID
+  delete:
+    operationId: deleteIssueRelationship
+    responses:
+      '204':
+        description: Issue relationship deleted.
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
