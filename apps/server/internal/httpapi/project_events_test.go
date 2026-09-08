@@ -144,6 +144,92 @@ func TestProjectEventStreamSubscribesBeforeCatchUpQuery(t *testing.T) {
 	}
 }
 
+func TestProjectEventStreamSignalsResyncWhenCatchUpIsTruncated(t *testing.T) {
+	restore := app.SetProjectEventReplayLimitsForTest(1, 1)
+	t.Cleanup(restore)
+
+	hub := evidence.NewHub()
+	events := []store.Event{
+		{
+			ID: "11111111-aaaa-4aaa-8aaa-111111111111", SchemaVersion: 1, Type: "issue.created",
+			ProjectID: projectID, IssueID: strPtr(issueID), Actor: store.EmptyObject, Payload: store.EmptyObject,
+			CreatedAt: time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC),
+		},
+		{
+			ID: "22222222-aaaa-4aaa-8aaa-222222222222", SchemaVersion: 1, Type: "issue.updated",
+			ProjectID: projectID, IssueID: strPtr(issueID), Actor: store.EmptyObject, Payload: store.EmptyObject,
+			CreatedAt: time.Date(2026, 1, 1, 0, 0, 2, 0, time.UTC),
+		},
+		{
+			ID: "33333333-aaaa-4aaa-8aaa-333333333333", SchemaVersion: 1, Type: "issue.status_changed",
+			ProjectID: projectID, IssueID: strPtr(issueID), Actor: store.EmptyObject, Payload: store.EmptyObject,
+			CreatedAt: time.Date(2026, 1, 1, 0, 0, 3, 0, time.UTC),
+		},
+	}
+	router := newProjectEventRouter(t, hub, events)
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+
+	resp, cancel := openProjectEventStream(t, server, events[0].ID)
+	defer cancel()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	frames := readSSEFrames(t, resp.Body, 1)
+	if frames[0].Name != "resync" {
+		t.Fatalf("expected resync control frame, got %+v raw=%s", frames[0], frames[0].Raw)
+	}
+
+	live := store.Event{
+		ID: "44444444-aaaa-4aaa-8aaa-444444444444", SchemaVersion: 1, Type: "issue.assigned",
+		ProjectID: projectID, IssueID: strPtr(issueID), Actor: store.EmptyObject, Payload: store.EmptyObject,
+	}
+	if err := hub.Publish(context.Background(), live); err != nil {
+		t.Fatal(err)
+	}
+	liveFrames := readSSEFrames(t, resp.Body, 1)
+	if liveFrames[0].ID != live.ID {
+		t.Fatalf("live after resync=%+v", liveFrames[0])
+	}
+}
+
+func TestProjectEventStreamDoesNotRetainLiveIDsInSeenSet(t *testing.T) {
+	hub := evidence.NewHub()
+	first := store.Event{
+		ID: "11111111-aaaa-4aaa-8aaa-111111111111", SchemaVersion: 1, Type: "issue.created",
+		ProjectID: projectID, IssueID: strPtr(issueID), Actor: store.EmptyObject, Payload: store.EmptyObject,
+		CreatedAt: time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC),
+	}
+	router := newProjectEventRouter(t, hub, []store.Event{first})
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+
+	resp, cancel := openProjectEventStream(t, server, first.ID)
+	defer cancel()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+
+	live := store.Event{
+		ID: "55555555-aaaa-4aaa-8aaa-555555555555", SchemaVersion: 1, Type: "issue.updated",
+		ProjectID: projectID, IssueID: strPtr(issueID), Actor: store.EmptyObject, Payload: store.EmptyObject,
+	}
+	if err := hub.Publish(context.Background(), live); err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.Publish(context.Background(), live); err != nil {
+		t.Fatal(err)
+	}
+	frames := readSSEFrames(t, resp.Body, 2)
+	if frames[0].ID != live.ID || frames[1].ID != live.ID {
+		t.Fatalf("live frames=%+v", frames)
+	}
+}
+
 func TestProjectEventStreamRejectsCrossProject(t *testing.T) {
 	hub := evidence.NewHub()
 	router := newProjectEventRouter(t, hub, nil)
@@ -224,7 +310,7 @@ func TestProjectEventOpenAPIPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	pathsDoc := string(pathsData)
-	if !strings.Contains(pathsDoc, "streamProjectEvents") || !strings.Contains(pathsDoc, "afterId") || !strings.Contains(pathsDoc, "text/event-stream:") {
+	if !strings.Contains(pathsDoc, "streamProjectEvents") || !strings.Contains(pathsDoc, "afterId") || !strings.Contains(pathsDoc, "text/event-stream:") || !strings.Contains(pathsDoc, "event: resync") {
 		t.Fatalf("project event stream contract is missing: %s", pathsDoc)
 	}
 }

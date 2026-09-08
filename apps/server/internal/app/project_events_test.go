@@ -80,11 +80,8 @@ func TestListProjectEventsAfterPagesAndIsolatesProjects(t *testing.T) {
 }
 
 func TestListProjectEventsAfterCapsReplayPages(t *testing.T) {
-	previousSize, previousMax := projectEventPageSize, projectEventMaxPages
-	projectEventPageSize, projectEventMaxPages = 2, 2
-	t.Cleanup(func() {
-		projectEventPageSize, projectEventMaxPages = previousSize, previousMax
-	})
+	restore := SetProjectEventReplayLimitsForTest(2, 2)
+	t.Cleanup(restore)
 
 	const projectID = "project"
 	events := make([]store.Event, 0, 10)
@@ -96,8 +93,12 @@ func TestListProjectEventsAfterCapsReplayPages(t *testing.T) {
 		events:    events,
 	}
 	got, err := New(base).ListProjectEventsAfter(context.Background(), projectID, events[0].ID)
-	if err != nil || len(got) != 4 {
-		t.Fatalf("len=%d err=%v", len(got), err)
+	if got != nil {
+		t.Fatalf("truncated replay should not return a partial timeline: len=%d", len(got))
+	}
+	appErr, ok := AsError(err)
+	if !ok || appErr.Code != "replay_truncated" {
+		t.Fatalf("error=%v", err)
 	}
 	if base.calls != 2 {
 		t.Fatalf("calls=%d", base.calls)

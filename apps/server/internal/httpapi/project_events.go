@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"github.com/brantje/agent-board/apps/server/internal/app"
 )
 
 func (a *api) streamProjectEvents(w http.ResponseWriter, r *http.Request) {
@@ -29,9 +31,14 @@ func (a *api) streamProjectEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribe()
 
 	events, err := a.service.ListProjectEventsAfter(r.Context(), projectID, afterID)
+	resync := false
 	if err != nil {
-		writeAppError(w, err)
-		return
+		if apiErr, ok := app.AsError(err); ok && apiErr.Code == "replay_truncated" {
+			resync = true
+		} else {
+			writeAppError(w, err)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -42,12 +49,18 @@ func (a *api) streamProjectEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	seen := make(map[string]struct{}, len(events))
-	for _, event := range events {
-		if err := writeRunSSEEvent(w, flusher, event); err != nil {
+	if resync {
+		if err := writeProjectSSEResync(w, flusher); err != nil {
 			return
 		}
-		if event.ID != "" {
-			seen[event.ID] = struct{}{}
+	} else {
+		for _, event := range events {
+			if err := writeRunSSEEvent(w, flusher, event); err != nil {
+				return
+			}
+			if event.ID != "" {
+				seen[event.ID] = struct{}{}
+			}
 		}
 	}
 
@@ -75,13 +88,20 @@ func (a *api) streamProjectEvents(w http.ResponseWriter, r *http.Request) {
 				if _, dup := seen[event.ID]; dup {
 					continue
 				}
-				seen[event.ID] = struct{}{}
 			}
 			if err := writeRunSSEEvent(w, flusher, event); err != nil {
 				return
 			}
 		}
 	}
+}
+
+func writeProjectSSEResync(w http.ResponseWriter, flusher http.Flusher) error {
+	if _, err := fmt.Fprint(w, "event: resync\ndata: {}\n\n"); err != nil {
+		return err
+	}
+	flusher.Flush()
+	return nil
 }
 
 func parseAfterID(w http.ResponseWriter, r *http.Request) (string, bool) {

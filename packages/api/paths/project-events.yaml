@@ -9,6 +9,8 @@ path1:
       Each SSE data payload is EventEvidence JSON. The SSE id field is the Event
       UUID and is the client idempotency key. afterId is the v0.1 reconnect
       cursor and selects later Events on the Project timeline (created_at, id).
+      If catch-up history exceeds the replay window, the stream emits `event: resync`
+      with empty JSON data so clients reload persisted reads and continue live.
     parameters:
     - name: afterId
       in: query
