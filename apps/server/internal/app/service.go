@@ -309,6 +309,14 @@ func (s *Service) GetRun(ctx context.Context, projectID, runID string) (store.Ru
 var projectEventPageSize = 500
 var projectEventMaxPages = 20
 
+func SetProjectEventReplayLimitsForTest(pageSize, maxPages int) func() {
+	previousSize, previousMax := projectEventPageSize, projectEventMaxPages
+	projectEventPageSize, projectEventMaxPages = pageSize, maxPages
+	return func() {
+		projectEventPageSize, projectEventMaxPages = previousSize, previousMax
+	}
+}
+
 func (s *Service) ListProjectEventsAfter(ctx context.Context, projectID, afterID string) ([]store.Event, error) {
 	if _, err := s.GetProject(ctx, projectID); err != nil {
 		return nil, err
@@ -332,7 +340,7 @@ func (s *Service) ListProjectEventsAfter(ctx context.Context, projectID, afterID
 			return events, nil
 		}
 	}
-	return events, nil
+	return nil, NewError("replay_truncated", "project event replay exceeds the catch-up window; reload persisted state", nil)
 }
 
 func translateStoreError(err error, resource string) error {
