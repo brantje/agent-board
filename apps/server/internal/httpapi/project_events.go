@@ -15,11 +15,6 @@ func (a *api) streamProjectEvents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	events, err := a.service.ListProjectEventsAfter(r.Context(), projectID, afterID)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
 	if a.eventHub == nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", "streaming is unavailable")
 		return
@@ -32,6 +27,12 @@ func (a *api) streamProjectEvents(w http.ResponseWriter, r *http.Request) {
 
 	live, unsubscribe := a.eventHub.SubscribeProject(r.Context(), projectID)
 	defer unsubscribe()
+
+	events, err := a.service.ListProjectEventsAfter(r.Context(), projectID, afterID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")

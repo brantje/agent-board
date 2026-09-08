@@ -63,13 +63,13 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var issueID string
+	var issueID, previousStatus string
 	if err := tx.QueryRow(ctx, `
-		SELECT id::text
+		SELECT id::text, status
 		FROM issues
 		WHERE project_id=$1 AND id=$2
 		FOR UPDATE
-	`, input.ProjectID, input.ID).Scan(&issueID); err != nil {
+	`, input.ProjectID, input.ID).Scan(&issueID, &previousStatus); err != nil {
 		return store.Issue{}, notFound(err)
 	}
 
@@ -108,6 +108,7 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 	if err := tx.Commit(ctx); err != nil {
 		return store.Issue{}, err
 	}
+	updated.PreviousStatus = previousStatus
 	return updated, nil
 }
 

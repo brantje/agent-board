@@ -19,10 +19,15 @@ import (
 
 type projectEventStore struct {
 	fakeControlPlaneStore
-	events []store.Event
+	events        []store.Event
+	hub           *evidence.Hub
+	publishOnList store.Event
 }
 
 func (s *projectEventStore) ListProjectEventsAfter(_ context.Context, pid, afterID string, limit int) ([]store.Event, error) {
+	if s.hub != nil && s.publishOnList.ID != "" {
+		_ = s.hub.Publish(context.Background(), s.publishOnList)
+	}
 	if pid != projectID {
 		return nil, store.ErrNotFound
 	}
@@ -97,6 +102,45 @@ func TestProjectEventStreamReplaysAfterIDThenForwardsLive(t *testing.T) {
 	liveFrames := readSSEFrames(t, resp.Body, 1)
 	if liveFrames[0].ID != live.ID || liveFrames[0].Event.Type != "issue.assigned" {
 		t.Fatalf("live frame=%+v", liveFrames[0])
+	}
+}
+
+func TestProjectEventStreamSubscribesBeforeCatchUpQuery(t *testing.T) {
+	hub := evidence.NewHub()
+	first := store.Event{
+		ID: "11111111-aaaa-4aaa-8aaa-111111111111", SchemaVersion: 1, Type: "issue.created",
+		ProjectID: projectID, IssueID: strPtr(issueID), Actor: store.EmptyObject, Payload: store.EmptyObject,
+		CreatedAt: time.Date(2026, 1, 1, 0, 0, 1, 0, time.UTC),
+	}
+	second := store.Event{
+		ID: "22222222-aaaa-4aaa-8aaa-222222222222", SchemaVersion: 1, Type: "issue.status_changed",
+		ProjectID: projectID, IssueID: strPtr(issueID), Actor: store.EmptyObject, Payload: store.EmptyObject,
+		CreatedAt: time.Date(2026, 1, 1, 0, 0, 2, 0, time.UTC),
+	}
+	duringCatchUp := store.Event{
+		ID: "44444444-aaaa-4aaa-8aaa-444444444444", SchemaVersion: 1, Type: "issue.updated",
+		ProjectID: projectID, IssueID: strPtr(issueID), Actor: store.EmptyObject, Payload: store.EmptyObject,
+	}
+	router := NewRouterWithApplication(&app.Services{
+		ControlPlane: app.New(&projectEventStore{events: []store.Event{first, second}, hub: hub, publishOnList: duringCatchUp}),
+		EventHub:     hub,
+	})
+	server := httptest.NewServer(router)
+	t.Cleanup(server.Close)
+
+	resp, cancel := openProjectEventStream(t, server, first.ID)
+	defer cancel()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d body=%s", resp.StatusCode, body)
+	}
+	frames := readSSEFrames(t, resp.Body, 2)
+	if frames[0].ID != second.ID {
+		t.Fatalf("replay frame=%+v", frames[0])
+	}
+	if frames[1].ID != duringCatchUp.ID {
+		t.Fatalf("missed live event published during catch-up: %+v", frames[1])
 	}
 }
 
@@ -188,7 +232,7 @@ func TestProjectEventOpenAPIPath(t *testing.T) {
 func newProjectEventRouter(t *testing.T, hub *evidence.Hub, events []store.Event) http.Handler {
 	t.Helper()
 	return NewRouterWithApplication(&app.Services{
-		ControlPlane: app.New(&projectEventStore{events: events}),
+		ControlPlane: app.New(&projectEventStore{events: events, hub: hub}),
 		EventHub:     hub,
 	})
 }
