@@ -41,6 +41,24 @@ export function useProjectEvents(
     const afterId = lastIds.get(id)
     const source = new EventSource(apiQuery(`${apiPath('projects', undefined, id)}/events`, { afterId }))
     sources.set(id, source)
+    source.addEventListener('resync', () => {
+      if (disposed || current !== generation) return
+      lastIds.delete(id)
+      void onEvent({
+        id: `resync:${id}`,
+        schemaVersion: 1,
+        type: 'project.resync',
+        occurredAt: new Date().toISOString(),
+        sequence: null,
+        agentId: null,
+        workspaceId: null,
+        runtimeInstanceId: null,
+        correlationId: null,
+        parentEventId: null,
+        actor: { type: 'SYSTEM' },
+        payload: {}
+      }, id)
+    })
     source.onmessage = message => {
       if (disposed || current !== generation) return
       const incoming = parseEventMessage(message.data)

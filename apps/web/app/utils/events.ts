@@ -42,7 +42,7 @@ export function refetchTargets(type: string) {
   }
 }
 
-const boardActivityFamilies = new Set(['issue', 'run', 'question', 'review', 'decision'])
+const boardActivityFamilies = new Set(['issue', 'run', 'question', 'review', 'decision', 'project'])
 
 export function isBoardActivityEvent(type: string) {
   return boardActivityFamilies.has(type.split('.')[0] || '')
