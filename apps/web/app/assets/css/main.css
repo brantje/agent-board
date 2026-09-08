@@ -1,12 +1,19 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
-
-html,
-body,
-#__nuxt {
-  min-height: 100%;
+@theme static {
+  --color-steel-50: #f1f6f9; --color-steel-100: #dce8f0; --color-steel-200: #bfd3e2;
+  --color-steel-300: #99b9cf; --color-steel-400: #759db9; --color-steel-500: #547f9f;
+  --color-steel-600: #416580; --color-steel-700: #38546a; --color-steel-800: #304658;
+  --color-steel-900: #2b3c4a; --color-steel-950: #1d2832;
+  --radius-xs: 2px;
+  --color-sidebar: var(--board-sidebar);
 }
-
-body {
-  margin: 0;
-}
+:root { --ui-radius: 0.125rem; --board-sidebar: #f4f4f4; --ui-primary: var(--color-steel-600); }
+.dark { --board-sidebar: #181818; --ui-bg: #212121; --ui-bg-muted: #242424; --ui-bg-elevated: #292929; --ui-border: #3d3d3d; --ui-primary: var(--color-steel-300); }
+html, body, #__nuxt { min-height: 100%; }
+body { margin: 0; }
+.detail-grid { display: grid; gap: 1rem; grid-template-columns: minmax(0, 1fr) 19rem; }
+.form-grid { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.section-label { font-size: .6875rem; text-transform: uppercase; letter-spacing: .08em; color: var(--ui-text-muted); }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .75rem; }
+@media (max-width: 900px) { .detail-grid, .form-grid { grid-template-columns: minmax(0, 1fr); } }

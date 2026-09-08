@@ -1,0 +1,20 @@
+<script setup lang="ts">
+import { computed } from 'vue'
+import { navigation } from '../utils/navigation'
+const route = useRoute()
+const projectId = computed(() => typeof route.params.projectID === 'string' ? route.params.projectID : undefined)
+const links = computed(() => navigation(projectId.value))
+</script>
+<template>
+  <UDashboardGroup unit="px">
+    <UDashboardSidebar collapsible resizable :default-size="224" :min-size="180" :max-size="320" :collapsed-size="64">
+      <template #header="{ collapsed }"><UButton to="/projects" icon="i-lucide-panels-top-left" :label="collapsed ? undefined : 'Agent Board'" aria-label="Agent Board projects" color="neutral" variant="ghost" /></template>
+      <template #default="{ collapsed }">
+        <UNavigationMenu aria-label="Primary navigation" orientation="vertical" :collapsed="collapsed" :items="links.global" />
+        <template v-if="projectId"><USeparator label="Project" /><UNavigationMenu aria-label="Project navigation" orientation="vertical" :collapsed="collapsed" :items="links.project" /></template>
+      </template>
+      <template #footer><UColorModeButton /><span class="text-xs text-muted">Self-hosted · v0.1</span></template>
+    </UDashboardSidebar>
+    <slot />
+  </UDashboardGroup>
+</template>
