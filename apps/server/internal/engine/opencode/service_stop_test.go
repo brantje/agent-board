@@ -115,4 +115,21 @@ func TestStopServiceFailsBoundedlyWhenProcessIgnoresSignals(t *testing.T) {
 	}
 }
 
+func TestWaitDrainedReturnsBoundedly(t *testing.T) {
+	blocked := make(chan struct{})
+	started := time.Now()
+	waitDrained(blocked, 10*time.Millisecond)
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("waitDrained blocked for %v", elapsed)
+	}
+
+	drained := make(chan struct{})
+	close(drained)
+	started = time.Now()
+	waitDrained(drained, time.Second)
+	if elapsed := time.Since(started); elapsed > 100*time.Millisecond {
+		t.Fatalf("waitDrained did not return promptly for a drained process: %v", elapsed)
+	}
+}
+
 var _ engine.Process = (*serviceStopProcess)(nil)
