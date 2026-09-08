@@ -163,7 +163,15 @@ pre {
 
 input[type='radio'],
 input[type='radio']::before,
-input[type='radio']::after {
+input[type='radio']::after,
+.issue-identity,
+.issue-identity *,
+.issue-identity::before,
+.issue-identity::after,
+.issue-priority,
+.issue-priority *,
+.issue-priority::before,
+.issue-priority::after {
   border-radius: 9999px !important;
 }
 

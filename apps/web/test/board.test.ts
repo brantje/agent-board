@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boardColumns, editableStatuses, latestRun, statusLabel } from '../app/utils/issues'
+import { boardColumns, editableStatuses, issuePriority, latestRun, statusLabel } from '../app/utils/issues'
 
 const issue = (id: string, status: string) => ({
   id,
@@ -13,13 +13,22 @@ const issue = (id: string, status: string) => ({
 })
 
 describe('durable Issue board projection', () => {
-  it('keeps six Issue states separate from Run states and filters by title', () => {
+  it('keeps six Issue states separate from Run states and filters by title, id, or description', () => {
     const columns = boardColumns([issue('First', 'BLOCKED'), issue('Second', 'TODO')], 'first')
     expect(columns.map(column => column.status)).toEqual(['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE'])
     expect(columns.map(column => column.label)).toEqual(['Backlog', 'Todo', 'In Progress', 'Blocked', 'Review', 'Done'])
     expect(columns.find(column => column.status === 'BLOCKED')?.issues.map(value => value.id)).toEqual(['First'])
     expect(columns.find(column => column.status === 'TODO')?.issues).toEqual([])
     expect(boardColumns([issue('abc-123', 'TODO')], 'ABC-123')[1]?.issues).toHaveLength(1)
+    expect(boardColumns([{ ...issue('AB-9', 'TODO'), title: 'Hidden', description: 'WebSocket notification system' }], 'websocket')[1]?.issues).toHaveLength(1)
+  })
+
+  it('projects Issue priority as labeled Low/High chips without relying on color alone', () => {
+    expect(issuePriority(0)).toMatchObject({ label: 'Low', variant: 'subtle', icon: 'i-lucide-signal-low' })
+    expect(issuePriority(2)).toMatchObject({ label: 'Medium', variant: 'subtle', icon: 'i-lucide-signal-medium' })
+    expect(issuePriority(3)).toMatchObject({ label: 'High', variant: 'solid', icon: 'i-lucide-signal-high' })
+    expect(issuePriority(4)).toMatchObject({ label: 'Highest', variant: 'solid', icon: 'i-lucide-signal' })
+    expect(issuePriority(9)).toMatchObject({ label: 'Priority 9', variant: 'subtle' })
   })
 
   it('protects Review and Done and reopens only into Todo', () => {

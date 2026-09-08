@@ -1,5 +1,31 @@
 <script setup lang="ts">
-import type {Issue} from '../types/api'
-defineProps<{issue:Issue;agentName?:string}>()
+import { computed } from 'vue'
+import type { Issue } from '../types/api'
+import { issuePriority } from '../utils/issues'
+
+const props = defineProps<{ issue: Issue; agentName?: string }>()
+
+const priority = computed(() => issuePriority(props.issue.priority))
+const assignedLabel = computed(() => props.agentName || (props.issue.assignedAgentId ? 'Assigned Agent' : ''))
 </script>
-<template><UCard><h3 class="text-sm font-medium break-words"><NuxtLink :to="`/projects/${issue.projectId}/issues/${issue.id}`" class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{issue.title}}</NuxtLink></h3><div class="mt-3 flex items-center justify-between gap-2 text-xs"><UBadge color="neutral" variant="subtle" :label="issue.status.replaceAll('_',' ')"/><span class="truncate text-muted">{{agentName || (issue.assignedAgentId ? 'Assigned Agent' : 'Unassigned')}}</span></div><p class="mt-2 text-xs font-mono text-dimmed">{{issue.id}}</p></UCard></template>
+
+<template>
+  <NuxtLink :to="`/projects/${issue.projectId}/issues/${issue.id}`" class="block focus-visible:outline-2 focus-visible:outline-primary">
+    <UCard>
+      <p class="font-mono text-xs leading-none text-dimmed">{{ issue.id }}</p>
+      <h3 class="mt-1.5 text-sm font-semibold leading-snug text-highlighted break-words line-clamp-2">{{ issue.title }}</h3>
+      <p v-if="issue.description.trim()" class="mt-1 truncate text-xs text-muted">{{ issue.description }}</p>
+      <div class="mt-3 flex items-center gap-2">
+        <UAvatar v-if="assignedLabel" :alt="assignedLabel" :aria-label="assignedLabel" size="2xs" class="issue-identity" />
+        <UBadge
+          :label="priority.label"
+          :icon="priority.icon"
+          color="warning"
+          :variant="priority.variant"
+          size="sm"
+          class="issue-priority"
+        />
+      </div>
+    </UCard>
+  </NuxtLink>
+</template>
