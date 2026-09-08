@@ -1,6 +1,7 @@
 export function navigation(projectId?: string) {
   const global = [
     { label: 'Projects', to: '/projects', icon: 'i-lucide-folders' },
+    { label: 'Agents', to: '/agents', icon: 'i-lucide-bot' },
     { label: 'Runs', to: '/runs', icon: 'i-lucide-play' },
     { label: 'Inbox', to: '/inbox', icon: 'i-lucide-inbox' }
   ]
