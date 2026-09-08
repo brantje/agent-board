@@ -333,6 +333,13 @@ func (c *sessionConn) Write(p []byte) (int, error) {
 					return written, c.writeCloseError()
 				default:
 				}
+				if errors.Is(err, errSessionTransportWrite) && errors.Is(err, os.ErrDeadlineExceeded) {
+					c.parent.fail(err)
+					return written, err
+				}
+				if errors.Is(err, os.ErrDeadlineExceeded) {
+					return written, err
+				}
 				c.closeRemote(err)
 				return written, err
 			}
