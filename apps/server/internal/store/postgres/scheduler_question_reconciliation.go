@@ -11,7 +11,7 @@ import (
 func resolveExpiredBlockingQuestion(ctx context.Context, tx pgx.Tx, job store.SchedulerJob, run store.Run, lease store.SchedulerLease) (bool, error) {
 	if run.Status == "WAITING_FOR_INPUT" {
 		question, err := scanQuestion(tx.QueryRow(ctx, `
-			SELECT q.id::text, q.project_id::text, q.issue_id::text, q.run_id::text, q.prompt, q.kind, q.options, q.recommendation, q.blocking, q.status, q.created_at, q.answered_at
+			SELECT q.id::text, q.project_id::text, q.issue_id::text, q.run_id::text, q.prompt, q.kind, q.options, q.recommendation, q.custom, q.blocking, q.status, q.created_at, q.answered_at
 			FROM questions AS q
 			JOIN engine_question_bindings AS binding
 			  ON binding.project_id=q.project_id
