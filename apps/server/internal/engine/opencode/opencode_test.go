@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
@@ -246,7 +247,9 @@ func TestEngineAnswersNativeQuestionWithoutSecondPrompt(t *testing.T) {
 	baseURL := "https://provider.example/v1"
 	adapter := newWithAddress(parsed.Host)
 
-	_, err = adapter.Execute(context.Background(), engine.Request{
+	executeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err = adapter.Execute(executeCtx, engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Implement native adapter", Description: "Keep the same native session alive."},
 			Agent:    executioncontext.AgentContext{RoleInstructions: "Make maintainable changes."},
