@@ -296,5 +296,35 @@ describe('useProjectEvents', () => {
     expect(MockEventSource.instances.at(-1)?.url).toBe('/api/projects/project-a/events')
     wrapper.unmount()
   })
+
+  it('serializes handlers and swallows handler failures', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', MockEventSource)
+    let inflight = 0
+    let max = 0
+    const seen: string[] = []
+    const wrapper = mount(defineComponent({
+      setup() {
+        useProjectEvents('project-a', async event => {
+          inflight++
+          max = Math.max(max, inflight)
+          await new Promise(resolve => setTimeout(resolve, 50))
+          inflight--
+          seen.push(event.id)
+          if (event.id === 'boom') throw new Error('refresh failed')
+        })
+        return () => h('div')
+      }
+    }))
+    await flushPromises()
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-1', type: 'issue.created', sequence: null }))
+    MockEventSource.instances[0]?.emit(event({ id: 'boom', type: 'issue.updated', sequence: null }))
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-2', type: 'issue.updated', sequence: null }))
+    await vi.advanceTimersByTimeAsync(200)
+    await flushPromises()
+    expect(max).toBe(1)
+    expect(seen).toEqual(['evt-1', 'boom', 'evt-2'])
+    wrapper.unmount()
+  })
 })
 

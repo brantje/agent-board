@@ -20,6 +20,14 @@ export function useProjectEvents(
   const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let disposed = false
   let generation = 0
+  let handlers = Promise.resolve()
+
+  function notify(event: EventEvidence, projectId: string, current: number) {
+    handlers = handlers.then(async () => {
+      if (disposed || current !== generation) return
+      await onEvent(event, projectId)
+    }).catch(() => {})
+  }
 
   function closeOne(id: string) {
     sources.get(id)?.close()
@@ -44,7 +52,7 @@ export function useProjectEvents(
     source.addEventListener('resync', () => {
       if (disposed || current !== generation) return
       lastIds.delete(id)
-      void onEvent({
+      notify({
         id: `resync:${id}`,
         schemaVersion: 1,
         type: 'project.resync',
@@ -57,14 +65,14 @@ export function useProjectEvents(
         parentEventId: null,
         actor: { type: 'SYSTEM' },
         payload: {}
-      }, id)
+      }, id, current)
     })
     source.onmessage = message => {
       if (disposed || current !== generation) return
       const incoming = parseEventMessage(message.data)
       if (!incoming) return
       lastIds.set(id, incoming.id)
-      void onEvent(incoming, id)
+      notify(incoming, id, current)
     }
     source.onerror = () => {
       if (disposed || current !== generation) return
