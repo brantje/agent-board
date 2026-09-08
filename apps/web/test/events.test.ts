@@ -50,6 +50,7 @@ describe('event timeline projection', () => {
     expect(refetchTargets('agent.message')).toEqual({ run: false, questions: false, reviews: false, issue: false })
     expect(isBoardActivityEvent('question.created')).toBe(true)
     expect(isBoardActivityEvent('decision.recorded')).toBe(true)
+    expect(isBoardActivityEvent('project.resync')).toBe(true)
     expect(isBoardActivityEvent('tool.completed')).toBe(false)
     expect(isBoardActivityEvent('agent.message')).toBe(false)
   })
@@ -269,6 +270,30 @@ describe('useProjectEvents', () => {
     await flushPromises()
     await vi.advanceTimersByTimeAsync(2000)
     expect(received).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('drops afterId and refreshes on a resync control frame', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('EventSource', MockEventSource)
+    const received: string[] = []
+    const wrapper = mount(defineComponent({
+      setup() {
+        useProjectEvents('project-a', event => { received.push(event.type) })
+        return () => h('div')
+      }
+    }))
+    await flushPromises()
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-1', type: 'issue.created', sequence: null }))
+    await flushPromises()
+    MockEventSource.instances[0]?.emitNamed('resync')
+    await flushPromises()
+    expect(received).toEqual(['issue.created', 'project.resync'])
+
+    MockEventSource.instances[0]?.fail()
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(MockEventSource.instances.at(-1)?.url).toBe('/api/projects/project-a/events')
     wrapper.unmount()
   })
 })
