@@ -36,6 +36,7 @@ describe('Go API transport', () => {
     [403, 'forbidden'],
     [404, 'runtime_not_found'],
     [409, 'conflict'],
+    [409, 'issue_done'],
     [422, 'execution_configuration_invalid'],
     [500, 'internal_error']
   ] as const)('returns a safe actionable error for status %s and code %s', async (status, code) => {
@@ -48,6 +49,7 @@ describe('Go API transport', () => {
       expect((error as ApiError).status).toBe(status)
       expect((error as ApiError).code).toBe(code)
       expect((error as Error).message).not.toContain('never reflect me')
+      if (code === 'issue_done') expect((error as Error).message).toContain('Reopen')
     }
   })
 
