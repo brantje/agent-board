@@ -14,7 +14,7 @@ const stubs = Object.fromEntries(['UApp','UDashboardGroup','UDashboardSidebar','
 const menu = { props: ['items'], template: '<nav><a v-for="item in items" :href="item.to">{{ item.label }}</a></nav>' }
 const alert = { props: ['title','description','actions'], template: '<div role="alert">{{ title }} {{ description }}<button @click="actions[0].onClick()">Retry</button></div>' }
 const empty = { props: ['title','description'], template: '<div>{{ title }} {{ description }}</div>' }
-const global = { stubs: { ...stubs, UNavigationMenu: menu, UButton: { props:['label'], template:'<a>{{ label }}</a>' }, UEmpty: empty, UAlert: alert } }
+const global = { stubs: { ...stubs, UNavigationMenu: menu, UButton: { props:['label','to'], template:'<a :href="to">{{ label }}</a>' }, UEmpty: empty, UAlert: alert } }
 afterEach(() => vi.unstubAllGlobals())
 describe('application foundation', () => {
   it('renders accessible route content and skip navigation', () => {
@@ -27,14 +27,22 @@ describe('application foundation', () => {
     vi.stubGlobal('useRoute', () => route)
     const wrapper = mount(Shell, { global })
     expect(wrapper.findAll('nav').length).toBe(2)
+    expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="settings-main-nav"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Inbox')
     expect(wrapper.text()).not.toContain('Plugins')
+    expect(wrapper.find('[aria-label="Back to projects"]').exists()).toBe(false)
     route.params.projectID = 'project-1'
     await flushPromises()
+    expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Inbox')
+    expect(wrapper.get('[aria-label="Back to projects"]').attributes('href')).toBe('/projects')
     expect(wrapper.find('a[href="/projects/project-1/board"]').exists()).toBe(true)
     delete route.params.projectID
     await flushPromises()
     expect(wrapper.find('a[href="/projects/project-1/board"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="Back to projects"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
     expect(navigation().global.map(item => item.label)).toEqual(['Projects','Agents','Runs','Inbox'])
     expect(navigation().settings.map(item => item.label)).toEqual(['Settings'])
   })
