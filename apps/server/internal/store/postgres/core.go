@@ -32,16 +32,16 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 	if status == "" {
 		status = "BACKLOG"
 	}
-	return scanIssue(s.pool.QueryRow(ctx, `
-		INSERT INTO issues (project_id, title, description, status, assigned_agent_id)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id::text, project_id::text, title, description, status, assigned_agent_id::text, created_at, updated_at
-	`, input.ProjectID, input.Title, input.Description, status, input.AssignedAgentID))
+	return scanIssueWithPriority(s.pool.QueryRow(ctx, `
+		INSERT INTO issues (project_id, title, description, status, priority, assigned_agent_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, created_at, updated_at
+	`, input.ProjectID, input.Title, input.Description, status, input.Priority, input.AssignedAgentID))
 }
 
 func (s *Store) GetIssue(ctx context.Context, projectID, issueID string) (store.Issue, error) {
-	return scanIssue(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, title, description, status, assigned_agent_id::text, created_at, updated_at
+	return scanIssueWithPriority(s.pool.QueryRow(ctx, `
+		SELECT id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, created_at, updated_at
 		FROM issues WHERE project_id = $1 AND id = $2
 	`, projectID, issueID))
 }
@@ -57,6 +57,14 @@ func scanProject(row pgx.Row) (store.Project, error) {
 func scanIssue(row pgx.Row) (store.Issue, error) {
 	var value store.Issue
 	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.AssignedAgentID, &value.CreatedAt, &value.UpdatedAt); err != nil {
+		return store.Issue{}, notFound(err)
+	}
+	return value, nil
+}
+
+func scanIssueWithPriority(row pgx.Row) (store.Issue, error) {
+	var value store.Issue
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.AssignedAgentID, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Issue{}, notFound(err)
 	}
 	return value, nil
