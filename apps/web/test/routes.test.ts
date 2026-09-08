@@ -6,6 +6,7 @@ const pages = import.meta.glob('../app/pages/**/*.vue',{eager:true,import:'defau
 afterEach(()=>vi.unstubAllGlobals())
 function isConfigPage(path: string) {
   return !path.endsWith('/pages/index.vue')
+    && !path.endsWith('/pages/projects/index.vue')
     && !path.includes('/issues/')
     && !path.endsWith('/board.vue')
     && !path.endsWith('/runs.vue')
@@ -64,4 +65,16 @@ it('binds Runs, Inbox, Run detail and Review routes', ()=>{
   expect(wrapperFor('/runs/index.vue').get('[data-runs]').attributes('data-project')).toBe('p')
   expect(wrapperFor('/runs/[runID].vue').get('[data-run]').attributes('data-run')).toBe('run-1')
   expect(wrapperFor('/reviews/[reviewID].vue').get('[data-review-page]').attributes('data-review')).toBe('review-1')
+})
+
+it('binds the projects index route to ProjectList', () => {
+  const path = Object.keys(pages).find(candidate => candidate.endsWith('/pages/projects/index.vue'))
+  const wrapper = mount(pages[path!]!, {
+    global: {
+      stubs: {
+        ProjectList: { template: '<div data-project-list="true" />' }
+      }
+    }
+  })
+  expect(wrapper.get('[data-project-list]').exists()).toBe(true)
 })
