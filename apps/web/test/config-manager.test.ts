@@ -117,6 +117,51 @@ describe('configuration screens', () => {
     expect(wrapper.find('[role=dialog]').exists()).toBe(false)
   })
 
+  it('creates project-owned providers and discovers models through project-scoped APIs', async () => {
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      if (path === '/api/projects/p/providers' && (!options.method || options.method === 'GET')) {
+        return new Response('[{"id":"provider","name":"Project provider","enabled":true,"projectId":"p"}]')
+      }
+      if (path === '/api/projects/p/providers' && options.method === 'POST') {
+        return new Response('{"id":"created","name":"Owned","kind":"anthropic","enabled":true,"projectId":"p"}')
+      }
+      if (path === '/api/projects/p/model-profiles') {
+        return new Response(options.method === 'POST' ? '{"id":"profile"}' : '[]')
+      }
+      if (path === '/api/projects/p/providers/provider/models') {
+        return new Response('{"models":[{"id":"model-a","name":"Model A"}]}')
+      }
+      return new Response('[]', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ConfigManager, { props: { kind: 'providers', projectId: 'p' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Project configuration')
+    expect(wrapper.text()).not.toContain('Global provider configuration')
+    await button(wrapper, 'New provider').trigger('click')
+    await wrapper.get('[data-field=name] input').setValue('Owned')
+    await wrapper.get('[data-field=kind] select').setValue('anthropic')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const createCall = fetch.mock.calls.find(([path, options]) => path === '/api/projects/p/providers' && options.method === 'POST')!
+    expect(JSON.parse(String(createCall[1].body))).toMatchObject({ name: 'Owned', kind: 'anthropic' })
+    wrapper.unmount()
+
+    const profile = mount(ConfigManager, { props: { kind: 'model-profiles', projectId: 'p' }, global })
+    await flushPromises()
+    await button(profile, 'New model profile').trigger('click')
+    await profile.get('[data-field=providerId] select').setValue('provider')
+    await flushPromises()
+    expect(fetch.mock.calls.some(([calledPath]) => calledPath === '/api/projects/p/providers/provider/models')).toBe(true)
+    await profile.get('[data-field=model] select').setValue('model-a')
+    await profile.get('[data-field=name] input').setValue('Profile')
+    await profile.get('form').trigger('submit')
+    await flushPromises()
+    const profileCreate = fetch.mock.calls.find(([calledPath, options]) => calledPath === '/api/projects/p/model-profiles' && options.method === 'POST')!
+    expect(JSON.parse(String(profileCreate[1].body))).toMatchObject({ providerId: 'provider', model: 'model-a' })
+    profile.unmount()
+  })
+
   it('validates drafts and sends provider API keys on the provider request only', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
       if (options.method === 'GET' || !options.method) return new Response('[]')

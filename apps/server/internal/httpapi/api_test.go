@@ -65,8 +65,8 @@ func (f *fakeControlPlaneStore) GetProject(_ context.Context, id string) (store.
 func (f *fakeControlPlaneStore) UpdateProject(_ context.Context, v store.Project) (store.Project, error) {
 	return v, nil
 }
-func (f *fakeControlPlaneStore) ListProviders(context.Context) ([]store.Provider, error) {
-	return []store.Provider{{ID: providerID, Name: "Provider", Kind: "test", Enabled: true, HealthStatus: "UNKNOWN", SafeMetadata: store.EmptyObject}}, nil
+func (f *fakeControlPlaneStore) ListProviders(_ context.Context, scope *string) ([]store.Provider, error) {
+	return []store.Provider{{ID: providerID, ProjectID: scoped(scope), Name: "Provider", Kind: "test", Enabled: true, HealthStatus: "UNKNOWN", SafeMetadata: store.EmptyObject}}, nil
 }
 func (f *fakeControlPlaneStore) CreateProvider(_ context.Context, v store.Provider) (store.Provider, error) {
 	v.ID = providerID
@@ -76,14 +76,23 @@ func (f *fakeControlPlaneStore) CreateProvider(_ context.Context, v store.Provid
 	}
 	return v, nil
 }
-func (f *fakeControlPlaneStore) GetProvider(_ context.Context, id string) (store.Provider, error) {
+func (f *fakeControlPlaneStore) GetProvider(_ context.Context, scope *string, id string) (store.Provider, error) {
 	if id != providerID {
 		return store.Provider{}, store.ErrNotFound
 	}
 	secret := "secret-ref"
-	return store.Provider{ID: providerID, Name: "Provider", Kind: "test", CredentialRef: &secret, Enabled: true, HealthStatus: "UNKNOWN", SafeMetadata: store.EmptyObject}, nil
+	return store.Provider{ID: providerID, ProjectID: scoped(scope), Name: "Provider", Kind: "test", CredentialRef: &secret, Enabled: true, HealthStatus: "UNKNOWN", SafeMetadata: store.EmptyObject}, nil
 }
-func (f *fakeControlPlaneStore) UpdateProvider(_ context.Context, v store.Provider) (store.Provider, error) {
+func (f *fakeControlPlaneStore) UpdateProvider(_ context.Context, scope *string, v store.Provider) (store.Provider, error) {
+	if scope == nil {
+		if v.ProjectID != nil {
+			return store.Provider{}, store.ErrNotFound
+		}
+		return v, nil
+	}
+	if v.ProjectID == nil || *v.ProjectID != *scope {
+		return store.Provider{}, store.ErrNotFound
+	}
 	return v, nil
 }
 func (f *fakeControlPlaneStore) ListModelProfiles(_ context.Context, scope *string) ([]store.ModelProfile, error) {
@@ -225,9 +234,8 @@ func TestControlPlaneRoutes(t *testing.T) {
 		status                   int
 	}{
 		{"list projects", "GET", "/api/projects", "", 200}, {"create project", "POST", "/api/projects", projectBody, 201}, {"get project", "GET", "/api/projects/" + projectID, "", 200}, {"update project", "PATCH", "/api/projects/" + projectID, `{"name":"Renamed"}`, 200},
-		{"list providers", "GET", "/api/providers", "", 200}, {"create provider", "POST", "/api/providers", providerBody, 201}, {"get provider", "GET", "/api/providers/" + providerID, "", 200}, {"update provider", "PUT", "/api/providers/" + providerID, providerBody, 200},
 	}
-	resources := []struct{ name, path, id, body string }{{"model", "model-profiles", modelID, modelBody}, {"runtime", "runtimes", runtimeID, runtimeBody}, {"agent", "agents", agentID, agentBody}}
+	resources := []struct{ name, path, id, body string }{{"provider", "providers", providerID, providerBody}, {"model", "model-profiles", modelID, modelBody}, {"runtime", "runtimes", runtimeID, runtimeBody}, {"agent", "agents", agentID, agentBody}}
 	for _, r := range resources {
 		cases = append(cases,
 			struct {
@@ -308,7 +316,7 @@ func TestControlPlaneRoutes(t *testing.T) {
 			if !strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
 				t.Fatalf("content type=%q", rec.Header().Get("Content-Type"))
 			}
-			if tc.name == "create provider" && (strings.Contains(rec.Body.String(), "credential") || strings.Contains(rec.Body.String(), "secret-ref")) {
+			if strings.Contains(tc.name, "create") && strings.Contains(tc.name, "provider") && (strings.Contains(rec.Body.String(), "credential") || strings.Contains(rec.Body.String(), "secret-ref")) {
 				t.Fatalf("provider response leaked credential: %s", rec.Body.String())
 			}
 		})

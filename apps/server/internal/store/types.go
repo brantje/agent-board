@@ -45,6 +45,7 @@ type IssueRelationship struct {
 
 type Provider struct {
 	ID            string
+	ProjectID     *string
 	Name          string
 	Kind          string
 	BaseURL       *string

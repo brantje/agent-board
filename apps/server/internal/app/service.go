@@ -70,25 +70,37 @@ func (s *Service) UpdateProject(ctx context.Context, input store.Project) (store
 	return value, translateStoreError(err, "project")
 }
 
-func (s *Service) ListProviders(ctx context.Context) ([]store.Provider, error) {
-	return s.store.ListProviders(ctx)
+func (s *Service) ListProviders(ctx context.Context, scope *string) ([]store.Provider, error) {
+	if err := s.ensureScope(ctx, scope); err != nil {
+		return nil, err
+	}
+	return s.store.ListProviders(ctx, scope)
 }
-func (s *Service) GetProvider(ctx context.Context, id string) (store.Provider, error) {
-	value, err := s.store.GetProvider(ctx, id)
+func (s *Service) GetProvider(ctx context.Context, scope *string, id string) (store.Provider, error) {
+	if err := s.ensureScope(ctx, scope); err != nil {
+		return store.Provider{}, err
+	}
+	value, err := s.store.GetProvider(ctx, scope, id)
 	return value, translateStoreError(err, "provider")
 }
 func (s *Service) CreateProvider(ctx context.Context, input store.Provider) (store.Provider, error) {
+	if err := s.ensureScope(ctx, input.ProjectID); err != nil {
+		return store.Provider{}, err
+	}
 	if err := validateProvider(input); err != nil {
 		return store.Provider{}, err
 	}
 	value, err := s.store.CreateProvider(ctx, input)
 	return value, translateStoreError(err, "provider")
 }
-func (s *Service) UpdateProvider(ctx context.Context, input store.Provider) (store.Provider, error) {
+func (s *Service) UpdateProvider(ctx context.Context, scope *string, input store.Provider) (store.Provider, error) {
+	if err := s.ensureScope(ctx, scope); err != nil {
+		return store.Provider{}, err
+	}
 	if err := validateProvider(input); err != nil {
 		return store.Provider{}, err
 	}
-	value, err := s.store.UpdateProvider(ctx, input)
+	value, err := s.store.UpdateProvider(ctx, scope, input)
 	return value, translateStoreError(err, "provider")
 }
 
@@ -120,7 +132,7 @@ func (s *Service) CreateModelProfile(ctx context.Context, input store.ModelProfi
 	if err := validateModelProfile(input); err != nil {
 		return store.ModelProfile{}, err
 	}
-	if _, err := s.GetProvider(ctx, input.ProviderID); err != nil {
+	if _, err := s.GetProvider(ctx, input.ProjectID, input.ProviderID); err != nil {
 		return store.ModelProfile{}, err
 	}
 	value, err := s.store.CreateModelProfile(ctx, input)
@@ -133,7 +145,7 @@ func (s *Service) UpdateModelProfile(ctx context.Context, scope *string, input s
 	if err := validateModelProfile(input); err != nil {
 		return store.ModelProfile{}, err
 	}
-	if _, err := s.GetProvider(ctx, input.ProviderID); err != nil {
+	if _, err := s.GetProvider(ctx, scope, input.ProviderID); err != nil {
 		return store.ModelProfile{}, err
 	}
 	value, err := s.store.UpdateModelProfile(ctx, scope, input)

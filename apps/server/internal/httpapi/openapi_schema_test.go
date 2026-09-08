@@ -14,7 +14,7 @@ func TestScopedResourceSchemasRequireProjectID(t *testing.T) {
 		t.Fatal(err)
 	}
 	doc := string(data)
-	for _, schema := range []string{"ModelProfile", "Runtime", "Agent"} {
+	for _, schema := range []string{"Provider", "ModelProfile", "Runtime", "Agent"} {
 		t.Run(schema, func(t *testing.T) {
 			block := topLevelYAMLBlock(doc, schema)
 			if block == "" {

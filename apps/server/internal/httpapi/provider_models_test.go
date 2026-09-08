@@ -18,7 +18,7 @@ type providerModelsStore struct {
 	provider store.Provider
 }
 
-func (s *providerModelsStore) GetProvider(_ context.Context, id string) (store.Provider, error) {
+func (s *providerModelsStore) GetProvider(_ context.Context, _ *string, id string) (store.Provider, error) {
 	if id != s.provider.ID {
 		return store.Provider{}, store.ErrNotFound
 	}

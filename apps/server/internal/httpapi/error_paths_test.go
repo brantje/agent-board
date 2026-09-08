@@ -18,6 +18,11 @@ func TestProjectScopedEndpointsHideMissingProject(t *testing.T) {
 	cases := []struct{ method, path, body string }{
 		{http.MethodGet, "/api/projects/" + otherID, ""},
 		{http.MethodPatch, "/api/projects/" + otherID, `{"name":"Renamed"}`},
+		{http.MethodGet, "/api/projects/" + otherID + "/providers", ""},
+		{http.MethodPost, "/api/projects/" + otherID + "/providers", `{"name":"Provider","kind":"test"}`},
+		{http.MethodGet, "/api/projects/" + otherID + "/providers/" + providerID, ""},
+		{http.MethodPut, "/api/projects/" + otherID + "/providers/" + providerID, `{"name":"Provider","kind":"test"}`},
+		{http.MethodGet, "/api/projects/" + otherID + "/providers/" + providerID + "/models", ""},
 		{http.MethodGet, "/api/projects/" + otherID + "/model-profiles", ""},
 		{http.MethodPost, "/api/projects/" + otherID + "/model-profiles", modelBody},
 		{http.MethodGet, "/api/projects/" + otherID + "/model-profiles/" + modelID, ""},

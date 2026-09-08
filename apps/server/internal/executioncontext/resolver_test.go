@@ -25,7 +25,7 @@ func (f fakeStore) GetRun(context.Context, string, string) (store.Run, error) { 
 func (f fakeStore) GetWorkspace(context.Context, string, string) (store.Workspace, error) { return f.workspace, nil }
 func (f fakeStore) GetAgentInScope(context.Context, *string, string) (store.Agent, error) { return f.agent, nil }
 func (f fakeStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) { return f.model, nil }
-func (f fakeStore) GetProvider(context.Context, string) (store.Provider, error) { return f.provider, nil }
+func (f fakeStore) GetProvider(context.Context, *string, string) (store.Provider, error) { return f.provider, nil }
 func (f fakeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) { return f.runtime, nil }
 
 func validStore() fakeStore {
@@ -78,6 +78,18 @@ func TestResolveRejectsForeignScopedConfiguration(t *testing.T) {
 	_, err = resolver.Resolve(context.Background(), "p1", "r1")
 	apiErr, ok := AsError(err)
 	if !ok || apiErr.Code != "execution_runtime_unavailable" {
+		t.Fatalf("err = %#v", err)
+	}
+
+	values = validStore()
+	values.provider.ProjectID = &foreign
+	resolver, err = NewResolver(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = resolver.Resolve(context.Background(), "p1", "r1")
+	apiErr, ok = AsError(err)
+	if !ok || apiErr.Code != "execution_provider_unavailable" {
 		t.Fatalf("err = %#v", err)
 	}
 }

@@ -8,11 +8,11 @@ import type { RepositorySettings } from '../types/api'
 
 const props = defineProps<{kind: ConfigKind; projectId?: string; resourceId?: string}>()
 const definition = definitions[props.kind]
-const path = computed(() => apiPath(props.kind, props.kind === 'projects' || props.kind === 'providers' ? undefined : props.projectId))
+const path = computed(() => apiPath(props.kind, props.kind === 'projects' ? undefined : props.projectId))
 const { data, pending, error, refresh } = useResource<ConfigRecord[]>(path)
 const references = Object.fromEntries(definition.fields
   .filter(field => field.resource)
-  .map(field => [field.key, useResource<ConfigRecord[]>(() => apiPath(field.resource!, field.resource === 'providers' ? undefined : props.projectId))]))
+  .map(field => [field.key, useResource<ConfigRecord[]>(() => apiPath(field.resource!, props.projectId))]))
 const referencesPending = computed(() => Object.values(references).some(resource => resource.pending.value))
 const referenceError = computed(() => Object.values(references).find(resource => resource.error.value)?.error.value)
 const open = ref(false)
@@ -25,7 +25,7 @@ const credential = ref('')
 const providerKindChoice = ref('')
 const suppressProviderModelReset = ref(false)
 const providerIdForModels = computed(() => props.kind === 'model-profiles' && open.value ? String(draft.value.providerId ?? '') : '')
-const { models: providerModels, error: providerModelsError, pending: providerModelsPending, refresh: refreshProviderModels } = useProviderModels(providerIdForModels)
+const { models: providerModels, error: providerModelsError, pending: providerModelsPending, refresh: refreshProviderModels } = useProviderModels(providerIdForModels, () => props.projectId)
 const modelOptions = computed(() => {
   const options = providerModels.value.map(model => ({
     label: model.name?.trim() ? `${model.name} (${model.id})` : model.id,
@@ -45,7 +45,6 @@ const showModelSelect = computed(() => {
 const visible = computed(() => props.resourceId ? data.value?.filter(item => item.id === props.resourceId) : data.value)
 const pageDescription = computed(() => {
   if (props.kind === 'projects') return props.resourceId ? 'Project settings · backend-managed repository context' : 'Projects · backend-managed repository contexts'
-  if (props.kind === 'providers') return 'Global provider configuration'
   return props.projectId ? 'Project configuration · shared resources are read-only' : 'Shared configuration'
 })
 const editingShared = computed(() => !!selected.value && !canEdit(selected.value, props.kind === 'projects' ? undefined : props.projectId))

@@ -16,8 +16,8 @@ type ProviderModel struct {
 	Name *string `json:"name"`
 }
 
-func (s *Service) ListProviderModels(ctx context.Context, providerID string, resolver executioncontext.SecretResolver, client *http.Client) ([]ProviderModel, error) {
-	provider, err := s.GetProvider(ctx, providerID)
+func (s *Service) ListProviderModels(ctx context.Context, scope *string, providerID string, resolver executioncontext.SecretResolver, client *http.Client) ([]ProviderModel, error) {
+	provider, err := s.GetProvider(ctx, scope, providerID)
 	if err != nil {
 		return nil, err
 	}
@@ -26,7 +26,7 @@ func (s *Service) ListProviderModels(ctx context.Context, providerID string, res
 		if !secretResolverConfigured(resolver) {
 			return nil, NewError("provider_credential_unavailable", "Provider credential is unavailable for model discovery.", nil)
 		}
-		apiKey, err = resolver.Resolve(ctx, secrets.Scope{}, strings.TrimSpace(*provider.CredentialRef))
+		apiKey, err = resolver.Resolve(ctx, secrets.Scope{ProjectID: scope}, strings.TrimSpace(*provider.CredentialRef))
 		if err != nil {
 			return nil, NewError("provider_credential_unavailable", "Provider credential is unavailable for model discovery.", err)
 		}

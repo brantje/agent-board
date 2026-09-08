@@ -40,16 +40,16 @@ func (f *fakeStore) CreateProject(_ context.Context, v store.Project) (store.Pro
 func (f *fakeStore) UpdateProject(_ context.Context, v store.Project) (store.Project, error) {
 	return v, nil
 }
-func (f *fakeStore) ListProviders(context.Context) ([]store.Provider, error) {
+func (f *fakeStore) ListProviders(context.Context, *string) ([]store.Provider, error) {
 	return []store.Provider{coverageProvider()}, nil
 }
 func (f *fakeStore) CreateProvider(_ context.Context, v store.Provider) (store.Provider, error) {
 	return v, nil
 }
-func (f *fakeStore) GetProvider(context.Context, string) (store.Provider, error) {
+func (f *fakeStore) GetProvider(context.Context, *string, string) (store.Provider, error) {
 	return coverageProvider(), nil
 }
-func (f *fakeStore) UpdateProvider(_ context.Context, v store.Provider) (store.Provider, error) {
+func (f *fakeStore) UpdateProvider(_ context.Context, _ *string, v store.Provider) (store.Provider, error) {
 	return v, nil
 }
 func (f *fakeStore) ListModelProfiles(context.Context, *string) ([]store.ModelProfile, error) {
@@ -120,7 +120,7 @@ func TestControlPlaneServiceHappyPaths(t *testing.T) {
 	issue := coverageIssue()
 	calls := []func() error{
 		func() error { _, e := svc.ListProjects(ctx); return e }, func() error { _, e := svc.CreateProject(ctx, p); return e }, func() error { _, e := svc.GetProject(ctx, p.ID); return e }, func() error { _, e := svc.UpdateProject(ctx, p); return e },
-		func() error { _, e := svc.ListProviders(ctx); return e }, func() error { _, e := svc.CreateProvider(ctx, provider); return e }, func() error { _, e := svc.GetProvider(ctx, provider.ID); return e }, func() error { _, e := svc.UpdateProvider(ctx, provider); return e },
+		func() error { _, e := svc.ListProviders(ctx, nil); return e }, func() error { _, e := svc.CreateProvider(ctx, provider); return e }, func() error { _, e := svc.GetProvider(ctx, nil, provider.ID); return e }, func() error { _, e := svc.UpdateProvider(ctx, nil, provider); return e }, func() error { _, e := svc.ListProviders(ctx, scope); return e }, func() error { _, e := svc.GetProvider(ctx, scope, provider.ID); return e }, func() error { _, e := svc.UpdateProvider(ctx, scope, provider); return e },
 		func() error { _, e := svc.ListModelProfiles(ctx, nil); return e }, func() error { _, e := svc.ListModelProfiles(ctx, scope); return e }, func() error { _, e := svc.GetModelProfile(ctx, scope, model.ID); return e }, func() error { _, e := svc.CreateModelProfile(ctx, model); return e }, func() error { _, e := svc.UpdateModelProfile(ctx, scope, model); return e },
 		func() error { _, e := svc.ListRuntimes(ctx, scope); return e }, func() error { _, e := svc.GetRuntime(ctx, scope, runtime.ID); return e }, func() error { _, e := svc.CreateRuntime(ctx, runtime); return e }, func() error { _, e := svc.UpdateRuntime(ctx, scope, runtime); return e },
 		func() error { _, e := svc.ListAgents(ctx, scope); return e }, func() error { _, e := svc.GetAgent(ctx, scope, agent.ID); return e }, func() error { _, e := svc.CreateAgent(ctx, agent); return e }, func() error { _, e := svc.UpdateAgent(ctx, scope, agent); return e },
@@ -145,7 +145,7 @@ func TestControlPlaneServiceScopeAndValidationErrors(t *testing.T) {
 	scope := &pid
 	svc := New(&missingProjectStore{})
 	scopeCalls := []func() error{
-		func() error { _, e := svc.ListModelProfiles(ctx, scope); return e }, func() error { _, e := svc.GetRuntime(ctx, scope, "runtime"); return e }, func() error { _, e := svc.GetAgent(ctx, scope, "agent"); return e }, func() error { _, e := svc.ListIssues(ctx, pid); return e }, func() error { _, e := svc.GetRun(ctx, pid, "run"); return e },
+		func() error { _, e := svc.ListProviders(ctx, scope); return e }, func() error { _, e := svc.ListModelProfiles(ctx, scope); return e }, func() error { _, e := svc.GetRuntime(ctx, scope, "runtime"); return e }, func() error { _, e := svc.GetAgent(ctx, scope, "agent"); return e }, func() error { _, e := svc.ListIssues(ctx, pid); return e }, func() error { _, e := svc.GetRun(ctx, pid, "run"); return e },
 	}
 	for _, call := range scopeCalls {
 		err := call()
@@ -157,7 +157,7 @@ func TestControlPlaneServiceScopeAndValidationErrors(t *testing.T) {
 	good := &fakeStore{project: store.Project{ID: pid}, agent: store.Agent{ID: "agent"}}
 	s := New(good)
 	badCalls := []func() error{
-		func() error { _, e := s.CreateProject(ctx, store.Project{}); return e }, func() error { _, e := s.UpdateProject(ctx, store.Project{}); return e }, func() error { _, e := s.CreateProvider(ctx, store.Provider{}); return e }, func() error { _, e := s.UpdateProvider(ctx, store.Provider{}); return e }, func() error { _, e := s.CreateModelProfile(ctx, store.ModelProfile{}); return e }, func() error { _, e := s.UpdateModelProfile(ctx, nil, store.ModelProfile{}); return e }, func() error { _, e := s.CreateRuntime(ctx, store.Runtime{}); return e }, func() error { _, e := s.UpdateRuntime(ctx, nil, store.Runtime{}); return e }, func() error { _, e := s.CreateAgent(ctx, store.Agent{}); return e }, func() error { _, e := s.UpdateAgent(ctx, nil, store.Agent{}); return e }, func() error { _, e := s.CreateIssue(ctx, store.Issue{ProjectID: pid}); return e }, func() error { _, e := s.UpdateIssue(ctx, store.Issue{ProjectID: pid}); return e },
+		func() error { _, e := s.CreateProject(ctx, store.Project{}); return e }, func() error { _, e := s.UpdateProject(ctx, store.Project{}); return e }, func() error { _, e := s.CreateProvider(ctx, store.Provider{}); return e }, func() error { _, e := s.UpdateProvider(ctx, nil, store.Provider{}); return e }, func() error { _, e := s.CreateModelProfile(ctx, store.ModelProfile{}); return e }, func() error { _, e := s.UpdateModelProfile(ctx, nil, store.ModelProfile{}); return e }, func() error { _, e := s.CreateRuntime(ctx, store.Runtime{}); return e }, func() error { _, e := s.UpdateRuntime(ctx, nil, store.Runtime{}); return e }, func() error { _, e := s.CreateAgent(ctx, store.Agent{}); return e }, func() error { _, e := s.UpdateAgent(ctx, nil, store.Agent{}); return e }, func() error { _, e := s.CreateIssue(ctx, store.Issue{ProjectID: pid}); return e }, func() error { _, e := s.UpdateIssue(ctx, store.Issue{ProjectID: pid}); return e },
 	}
 	for _, call := range badCalls {
 		ae, ok := AsError(call())
@@ -246,7 +246,7 @@ func (s *disabledModelStore) GetModelProfile(context.Context, *string, string) (
 
 type disabledProviderStore struct{ *fakeStore }
 
-func (s *disabledProviderStore) GetProvider(context.Context, string) (store.Provider, error) {
+func (s *disabledProviderStore) GetProvider(context.Context, *string, string) (store.Provider, error) {
 	p := coverageProvider()
 	p.Enabled = false
 	return p, nil

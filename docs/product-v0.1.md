@@ -52,10 +52,11 @@ Frontend implementation follows `frontend-implementation.md` and `frontend-theme
 Shared/global or Project-scoped:
 
 - Agents
+- Providers
 - Model Profiles
 - Runtimes
 
-Providers are global in v0.1. Project repository configuration belongs to Project.
+Project repository configuration belongs to Project.
 
 Inside a Project, shared resources are visible/read-only and Project-owned resources remain isolated.
 
@@ -65,7 +66,6 @@ Global:
 
 ```text
 Projects
-Agents
 Runs
 Inbox
 Settings
@@ -86,12 +86,14 @@ Settings:
 Models
   Providers
   Model Profiles
+Execution
+  Agents (global/shared only)
 Infrastructure
   Runtimes
-Execution
-  Agents
-Projects configure repository/source + workflow behavior
+Project page for repository/workflow
 ```
+
+Shared Agents live under global Settings. Project Agents stay in the project primary menu, not in the project settings sidebar.
 
 Plugins are not part of the v0.1 critical path.
 

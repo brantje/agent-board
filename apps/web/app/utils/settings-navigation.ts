@@ -5,12 +5,12 @@ function projectPath(projectId: string, segment: string) {
 }
 
 export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
+  const providers = projectId ? projectPath(projectId, 'providers') : '/settings/providers'
   const modelProfiles = projectId ? projectPath(projectId, 'model-profiles') : '/settings/model-profiles'
   const runtimes = projectId ? projectPath(projectId, 'runtimes') : '/settings/runtimes'
-  const agents = projectId ? `/projects/${encodeURIComponent(projectId)}/agents` : '/agents'
   const overview = projectId ? projectPath(projectId, '') : '/settings'
 
-  return [
+  const groups: NavigationMenuItem[][] = [
     [
       { label: 'Settings', type: 'label' },
       {
@@ -21,16 +21,19 @@ export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
     ],
     [
       { label: 'Models', type: 'label' },
-      { label: 'Providers', to: '/settings/providers' },
+      { label: 'Providers', to: providers },
       { label: 'Model Profiles', to: modelProfiles }
-    ],
-    [
-      { label: 'Infrastructure', type: 'label' },
-      { label: 'Runtimes', to: runtimes }
-    ],
-    [
-      { label: 'Execution', type: 'label' },
-      { label: 'Agents', to: agents }
     ]
   ]
+  if (!projectId) {
+    groups.push([
+      { label: 'Execution', type: 'label' },
+      { label: 'Agents', to: '/settings/agents' }
+    ])
+  }
+  groups.push([
+    { label: 'Infrastructure', type: 'label' },
+    { label: 'Runtimes', to: runtimes }
+  ])
+  return groups
 }

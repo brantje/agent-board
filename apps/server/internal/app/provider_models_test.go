@@ -19,7 +19,7 @@ type providerModelStore struct {
 	provider store.Provider
 }
 
-func (s *providerModelStore) GetProvider(_ context.Context, id string) (store.Provider, error) {
+func (s *providerModelStore) GetProvider(_ context.Context, _ *string, id string) (store.Provider, error) {
 	if id != s.provider.ID {
 		return store.Provider{}, store.ErrNotFound
 	}
@@ -59,7 +59,7 @@ func TestListProviderModelsReturnsDiscoveredModels(t *testing.T) {
 	service := New(store)
 	resolver := &fakeProviderModelSecretResolver{values: map[string][]byte{ref: []byte("secret")}}
 
-	models, err := service.ListProviderModels(context.Background(), testProviderID, resolver, upstream.Client())
+	models, err := service.ListProviderModels(context.Background(), nil, testProviderID, resolver, upstream.Client())
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
@@ -78,7 +78,7 @@ func TestListProviderModelsRequiresSecretResolverWhenCredentialConfigured(t *tes
 		SafeMetadata:  store.EmptyObject,
 	}}
 	service := New(store)
-	_, err := service.ListProviderModels(context.Background(), testProviderID, nil, nil)
+	_, err := service.ListProviderModels(context.Background(), nil, testProviderID, nil, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -96,7 +96,7 @@ func TestListProviderModelsRejectsUnconfiguredCustomProvider(t *testing.T) {
 		SafeMetadata: store.EmptyObject,
 	}}
 	service := New(store)
-	_, err := service.ListProviderModels(context.Background(), testProviderID, &fakeProviderModelSecretResolver{}, nil)
+	_, err := service.ListProviderModels(context.Background(), nil, testProviderID, &fakeProviderModelSecretResolver{}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}

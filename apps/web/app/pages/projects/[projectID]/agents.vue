@@ -1,6 +1,4 @@
 <script setup lang="ts">const route = useRoute()</script>
 <template>
-  <SettingsShell>
-    <ConfigManager :key="String(route.params.projectID)" kind="agents" :project-id="String(route.params.projectID)" />
-  </SettingsShell>
+  <ConfigManager :key="String(route.params.projectID)" kind="agents" :project-id="String(route.params.projectID)" />
 </template>

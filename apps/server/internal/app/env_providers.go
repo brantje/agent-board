@@ -32,7 +32,7 @@ func EnsureOpenRouterFromEnv(ctx context.Context, control *Service, secretStore 
 		return nil
 	}
 
-	providers, err := control.ListProviders(ctx)
+	providers, err := control.ListProviders(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("list providers for env bootstrap: %w", err)
 	}
@@ -71,7 +71,7 @@ func ensureOpenRouterProviderFromEnv(ctx context.Context, control *Service, secr
 	})
 	if err != nil {
 		if errors.Is(err, store.ErrConflict) {
-			reloaded, listErr := control.ListProviders(ctx)
+			reloaded, listErr := control.ListProviders(ctx, nil)
 			if listErr != nil {
 				return store.Provider{}, fmt.Errorf("list providers after OpenRouter create conflict: %w", listErr)
 			}
@@ -125,7 +125,7 @@ func completeOpenRouterProviderCredential(ctx context.Context, control *Service,
 	}
 	refValue := ref
 	provider.CredentialRef = &refValue
-	provider, err := control.UpdateProvider(ctx, provider)
+	provider, err := control.UpdateProvider(ctx, nil, provider)
 	if err != nil {
 		return store.Provider{}, fmt.Errorf("update OpenRouter credential ref: %w", err)
 	}

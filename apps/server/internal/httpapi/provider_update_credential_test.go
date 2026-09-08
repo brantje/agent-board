@@ -14,7 +14,7 @@ type captureProviderStore struct {
 	saved store.Provider
 }
 
-func (s *captureProviderStore) UpdateProvider(_ context.Context, p store.Provider) (store.Provider, error) {
+func (s *captureProviderStore) UpdateProvider(_ context.Context, _ *string, p store.Provider) (store.Provider, error) {
 	s.saved = p
 	return p, nil
 }

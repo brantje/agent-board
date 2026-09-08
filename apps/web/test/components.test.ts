@@ -30,6 +30,7 @@ describe('application foundation', () => {
     expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="settings-main-nav"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Inbox')
+    expect(wrapper.find('a[href="/agents"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Plugins')
     expect(wrapper.find('[aria-label="Back to projects"]').exists()).toBe(false)
     route.params.projectID = 'project-1'
@@ -43,7 +44,7 @@ describe('application foundation', () => {
     expect(wrapper.find('a[href="/projects/project-1/board"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="Back to projects"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
-    expect(navigation().global.map(item => item.label)).toEqual(['Projects','Agents','Runs','Inbox'])
+    expect(navigation().global.map(item => item.label)).toEqual(['Projects','Runs','Inbox'])
     expect(navigation().settings.map(item => item.label)).toEqual(['Settings'])
   })
   it('pins Settings above the sidebar footer divider', () => {

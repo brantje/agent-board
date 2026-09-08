@@ -25,11 +25,11 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 
 	provider, err := s.CreateProvider(ctx, store.Provider{Name: "Provider", Kind: "test", Enabled: true, SafeMetadata: store.EmptyObject})
 	if err != nil { t.Fatal(err) }
-	if _, err = s.GetProvider(ctx, provider.ID); err != nil { t.Fatal(err) }
-	providers, err := s.ListProviders(ctx)
+	if _, err = s.GetProvider(ctx, nil, provider.ID); err != nil { t.Fatal(err) }
+	providers, err := s.ListProviders(ctx, nil)
 	if err != nil || len(providers) != 1 { t.Fatalf("providers=%d err=%v", len(providers), err) }
 	provider.BaseURL = stringPtrPG("https://example.test")
-	if _, err = s.UpdateProvider(ctx, provider); err != nil { t.Fatal(err) }
+	if _, err = s.UpdateProvider(ctx, nil, provider); err != nil { t.Fatal(err) }
 	if _, err = s.CreateProvider(ctx, store.Provider{Name: "Provider", Kind: "test", Enabled: true}); !errors.Is(err, store.ErrConflict) { t.Fatalf("duplicate provider err=%v", err) }
 
 	p1id, p2id := p1.ID, p2.ID
