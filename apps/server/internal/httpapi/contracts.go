@@ -30,9 +30,19 @@ type IssueDTO struct {
 	Title           string    `json:"title"`
 	Description     string    `json:"description"`
 	Status          string    `json:"status"`
+	Priority        int       `json:"priority"`
 	AssignedAgentID *string   `json:"assignedAgentId"`
 	CreatedAt       time.Time `json:"createdAt"`
 	UpdatedAt       time.Time `json:"updatedAt"`
+}
+
+type IssueRelationshipDTO struct {
+	ID            string    `json:"id"`
+	ProjectID     string    `json:"projectId"`
+	SourceIssueID string    `json:"sourceIssueId"`
+	TargetIssueID string    `json:"targetIssueId"`
+	Type          string    `json:"type"`
+	CreatedAt     time.Time `json:"createdAt"`
 }
 
 type ProviderDTO struct {
@@ -141,12 +151,19 @@ type CreateIssueRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Status      string `json:"status"`
+	Priority    *int   `json:"priority"`
 }
 
 type UpdateIssueRequest struct {
 	Title       *string `json:"title"`
 	Description *string `json:"description"`
 	Status      *string `json:"status"`
+	Priority    *int    `json:"priority"`
+}
+
+type CreateIssueRelationshipRequest struct {
+	TargetIssueID string `json:"targetIssueId"`
+	Type          string `json:"type"`
 }
 
 type CreateProviderRequest struct {
@@ -162,7 +179,7 @@ type UpdateProviderRequest struct {
 	Name          *string          `json:"name"`
 	Kind          *string          `json:"kind"`
 	BaseURL       *string          `json:"baseUrl"`
-	CredentialRef *string          `json:"credentialRef"`
+	CredentialRef *string         `json:"credentialRef"`
 	Enabled       *bool            `json:"enabled"`
 	SafeMetadata  *json.RawMessage `json:"safeMetadata"`
 }

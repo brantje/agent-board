@@ -7,11 +7,18 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+func validIssuePriority(priority int) bool {
+	return priority >= 0 && priority <= 4
+}
+
 func (a *api) registerIssueRunRoutes(r chi.Router) {
 	r.Get("/projects/{projectID}/issues", a.listIssues)
 	r.Post("/projects/{projectID}/issues", a.createIssue)
 	r.Get("/projects/{projectID}/issues/{issueID}", a.getIssue)
 	r.Patch("/projects/{projectID}/issues/{issueID}", a.updateIssue)
+	r.Get("/projects/{projectID}/issues/{issueID}/relationships", a.listIssueRelationships)
+	r.Post("/projects/{projectID}/issues/{issueID}/relationships", a.createIssueRelationship)
+	r.Delete("/projects/{projectID}/issues/{issueID}/relationships/{relationshipID}", a.deleteIssueRelationship)
 	r.Post("/projects/{projectID}/issues/{issueID}/assignment", a.assignIssue)
 	r.Get("/projects/{projectID}/runs", a.listRuns)
 	r.Get("/projects/{projectID}/runs/{runID}", a.getRun)
@@ -47,11 +54,20 @@ func (a *api) createIssue(w http.ResponseWriter, r *http.Request) {
 	if status == "" {
 		status = "BACKLOG"
 	}
+	priority := 0
+	if req.Priority != nil {
+		priority = *req.Priority
+	}
+	if !validIssuePriority(priority) {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
+		return
+	}
 	value, err := a.service.CreateIssue(r.Context(), store.Issue{
 		ProjectID:   projectID,
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      status,
+		Priority:    priority,
 	})
 	if err != nil {
 		writeAppError(w, err)
@@ -104,12 +120,90 @@ func (a *api) updateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Status != nil {
 		current.Status = *req.Status
 	}
+	if req.Priority != nil {
+		if !validIssuePriority(*req.Priority) {
+			writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
+			return
+		}
+		current.Priority = *req.Priority
+	}
 	value, err := a.service.UpdateIssue(r.Context(), current)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, issueDTO(value))
+}
+
+func (a *api) listIssueRelationships(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := pathUUID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	issueID, ok := pathUUID(w, r, "issueID")
+	if !ok {
+		return
+	}
+	values, err := a.service.ListIssueRelationships(r.Context(), projectID, issueID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	out := make([]IssueRelationshipDTO, 0, len(values))
+	for _, value := range values {
+		out = append(out, issueRelationshipDTO(value))
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *api) createIssueRelationship(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := pathUUID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	issueID, ok := pathUUID(w, r, "issueID")
+	if !ok {
+		return
+	}
+	var req CreateIssueRelationshipRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if !validUUID(req.TargetIssueID) {
+		writeError(w, http.StatusBadRequest, "invalid_id", "targetIssueId must be a UUID")
+		return
+	}
+	value, err := a.service.CreateIssueRelationship(r.Context(), store.IssueRelationship{
+		ProjectID:     projectID,
+		SourceIssueID: issueID,
+		TargetIssueID: req.TargetIssueID,
+		Type:          req.Type,
+	})
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, issueRelationshipDTO(value))
+}
+
+func (a *api) deleteIssueRelationship(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := pathUUID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	issueID, ok := pathUUID(w, r, "issueID")
+	if !ok {
+		return
+	}
+	relationshipID, ok := pathUUID(w, r, "relationshipID")
+	if !ok {
+		return
+	}
+	if err := a.service.DeleteIssueRelationship(r.Context(), projectID, issueID, relationshipID); err != nil {
+		writeAppError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *api) listRuns(w http.ResponseWriter, r *http.Request) {

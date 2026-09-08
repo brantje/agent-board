@@ -22,6 +22,10 @@ The durable unit of work.
 
 An Issue owns one authoritative Workspace in v0.1 and may have multiple execution attempts (Runs).
 
+Core Issue fields include title, description, durable Board status, priority and optional assigned Agent.
+
+Priority uses the numeric vocabulary `0..4`: `0` is the default/base priority and higher integers represent higher relative priority. Priority is metadata, not an execution command; it does not independently change status, bypass workflow policy or create/cancel Runs.
+
 Board workflow:
 
 ```text
@@ -29,6 +33,32 @@ BACKLOG -> TODO -> IN_PROGRESS -> BLOCKED -> REVIEW -> DONE
 ```
 
 `BLOCKED` is a durable Issue state and its normal Board column projection. Run states remain separate.
+
+### Issue Relationship
+
+A durable Project-scoped directed relationship from one source Issue to one target Issue.
+
+Canonical types:
+
+```text
+blocks
+  source blocks target
+
+depends_on
+  source depends on target
+
+related_to
+  source records target as related
+
+duplicates
+  source declares itself a duplicate of target
+```
+
+Both Issues must belong to the same Project. Self-relations and duplicate source/target/type rows are invalid.
+
+The stored relationship is always source -> target. Agent Board does not synthesize a second inverse row. In particular, a stored `blocks` relation is not also persisted as a `depends_on` relation, and `related_to` remains a directed durable record even when its human interpretation is symmetric.
+
+Relationships are server-authoritative workflow inputs. Creating or deleting a relationship does not by itself mutate Board status or Run state; any blocker/dependency policy effect is evaluated by trusted server-side workflow logic rather than by the browser.
 
 ### Agent
 

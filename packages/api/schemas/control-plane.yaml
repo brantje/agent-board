@@ -191,13 +191,18 @@ AgentInput:
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}
 Issue:
   type: object
-  required: [id, projectId, title, description, status, assignedAgentId, createdAt, updatedAt]
+  required: [id, projectId, title, description, status, priority, assignedAgentId, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
     title: {type: string}
     description: {type: string}
     status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]}
+    priority:
+      type: integer
+      minimum: 0
+      maximum: 4
+      description: Numeric v0.1 priority. 0 is the default/base priority and larger values mean higher relative priority.
     assignedAgentId: {type: [string, 'null'], format: uuid}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
@@ -209,6 +214,12 @@ IssueCreate:
     title: {type: string}
     description: {type: string}
     status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE], default: BACKLOG}
+    priority:
+      type: integer
+      minimum: 0
+      maximum: 4
+      default: 0
+      description: Numeric v0.1 priority. 0 is the default/base priority and larger values mean higher relative priority.
 IssueUpdate:
   type: object
   additionalProperties: false
@@ -216,6 +227,36 @@ IssueUpdate:
     title: {type: string}
     description: {type: string}
     status: {type: string, enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]}
+    priority:
+      type: integer
+      minimum: 0
+      maximum: 4
+      description: Numeric v0.1 priority. 0 is the default/base priority and larger values mean higher relative priority.
+IssueRelationship:
+  type: object
+  description: Project-scoped directed source-to-target Issue relationship. No inverse row is synthesized and the relationship does not itself mutate workflow state.
+  required: [id, projectId, sourceIssueId, targetIssueId, type, createdAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: string, format: uuid}
+    sourceIssueId: {type: string, format: uuid}
+    targetIssueId: {type: string, format: uuid}
+    type:
+      type: string
+      enum: [blocks, depends_on, related_to, duplicates]
+      description: "Source-to-target meaning: blocks = source blocks target; depends_on = source depends on target; related_to = source records target as related; duplicates = source declares itself a duplicate of target."
+    createdAt: {type: string, format: date-time}
+IssueRelationshipCreate:
+  type: object
+  description: Creates one directed source-to-target relationship. Source is the Issue in the request path; the server does not synthesize an inverse relationship.
+  additionalProperties: false
+  required: [targetIssueId, type]
+  properties:
+    targetIssueId: {type: string, format: uuid}
+    type:
+      type: string
+      enum: [blocks, depends_on, related_to, duplicates]
+      description: "Source-to-target meaning: blocks = source blocks target; depends_on = source depends on target; related_to = source records target as related; duplicates = source declares itself a duplicate of target."
 Run:
   type: object
   required: [id, projectId, issueId, workspaceId, agentId, attempt, status, queueReason, failureReason, createdAt, startedAt, completedAt, updatedAt]
