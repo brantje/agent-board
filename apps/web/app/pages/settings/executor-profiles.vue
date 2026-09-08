@@ -1,1 +1,1 @@
-<template><ConfigManager kind="executor-profiles" /></template>
+<template><SettingsShell><ConfigManager kind="executor-profiles" /></SettingsShell></template>

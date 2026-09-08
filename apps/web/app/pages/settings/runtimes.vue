@@ -1,1 +1,1 @@
-<template><ConfigManager kind="runtimes" /></template>
+<template><SettingsShell><ConfigManager kind="runtimes" /></SettingsShell></template>

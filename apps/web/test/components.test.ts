@@ -26,7 +26,8 @@ describe('application foundation', () => {
     const route = reactive({ params: {} as Record<string,string> })
     vi.stubGlobal('useRoute', () => route)
     const wrapper = mount(Shell, { global })
-    expect(wrapper.findAll('nav').length).toBe(1)
+    expect(wrapper.findAll('nav').length).toBe(2)
+    expect(wrapper.find('[data-testid="settings-main-nav"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('Plugins')
     route.params.projectID = 'project-1'
     await flushPromises()
@@ -34,7 +35,8 @@ describe('application foundation', () => {
     delete route.params.projectID
     await flushPromises()
     expect(wrapper.find('a[href="/projects/project-1/board"]').exists()).toBe(false)
-    expect(navigation().global.map(item => item.label)).toEqual(['Projects','Agents','Runs','Inbox','Settings'])
+    expect(navigation().global.map(item => item.label)).toEqual(['Projects','Agents','Runs','Inbox'])
+    expect(navigation().settings.map(item => item.label)).toEqual(['Settings'])
   })
   it('provides a viewport page and compact action slots', () => {
     const wrapper = mount(Page, { props: { title: 'Board', description: 'Project context' }, slots: { actions: '<span>New issue</span>', default: '<p>Work</p>' }, global })
