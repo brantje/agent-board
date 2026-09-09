@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ActivityTimeline from '../app/components/ActivityTimeline.vue'
-import { countRunToolCalls, projectRunActivity, toolActivityLabel, toolActivityTarget } from '../app/utils/events'
+import { projectRunActivity, toolActivityLabel, toolActivityTarget } from '../app/utils/events'
 import { event } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
@@ -18,7 +18,7 @@ describe('run activity projection', () => {
     expect(items[0]).toMatchObject({ kind: 'thought', message: 'Inspect the handler first.' })
     expect(items[1]).toMatchObject({ kind: 'tool', label: 'Read', target: 'server/internal/handler/issue.go', status: 'completed', resultPreview: 'func Create()' })
     expect(items[2]).toMatchObject({ kind: 'event', title: 'Tool Completed' })
-    expect(countRunToolCalls(events)).toBe(1)
+    expect(items.filter(item => item.kind === 'tool')).toHaveLength(1)
   })
 
   it('keeps same-named calls distinct and projects failed calls', () => {
@@ -42,14 +42,13 @@ describe('run activity projection', () => {
 
 describe('ActivityTimeline run feed', () => {
   it('renders reasoning with the brain icon and compact tool results', () => {
+    const items = projectRunActivity([
+      event({ id: 'thought', type: 'agent.message', sequence: 1, payload: { kind: 'reasoning', message: 'Inspect handlers.' } }),
+      event({ id: 'start', type: 'tool.started', sequence: 2, payload: { toolCallId: 'call', name: 'read', input: { filePath: 'issue.go' } } }),
+      event({ id: 'done', type: 'tool.completed', sequence: 3, payload: { toolCallId: 'call', name: 'read', resultPreview: 'func Create()' } })
+    ])
     const wrapper = mount(ActivityTimeline, {
-      props: {
-        events: [
-          event({ id: 'thought', type: 'agent.message', sequence: 1, payload: { kind: 'reasoning', message: 'Inspect handlers.' } }),
-          event({ id: 'start', type: 'tool.started', sequence: 2, payload: { toolCallId: 'call', name: 'read', input: { filePath: 'issue.go' } } }),
-          event({ id: 'done', type: 'tool.completed', sequence: 3, payload: { toolCallId: 'call', name: 'read', resultPreview: 'func Create()' } })
-        ]
-      },
+      props: { items },
       global: { stubs: uiStubs }
     })
     expect(wrapper.find('.i-lucide-brain').exists()).toBe(true)
@@ -61,13 +60,12 @@ describe('ActivityTimeline run feed', () => {
   })
 
   it('renders failed status and reason even when a result preview exists', () => {
+    const items = projectRunActivity([
+      event({ id: 'start', type: 'tool.started', sequence: 1, payload: { toolCallId: 'call', name: 'edit', input: { path: 'issue.go' } } }),
+      event({ id: 'failed', type: 'tool.failed', sequence: 2, payload: { toolCallId: 'call', name: 'edit', resultPreview: 'partial update', reason: 'write failed' } })
+    ])
     const wrapper = mount(ActivityTimeline, {
-      props: {
-        events: [
-          event({ id: 'start', type: 'tool.started', sequence: 1, payload: { toolCallId: 'call', name: 'edit', input: { path: 'issue.go' } } }),
-          event({ id: 'failed', type: 'tool.failed', sequence: 2, payload: { toolCallId: 'call', name: 'edit', resultPreview: 'partial update', reason: 'write failed' } })
-        ]
-      },
+      props: { items },
       global: { stubs: uiStubs }
     })
     const tool = wrapper.get('[data-tool-status="failed"]')
