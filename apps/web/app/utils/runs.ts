@@ -1,7 +1,21 @@
 import { statusLabel } from './issues'
 
+const runActivityLabels: Record<string, string> = {
+  QUEUED: 'Agent is queued',
+  RUNNING: 'Agent is working',
+  WAITING_FOR_INPUT: 'Agent needs input',
+  READY_FOR_REVIEW: 'Ready for review',
+  COMPLETED: 'Run completed',
+  FAILED: 'Run failed',
+  CANCELLED: 'Run cancelled'
+}
+
 export function runStatusLabel(status: string) {
   return `Run · ${statusLabel(status)}`
+}
+
+export function runActivityStatusLabel(status: string) {
+  return runActivityLabels[status] || runStatusLabel(status)
 }
 
 export function formatElapsed(startedAt: string | null, completedAt: string | null, now = Date.now()) {
