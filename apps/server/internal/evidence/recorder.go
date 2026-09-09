@@ -4,9 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
+
+const ActivityPreviewLimit = 4 * 1024
 
 type EventAppender interface {
 	AppendEvent(context.Context, store.Event) (store.Event, error)
@@ -70,13 +74,33 @@ func EncodePayload(value any) (json.RawMessage, error) {
 	return encoded, nil
 }
 
+// BoundActivityPreview trims user-visible activity text and bounds the persisted
+// Event payload. Complete command output remains available through raw evidence.
+func BoundActivityPreview(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= ActivityPreviewLimit {
+		return value
+	}
+	const suffix = "…"
+	limit := ActivityPreviewLimit - len(suffix)
+	for limit > 0 && !utf8.ValidString(value[:limit]) {
+		limit--
+	}
+	return strings.TrimSpace(value[:limit]) + suffix
+}
+
 type ToolPayload struct {
-	Kind           string   `json:"kind"`
-	Name           string   `json:"name"`
-	Command        []string `json:"command,omitempty"`
-	CWD            string   `json:"cwd,omitempty"`
-	ExitCode       *int     `json:"exitCode,omitempty"`
-	OutputChunkIDs []string `json:"outputChunkIds,omitempty"`
+	Kind           string         `json:"kind"`
+	Name           string         `json:"name"`
+	ToolCallID     string         `json:"toolCallId,omitempty"`
+	Command        []string       `json:"command,omitempty"`
+	CWD            string         `json:"cwd,omitempty"`
+	Input          map[string]any `json:"input,omitempty"`
+	Summary        string         `json:"summary,omitempty"`
+	ResultPreview  string         `json:"resultPreview,omitempty"`
+	Reason         string         `json:"reason,omitempty"`
+	ExitCode       *int           `json:"exitCode,omitempty"`
+	OutputChunkIDs []string       `json:"outputChunkIds,omitempty"`
 }
 
 type TestPayload struct {
