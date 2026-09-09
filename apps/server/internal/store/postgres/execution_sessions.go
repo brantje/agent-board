@@ -134,13 +134,14 @@ func (s *Store) TransitionExecutionSession(ctx context.Context, transition store
 		UPDATE execution_sessions
 		SET status = $3,
 		    exit_code = CASE WHEN $4::integer IS NULL THEN exit_code ELSE $4 END,
+		    command_argv = CASE WHEN $6::jsonb IS NULL THEN command_argv ELSE $6 END,
 		    started_at = CASE WHEN $3 = 'RUNNING' AND started_at IS NULL THEN now() ELSE started_at END,
 		    completed_at = CASE WHEN $3 IN ('COMPLETED', 'FAILED', 'CANCELLED') AND completed_at IS NULL THEN now() ELSE completed_at END,
 		    updated_at = now()
 		WHERE project_id = $1 AND id = $2
 		  AND status = ANY($5::text[])
 		RETURNING `+executionSessionReturning+`
-	`, transition.ProjectID, transition.SessionID, transition.Status, transition.ExitCode, transition.FromStatuses))
+	`, transition.ProjectID, transition.SessionID, transition.Status, transition.ExitCode, transition.FromStatuses, commandArgvJSON(transition.CommandArgv)))
 	if err == nil {
 		return value, nil
 	}

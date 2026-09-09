@@ -1,30 +1,27 @@
 # Runtime Engine execution
 
-The Runtime Instance is the actual execution environment for Engine processes. Coding-agent processes never execute directly in the trusted Go backend process.
+The Runtime Instance is the execution environment for the **legacy internal managed-compute path**. Preferred production execution uses an external or internal `agent-runner` host without creating a Runtime Instance. Coding-agent processes never execute directly in the trusted Go backend process.
 
 ## Execution boundary
 
+Preferred runner path:
+
 ```text
 Go Run worker
-  -> execution service
-      -> resolved Runtime
-          -> Runtime implementation
-              -> Runtime Instance
-                  -> agent-runner
-                      -> Execution Session
-                          -> Engine process tree
-                              -> stdin
-                              -> stdout
-                              -> stderr
-                              -> wait/exit
-                              -> terminate/kill
+  -> scheduler-selected Runner
+      -> authenticated protocol-v2 WebSocket
+          -> agent-runner
+              -> Execution Session
+                  -> Engine process tree
 ```
 
-Engine adapters remain in the trusted server. They receive a provider-neutral execution capability for the Runtime Instance already selected for the Run. They do not receive Docker clients, Docker sockets, provider-specific runtime handles or raw WebSocket framing.
+Legacy managed-compute path may still provision a Runtime Instance. Do not create a placeholder Runtime Instance merely to run an external runner.
+
+Engine adapters remain in the trusted server. They receive a provider-neutral execution capability for the Runner already selected for the Run. They do not receive Docker clients, Docker sockets, provider-specific runtime handles or raw WebSocket framing.
 
 ## Workspace
 
-The durable Issue Workspace is mounted at `/workspace`. Engine execution uses `/workspace` as its working directory unless an explicitly safe subdirectory is selected.
+The durable Issue Workspace is materialized onto the Runner at `/workspace` through Git-native transfer. Engine execution uses `/workspace` as its working directory unless an explicitly safe subdirectory is selected.
 
 A Runtime Instance is bound to exactly one Workspace for its lifetime. A healthy instance/runner may execute many sequential Execution Sessions against that same Workspace.
 

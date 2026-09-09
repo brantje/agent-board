@@ -107,3 +107,10 @@ func arrayJSON(value json.RawMessage) json.RawMessage {
 	}
 	return value
 }
+
+func commandArgvJSON(value json.RawMessage) json.RawMessage {
+	if len(value) == 0 {
+		return nil
+	}
+	return arrayJSON(value)
+}

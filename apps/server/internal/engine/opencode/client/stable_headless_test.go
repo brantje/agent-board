@@ -91,3 +91,27 @@ func unexpectedStableFallback(t *testing.T) http.HandlerFunc {
 		http.Error(w, "unexpected V2 fallback", http.StatusInternalServerError)
 	}
 }
+
+func TestSessionActiveFallsBackToV2WhenStatusOmitsSession(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{})
+	})
+	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{"data": map[string]any{"ses_1": map[string]any{}}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	native, err := New(server.Client(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := native.SessionActive(context.Background(), "ses_1")
+	if err != nil || !active {
+		t.Fatalf("ses_1 active=%v err=%v", active, err)
+	}
+	active, err = native.SessionActive(context.Background(), "ses_missing")
+	if err != nil || active {
+		t.Fatalf("missing session active=%v err=%v", active, err)
+	}
+}

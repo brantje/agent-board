@@ -13,14 +13,15 @@ Include where applicable:
 - Model Profile
 - Provider identity/type/base endpoint metadata
 - selected model + generation settings
-- Runtime ID/name/kind/image/effective policy
+- Runtime ID/name/kind/image/effective policy when the legacy managed-compute path was used
+- selected Runner identity/name when Runner-based execution was used
 - Runtime tooling/capability metadata where relevant
 - Workspace identity
 - repository/base/working branch
 - Source Connection identity without credentials
 - relevant workflow/config revision metadata
 
-Runtime is captured directly because Agents select Runtime directly.
+Runner identity is captured because the scheduler selected that Runner for the attempt. Runtime is captured only when the legacy managed-compute path was used.
 
 Never persist secret plaintext in public execution evidence. Editing current Agent/Model/Provider/Runtime configuration does not alter historical Run provenance.
 

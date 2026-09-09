@@ -18,7 +18,8 @@ func TestRuntimeInstanceRecoveryQueriesAreScoped(t *testing.T) {
 	instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
 		ProjectID:   fixture.project.ID,
 		WorkspaceID: fixture.workspace.ID,
-			})
+		RuntimeID:   fixture.runtime.ID,
+	})
 	if err != nil {
 		t.Fatalf("create runtime instance: %v", err)
 	}

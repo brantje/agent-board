@@ -22,7 +22,18 @@ func (c *Client) Subscribe(ctx context.Context) (*EventStream, error) {
 	if c == nil || c.http == nil {
 		return nil, fmt.Errorf("opencode: client is unavailable")
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/event", nil)
+	stream, err := c.subscribePath(ctx, "/event")
+	if err == nil {
+		return stream, nil
+	}
+	if !isNotFound(err) {
+		return nil, err
+	}
+	return c.subscribePath(ctx, "/api/event")
+}
+
+func (c *Client) subscribePath(ctx context.Context, path string) (*EventStream, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: build event subscription: %w", err)
 	}
@@ -34,7 +45,7 @@ func (c *Client) Subscribe(ctx context.Context) (*EventStream, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBody))
-		return nil, &HTTPError{StatusCode: resp.StatusCode, Method: http.MethodGet, Path: "/api/event", Body: strings.TrimSpace(string(data))}
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Method: http.MethodGet, Path: path, Body: strings.TrimSpace(string(data))}
 	}
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 64<<10), maxSSELineSize)

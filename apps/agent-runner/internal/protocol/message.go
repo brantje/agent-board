@@ -53,6 +53,16 @@ type TransferChunk = runnerprotocol.TransferChunk
 type TransferEnd = runnerprotocol.TransferEnd
 type TransferFailed = runnerprotocol.TransferFailed
 
+const (
+	TransferChunkSize = runnerprotocol.TransferChunkSize
+	MaxTransferBytes  = runnerprotocol.MaxTransferBytes
+	MaxMessageSize    = runnerprotocol.MaxMessageSize
+)
+
+func ValidateTransferBegin(begin TransferBegin) error {
+	return runnerprotocol.ValidateTransferBegin(begin)
+}
+
 func NewMessage(version int, typ MessageType, sessionID string, payload any) (Message, error) {
 	return runnerprotocol.NewMessage(version, typ, sessionID, payload)
 }

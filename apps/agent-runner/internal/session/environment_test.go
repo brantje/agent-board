@@ -32,6 +32,19 @@ func TestSessionDoesNotInheritUnapprovedRunnerEnvironment(t *testing.T) {
 	}
 }
 
+func TestSessionInheritsTLSCertificateEnvironment(t *testing.T) {
+	t.Setenv("SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt")
+	t.Setenv("SSL_CERT_DIR", "/etc/ssl/certs")
+	values := mergeEnvironment(nil, nil)
+	joined := strings.Join(values, "\n")
+	if !strings.Contains(joined, "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt") {
+		t.Fatalf("expected SSL_CERT_FILE in inherited environment, got %q", joined)
+	}
+	if !strings.Contains(joined, "SSL_CERT_DIR=/etc/ssl/certs") {
+		t.Fatalf("expected SSL_CERT_DIR in inherited environment, got %q", joined)
+	}
+}
+
 func TestExplicitEnvironmentMayOverrideAllowlistedValue(t *testing.T) {
 	t.Setenv("HOME", "/runner-home")
 	values := mergeEnvironment(map[string]string{"HOME": "/session-home"}, nil)

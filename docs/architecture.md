@@ -12,10 +12,9 @@ Local Project repository
  -> Agent
       -> Engine
       -> Model Profile -> Provider
-      -> Runtime
  -> durable scheduler claim
+ -> selected connected Runner
  -> durable Issue Workspace
- -> Runtime Instance
  -> agent-runner
  -> Execution Session
  -> Engine process
@@ -36,8 +35,8 @@ Runner          Go (`apps/agent-runner`)
 HTTP            chi
 Database        PostgreSQL + pgvector
 Live updates    Server-Sent Events
-Runtime         Docker first
-Runner transport WebSocket
+Runtime         Docker optional (legacy internal managed compute)
+Runner transport WebSocket (runner -> server protocol v2)
 API contracts   OpenAPI + intentional public DTOs
 Blob storage    local filesystem first; S3-compatible later
 ```
@@ -75,7 +74,7 @@ HTTP handlers are adapters around separable application/domain/store/runtime log
 
 ### Agent runner
 
-`agent-runner` is the small execution-plane binary inside a Runtime Instance. It is Engine-neutral and communicates with the trusted server over a versioned WebSocket protocol.
+`agent-runner` is the Engine-neutral execution-plane binary. Production v0.1 prefers external persistent hosts; the server also supervises an internal runner. Both connect outbound to Agent Board over protocol v2.
 
 Runtime Instance, runner, Execution Session and Run are separate identities. One runner may execute many sessions over time. v0.1 allows one active Execution Session per runner while keeping the protocol/session model extensible for later fleet capacity.
 
@@ -202,7 +201,7 @@ The browser reconstructs live state from persisted reads plus SSE and is never t
 
 ## Provenance and Review evidence
 
-Every Run stores immutable safe execution provenance including the direct Runtime selected by its Agent. Run inspection and Review use this durable evidence rather than mutable current configuration.
+Every Run stores immutable safe execution provenance including the selected Runner and resolved Engine/Model/Provider configuration. Run inspection and Review use this durable evidence rather than mutable current configuration.
 
 Review represents the complete candidate: staged, unstaged, new/untracked, deleted/renamed files, tests, commands, Artifacts and relevant messages where available.
 
@@ -239,11 +238,11 @@ Plugins are deliberately late roadmap work.
 5. A Runtime Instance is bound to exactly one Workspace for its lifetime.
 6. One runner may execute many Execution Sessions over time against that Workspace.
 7. One Execution Session owns one process tree.
-8. Runtime is selected directly by Agent.
-9. Runtime owns complete execution environment/policy configuration.
+8. Runner placement is scheduler-owned; Agents select Engine and Model Profile, not Runtime.
+9. Runtime remains available only for legacy internal managed compute.
 10. PostgreSQL owns durable scheduling state.
 11. Browser/request lifetime never owns execution or continuation.
-12. Engine processes execute inside the selected Runtime Instance through `agent-runner`.
+12. Engine processes execute on the selected Runner through `agent-runner`.
 13. Engine adapters remain server-side.
 14. Runner/server transport is versioned WebSocket and session-scoped.
 15. Secrets are ephemeral and redacted before persistence.

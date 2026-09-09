@@ -102,7 +102,7 @@ func TestExecutionPersistenceInvariants(t *testing.T) {
 	}
 
 	instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
-		ProjectID: f.project.ID, WorkspaceID: f.workspace.ID,
+		ProjectID: f.project.ID, WorkspaceID: f.workspace.ID, RuntimeID: f.runtime.ID,
 	})
 	if err != nil {
 		t.Fatalf("create runtime instance: %v", err)

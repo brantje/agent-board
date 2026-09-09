@@ -124,7 +124,7 @@ func TestRuntimeInstanceServiceLifecyclePreservesWorkspaceBinding(t *testing.T) 
 	if instance.Status != "PROVISIONING" || instance.WorkspaceID != workspace.ID || instance.ExternalID == nil || *instance.ExternalID != "container-1" {
 		t.Fatalf("created instance=%+v", instance)
 	}
-	if implementation.createdSpec.Workspace.Source != workspace.Path || implementation.createdSpec.WorkspaceID != workspace.ID || implementation.createdSpec.IssueID != workspace.IssueID {
+	if implementation.createdSpec.Workspace.Source != workspace.Path || implementation.createdSpec.WorkspaceID != workspace.ID || implementation.createdSpec.IssueID != workspace.IssueID || implementation.createdSpec.RuntimeID != runtimeStore.runtime.ID {
 		t.Fatalf("RuntimeSpec=%+v", implementation.createdSpec)
 	}
 

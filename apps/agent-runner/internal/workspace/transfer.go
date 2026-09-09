@@ -35,7 +35,9 @@ func MaterializeBundle(ctx context.Context, repositoryPath string, bundle []byte
 	if err := file.Close(); err != nil {
 		return fmt.Errorf("close transfer bundle file: %w", err)
 	}
-	if _, err := runGit(ctx, "bundle", "verify", name); err != nil {
+	// Git 2.53+ `bundle verify` requires an existing repository. `list-heads`
+	// still rejects truncated/non-bundle payloads without that requirement.
+	if _, err := runGit(ctx, "bundle", "list-heads", name); err != nil {
 		return fmt.Errorf("verify transfer bundle: %w", err)
 	}
 	parent := filepath.Dir(repositoryPath)
@@ -86,17 +88,35 @@ func SnapshotBundle(ctx context.Context, repositoryPath, transferID string) ([]b
 	}
 	bundlePath := filepath.Join(os.TempDir(), ".agent-board-sync-"+transferID+".bundle")
 	defer os.Remove(bundlePath)
-	if _, err := runGit(ctx, "-C", repositoryPath, "bundle", "create", bundlePath, syncRef); err != nil {
+	if err := writeCloneableBundle(ctx, repositoryPath, commit, bundlePath); err != nil {
 		if strings.Contains(err.Error(), "Refusing to create empty bundle") {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("create session workspace sync bundle: %w", err)
+		return nil, err
 	}
 	payload, err := os.ReadFile(bundlePath)
 	if err != nil {
 		return nil, fmt.Errorf("read session workspace sync bundle: %w", err)
 	}
 	return payload, nil
+}
+
+func writeCloneableBundle(ctx context.Context, repositoryPath, commit, bundlePath string) error {
+	private := filepath.Join(os.TempDir(), ".agent-board-bundle-"+filepath.Base(bundlePath))
+	defer os.RemoveAll(private)
+	if _, err := runGit(ctx, "clone", "--bare", repositoryPath, private); err != nil {
+		return fmt.Errorf("create session workspace sync bundle: %w", err)
+	}
+	if _, err := runGit(ctx, "--git-dir", private, "update-ref", "refs/heads/main", commit); err != nil {
+		return fmt.Errorf("create session workspace sync bundle: %w", err)
+	}
+	if _, err := runGit(ctx, "--git-dir", private, "symbolic-ref", "HEAD", "refs/heads/main"); err != nil {
+		return fmt.Errorf("create session workspace sync bundle: %w", err)
+	}
+	if _, err := runGit(ctx, "--git-dir", private, "bundle", "create", bundlePath, "HEAD", "main"); err != nil {
+		return fmt.Errorf("create session workspace sync bundle: %w", err)
+	}
+	return nil
 }
 
 func IsRepository(ctx context.Context, repositoryPath string) bool {

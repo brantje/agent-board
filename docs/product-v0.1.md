@@ -4,7 +4,7 @@ This document defines the user-facing v0.1 product. The primary goal is one comp
 
 ## v0.1 success condition
 
-A user configures a local Project Git repository and runnable Agent, assigns an Issue, closes the browser, and later reviews real repository changes produced by a real coding Engine in the selected Runtime.
+A user configures a local Project Git repository and runnable Agent, assigns an Issue, closes the browser, and later reviews real repository changes produced by a real coding Engine on a selected Runner.
 
 ```text
 Local Project repository
@@ -12,15 +12,16 @@ Local Project repository
   -> Agent
        -> Engine
        -> Model Profile -> Provider
-       -> Runtime
   -> QUEUED Run
   -> durable scheduler
+  -> selected connected Runner
   -> durable Issue Workspace
-  -> Runtime Instance
+  -> Workspace transfer
   -> agent-runner
   -> Execution Session
   -> coding Engine
   -> commands / files / tests / Artifacts
+  -> Workspace sync-back
   -> Question / resume when needed
   -> Review
   -> Approve
@@ -35,7 +36,7 @@ Keep normal configuration understandable:
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Agent
+Engine + Model Profile -> Agent
 Issue -> assignee -> Run
 ```
 
@@ -274,7 +275,7 @@ Automatic merge/deploy is a separate, stronger permission and must not be implie
 
 ## Execution preflight
 
-The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Engine, Model Profile/Provider credentials/health, direct Runtime health/policy, runner protocol compatibility/availability and local Project repository prerequisites.
+The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Engine, Model Profile/Provider credentials/health, live Runner protocol compatibility/availability and local Project repository prerequisites.
 
 ## Explicitly after the v0.1 flow
 
@@ -293,17 +294,17 @@ The product distinguishes `configured` from `runnable`. Preflight evaluates Agen
 
 ## Implementation priority
 
-1. direct Agent -> Runtime configuration
-2. durable async scheduler/restart-safe continuation
+1. Agent Engine + Model Profile configuration (no Agent Runtime selection)
+2. durable async scheduler/restart-safe continuation with live Runner admission
 3. local repository-backed Issue Workspaces
-4. Runtime Instance lifecycle with same-Workspace reuse
-5. `agent-runner` binary + versioned WebSocket Execution Session transport
+4. external and internal `agent-runner` hosts over protocol v2
+5. Git-native Workspace transfer and sync-back
 6. canonical execution context + secure Provider credentials
 7. immutable provenance + durable raw logs/Artifacts
 8. complete Run/Review evidence
-9. operational preflight/runtime-policy truthfulness
+9. operational preflight/runner-availability truthfulness
 10. first real coding Engine (OpenCode first)
-11. prove local repository -> Run -> Runtime -> runner -> Engine -> changes -> Review end to end
+11. prove local repository -> Run -> Runner -> Engine -> changes -> Review end to end
 12. only then broaden repository integrations and the roadmap
 
 Frontend implementation uses Nuxt 4 + Nuxt UI v4 and remains within this v0.1 product scope. Plugin work is deliberately last, including after future users/groups/permissions work unless explicitly reprioritized.

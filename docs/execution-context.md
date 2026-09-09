@@ -29,7 +29,7 @@ encrypted secret/reference
  -> authorization check
  -> resolve/decrypt in trusted Go boundary
  -> execution-scoped secret material
- -> inject only into Runtime process/session
+ -> inject only into the assigned Runner session
  -> redact before every durable sink
 ```
 

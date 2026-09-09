@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/brantje/agent-board/apps/agent-runner/internal/protocol"
 	"github.com/brantje/agent-board/apps/agent-runner/internal/workspace"
@@ -24,24 +25,34 @@ type incomingTransfer struct {
 }
 
 type transferState struct {
-	mu         sync.Mutex
-	incoming   map[string]*incomingTransfer
-	ready      map[string]bool
+	mu       sync.Mutex
+	incoming map[string]*incomingTransfer
+	ready    map[string]bool
+	begun    map[string]bool
+	failed   map[string]bool
 }
 
 func newTransferState() *transferState {
 	return &transferState{
 		incoming: make(map[string]*incomingTransfer),
 		ready:    make(map[string]bool),
+		begun:    make(map[string]bool),
+		failed:   make(map[string]bool),
 	}
 }
 
 func (s *transferState) begin(sessionID string, begin protocol.TransferBegin) error {
-	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(begin.TransferID) == "" {
+	if strings.TrimSpace(sessionID) == "" {
 		return errors.New("transfer requires session and transfer ids")
+	}
+	if err := protocol.ValidateTransferBegin(begin); err != nil {
+		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.begun[sessionID] = true
+	delete(s.failed, sessionID)
+	delete(s.ready, sessionID)
 	s.incoming[sessionID] = &incomingTransfer{
 		transferID: begin.TransferID,
 		direction:  begin.Direction,
@@ -65,6 +76,12 @@ func (s *transferState) chunk(sessionID string, chunk protocol.TransferChunk) er
 	data, err := base64.StdEncoding.DecodeString(chunk.Data)
 	if err != nil {
 		return fmt.Errorf("decode transfer chunk: %w", err)
+	}
+	if transfer.expected == 0 && len(data) > 0 {
+		return errors.New("transfer payload exceeded declared size")
+	}
+	if int64(len(transfer.buffer)+len(data)) > protocol.MaxTransferBytes {
+		return errors.New("transfer payload exceeded declared size")
 	}
 	transfer.buffer = append(transfer.buffer, data...)
 	if transfer.expected > 0 && int64(len(transfer.buffer)) > transfer.expected {
@@ -102,7 +119,40 @@ func (s *transferState) end(sessionID string, end protocol.TransferEnd) ([]byte,
 func (s *transferState) markReady(sessionID string) {
 	s.mu.Lock()
 	s.ready[sessionID] = true
+	delete(s.failed, sessionID)
 	s.mu.Unlock()
+}
+
+func (s *transferState) markFailed(sessionID string) {
+	s.mu.Lock()
+	s.failed[sessionID] = true
+	delete(s.ready, sessionID)
+	s.mu.Unlock()
+}
+
+func (s *transferState) waitReady(sessionID string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.Lock()
+		ready := s.ready[sessionID]
+		failed := s.failed[sessionID]
+		begun := s.begun[sessionID]
+		incoming := s.incoming[sessionID] != nil
+		s.mu.Unlock()
+		if ready {
+			return true
+		}
+		if failed {
+			return false
+		}
+		if !begun && !incoming {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func (s *transferState) isReady(sessionID string) bool {
@@ -114,6 +164,8 @@ func (s *transferState) isReady(sessionID string) bool {
 func (s *transferState) clearReady(sessionID string) {
 	s.mu.Lock()
 	delete(s.ready, sessionID)
+	delete(s.begun, sessionID)
+	delete(s.failed, sessionID)
 	s.mu.Unlock()
 }
 
@@ -150,12 +202,22 @@ func (s *Server) handleTransferEnd(writer *connectionWriter, msg protocol.Messag
 		writer.sendError("transfer_failed", err.Error(), msg.SessionID)
 		return
 	}
+	if direction == "from_runner" {
+		s.syncWorkspaceBack(writer, msg.SessionID, end.TransferID)
+		return
+	}
 	if direction != "to_runner" {
 		return
 	}
 	repositoryPath := s.manager.SessionWorkspacePath(msg.SessionID)
-	if err := workspace.MaterializeBundle(context.Background(), repositoryPath, payload); err != nil {
+	if repositoryPath == "" {
+		s.transfers.markFailed(msg.SessionID)
 		writer.sendError("transfer_failed", "workspace could not be materialized", msg.SessionID)
+		return
+	}
+	if err := workspace.MaterializeBundle(context.Background(), repositoryPath, payload); err != nil {
+		s.transfers.markFailed(msg.SessionID)
+		writer.sendError("transfer_failed", "workspace could not be materialized: "+err.Error(), msg.SessionID)
 		return
 	}
 	s.transfers.markReady(msg.SessionID)
@@ -171,7 +233,7 @@ func (w *connectionWriter) sendTransfer(ctx context.Context, sessionID, transfer
 	}); err != nil {
 		return err
 	}
-	chunkSize := 64 << 10
+	chunkSize := protocol.TransferChunkSize
 	for offset := 0; offset < len(payload); offset += chunkSize {
 		end := offset + chunkSize
 		if end > len(payload) {
@@ -190,24 +252,34 @@ func (w *connectionWriter) sendTransfer(ctx context.Context, sessionID, transfer
 	return w.send(protocol.TypeTransferEnd, sessionID, protocol.TransferEnd{TransferID: transferID})
 }
 
-func (s *Server) syncWorkspaceBack(writer streamWriter, sessionID string) {
+func (s *Server) syncWorkspaceBack(writer streamWriter, sessionID, transferID string) {
+	if strings.TrimSpace(transferID) == "" {
+		transferID = sessionID + "-sync"
+	}
+	fail := func() {
+		_ = writer.send(protocol.TypeTransferFailed, sessionID, protocol.TransferFailed{
+			TransferID: transferID,
+			Code:       "transfer_failed",
+			Message:    "workspace sync snapshot failed",
+		})
+	}
 	s.transfers.clearReady(sessionID)
 	repositoryPath := s.manager.SessionWorkspacePath(sessionID)
+	if repositoryPath == "" {
+		fail()
+		return
+	}
 	if !workspace.IsRepository(context.Background(), repositoryPath) {
-		_ = os.RemoveAll(repositoryPath)
+		fail()
 		return
 	}
-	payload, err := workspace.SnapshotBundle(context.Background(), repositoryPath, sessionID+"-sync")
-	if err != nil {
-		writer.sendError("transfer_failed", "workspace sync snapshot failed", sessionID)
+	payload, err := workspace.SnapshotBundle(context.Background(), repositoryPath, transferID)
+	if err != nil || len(payload) == 0 {
+		fail()
 		return
 	}
-	if len(payload) == 0 {
-		_ = os.RemoveAll(repositoryPath)
-		return
-	}
-	if err := writer.sendTransfer(context.Background(), sessionID, sessionID+"-sync", "from_runner", payload); err != nil {
-		writer.sendError("transfer_failed", "workspace sync transfer failed", sessionID)
+	if err := writer.sendTransfer(context.Background(), sessionID, transferID, "from_runner", payload); err != nil {
+		fail()
 		return
 	}
 	_ = os.RemoveAll(repositoryPath)

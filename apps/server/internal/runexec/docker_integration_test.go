@@ -307,7 +307,16 @@ func waitForScriptedRun(t *testing.T, ctx context.Context, database *postgres.St
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timed out waiting for Run: %v", ctx.Err())
+			reason := ""
+			if run.FailureReason != nil {
+				reason = *run.FailureReason
+			}
+			events, _ := database.ListRunEvents(context.Background(), projectID, runID, 0, 50)
+			types := make([]string, 0, len(events))
+			for _, event := range events {
+				types = append(types, event.Type)
+			}
+			t.Fatalf("timed out waiting for Run: %v status=%s failure=%s events=%v", ctx.Err(), run.Status, reason, types)
 		case <-ticker.C:
 		}
 	}

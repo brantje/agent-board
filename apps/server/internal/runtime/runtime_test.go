@@ -11,7 +11,8 @@ func validSpec() RuntimeSpec {
 		ProjectID:         "project-1",
 		IssueID:           "issue-1",
 		WorkspaceID:       "workspace-1",
-				Image:             "agent-board-runtime:test",
+		RuntimeID:         "runtime-1",
+		Image:             "agent-board-runtime:test",
 		WorkingDirectory:  "/workspace",
 		Workspace: WorkspaceMount{
 			WorkspaceID: "workspace-1",
@@ -43,6 +44,7 @@ func TestValidateSpecRejectsInvalidOrEscapingState(t *testing.T) {
 		mutate func(*RuntimeSpec)
 	}{
 		{"missing identity", func(v *RuntimeSpec) { v.RuntimeInstanceID = "" }},
+		{"missing runtime", func(v *RuntimeSpec) { v.RuntimeID = "" }},
 		{"workspace mismatch", func(v *RuntimeSpec) { v.Workspace.WorkspaceID = "other" }},
 		{"missing source", func(v *RuntimeSpec) { v.Workspace.Source = "" }},
 		{"wrong mount target", func(v *RuntimeSpec) { v.Workspace.Target = "/tmp/workspace" }},

@@ -43,17 +43,39 @@ func (g *GitCLI) TransferSnapshot(ctx context.Context, repositoryPath, transferI
 	if _, err := g.run(ctx, "-C", repositoryPath, "reset"); err != nil {
 		return nil, fmt.Errorf("restore workspace index after transfer snapshot: %w", err)
 	}
+	transferRef := transferRefPrefix + transferID
+	if _, err := g.run(ctx, "-C", repositoryPath, "update-ref", transferRef, commit); err != nil {
+		return nil, fmt.Errorf("pin workspace transfer ref: %w", err)
+	}
+	defer func() { _, _ = g.run(ctx, "-C", repositoryPath, "update-ref", "-d", transferRef) }()
 	bundlePath := filepath.Join(os.TempDir(), ".agent-board-transfer-"+transferID+".bundle")
 	defer os.Remove(bundlePath)
-	if _, err := g.run(ctx, "-C", repositoryPath, "bundle", "create", bundlePath, commit); err != nil {
-		return nil, fmt.Errorf("create workspace transfer bundle: %w", err)
+	if err := g.writeCloneableBundle(ctx, repositoryPath, commit, bundlePath); err != nil {
+		return nil, err
 	}
 	payload, err := os.ReadFile(bundlePath)
 	if err != nil {
 		return nil, fmt.Errorf("read workspace transfer bundle: %w", err)
 	}
-	_, _ = g.run(ctx, "-C", repositoryPath, "update-ref", "-d", transferRefPrefix+transferID)
 	return payload, nil
+}
+
+func (g *GitCLI) writeCloneableBundle(ctx context.Context, repositoryPath, commit, bundlePath string) error {
+	private := filepath.Join(os.TempDir(), ".agent-board-bundle-"+filepath.Base(bundlePath))
+	defer os.RemoveAll(private)
+	if _, err := g.run(ctx, "clone", "--bare", repositoryPath, private); err != nil {
+		return fmt.Errorf("create workspace transfer bundle: %w", err)
+	}
+	if _, err := g.run(ctx, "--git-dir", private, "update-ref", "refs/heads/main", commit); err != nil {
+		return fmt.Errorf("create workspace transfer bundle: %w", err)
+	}
+	if _, err := g.run(ctx, "--git-dir", private, "symbolic-ref", "HEAD", "refs/heads/main"); err != nil {
+		return fmt.Errorf("create workspace transfer bundle: %w", err)
+	}
+	if _, err := g.run(ctx, "--git-dir", private, "bundle", "create", bundlePath, "HEAD", "main"); err != nil {
+		return fmt.Errorf("create workspace transfer bundle: %w", err)
+	}
+	return nil
 }
 
 // ApplyTransferBundle applies a runner-returned bundle onto the authoritative Workspace.
@@ -83,7 +105,9 @@ func (g *GitCLI) ApplyTransferBundle(ctx context.Context, repositoryPath string,
 	}
 	syncRef := "refs/agent-board/sync/head"
 	if _, err := g.run(ctx, "-C", repositoryPath, "fetch", name, "HEAD:"+syncRef); err != nil {
-		return fmt.Errorf("fetch sync bundle: %w", err)
+		if _, fallbackErr := g.run(ctx, "-C", repositoryPath, "fetch", name, "main:"+syncRef); fallbackErr != nil {
+			return fmt.Errorf("fetch sync bundle: %w", err)
+		}
 	}
 	remote, err := g.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", syncRef+"^{commit}")
 	if err != nil {

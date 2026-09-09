@@ -143,10 +143,6 @@ func TestRuntimeInstanceServiceConstructorAndServiceBundleBranches(t *testing.T)
 			_, err := NewRuntimeInstanceService(baseStore, nil, map[string]runtimepkg.Implementation{"docker": impl})
 			return err
 		},
-		"empty implementations": func() error {
-			_, err := NewRuntimeInstanceService(baseStore, workspace, nil)
-			return err
-		},
 		"blank kind": func() error {
 			_, err := NewRuntimeInstanceService(baseStore, workspace, map[string]runtimepkg.Implementation{" ": impl})
 			return err
@@ -163,8 +159,22 @@ func TestRuntimeInstanceServiceConstructorAndServiceBundleBranches(t *testing.T)
 		})
 	}
 
-	if _, err := NewServicesWithRuntimes(&fakeStore{}, materializer, nil); err == nil {
-		t.Fatal("NewServicesWithRuntimes() unexpectedly accepted empty implementations")
+	empty, err := NewRuntimeInstanceService(baseStore, workspace, nil)
+	if err != nil {
+		t.Fatalf("empty Runtime implementations must be allowed: %v", err)
+	}
+	if err := empty.Close(); err != nil {
+		t.Fatal(err)
+	}
+	runnerOnly, err := NewServicesWithRuntimes(&fakeStore{}, materializer, nil)
+	if err != nil {
+		t.Fatalf("NewServicesWithRuntimes() without Docker error=%v", err)
+	}
+	if runnerOnly.RuntimeInstances == nil || runnerOnly.ExecutionSessions == nil {
+		t.Fatal("runner-only services were not fully wired")
+	}
+	if err := runnerOnly.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
 

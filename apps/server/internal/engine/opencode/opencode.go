@@ -228,7 +228,8 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			if !executionObserved {
 				promptStallPolls++
 				if promptStallPolls >= promptAdmissionPollLimit {
-					return engine.Result{}, fmt.Errorf("opencode engine: native session did not start execution after prompt")
+					detail := nativeSessionStallDetail(ctx, native, session.ID)
+					return engine.Result{}, fmt.Errorf("opencode engine: native session did not start execution after prompt%s", detail)
 				}
 				inactivePolls = 0
 				continue
@@ -282,12 +283,10 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
 				return engine.Result{}, err
 			}
-			// A native Question can be asked and answered before the first activity
-			// poll. Since handleQuestion only retains requests for this exact native
-			// session, its presence is authoritative proof that execution started.
-			if len(state.nativeQuestions) > 0 {
+			if indicatesSessionExecution(eventRead.event, session.ID) || len(state.nativeQuestions) > 0 {
 				executionObserved = true
 				inactivePolls = 0
+				promptStallPolls = 0
 			}
 		}
 	}
@@ -348,6 +347,14 @@ func serverEnvironment(safe executioncontext.SafeContext, providerID string) (ma
 			providerID: providerConfig,
 		},
 	}
+	if providerID != "" && modelID != "" {
+		ref := providerID + "/" + modelID
+		config["model"] = ref
+		config["small_model"] = ref
+		config["agent"] = map[string]any{
+			"title": map[string]any{"disable": true},
+		}
+	}
 	encoded, err := json.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("opencode engine: encode provider config: %w", err)
@@ -397,7 +404,6 @@ func ensureNativeSession(ctx context.Context, native *client.Client, safe execut
 		}
 	}
 	session, err := native.CreateSession(ctx, client.CreateSessionRequest{
-		Directory: "/workspace",
 		Model: client.ModelRef{
 			ID:         safe.Model.Model,
 			ProviderID: settings.ProviderID,
@@ -447,7 +453,7 @@ func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	if safe.ReviewFeedback != nil && strings.TrimSpace(safe.ReviewFeedback.Feedback) != "" {
 		sections = append(sections, "Review feedback:\n"+strings.TrimSpace(safe.ReviewFeedback.Feedback))
 	}
-	sections = append(sections, "Work directly in /workspace and implement the requested issue. If human input is required, use OpenCode's native Question capability rather than guessing.")
+	sections = append(sections, "Work directly in the current project directory and implement the requested issue. If human input is required, use OpenCode's native Question capability rather than guessing.")
 	return strings.Join(sections, "\n\n")
 }
 
@@ -518,13 +524,37 @@ func isSessionIdleEvent(event client.Event, sessionID string) (bool, error) {
 	if event.Type != "session.idle" {
 		return false, nil
 	}
-	var properties struct {
+	var payload struct {
 		SessionID string `json:"sessionID"`
 	}
-	if err := json.Unmarshal(event.Properties, &properties); err != nil {
+	if err := json.Unmarshal(event.Properties, &payload); err != nil {
 		return false, fmt.Errorf("opencode engine: decode session idle event: %w", err)
 	}
-	return properties.SessionID == sessionID, nil
+	return payload.SessionID == sessionID, nil
+}
+
+func nativeSessionStallDetail(ctx context.Context, native *client.Client, sessionID string) string {
+	active, activeErr := native.SessionActive(ctx, sessionID)
+	sessions, listErr := native.ListSessions(ctx)
+	return fmt.Sprintf(" (session=%s active=%v activeErr=%v sessions=%d listErr=%v)", sessionID, active, activeErr, len(sessions), listErr)
+}
+
+func indicatesSessionExecution(event client.Event, sessionID string) bool {
+	if strings.TrimSpace(sessionID) == "" || !eventBelongsToSession(event, sessionID) {
+		return false
+	}
+	eventType := event.Type
+	return strings.HasPrefix(eventType, "message.") || strings.HasPrefix(eventType, "session.next.") || strings.HasPrefix(eventType, "question.")
+}
+
+func eventBelongsToSession(event client.Event, sessionID string) bool {
+	var payload struct {
+		SessionID string `json:"sessionID"`
+	}
+	if json.Unmarshal(event.Properties, &payload) != nil {
+		return false
+	}
+	return payload.SessionID == sessionID
 }
 
 type eventReadResult struct {

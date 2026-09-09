@@ -38,6 +38,9 @@ func (d *redirectDialer) lastCall() string {
 
 func TestNewSessionRoutesHTTPThroughExecutionSessionDialer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Host != "127.0.0.1:4321" {
+			t.Errorf("host=%q want session-local address", r.Host)
+		}
 		if r.URL.Path != "/api/health" {
 			t.Errorf("path=%q", r.URL.Path)
 			http.Error(w, "unexpected path", http.StatusNotFound)
@@ -173,7 +176,11 @@ func TestEventStreamValidationAndUnavailableCases(t *testing.T) {
 }
 
 func TestSubscribeReturnsTypedHTTPError(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/event" {
+			http.NotFound(w, r)
+			return
+		}
 		http.Error(w, "stream unavailable", http.StatusServiceUnavailable)
 	}))
 	defer server.Close()

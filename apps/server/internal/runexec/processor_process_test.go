@@ -540,7 +540,7 @@ func processTestSafeContext(workspace string) executioncontext.SafeContext {
 		Model:     executioncontext.ModelContext{ID: "model", Name: "Model", Model: "model"},
 		Provider:  executioncontext.ProviderContext{ID: "provider", Name: "Provider", Kind: "test"},
 		Runtime:   executioncontext.RuntimeContext{ID: "runtime", Name: "Runtime", Kind: "docker", Image: "image"},
-		Workspace: executioncontext.WorkspaceContext{ID: "workspace", Path: workspace, WorkingBranch: "work"},
+		Workspace: executioncontext.WorkspaceContext{ID: "workspace", Path: workspace, WorkingBranch: "work", BootstrapStatus: "READY"},
 	}
 }
 
@@ -555,6 +555,22 @@ func processTestEvent(events []store.Event, eventType string) store.Event {
 		}
 	}
 	return store.Event{}
+}
+
+func TestProcessorRecordOmitsEmptyRuntimeInstanceID(t *testing.T) {
+	evidenceStore := &processTestStore{}
+	recorder, err := evidence.NewRecorder(evidenceStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor := &Processor{events: recorder}
+	empty := ""
+	if err := processor.record(context.Background(), processTestSafeContext(t.TempDir()), "agent.message", map[string]any{"message": "ok"}, &empty, &empty); err != nil {
+		t.Fatal(err)
+	}
+	if len(evidenceStore.events) != 1 || evidenceStore.events[0].RuntimeInstanceID != nil || evidenceStore.events[0].ParentEventID != nil {
+		t.Fatalf("empty ids must be omitted: %+v", evidenceStore.events)
+	}
 }
 
 var _ scheduler.Lifecycle = processTestLifecycle{}

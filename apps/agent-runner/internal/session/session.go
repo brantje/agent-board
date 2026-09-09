@@ -28,6 +28,8 @@ var inheritedEnvironmentAllowlist = []string{
 	"LC_ALL",
 	"LC_CTYPE",
 	"TZ",
+	"SSL_CERT_FILE",
+	"SSL_CERT_DIR",
 }
 
 type Request struct {
@@ -113,10 +115,10 @@ func start(id, workspaceRoot string, request Request, redactionValues []string) 
 	return s, nil
 }
 
-func (s *Session) ID() string { return s.id }
+func (s *Session) ID() string            { return s.id }
 func (s *Session) Stdin() io.WriteCloser { return s.stdin }
-func (s *Session) Stdout() io.Reader { return s.stdout }
-func (s *Session) Stderr() io.Reader { return s.stderr }
+func (s *Session) Stdout() io.Reader     { return s.stdout }
+func (s *Session) Stderr() io.Reader     { return s.stderr }
 func (s *Session) Done() <-chan struct{} { return s.done }
 
 func (s *Session) Wait(ctx context.Context) (Result, error) {

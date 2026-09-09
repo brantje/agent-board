@@ -59,9 +59,13 @@ A queued Run exposes a machine-readable reason, for example:
 - model capacity exhausted
 - configuration/preflight unavailable
 - repository/source prerequisite unavailable
-- Runtime unavailable
+- runner capacity exhausted / no eligible live Runner
 
 Capacity-only waiting remains Run `QUEUED`; it does not force Issue `BLOCKED`.
+
+### Runner capacity
+
+The scheduler admits a Run only against a live authenticated Runner that advertises the Agent's Engine, satisfies Project runner policy, and is below active-session capacity. External runners are preferred; the server-managed internal runner is fallback when `allow_internal_runner` is true. Persisted last-seen/capabilities never make a disconnected Runner eligible.
 
 ## Release and reacquisition
 

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,7 +17,7 @@ func TestExecutionSessionLifecycleAndSequentialReuse(t *testing.T) {
 	other := seedRunFixture(t, s, "execution-session-other")
 
 	instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
-		ProjectID: fixture.project.ID, WorkspaceID: fixture.workspace.ID,
+		ProjectID: fixture.project.ID, WorkspaceID: fixture.workspace.ID, RuntimeID: fixture.runtime.ID,
 	})
 	if err != nil {
 		t.Fatalf("create runtime instance: %v", err)
@@ -38,9 +39,10 @@ func TestExecutionSessionLifecycleAndSequentialReuse(t *testing.T) {
 
 	first, err = s.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
 		ProjectID: fixture.project.ID, SessionID: first.ID, FromStatuses: []string{"PENDING"}, Status: "STARTING",
+		CommandArgv: json.RawMessage(`["opencode","serve"]`),
 	})
-	if err != nil {
-		t.Fatalf("transition starting: %v", err)
+	if err != nil || !bytes.Contains(first.CommandArgv, []byte("opencode")) {
+		t.Fatalf("transition starting: session=%+v err=%v", first, err)
 	}
 	first, err = s.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
 		ProjectID: fixture.project.ID, SessionID: first.ID, FromStatuses: []string{"STARTING"}, Status: "RUNNING",

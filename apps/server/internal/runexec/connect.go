@@ -24,7 +24,13 @@ func (p *capturingProcess) DialContext(ctx context.Context, network, address str
 		return nil, fmt.Errorf("run execution: process session connector is unsupported")
 	}
 	record := p.process.Record()
-	if record.ID == "" || record.ProjectID == "" || record.RuntimeInstanceID == "" {
+	if record.ID == "" || record.ProjectID == "" {
+		return nil, fmt.Errorf("run execution: process has no durable Execution Session binding")
+	}
+	if record.RunnerID != "" {
+		return dialer.DialSession(ctx, record.ProjectID, "", record.ID, network, address)
+	}
+	if record.RuntimeInstanceID == "" {
 		return nil, fmt.Errorf("run execution: process has no durable Execution Session binding")
 	}
 	return dialer.DialSession(ctx, record.ProjectID, record.RuntimeInstanceID, record.ID, network, address)

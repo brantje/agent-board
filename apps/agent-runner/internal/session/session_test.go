@@ -103,6 +103,19 @@ func TestWorkspaceBoundary(t *testing.T) {
 	}
 }
 
+func TestSessionWorkspacePathRejectsTraversalIDs(t *testing.T) {
+	workspace := t.TempDir()
+	manager := NewManagerWithWorkspace(1, workspace)
+	for _, id := range []string{"../escape", "a/../../etc", "/tmp/outside", "foo/bar"} {
+		if path := manager.SessionWorkspacePath(id); path != "" {
+			t.Fatalf("session id %q resolved to %q", id, path)
+		}
+		if _, err := manager.Start(id, Request{Command: []string{"true"}}); err == nil {
+			t.Fatalf("session id %q was accepted", id)
+		}
+	}
+}
+
 func TestWorkspaceBoundaryRejectsSymlinkEscape(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
@@ -212,6 +225,17 @@ func TestTerminateProcessTree(t *testing.T) {
 	}
 	if !result.Signaled {
 		t.Fatalf("expected signaled result, got %#v", result)
+	}
+}
+
+func TestNewManagerDefaultsAndWorkspaceRoot(t *testing.T) {
+	manager := NewManager(0)
+	if manager.Capacity() != 1 || manager.WorkspaceRoot() != DefaultWorkspaceRoot {
+		t.Fatalf("defaults capacity=%d root=%q", manager.Capacity(), manager.WorkspaceRoot())
+	}
+	custom := NewManagerWithWorkspace(3, "")
+	if custom.Capacity() != 3 || custom.WorkspaceRoot() != DefaultWorkspaceRoot {
+		t.Fatalf("empty root fallback capacity=%d root=%q", custom.Capacity(), custom.WorkspaceRoot())
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -59,7 +60,19 @@ func (m *Manager) WorkspaceRoot() string {
 }
 
 func (m *Manager) SessionWorkspacePath(sessionID string) string {
-	return filepath.Join(m.workspaceRoot, sessionID)
+	id := sanitizeSessionID(sessionID)
+	if id == "" {
+		return ""
+	}
+	return filepath.Join(m.workspaceRoot, id)
+}
+
+func sanitizeSessionID(sessionID string) string {
+	cleaned := filepath.Clean(sessionID)
+	if cleaned == "." || cleaned == ".." || strings.Contains(cleaned, string(filepath.Separator)) || filepath.IsAbs(cleaned) {
+		return ""
+	}
+	return cleaned
 }
 
 func (m *Manager) ActiveIDs() []string {
@@ -74,6 +87,7 @@ func (m *Manager) ActiveIDs() []string {
 }
 
 func (m *Manager) Start(id string, request Request) (*Session, error) {
+	id = sanitizeSessionID(id)
 	if id == "" {
 		return nil, errors.New("execution session id is required")
 	}
@@ -100,6 +114,9 @@ func (m *Manager) Start(id string, request Request) (*Session, error) {
 	}
 
 	sessionRoot := m.SessionWorkspacePath(id)
+	if sessionRoot == "" {
+		return nil, errors.New("execution session id is required")
+	}
 	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("prepare session workspace: %w", err)
 	}

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	maxMessageSize    = 1 << 20
+	maxMessageSize    = shared.MaxMessageSize
 	defaultPongWait   = 60 * time.Second
 	defaultPingPeriod = 45 * time.Second
 	pingWriteTimeout  = 5 * time.Second
@@ -268,6 +268,10 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 		writer.sendError("invalid_start", "invalid start request", msg.SessionID)
 		return
 	}
+	if !s.transfers.waitReady(msg.SessionID, 30*time.Second) {
+		writer.sendError("start_failed", "workspace is not ready", msg.SessionID)
+		return
+	}
 	execution, stdin, err := s.startSession(msg.SessionID, session.Request{
 		Command: request.Command,
 		Dir:     request.Dir,
@@ -294,7 +298,7 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 	go func() {
 		defer s.streamWG.Done()
 		defer s.removeDelivery(msg.SessionID, delivery)
-		streamExecution(s.shutdownCtx, s, delivery, execution)
+		streamExecution(s.shutdownCtx, delivery, execution)
 	}()
 }
 
@@ -402,7 +406,7 @@ func (s *Server) handleSignal(writer *connectionWriter, sessionID string, force 
 	}
 }
 
-func streamExecution(ctx context.Context, server *Server, writer streamWriter, execution *session.Session) {
+func streamExecution(ctx context.Context, writer streamWriter, execution *session.Session) {
 	var streams sync.WaitGroup
 	streams.Add(2)
 	go func() {
@@ -416,7 +420,6 @@ func streamExecution(ctx context.Context, server *Server, writer streamWriter, e
 
 	result, err := execution.Wait(ctx)
 	streams.Wait()
-	server.syncWorkspaceBack(writer, execution.ID())
 	if err != nil {
 		if ctx.Err() != nil {
 			return

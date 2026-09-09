@@ -11,25 +11,36 @@ import (
 )
 
 // DialSession opens a connection from the runner that owns sessionID to a
-// service local to that active Execution Session. The durable binding is
-// validated before any transport operation so callers cannot use a session ID
-// with a different Runtime Instance.
+// service local to that active Execution Session. Runtime-owned sessions are
+// bound through runtimeInstanceID; runner-owned sessions use the persisted
+// Runner ID and must not be addressed through a Runtime Instance.
 func (s *ExecutionSessionService) DialSession(ctx context.Context, projectID, runtimeInstanceID, sessionID, network, address string) (net.Conn, error) {
-	if s == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(runtimeInstanceID) == "" || strings.TrimSpace(sessionID) == "" {
-		return nil, NewError("invalid_argument", "projectId, runtimeInstanceId and sessionId are required", store.ErrInvalidArgument)
+	if s == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(sessionID) == "" {
+		return nil, NewError("invalid_argument", "projectId and sessionId are required", store.ErrInvalidArgument)
 	}
 	session, err := s.store.GetExecutionSession(ctx, projectID, sessionID)
 	if err != nil {
 		return nil, translateStoreError(err, "execution_session")
 	}
-	if session.RuntimeInstanceID != runtimeInstanceID {
-		return nil, NewError("execution_session_runtime_mismatch", "Execution Session does not belong to the requested Runtime Instance", store.ErrInvalidArgument)
-	}
 	if session.Status != "RUNNING" {
 		return nil, NewError("execution_session_not_running", "Execution Session is not running", store.ErrConflict)
 	}
 
-	client, err := s.runners.Connect(ctx, projectID, runtimeInstanceID)
+	var client runner.Client
+	if session.RunnerID != "" {
+		if strings.TrimSpace(runtimeInstanceID) != "" {
+			return nil, NewError("execution_session_runtime_mismatch", "Execution Session does not belong to the requested Runtime Instance", store.ErrInvalidArgument)
+		}
+		client, err = s.registry.Connect(ctx, projectID, session.RunnerID)
+	} else {
+		if strings.TrimSpace(runtimeInstanceID) == "" {
+			return nil, NewError("invalid_argument", "projectId, runtimeInstanceId and sessionId are required", store.ErrInvalidArgument)
+		}
+		if session.RuntimeInstanceID != runtimeInstanceID {
+			return nil, NewError("execution_session_runtime_mismatch", "Execution Session does not belong to the requested Runtime Instance", store.ErrInvalidArgument)
+		}
+		client, err = s.runners.Connect(ctx, projectID, runtimeInstanceID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("connect runner for session-local dial: %w", err)
 	}

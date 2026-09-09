@@ -17,7 +17,8 @@ func TestRuntimeInstanceStopTimeIsStable(t *testing.T) {
 	instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
 		ProjectID:   f.project.ID,
 		WorkspaceID: f.workspace.ID,
-			})
+		RuntimeID:   f.runtime.ID,
+	})
 	if err != nil {
 		t.Fatalf("create runtime instance: %v", err)
 	}
@@ -83,6 +84,11 @@ func TestConfigurationOwnershipChangesCannotBreakProjectScope(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `UPDATE model_profiles SET project_id = $1 WHERE id = $2`, second.project.ID, first.model.ID); err == nil {
 		t.Fatal("expected referenced model profile ownership change to fail")
 	}
+	if _, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
+		ProjectID: first.project.ID, WorkspaceID: first.workspace.ID, RuntimeID: first.runtime.ID,
+	}); err != nil {
+		t.Fatalf("create referenced runtime instance: %v", err)
+	}
 	if _, err := s.pool.Exec(ctx, `UPDATE runtimes SET project_id = $1 WHERE id = $2`, second.project.ID, first.runtime.ID); err == nil {
 		t.Fatal("expected referenced runtime ownership change to fail")
 	}
@@ -119,7 +125,7 @@ func TestImmutableEvidenceBlocksParentDeletion(t *testing.T) {
 		Name:           "history-agent",
 		Engine:         "test",
 		ModelProfileID: f.model.ID,
-				EngineSettings: store.EmptyObject,
+		EngineSettings: store.EmptyObject,
 	})
 	if err != nil {
 		t.Fatalf("create history agent: %v", err)

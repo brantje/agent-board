@@ -100,3 +100,15 @@ func TestPayloadShape(t *testing.T) {
 		t.Fatalf("unexpected version payload: %#v", payload)
 	}
 }
+
+func TestValidateTransferBeginRejectsBlankIDAndOversize(t *testing.T) {
+	if err := ValidateTransferBegin(TransferBegin{TransferID: "t1", TotalBytes: 8}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateTransferBegin(TransferBegin{TotalBytes: 1}); err == nil {
+		t.Fatal("blank transfer id accepted")
+	}
+	if err := ValidateTransferBegin(TransferBegin{TransferID: "t1", TotalBytes: MaxTransferBytes + 1}); err == nil {
+		t.Fatal("oversize transfer accepted")
+	}
+}

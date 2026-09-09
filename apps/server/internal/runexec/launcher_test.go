@@ -106,6 +106,9 @@ func (s *launcherSessionStore) TransitionExecutionSession(_ context.Context, tra
 	now := time.Now()
 	session.Status = transition.Status
 	session.ExitCode = transition.ExitCode
+	if len(transition.CommandArgv) > 0 {
+		session.CommandArgv = append(json.RawMessage(nil), transition.CommandArgv...)
+	}
 	if transition.Status == "RUNNING" && session.StartedAt == nil {
 		session.StartedAt = &now
 	}
@@ -638,6 +641,21 @@ func TestProcessLauncherAttachFailureBoundaries(t *testing.T) {
 		}
 		if _, err := launcher.Attach(t.Context()); !errors.Is(err, want) {
 			t.Fatalf("Attach() error=%v want=%v", err, want)
+		}
+	})
+
+	t.Run("pending runner session", func(t *testing.T) {
+		launcher := &processLauncher{
+			sessions:        failingLauncherSessions{err: app.NewError("execution_session_not_running", "Execution Session is not running", store.ErrConflict)},
+			events:          recorder,
+			output:          output,
+			safe:            safe,
+			runnerID:        "runner-1",
+			attachSessionID: "session-1",
+			scope:           evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+		}
+		if _, err := launcher.Attach(t.Context()); !errors.Is(err, engine.ErrNotAttachable) {
+			t.Fatalf("Attach() error=%v want ErrNotAttachable", err)
 		}
 	})
 

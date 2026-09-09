@@ -20,23 +20,20 @@ Docker is implementation #1; the contract remains implementation-neutral.
 12. Configured Runtime identity is separate from implementation/external IDs.
 13. Agent-executed code is untrusted.
 14. Runtime creation comes from validated server-owned configuration.
-15. Coding Engine processes execute inside the selected Runtime Instance through `agent-runner`.
+15. Coding Engine processes execute on the selected Runner through `agent-runner`. External hosts do not require a Runtime Instance.
 
 ## Resolution
 
 ```text
 Agent
- -> Runtime
- -> verify accessible/enabled/runnable
- -> validated Runtime Spec
- -> Runtime implementation
- -> Runtime Instance
- -> agent-runner
+ -> Engine + Model Profile
+ -> scheduler
+ -> live eligible Runner
  -> Execution Session
  -> Engine process
 ```
 
-Runtime owns the complete executable environment configuration and policy. Agents select Runtime directly.
+Agents select Engine and Model Profile. The scheduler selects an eligible connected Runner. Runtime remains a reusable configured execution environment for legacy internal managed compute only.
 
 ## Runtime configuration
 

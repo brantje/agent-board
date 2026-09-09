@@ -86,6 +86,9 @@ func (c *Connection) handleTransferMessage(msg protocol.Message) error {
 		if err != nil {
 			return err
 		}
+		if err := protocol.ValidateTransferBegin(begin); err != nil {
+			return err
+		}
 		c.mu.Lock()
 		c.transfers[msg.SessionID] = &incomingTransferState{
 			transferID: begin.TransferID,
@@ -114,6 +117,14 @@ func (c *Connection) handleTransferMessage(msg protocol.Message) error {
 		if err != nil {
 			c.mu.Unlock()
 			return fmt.Errorf("decode transfer chunk: %w", err)
+		}
+		if transfer.expected == 0 && len(data) > 0 {
+			c.mu.Unlock()
+			return c.completeTransfer(msg.SessionID, transferResult{err: fmt.Errorf("transfer payload exceeded declared size")})
+		}
+		if int64(len(transfer.buffer)+len(data)) > protocol.MaxTransferBytes {
+			c.mu.Unlock()
+			return c.completeTransfer(msg.SessionID, transferResult{err: fmt.Errorf("transfer payload exceeded declared size")})
 		}
 		transfer.buffer = append(transfer.buffer, data...)
 		transferred := int64(len(transfer.buffer))

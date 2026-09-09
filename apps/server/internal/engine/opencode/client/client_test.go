@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClientNativeSessionAndQuestionRoutes(t *testing.T) {
@@ -203,7 +204,7 @@ func TestClientHealthFallsBackToLegacyRoute(t *testing.T) {
 
 func TestClientDecodesNativeSSEEvents(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/event" || r.Header.Get("Accept") != "text/event-stream" {
+		if r.URL.Path != "/event" && r.URL.Path != "/api/event" || r.Header.Get("Accept") != "text/event-stream" {
 			t.Errorf("request path=%q accept=%q", r.URL.Path, r.Header.Get("Accept"))
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -243,6 +244,54 @@ func TestClientReturnsTypedHTTPError(t *testing.T) {
 	var httpErr *HTTPError
 	if !errorsAs(err, &httpErr) || httpErr.StatusCode != http.StatusBadRequest {
 		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestClientJSONRequestsBoundTheirWait(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	native, err := New(server.Client(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, err = native.Health(context.Background())
+	elapsed := time.Since(started)
+	if err == nil {
+		t.Fatal("hung JSON request unexpectedly succeeded")
+	}
+	if elapsed < 2*time.Second || elapsed > 12*time.Second {
+		t.Fatalf("json timeout elapsed=%s err=%v", elapsed, err)
+	}
+}
+
+func TestClientCreateSessionOmitsLocationWhenDirectoryEmpty(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode create session: %v", err)
+		}
+		if _, exists := payload["location"]; exists {
+			t.Errorf("location unexpectedly present: %+v", payload)
+		}
+		model, _ := payload["model"].(map[string]any)
+		if fmt.Sprint(model["providerID"]) != "openrouter" || fmt.Sprint(model["id"]) != "test-model" {
+			t.Errorf("model=%v", payload["model"])
+		}
+		writeJSON(t, w, http.StatusOK, map[string]any{"data": map[string]any{"id": "ses_cwd"}})
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	native, err := New(server.Client(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := native.CreateSession(context.Background(), CreateSessionRequest{Model: ModelRef{ProviderID: "openrouter", ID: "test-model"}})
+	if err != nil || session.ID != "ses_cwd" {
+		t.Fatalf("session=%+v err=%v", session, err)
 	}
 }
 

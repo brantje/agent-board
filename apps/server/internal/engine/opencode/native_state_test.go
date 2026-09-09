@@ -47,6 +47,33 @@ func TestIsSessionIdleEventFiltersAndValidatesNativeSession(t *testing.T) {
 	}
 }
 
+func TestIndicatesSessionExecutionRequiresMatchingPromptActivity(t *testing.T) {
+	if !indicatesSessionExecution(client.Event{
+		Type:       "message.part.updated",
+		Properties: idleEventProperties(t, "ses_1"),
+	}, "ses_1") {
+		t.Fatal("session-scoped message event should indicate execution")
+	}
+	if !indicatesSessionExecution(client.Event{
+		Type:       "session.next.prompted",
+		Properties: idleEventProperties(t, "ses_1"),
+	}, "ses_1") {
+		t.Fatal("session.next event should indicate execution")
+	}
+	if indicatesSessionExecution(client.Event{
+		Type:       "session.created",
+		Properties: idleEventProperties(t, "ses_1"),
+	}, "ses_1") {
+		t.Fatal("session.created must not count as prompt execution")
+	}
+	if indicatesSessionExecution(client.Event{
+		Type:       "message.part.updated",
+		Properties: idleEventProperties(t, "ses_other"),
+	}, "ses_1") {
+		t.Fatal("other session message event must not indicate execution")
+	}
+}
+
 func TestReconcilePendingQuestionsHandlesEmptyAndErrorResponses(t *testing.T) {
 	emptyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, []any{})
@@ -131,7 +158,7 @@ func TestEngineCompletesOnMatchingNativeIdleEvent(t *testing.T) {
 	_, err = adapter.Execute(context.Background(), engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Complete on native idle"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "test-model"},
 			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
 		},
@@ -265,7 +292,7 @@ func TestEngineFailsWhenIdleBeforeExecutionStarts(t *testing.T) {
 	_, err = adapter.Execute(context.Background(), engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Fail on early idle"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "test-model"},
 			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
 		},
@@ -349,7 +376,7 @@ func nativeStateRequest(launcher *fakeOpenCodeLauncher) engine.Request {
 	return engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Observe native completion"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "test-model"},
 			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
 		},

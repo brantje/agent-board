@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxMessageSize            = 1 << 20
+	maxMessageSize            = protocol.MaxMessageSize
 	writeTimeout              = 10 * time.Second
 	handshakeTimeout          = 10 * time.Second
 	runnerReadTimeout         = 90 * time.Second

@@ -183,12 +183,27 @@ func (s *ExecutionSessionService) StartPreparedOnRunner(ctx context.Context, pro
 	if err != nil {
 		return nil, err
 	}
-	if session.Status != "PENDING" {
+	fromStatus := []string{"PENDING"}
+	switch session.Status {
+	case "PENDING":
+	case "COMPLETED":
+		fromStatus = []string{"COMPLETED"}
+	default:
 		return nil, NewError("execution_session_invalid_state", "Execution Session is not pending workspace transfer", store.ErrInvalidArgument)
 	}
-	session, err = s.transition(ctx, session, []string{"PENDING"}, "STARTING", nil)
+	argv, err := json.Marshal(request.Command)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("encode execution command: %w", err)
+	}
+	previous := session
+	session, err = s.store.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
+		ProjectID: session.ProjectID, SessionID: session.ID, FromStatuses: fromStatus, Status: "STARTING", CommandArgv: argv,
+	})
+	if err != nil {
+		return nil, translateStoreError(err, "execution_session")
+	}
+	if session.RunID != previous.RunID || session.RuntimeInstanceID != previous.RuntimeInstanceID || session.RunnerID != previous.RunnerID {
+		return nil, fmt.Errorf("execution session immutable binding changed during transition")
 	}
 	client, err := s.registry.Connect(ctx, projectID, session.RunnerID)
 	if err != nil {
@@ -461,7 +476,7 @@ func (p *ExecutionProcess) observe() {
 		}
 		finalErr = transitionErr
 	}
-	if record.Status == "COMPLETED" || record.Status == "FAILED" || record.Status == "CANCELLED" {
+	if record.RuntimeInstanceID != "" && (record.Status == "COMPLETED" || record.Status == "FAILED" || record.Status == "CANCELLED") {
 		if statusErr := p.service.updateRunnerStatusRecovery(record.ProjectID, record.RuntimeInstanceID, "READY"); statusErr != nil {
 			finalErr = errors.Join(finalErr, statusErr)
 		}

@@ -33,6 +33,7 @@ jobs:
           --health-retries 10
     env:
       AGENT_BOARD_TEST_DATABASE_RESET: "1"
+      AGENT_BOARD_TEST_RUNNER: "1"
     steps:
       - uses: actions/checkout@v5
         with:

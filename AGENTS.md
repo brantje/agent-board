@@ -34,10 +34,9 @@ Local Project repository
  -> Agent
       -> Engine
       -> Model Profile -> Provider
-      -> Runtime
  -> durable scheduler
+ -> selected connected Runner
  -> durable Issue Workspace
- -> Runtime Instance
  -> agent-runner
  -> Execution Session
  -> real coding Engine
@@ -85,12 +84,12 @@ After the answers, finalize the plan and proceed. Avoid extended question trees 
 - PostgreSQL is authoritative for structured state and scheduler ownership.
 - Browser/request lifetime never owns execution or continuation.
 - Engine adapters remain server-side; `agent-runner` stays Engine-neutral.
-- Engine processes execute inside the selected Runtime Instance through `agent-runner`.
-- Server/runner transport is explicitly versioned WebSocket.
-- Model inference is independent from Runtime compute.
-- Agents select Runtime directly.
-- Runtime owns the complete execution environment/policy configuration.
-- Agent concurrency and Model Profile capacity are scheduler constraints.
+- Engine processes execute on the selected Runner through `agent-runner`.
+- Server/runner transport is explicitly versioned WebSocket (runner -> server protocol v2).
+- Model inference is independent from Runner compute.
+- Agents select Engine and Model Profile; the scheduler selects an eligible Runner.
+- Runtime remains legacy internal managed compute only and is not Agent configuration.
+- Agent concurrency, Model Profile capacity and live Runner capacity are scheduler constraints.
 - Questions and Decisions are first-class durable objects.
 - Events are append-only and persist-before-publish.
 - Secrets are ephemeral and redacted before every durable sink.
@@ -102,7 +101,7 @@ Canonical configuration:
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Agent
+Engine + Model Profile -> Agent
 ```
 
 Board workflow:
@@ -176,7 +175,7 @@ pnpm build
 - PostgreSQL owns durable scheduling state; process-local semaphores/maps are not authoritative.
 - Human decisions requiring continuation persist that continuation durably before success returns.
 - Do not create parallel schedulers, Run lifecycles, Workspaces or Engine-owned authoritative state.
-- Do not introduce a Runtime Profile domain/API/persistence/UI layer; Agents select Runtime directly.
+- Do not introduce a Runtime Profile, Executor Profile or Runner Profile domain/API/persistence/UI layer; Agents select Engine and Model Profile, and the scheduler selects Runners.
 - Keep Engine adapters server-side and independent from raw runner WebSocket framing.
 - Keep `agent-runner` Engine-neutral and free of PostgreSQL, scheduler, Review and control-plane authorization logic.
 

@@ -168,6 +168,48 @@ func TestAuthorizedExecutionStartOnRunnerRejectsRuntimeSecretRefs(t *testing.T) 
 	if !ok || apiErr.Code != "execution_secret_unavailable" {
 		t.Fatalf("err=%v api=%+v", err, apiErr)
 	}
+	_, err = service.StartPreparedOnRunner(context.Background(), "project-1", "session-1", AuthorizedExecutionRequest{
+		Command:           []string{"true"},
+		RuntimeSecretRefs: map[string]string{"TOKEN": "runtime-token"},
+	})
+	apiErr, ok = AsError(err)
+	if !ok || apiErr.Code != "execution_secret_unavailable" {
+		t.Fatalf("prepared err=%v api=%+v", err, apiErr)
+	}
+}
+
+func TestAuthorizedCreateAndStartPreparedRunnerSession(t *testing.T) {
+	transport := newFakeExecutionTransport("session-1")
+	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
+	manager := &fakeExecutionManager{client: client}
+	storeFake := &executionSessionStoreFake{
+		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
+	}
+	lowLevel, err := NewExecutionSessionService(storeFake, manager, manager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{prepared: executioncontext.Prepared{
+		Secrets: map[string]string{"AGENT_BOARD_PROVIDER_API_KEY": "provider-secret"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := service.CreateRunnerSession(context.Background(), "project-1", "run-1", "runner-1")
+	if err != nil || session.RunnerID != "runner-1" || session.RuntimeInstanceID != "" {
+		t.Fatalf("session=%+v err=%v", session, err)
+	}
+	process, err := service.StartPreparedOnRunner(context.Background(), "project-1", session.ID, AuthorizedExecutionRequest{Command: []string{"true"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process.Record().RunnerID != "runner-1" || process.Record().RuntimeInstanceID != "" {
+		t.Fatalf("record=%+v", process.Record())
+	}
+	close(transport.resultCh)
+	if _, err := process.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func assertRunRedactionRetainedAndRelease(t *testing.T, service *AuthorizedExecutionSessionService, runID string, released <-chan struct{}) {

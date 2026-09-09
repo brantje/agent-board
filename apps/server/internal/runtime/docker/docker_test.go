@@ -77,7 +77,8 @@ func dockerSpec() runtimepkg.RuntimeSpec {
 		ProjectID:         "project-1",
 		IssueID:           "issue-1",
 		WorkspaceID:       "workspace-1",
-				Image:             "agent-board-runtime:test",
+		RuntimeID:         "runtime-1",
+		Image:             "agent-board-runtime:test",
 		WorkingDirectory:  "/workspace",
 		Resources: runtimepkg.ResourcePolicy{
 			CPULimitMillis:   &cpu,

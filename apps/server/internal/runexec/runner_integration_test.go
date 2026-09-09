@@ -15,8 +15,6 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine/scripted"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
-	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
-	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
@@ -62,11 +60,7 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dockerRuntime, err := dockerruntime.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime})
+	services, err := app.NewServicesWithRuntimes(database, materializer, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,14 +92,18 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 		_ = proc.Wait()
 	})
 	waitForRunnerConnected(t, services.ControlPlane.Runners.Connections, runner.ID)
-
-	database.SetRunnerCandidates(func(engine string) []string {
-		if engine != scripted.Name {
-			return nil
+	database.SetRunnerCandidates(services.ControlPlane.Runners.Connections.Candidates)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, id := range services.ControlPlane.Runners.Connections.Candidates(scripted.Name) {
+			if id == runner.ID {
+				goto admitted
+			}
 		}
-		return []string{runner.ID}
-	})
-
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("live registry did not advertise the connected runner for the scripted engine")
+admitted:
 	project, run := createRunnerScriptedIntegrationRun(t, ctx, services.ControlPlane, repositoryPath)
 	baseBlobs, err := evidence.NewFileBlobStore(filepath.Join(t.TempDir(), "evidence"), 8<<20)
 	if err != nil {
@@ -136,6 +134,7 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	processor.SetWorkspaceEnsurer(services.Workspaces)
 	config := scheduler.DefaultConfig("runner-integration")
 	config.PollInterval = 20 * time.Millisecond
 	config.LeaseDuration = 3 * time.Second
@@ -161,7 +160,12 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 		t.Fatal("scheduler did not stop")
 	}
 	if terminal.Status != "READY_FOR_REVIEW" {
-		t.Fatalf("run status=%s failure=%v", terminal.Status, terminal.FailureReason)
+		reason := ""
+		if terminal.FailureReason != nil {
+			reason = *terminal.FailureReason
+		}
+		events, _ := database.ListRunEvents(context.Background(), project.ID, run.ID, 0, 80)
+		t.Fatalf("run status=%s failure=%s events=%v", terminal.Status, reason, eventTypes(events))
 	}
 
 	workspaceRecord, err := database.GetWorkspace(ctx, project.ID, terminal.WorkspaceID)

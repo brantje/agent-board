@@ -1,6 +1,22 @@
 package runnerprotocol
 
-const TransferChunkSize = 64 << 10
+import "fmt"
+
+const (
+	TransferChunkSize = 64 << 10
+	MaxTransferBytes  = 512 << 20
+	MaxMessageSize    = 1 << 20
+)
+
+func ValidateTransferBegin(begin TransferBegin) error {
+	if begin.TransferID == "" {
+		return fmt.Errorf("transfer id is required")
+	}
+	if begin.TotalBytes < 0 || begin.TotalBytes > MaxTransferBytes {
+		return fmt.Errorf("transfer size is invalid")
+	}
+	return nil
+}
 
 type TransferBegin struct {
 	TransferID string `json:"transfer_id"`

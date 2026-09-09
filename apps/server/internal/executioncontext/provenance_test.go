@@ -68,6 +68,25 @@ func TestEnsureProvenancePersistsSafeContextOnce(t *testing.T) {
 	}
 }
 
+func TestEnsureProvenanceRecordsRunnerIdentity(t *testing.T) {
+	evidence := &fakeProvenanceStore{}
+	safe := SafeContext{
+		Run:    RunContext{ID: "run-1", Attempt: 1},
+		Agent:  AgentContext{Engine: "opencode"},
+		Runner: &RunnerContext{ID: "runner-1", Name: "lab-host", Internal: false},
+	}
+	if err := EnsureProvenance(context.Background(), evidence, "project-1", "run-1", safe); err != nil {
+		t.Fatal(err)
+	}
+	var got Provenance
+	if err := json.Unmarshal(evidence.snapshot, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Context.Runner == nil || got.Context.Runner.ID != "runner-1" || got.Context.Runner.Name != "lab-host" {
+		t.Fatalf("runner provenance = %+v", got.Context.Runner)
+	}
+}
+
 func TestEnsureProvenanceRejectsDifferentHistoricalContext(t *testing.T) {
 	evidence := &fakeProvenanceStore{}
 	first := SafeContext{Run: RunContext{ID: "run-1", Attempt: 1}, Runtime: RuntimeContext{Image: "runtime:v1"}}

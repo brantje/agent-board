@@ -139,3 +139,11 @@ func (s *RedactingStore) AcquireWorkspaceBootstrapLock(ctx context.Context, work
 	}
 	return base.AcquireWorkspaceBootstrapLock(ctx, workspaceID)
 }
+
+func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner, error) {
+	base, ok := s.ControlPlaneStore.(store.RunnerStore)
+	if !ok {
+		return store.Runner{}, fmt.Errorf("redacting store base does not support runners")
+	}
+	return base.GetRunner(ctx, id)
+}

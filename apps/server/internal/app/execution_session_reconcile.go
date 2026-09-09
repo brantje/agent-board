@@ -64,6 +64,9 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 	case "COMPLETED", "FAILED", "CANCELLED":
 		return nil, nil
 	case "PENDING":
+		if session.RunnerID != "" {
+			return nil, nil
+		}
 		_, err := s.transition(ctx, session, []string{"PENDING"}, "FAILED", nil)
 		return nil, err
 	case "STARTING", "RUNNING":

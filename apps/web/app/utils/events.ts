@@ -105,7 +105,6 @@ const hiddenRunActivityTypes = new Set([
   'engine.file_created',
   'file.created',
   'model.usage',
-  'workspace.transfer.progress',
 ])
 
 const boardActivityFamilies = new Set(['issue', 'run', 'question', 'review', 'decision', 'project'])
@@ -154,6 +153,9 @@ export function applyCurrentBranchToRun<T extends Run>(run: T, event: EventEvide
 }
 
 export function eventTitle(event: EventEvidence) {
+  if (event.type.startsWith('workspace.transfer.')) {
+    return workspaceTransferTitle(event)
+  }
   if (event.type === 'agent.message') {
     const kind = typeof event.payload?.kind === 'string' ? event.payload.kind : 'message'
     return agentMessageKinds[kind] ?? 'Message'
@@ -163,10 +165,26 @@ export function eventTitle(event: EventEvidence) {
   return event.type
 }
 
-function workspaceTransferDirection(direction: unknown) {
-  if (direction === 'to_runner') return 'To runner'
-  if (direction === 'from_runner') return 'From runner'
-  return typeof direction === 'string' && direction.trim() ? direction : undefined
+function workspaceTransferRunnerName(payload: Record<string, unknown>) {
+  if (typeof payload.runnerName === 'string' && payload.runnerName.trim()) return payload.runnerName.trim()
+  if (typeof payload.runnerId === 'string' && payload.runnerId.trim()) return payload.runnerId.trim()
+  return 'runner'
+}
+
+function workspaceTransferTitle(event: EventEvidence) {
+  const payload = event.payload || {}
+  const name = workspaceTransferRunnerName(payload)
+  if (event.type === 'workspace.transfer.failed') {
+    return payload.direction === 'from_runner'
+      ? `Failed to synchronize changes from ${name}`
+      : `Failed to transfer workspace to ${name}`
+  }
+  if (event.type === 'workspace.transfer.completed') {
+    return payload.direction === 'from_runner' ? 'Applying workspace changes' : `Workspace transferred to ${name}`
+  }
+  if (payload.direction === 'from_runner') return `Synchronizing changes from ${name}`
+  if (event.type === 'workspace.transfer.progress') return `Transferring workspace to ${name}`
+  return 'Preparing workspace'
 }
 
 function formatTransferBytes(value: unknown) {
@@ -176,20 +194,29 @@ function formatTransferBytes(value: unknown) {
   return `${(value / (1024 * 1024)).toFixed(1)} MiB`
 }
 
+function transferPercent(payload: Record<string, unknown>) {
+  const transferred = payload.bytesTransferred
+  const total = payload.totalBytes
+  if (typeof transferred !== 'number' || typeof total !== 'number' || !Number.isFinite(transferred) || !Number.isFinite(total) || total <= 0) {
+    return undefined
+  }
+  return Math.max(0, Math.min(100, Math.round((transferred / total) * 100)))
+}
+
 export function eventDescription(event: EventEvidence) {
   const payload = event.payload || {}
   if (event.type.startsWith('workspace.transfer.')) {
-    const direction = workspaceTransferDirection(payload.direction)
     if (event.type === 'workspace.transfer.failed' && typeof payload.reason === 'string' && payload.reason.trim()) {
-      return direction ? `${direction}: ${payload.reason}` : payload.reason
+      return payload.reason
     }
     const transferred = formatTransferBytes(payload.bytesTransferred)
     const total = formatTransferBytes(payload.totalBytes)
     if (transferred && total) {
+      const percent = transferPercent(payload)
       const size = transferred === total ? transferred : `${transferred} / ${total}`
-      return direction ? `${direction} · ${size}` : size
+      return percent == null ? size : `${size} (${percent}%)`
     }
-    return direction || ''
+    return ''
   }
   if (event.type === 'git.branch_checked_out' && typeof payload.branch === 'string') {
     const previous = typeof payload.previousBranch === 'string' ? payload.previousBranch : undefined
@@ -521,10 +548,32 @@ export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
   const toolIndexes = new Map<string, number>()
   const pendingByName = new Map<string, number[]>()
   const questionIndexes = new Map<string, number>()
+  const transferIndexes = new Map<string, number>()
 
   for (const event of [...events].sort(compareEvents)) {
     if (hiddenRunActivityTypes.has(event.type)) continue
     const payload = event.payload || {}
+    if (event.type.startsWith('workspace.transfer.')) {
+      const transferId = typeof payload.transferId === 'string' ? payload.transferId : event.id
+      const existingIndex = transferIndexes.get(transferId)
+      const item: GenericActivityItem = {
+        kind: 'event',
+        id: event.id,
+        occurredAt: event.occurredAt,
+        sequence: event.sequence,
+        title: eventTitle(event),
+        description: eventDescription(event),
+        event,
+        unknown: false
+      }
+      if (existingIndex != null && items[existingIndex]?.kind === 'event') {
+        items[existingIndex] = item
+      } else {
+        transferIndexes.set(transferId, items.length)
+        items.push(item)
+      }
+      continue
+    }
     if (event.type === 'agent.message' && (payload.kind === 'reasoning' || payload.kind === 'message') && typeof payload.message === 'string' && payload.message.trim()) {
       items.push({
         kind: payload.kind === 'message' ? 'message' : 'thought',

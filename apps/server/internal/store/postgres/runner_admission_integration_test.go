@@ -53,3 +53,40 @@ func TestSchedulerRunnerPreferencePolicyAndCapacity(t *testing.T) {
 		t.Fatalf("internal fallback: %+v %v", claim, err)
 	}
 }
+
+func TestSchedulerIgnoresDisconnectedAndMismatchedRunners(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "runner-stale")
+	stale, err := s.CreateRunner(ctx, store.Runner{Name: "Stale", TokenHash: make([]byte, 32), Capabilities: []byte(`{"engines":["opencode"]}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ObserveRunner(ctx, stale.ID, []byte(`{"engines":["opencode"],"os":"linux"}`)); err != nil {
+		t.Fatal(err)
+	}
+	s.SetRunnerCandidates(func(engine string) []string { return nil })
+	enqueueFixtureRun(t, s, f, f.run, "stale-disconnected")
+	claim, err := s.AdmitNextJob(ctx, "worker", time.Minute, time.Millisecond)
+	if err != nil || claim != nil {
+		t.Fatalf("disconnected runner admitted: %+v %v", claim, err)
+	}
+
+	wrongEngine, err := s.CreateRunner(ctx, store.Runner{Name: "Wrong engine", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetRunnerCandidates(func(engine string) []string {
+		if engine == f.agent.Engine {
+			return nil
+		}
+		return []string{wrongEngine.ID}
+	})
+	if _, err = s.pool.Exec(ctx, `UPDATE scheduler_jobs SET available_at=now() WHERE run_id=$1`, f.run.ID); err != nil {
+		t.Fatal(err)
+	}
+	claim, err = s.AdmitNextJob(ctx, "worker", time.Minute, time.Millisecond)
+	if err != nil || claim != nil {
+		t.Fatalf("engine-mismatched runner admitted: %+v %v", claim, err)
+	}
+}
