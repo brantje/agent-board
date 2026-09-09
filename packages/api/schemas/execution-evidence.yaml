@@ -1,7 +1,7 @@
 RunEvidence:
   type: object
   additionalProperties: false
-  required: [run, provenance, runtimeInstances, commands, events, tests, fileChanges, rawOutput, artifacts]
+  required: [run, provenance, runtimeInstances, commands, events, tests, fileChanges, usage, rawOutput, artifacts]
   properties:
     run:
       $ref: ./control-plane.yaml#/Run
@@ -32,6 +32,10 @@ RunEvidence:
       description: File-family Events extracted from the authoritative Event timeline.
       items:
         $ref: '#/EventEvidence'
+    usage:
+      oneOf:
+      - $ref: '#/RunUsageEvidence'
+      - type: 'null'
     rawOutput:
       type: array
       items:
@@ -40,6 +44,19 @@ RunEvidence:
       type: array
       items:
         $ref: '#/ArtifactEvidence'
+
+RunUsageEvidence:
+  type: object
+  additionalProperties: false
+  required: [contextTokens, contextLimitTokens, inputTokens, outputTokens, cacheReadTokens, averageWaitMs, tokensPerSecond]
+  properties:
+    contextTokens: {type: integer, minimum: 0}
+    contextLimitTokens: {type: [integer, 'null'], minimum: 1}
+    inputTokens: {type: integer, minimum: 0}
+    outputTokens: {type: integer, minimum: 0}
+    cacheReadTokens: {type: integer, minimum: 0}
+    averageWaitMs: {type: [number, 'null'], minimum: 0}
+    tokensPerSecond: {type: [number, 'null'], exclusiveMinimum: 0}
 
 RuntimeInstanceEvidence:
   type: object

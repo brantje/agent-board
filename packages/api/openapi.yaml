@@ -74,6 +74,8 @@ paths:
     $ref: ./paths/issues-runs.yaml#/path5
   /api/projects/{projectID}/runs/{runID}/evidence:
     $ref: ./paths/run-evidence.yaml#/path1
+  /api/projects/{projectID}/runs/{runID}/usage:
+    $ref: ./paths/run-evidence.yaml#/path5
   /api/projects/{projectID}/runs/{runID}/raw-output/{chunkID}:
     $ref: ./paths/run-evidence.yaml#/path2
   /api/projects/{projectID}/runs/{runID}/artifacts/{artifactID}:

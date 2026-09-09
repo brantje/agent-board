@@ -92,3 +92,22 @@ path4:
               description: SSE frames. data is EventEvidence JSON; id is the Event UUID.
       default:
         $ref: ../components/api-components.yaml#/responses/Error
+
+path5:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/RunID
+  get:
+    operationId: getRunUsage
+    description: Returns normalized Run model-usage telemetry reconstructed from durable model.usage Events.
+    responses:
+      '200':
+        description: Current Run model-usage summary, or null when no valid telemetry exists.
+        content:
+          application/json:
+            schema:
+              oneOf:
+              - $ref: ../schemas/execution-evidence.yaml#/RunUsageEvidence
+              - type: 'null'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
