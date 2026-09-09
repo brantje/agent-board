@@ -2,7 +2,7 @@
 
 Agent Board v0.1 uses OpenCode as its first real interactive Engine adapter. OpenCode runs inside the selected Runtime Instance through `agent-runner`; the trusted server never starts OpenCode locally and never exposes the OpenCode HTTP service as a public Agent Board endpoint.
 
-The official `apps/agent-runner/Dockerfile` installs OpenCode from the immutable upstream `v1.18.29` release, selecting the architecture-specific musl asset and verifying its SHA-256 digest before extraction. Engine adapters still depend only on Agent Board Engine capabilities, not on Docker or WebSocket implementation details.
+The official `apps/agent-runner/Dockerfile` installs OpenCode from the immutable upstream `v1.18.30` release, selecting the architecture-specific musl asset and verifying its SHA-256 digest before extraction. Engine adapters still depend only on Agent Board Engine capabilities, not on Docker or WebSocket implementation details.
 
 ## Native execution path
 

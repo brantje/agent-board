@@ -165,7 +165,7 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) error {
 	}
 
 	// Keep a narrow compatibility fallback for OpenCode builds that predate the
-	// documented headless prompt_async route. v1.18.29 uses the path above.
+	// documented headless prompt_async route. The pinned Runtime uses the path above.
 	fallbackPayload := struct {
 		Prompt struct {
 			Text string `json:"text"`
@@ -178,9 +178,9 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) error {
 }
 
 // SessionActive follows the same documented headless execution surface as
-// Prompt. OpenCode v1.18.29 exposes the legacy SessionPrompt lifecycle through
-// /session/status; polling /api/session/active would observe the separate V2
-// execution coordinator and can report this prompt inactive while it is busy.
+// Prompt. The pinned OpenCode Runtime exposes the legacy SessionPrompt lifecycle
+// through /session/status; polling /api/session/active would observe the separate
+// V2 execution coordinator and can report this prompt inactive while it is busy.
 func (c *Client) SessionActive(ctx context.Context, sessionID string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return false, fmt.Errorf("opencode: session id is required")
@@ -197,7 +197,7 @@ func (c *Client) SessionActive(ctx context.Context, sessionID string) (bool, err
 	}
 
 	// Compatibility fallback for OpenCode builds without the documented status
-	// endpoint. The pinned v1.18.29 Runtime uses /session/status above.
+	// endpoint. The pinned Runtime uses /session/status above.
 	var response struct {
 		Data map[string]json.RawMessage `json:"data"`
 	}
