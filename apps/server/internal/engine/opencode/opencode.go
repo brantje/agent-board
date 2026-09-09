@@ -339,6 +339,9 @@ func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher,
 	if attacher, ok := launcher.(engine.ProcessAttacher); ok {
 		process, err := attacher.Attach(ctx)
 		if err == nil {
+			if process == nil {
+				return nil, false, fmt.Errorf("opencode engine: attached process is unavailable")
+			}
 			return process, true, nil
 		}
 		if !errors.Is(err, engine.ErrNotAttachable) {

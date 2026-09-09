@@ -478,6 +478,14 @@ func cloneMap(values map[string]string) map[string]string {
 	return copyValues
 }
 
+func optionalEventID(id string) *string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	return &id
+}
+
 type captureResult struct {
 	chunks []store.RawOutputChunk
 	err    error
@@ -577,7 +585,7 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 		p.waitResult = engine.ProcessResult{ExitCode: result.ExitCode}
 		p.waitErr = errors.Join(waitErr, captureErr)
 		exitCode := result.ExitCode
-		parent := p.parentEventID
+		parent := optionalEventID(p.parentEventID)
 		terminalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processCancellationCleanupTimeout)
 		defer cancel()
 		if p.waitErr != nil || result.ExitCode != 0 {
@@ -585,7 +593,7 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 			if cause == nil {
 				cause = fmt.Errorf("process exited with code %d", result.ExitCode)
 			}
-			if eventErr := p.launcher.recordFailure(terminalCtx, p.request, &parent, chunks, cause); eventErr != nil {
+			if eventErr := p.launcher.recordFailure(terminalCtx, p.request, parent, chunks, cause); eventErr != nil {
 				p.waitErr = errors.Join(p.waitErr, eventErr)
 			}
 			return
@@ -595,7 +603,7 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 		if p.request.Kind == "test" {
 			eventType = "test.completed"
 		}
-		if _, eventErr := p.launcher.record(terminalCtx, eventType, payload, &parent); eventErr != nil {
+		if _, eventErr := p.launcher.record(terminalCtx, eventType, payload, parent); eventErr != nil {
 			p.waitErr = eventErr
 		}
 	})

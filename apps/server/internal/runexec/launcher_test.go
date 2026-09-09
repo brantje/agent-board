@@ -382,6 +382,19 @@ func TestProcessLauncherAttachDoesNotRecordToolStarted(t *testing.T) {
 	if hasProcessTestEvent(evidenceStore.events, "tool.started") {
 		t.Fatalf("attach must not record tool.started: %+v", evidenceStore.events)
 	}
+	var completed *store.Event
+	for index := range evidenceStore.events {
+		if evidenceStore.events[index].Type == "tool.completed" {
+			completed = &evidenceStore.events[index]
+			break
+		}
+	}
+	if completed == nil {
+		t.Fatalf("missing tool.completed in %+v", evidenceStore.events)
+	}
+	if completed.ParentEventID != nil {
+		t.Fatalf("attached tool.completed parent=%v", *completed.ParentEventID)
+	}
 }
 
 func TestProcessLauncherAttachFailureBoundaries(t *testing.T) {

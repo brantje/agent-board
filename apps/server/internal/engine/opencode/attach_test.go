@@ -258,6 +258,13 @@ func TestLaunchOpenCodeProcessStartsWhenAttachIsNotApplicable(t *testing.T) {
 	}
 }
 
+func TestLaunchOpenCodeProcessRejectsNilAttachedProcess(t *testing.T) {
+	_, _, err := launchOpenCodeProcess(context.Background(), &nilAttachLauncher{}, "127.0.0.1", "4096", nil)
+	if err == nil || !strings.Contains(err.Error(), "attached process is unavailable") {
+		t.Fatalf("launchOpenCodeProcess() error=%v", err)
+	}
+}
+
 func TestEngineAttachReportsLauncherFailure(t *testing.T) {
 	adapter := newWithAddress("127.0.0.1:4096")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -320,6 +327,14 @@ type notAttachableLauncher struct {
 
 func (l *notAttachableLauncher) Attach(context.Context) (engine.Process, error) {
 	return nil, engine.ErrNotAttachable
+}
+
+type nilAttachLauncher struct {
+	fakeOpenCodeLauncher
+}
+
+func (l *nilAttachLauncher) Attach(context.Context) (engine.Process, error) {
+	return nil, nil
 }
 
 type failingAttachLauncher struct{}
