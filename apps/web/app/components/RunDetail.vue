@@ -152,6 +152,7 @@ function provenanceText() {
           </details>
         </section>
         <aside class="space-y-4">
+          <RunUsageCard :usage="evidence?.usage" />
           <UCard>
             <h2 class="section-label mb-3">Properties</h2>
             <dl class="space-y-3 text-sm">
