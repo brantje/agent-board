@@ -37,6 +37,18 @@ export type ToolActivityItem = {
   reason?: string
 }
 
+export type QuestionActivityItem = {
+  kind: 'question'
+  id: string
+  occurredAt: string
+  sequence: number | null
+  questionId: string
+  prompt: string
+  options: Array<{ id: string; label: string }>
+  status: 'open' | 'answered' | 'cancelled'
+  answer?: string
+}
+
 export type GenericActivityItem = {
   kind: 'event'
   id: string
@@ -48,7 +60,7 @@ export type GenericActivityItem = {
   unknown: boolean
 }
 
-export type RunActivityItem = ThoughtActivityItem | ToolActivityItem | GenericActivityItem
+export type RunActivityItem = ThoughtActivityItem | ToolActivityItem | QuestionActivityItem | GenericActivityItem
 
 export function compareEvents(left: EventEvidence, right: EventEvidence) {
   const leftSequence = left.sequence ?? Number.MAX_SAFE_INTEGER
@@ -149,15 +161,71 @@ function stringValue(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
+function questionOptions(value: unknown): QuestionActivityItem['options'] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((option) => {
+    if (!option || typeof option !== 'object' || Array.isArray(option)) return []
+    const values = option as Record<string, unknown>
+    const id = stringValue(values.id)
+    const label = stringValue(values.label)
+    return id && label ? [{ id, label }] : []
+  })
+}
+
+function questionAnswer(value: unknown, options: QuestionActivityItem['options']) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const answer = value as Record<string, unknown>
+  const text = stringValue(answer.text)
+  if (text) return text
+  if (!Array.isArray(answer.optionIds)) return undefined
+  const labels = answer.optionIds.flatMap((id) => {
+    if (typeof id !== 'string') return []
+    return [options.find(option => option.id === id)?.label || id]
+  })
+  return labels.length ? labels.join(', ') : undefined
+}
+
 export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
   const items: RunActivityItem[] = []
   const toolIndexes = new Map<string, number>()
+  const questionIndexes = new Map<string, number>()
 
   for (const event of [...events].sort(compareEvents)) {
     const payload = event.payload || {}
     if (event.type === 'agent.message' && payload.kind === 'reasoning' && typeof payload.message === 'string' && payload.message.trim()) {
       items.push({ kind: 'thought', id: event.id, occurredAt: event.occurredAt, sequence: event.sequence, message: payload.message })
       continue
+    }
+
+    const questionId = event.type.startsWith('question.') ? stringValue(payload.questionId) : undefined
+    if (event.type === 'question.created' && questionId) {
+      const prompt = stringValue(payload.prompt)
+      if (prompt) {
+        questionIndexes.set(questionId, items.length)
+        items.push({
+          kind: 'question',
+          id: event.id,
+          occurredAt: event.occurredAt,
+          sequence: event.sequence,
+          questionId,
+          prompt,
+          options: questionOptions(payload.options),
+          status: 'open'
+        })
+        continue
+      }
+    }
+    if ((event.type === 'question.answered' || event.type === 'question.cancelled') && questionId) {
+      const existingIndex = questionIndexes.get(questionId)
+      const existing = existingIndex == null ? undefined : items[existingIndex]
+      if (existing?.kind === 'question') {
+        items[existingIndex!] = {
+          ...existing,
+          status: event.type === 'question.answered' ? 'answered' : 'cancelled',
+          answer: event.type === 'question.answered' ? questionAnswer(payload.answer, existing.options) : existing.answer
+        }
+        continue
+      }
     }
 
     const toolCallId = event.type.startsWith('tool.') ? stringValue(payload.toolCallId) : undefined
