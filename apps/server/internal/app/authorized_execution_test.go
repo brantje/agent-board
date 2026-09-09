@@ -223,6 +223,34 @@ func TestAuthorizedExecutionAttachReusesLiveSession(t *testing.T) {
 	close(transport.resultCh)
 }
 
+func TestAuthorizedExecutionAttachPreparesAuthorizedSecretRedaction(t *testing.T) {
+	lowLevel, _, transport := executionServiceFixture(t)
+	preparer := &fakeExecutionPreparer{prepared: executioncontext.Prepared{RuntimeID: ""}}
+	service, err := NewAuthorizedExecutionSessionService(lowLevel, preparer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.Start(t.Context(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{
+		Command:               []string{"sleep", "10"},
+		ProviderCredentialEnv: "PROVIDER_TOKEN",
+		RuntimeSecretRefs:     map[string]string{"RUNTIME_TOKEN": "runtime-token"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preparer.request.RedactAuthorizedSecrets {
+		t.Fatal("Start must not switch to attach redaction")
+	}
+	_, err = service.Attach(t.Context(), "project-1", started.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preparer.request.RedactAuthorizedSecrets {
+		t.Fatalf("Attach SecretRequest=%+v", preparer.request)
+	}
+	close(transport.resultCh)
+}
+
 func TestAuthorizedExecutionAttachFailureBoundaries(t *testing.T) {
 	t.Run("unavailable service", func(t *testing.T) {
 		var service *AuthorizedExecutionSessionService

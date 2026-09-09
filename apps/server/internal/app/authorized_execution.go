@@ -97,7 +97,7 @@ func (s *AuthorizedExecutionSessionService) Attach(ctx context.Context, projectI
 	if err != nil {
 		return nil, translateStoreError(err, "execution_session")
 	}
-	prepared, err := s.preparer.Prepare(ctx, projectID, session.RunID, executioncontext.SecretRequest{})
+	prepared, err := s.preparer.Prepare(ctx, projectID, session.RunID, executioncontext.SecretRequest{RedactAuthorizedSecrets: true})
 	if err != nil {
 		return nil, translateExecutionPreparationError(err)
 	}
