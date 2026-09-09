@@ -73,6 +73,9 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 	if process, ok := s.liveProcess(projectID, sessionID); ok {
 		return process, nil
 	}
+	if session.RunnerID != "" {
+		return s.reconcileRunnerSession(ctx, session)
+	}
 
 	instance, err := s.store.GetRuntimeInstance(ctx, projectID, session.RuntimeInstanceID)
 	if err != nil {

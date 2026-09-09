@@ -11,7 +11,8 @@ const state = reactive({
   issuePrefix: props.project?.issuePrefix ?? '',
   repositoryPath: props.project?.repositoryPath ?? '',
   defaultBranch: props.project?.defaultBranch ?? 'main',
-  workflowSettings: props.project ? JSON.stringify(props.project.workflowSettings ?? {}, null, 2) : '{}'
+  workflowSettings: props.project ? JSON.stringify(props.project.workflowSettings ?? {}, null, 2) : '{}',
+  allowInternalRunner: props.project?.allowInternalRunner ?? true
 })
 const saving = ref(false)
 const error = ref<Error>()
@@ -47,6 +48,7 @@ function payload() {
     defaultBranch: state.defaultBranch.trim(),
     workflowSettings
   }
+  if (props.project) body.allowInternalRunner = state.allowInternalRunner
   if (!props.project) body.issuePrefix = state.issuePrefix.trim().toUpperCase()
   return body
 }
@@ -110,6 +112,14 @@ onMounted(async () => {
       description="Optional workflow policy overrides supported by your Go server."
     >
       <UTextarea v-model="state.workflowSettings" :rows="6" class="w-full font-mono" :disabled="saving" />
+    </UFormField>
+    <UFormField
+      v-if="project"
+      label="Allow internal runner"
+      name="allowInternalRunner"
+      description="Permit the server-managed internal runner as scheduler fallback when no eligible external runner is available."
+    >
+      <USwitch v-model="state.allowInternalRunner" :disabled="saving" />
     </UFormField>
     <div class="flex justify-end gap-2">
       <UButton label="Cancel" color="neutral" variant="outline" :disabled="saving" @click="emit('cancel')" />

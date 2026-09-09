@@ -102,7 +102,7 @@ describe('workspace branch presentation', () => {
       const url = String(input)
       if (url.includes('/issues')) return new Response(JSON.stringify([issue]), { status: 200 })
       if (url.includes('/agents')) return new Response(JSON.stringify([]), { status: 200 })
-      if (url.endsWith('/projects/p')) return new Response(JSON.stringify({ id: 'p', name: 'Demo', issuePrefix: 'AB', repositoryPath: '/repo', defaultBranch: 'main', workflowSettings: {}, createdAt: '', updatedAt: '' }), { status: 200 })
+      if (url.endsWith('/projects/p')) return new Response(JSON.stringify({ id: 'p', name: 'Demo', issuePrefix: 'AB', repositoryPath: '/repo', defaultBranch: 'main', workflowSettings: {}, allowInternalRunner: true, createdAt: '', updatedAt: '' }), { status: 200 })
       return new Response('[]', { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)

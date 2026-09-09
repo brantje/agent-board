@@ -53,10 +53,16 @@ type transferResult struct {
 }
 
 type incomingTransferState struct {
-	transferID string
-	expected   int64
-	checksum   string
-	buffer     []byte
+	transferID    string
+	expected      int64
+	checksum      string
+	buffer        []byte
+	progressState transferProgressState
+}
+
+type transferWaiter struct {
+	result     chan transferResult
+	onProgress TransferProgressFunc
 }
 
 type Connection struct {
@@ -68,7 +74,7 @@ type Connection struct {
 	pending   map[string]*pendingSessionMessages
 	connects  map[string]map[string]*sessionConn
 	transfers map[string]*incomingTransferState
-	transferWaiters map[string]chan transferResult
+	transferWaiters map[string]*transferWaiter
 	transferDone    map[string]transferResult
 	health    protocol.Health
 	caps      protocol.Capabilities
@@ -103,7 +109,7 @@ func acceptConnection(ctx context.Context, conn *websocket.Conn) (*Connection, e
 		pending:         make(map[string]*pendingSessionMessages),
 		connects:        make(map[string]map[string]*sessionConn),
 		transfers:       make(map[string]*incomingTransferState),
-		transferWaiters: make(map[string]chan transferResult),
+		transferWaiters: make(map[string]*transferWaiter),
 		transferDone:    make(map[string]transferResult),
 		done:            make(chan struct{}),
 	}

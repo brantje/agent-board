@@ -38,6 +38,16 @@ type RunnerRegistry interface {
 	Reconcile(context.Context, string, string, string) (runner.ProcessSession, bool, error)
 }
 
+type noopRunnerRegistry struct{}
+
+func (noopRunnerRegistry) Connect(context.Context, string, string) (runner.Client, error) {
+	return nil, errors.New("runner registry is not configured")
+}
+
+func (noopRunnerRegistry) Reconcile(context.Context, string, string, string) (runner.ProcessSession, bool, error) {
+	return nil, false, errors.New("runner registry is not configured")
+}
+
 type ExecutionRequest struct {
 	Command []string
 	CWD     string
@@ -55,8 +65,11 @@ type ExecutionSessionService struct {
 }
 
 func NewExecutionSessionService(sessionStore ExecutionSessionStore, runners RunnerConnectionManager, registry RunnerRegistry) (*ExecutionSessionService, error) {
-	if sessionStore == nil || runners == nil || registry == nil {
-		return nil, fmt.Errorf("execution session store, runner manager and registry are required")
+	if sessionStore == nil || runners == nil {
+		return nil, fmt.Errorf("execution session store and runner manager are required")
+	}
+	if registry == nil {
+		registry = noopRunnerRegistry{}
 	}
 	return &ExecutionSessionService{store: sessionStore, runners: runners, registry: registry, live: make(map[string]*ExecutionProcess)}, nil
 }

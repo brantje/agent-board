@@ -16,6 +16,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
+	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
@@ -59,8 +60,8 @@ type RunnerConnector interface {
 }
 
 type runnerClient interface {
-	SendTransfer(context.Context, string, string, string, []byte) error
-	ReceiveTransfer(context.Context, string) (string, []byte, error)
+	SendTransfer(context.Context, string, string, string, []byte, runner.TransferProgressFunc) error
+	ReceiveTransfer(context.Context, string, runner.TransferProgressFunc) (string, []byte, error)
 }
 
 type runnerSessionPreparer interface {
@@ -792,7 +793,8 @@ func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executio
 		}, nil, nil)
 		return err
 	}
-	if err := client.SendTransfer(ctx, sessionID, transferID, "to_runner", payload); err != nil {
+	progress := p.transferProgressRecorder(ctx, safe, runnerID, transferID, "to_runner")
+	if err := client.SendTransfer(ctx, sessionID, transferID, "to_runner", payload, progress); err != nil {
 		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
 			"direction": "to_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
 		}, nil, nil)
@@ -853,6 +855,15 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
 }
 
+func (p *Processor) transferProgressRecorder(ctx context.Context, safe executioncontext.SafeContext, runnerID, transferID, direction string) runner.TransferProgressFunc {
+	return func(progress runner.TransferProgress) {
+		_ = p.record(ctx, safe, "workspace.transfer.progress", map[string]any{
+			"direction": direction, "runnerId": runnerID, "transferId": transferID,
+			"bytesTransferred": progress.BytesTransferred, "totalBytes": progress.TotalBytes,
+		}, nil, nil)
+	}
+}
+
 func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
 	if sessionID == "" || p.runners == nil {
 		return fmt.Errorf("workspace sync requires a prepared runner execution session")
@@ -878,7 +889,8 @@ func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executionc
 		}, nil, nil)
 		return err
 	}
-	receivedID, payload, err := client.ReceiveTransfer(ctx, sessionID)
+	progress := p.transferProgressRecorder(ctx, safe, runnerID, transferID, "from_runner")
+	receivedID, payload, err := client.ReceiveTransfer(ctx, sessionID, progress)
 	if err != nil {
 		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
 			"direction": "from_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),

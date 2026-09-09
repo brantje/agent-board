@@ -6,23 +6,26 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
 )
 
-func (c *Connection) SendTransfer(ctx context.Context, sessionID, transferID, direction string, payload []byte) error {
+func (c *Connection) SendTransfer(ctx context.Context, sessionID, transferID, direction string, payload []byte, onProgress TransferProgressFunc) error {
 	if c == nil || sessionID == "" || transferID == "" {
 		return fmt.Errorf("runner transfer requires session and transfer ids")
 	}
+	total := int64(len(payload))
 	checksum := sha256.Sum256(payload)
 	if err := c.write(protocol.TypeTransferBegin, sessionID, protocol.TransferBegin{
 		TransferID: transferID,
 		Direction:  direction,
-		TotalBytes: int64(len(payload)),
+		TotalBytes: total,
 		Checksum:   hex.EncodeToString(checksum[:]),
 	}); err != nil {
 		return err
 	}
+	var progressState transferProgressState
 	chunkSize := protocol.TransferChunkSize
 	for offset := 0; offset < len(payload); offset += chunkSize {
 		end := offset + chunkSize
@@ -35,14 +38,16 @@ func (c *Connection) SendTransfer(ctx context.Context, sessionID, transferID, di
 		}); err != nil {
 			return err
 		}
+		emitTransferProgress(onProgress, int64(end), total, &progressState, time.Now(), DefaultTransferProgressInterval)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 	}
+	emitTransferProgress(onProgress, total, total, &progressState, time.Now(), DefaultTransferProgressInterval)
 	return c.write(protocol.TypeTransferEnd, sessionID, protocol.TransferEnd{TransferID: transferID})
 }
 
-func (c *Connection) ReceiveTransfer(ctx context.Context, sessionID string) (transferID string, payload []byte, err error) {
+func (c *Connection) ReceiveTransfer(ctx context.Context, sessionID string, onProgress TransferProgressFunc) (transferID string, payload []byte, err error) {
 	if c == nil || sessionID == "" {
 		return "", nil, fmt.Errorf("runner transfer requires session id")
 	}
@@ -52,12 +57,12 @@ func (c *Connection) ReceiveTransfer(ctx context.Context, sessionID string) (tra
 		c.mu.Unlock()
 		return result.transferID, result.payload, result.err
 	}
-	waiter := make(chan transferResult, 1)
+	waiter := &transferWaiter{result: make(chan transferResult, 1), onProgress: onProgress}
 	c.transferWaiters[sessionID] = waiter
 	c.mu.Unlock()
 
 	select {
-	case result := <-waiter:
+	case result := <-waiter.result:
 		return result.transferID, result.payload, result.err
 	case <-ctx.Done():
 		c.mu.Lock()
@@ -111,9 +116,14 @@ func (c *Connection) handleTransferMessage(msg protocol.Message) error {
 			return fmt.Errorf("decode transfer chunk: %w", err)
 		}
 		transfer.buffer = append(transfer.buffer, data...)
-		if transfer.expected > 0 && int64(len(transfer.buffer)) > transfer.expected {
+		transferred := int64(len(transfer.buffer))
+		waiter := c.transferWaiters[msg.SessionID]
+		if transfer.expected > 0 && transferred > transfer.expected {
 			c.mu.Unlock()
 			return c.completeTransfer(msg.SessionID, transferResult{err: fmt.Errorf("transfer payload exceeded declared size")})
+		}
+		if waiter != nil {
+			emitTransferProgress(waiter.onProgress, transferred, transfer.expected, &transfer.progressState, time.Now(), DefaultTransferProgressInterval)
 		}
 		c.mu.Unlock()
 		return nil
@@ -167,7 +177,7 @@ func (c *Connection) completeTransfer(sessionID string, result transferResult) e
 	c.transferDone[sessionID] = result
 	c.mu.Unlock()
 	if waiter != nil {
-		waiter <- result
+		waiter.result <- result
 	}
 	return result.err
 }

@@ -6,6 +6,7 @@ export interface Project {
   repositoryPath: string
   defaultBranch: string
   workflowSettings: Record<string, unknown>
+  allowInternalRunner: boolean
   createdAt: string
   updatedAt: string
 }
