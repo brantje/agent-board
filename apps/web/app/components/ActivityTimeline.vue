@@ -22,11 +22,12 @@ const items = computed(() => projectRunActivity(props.events))
           <span class="font-medium">{{ item.label }}</span>
           <span v-if="item.target" class="min-w-0 truncate font-mono text-xs text-muted">{{ item.target }}</span>
           <span v-if="item.status === 'running'" class="ml-auto text-xs text-muted">running</span>
+          <span v-else-if="item.status === 'failed'" class="ml-auto text-xs text-error">failed</span>
         </div>
         <p v-if="item.resultPreview" class="ml-5 mt-1 truncate text-xs text-muted">
           <span class="font-medium text-default">result:</span> {{ item.resultPreview }}
         </p>
-        <p v-else-if="item.reason" class="ml-5 mt-1 text-xs text-error">
+        <p v-if="item.reason" class="ml-5 mt-1 text-xs text-error">
           <span class="font-medium">error:</span> {{ item.reason }}
         </p>
         <details v-if="item.summary || item.input" class="ml-5 mt-1 text-xs text-muted">
