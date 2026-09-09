@@ -20,6 +20,8 @@ export const uiStubs = {
   URadioGroup: {props:['modelValue','items','disabled'],emits:['update:modelValue'],template:'<div><label v-for="item in items" :key="item.value"><input type="radio" :value="item.value" :checked="modelValue===item.value" :disabled="disabled" @change="$emit(\'update:modelValue\', item.value)"/>{{item.label}}</label></div>'},
   UEmpty: {props:['title','description'],template:'<div>{{title}} {{description}}</div>'},
   UIcon: {props:['name'],template:'<span :class="name" :data-icon="name" />'},
+  UTooltip: {props:['text'],template:'<span :title="text"><slot/></span>'},
+  UProgress: {props:['modelValue','max'],template:'<progress :value="modelValue" :max="max || 100" />'},
   UCollapsible: defineComponent({
     props: ['disabled'],
     setup(props, { slots }) {
