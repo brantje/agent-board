@@ -60,14 +60,20 @@ type Reconciler interface {
 	Reconcile(context.Context, *store.SchedulerAdmission) (store.SchedulerReconciliationOutcome, *string, error)
 }
 
+type activeRun struct {
+	token  uint64
+	cancel context.CancelCauseFunc
+}
+
 type Coordinator struct {
 	store      store.SchedulerStore
 	processor  Processor
 	reconciler Reconciler
 	config     Config
 
-	activeMu sync.Mutex
-	active   map[string]context.CancelCauseFunc
+	activeMu  sync.Mutex
+	activeSeq uint64
+	active    map[string]activeRun
 }
 
 func New(s store.SchedulerStore, processor Processor, reconciler Reconciler, config Config) (*Coordinator, error) {
@@ -91,7 +97,7 @@ func New(s store.SchedulerStore, processor Processor, reconciler Reconciler, con
 	}
 	return &Coordinator{
 		store: s, processor: processor, reconciler: reconciler, config: config,
-		active: make(map[string]context.CancelCauseFunc),
+		active: make(map[string]activeRun),
 	}, nil
 }
 
@@ -109,31 +115,34 @@ func (c *Coordinator) CancelRun(projectID, runID string) bool {
 	}
 	key := activeRunKey(projectID, runID)
 	c.activeMu.Lock()
-	cancel := c.active[key]
+	registration, ok := c.active[key]
 	c.activeMu.Unlock()
-	if cancel == nil {
+	if !ok || registration.cancel == nil {
 		return false
 	}
-	cancel(ErrRunCancellation)
+	registration.cancel(ErrRunCancellation)
 	return true
 }
 
-func (c *Coordinator) registerActiveRun(claim *store.SchedulerAdmission, cancel context.CancelCauseFunc) {
+func (c *Coordinator) registerActiveRun(claim *store.SchedulerAdmission, cancel context.CancelCauseFunc) uint64 {
 	if c == nil || claim == nil || cancel == nil {
-		return
+		return 0
 	}
 	c.activeMu.Lock()
-	c.active[activeRunKey(claim.Job.ProjectID, claim.Run.ID)] = cancel
-	c.activeMu.Unlock()
+	defer c.activeMu.Unlock()
+	c.activeSeq++
+	token := c.activeSeq
+	c.active[activeRunKey(claim.Job.ProjectID, claim.Run.ID)] = activeRun{token: token, cancel: cancel}
+	return token
 }
 
-func (c *Coordinator) unregisterActiveRun(claim *store.SchedulerAdmission, cancel context.CancelCauseFunc) {
-	if c == nil || claim == nil {
+func (c *Coordinator) unregisterActiveRun(claim *store.SchedulerAdmission, token uint64) {
+	if c == nil || claim == nil || token == 0 {
 		return
 	}
 	key := activeRunKey(claim.Job.ProjectID, claim.Run.ID)
 	c.activeMu.Lock()
-	if current := c.active[key]; current != nil {
+	if current, ok := c.active[key]; ok && current.token == token {
 		delete(c.active, key)
 	}
 	c.activeMu.Unlock()
@@ -249,8 +258,8 @@ func (c *Coordinator) reconcileOne(ctx context.Context) (*store.SchedulerAdmissi
 func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmission) {
 	ctx, cancel := context.WithCancelCause(parent)
 	defer cancel(nil)
-	c.registerActiveRun(claim, cancel)
-	defer c.unregisterActiveRun(claim, cancel)
+	registrationToken := c.registerActiveRun(claim, cancel)
+	defer c.unregisterActiveRun(claim, registrationToken)
 
 	heartbeatDone := make(chan struct{})
 	var leaseLost atomic.Bool
@@ -282,9 +291,13 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 
 	lifecycle := claimLifecycle{store: c.store, claim: claim}
 	result, err := c.processor.Process(ctx, claim, lifecycle)
+	// Once the processor returned, stop accepting new user cancellation for this
+	// registration before inspecting its cause. A cancellation that raced with a
+	// completed final result must not replace that authoritative outcome.
+	c.unregisterActiveRun(claim, registrationToken)
 	close(heartbeatDone)
 	heartbeat.Wait()
-	runCancelled := errors.Is(context.Cause(ctx), ErrRunCancellation)
+	runCancelled := errors.Is(context.Cause(ctx), ErrRunCancellation) && (err != nil || !isFinalProcessorStatus(result.RunStatus))
 	if runCancelled {
 		result = Result{RunStatus: "CANCELLED"}
 		err = nil
