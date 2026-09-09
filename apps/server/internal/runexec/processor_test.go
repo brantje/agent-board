@@ -26,6 +26,14 @@ func (s *reconcileStore) ListExecutionSessions(context.Context, string, []string
 	return append([]store.ExecutionSession(nil), s.sessions...), nil
 }
 
+func (*reconcileStore) GetWorkspace(context.Context, string, string) (store.Workspace, error) {
+	return store.Workspace{}, store.ErrNotFound
+}
+
+func (*reconcileStore) UpdateWorkspaceCurrentBranch(context.Context, string, string, string) (store.Workspace, error) {
+	return store.Workspace{}, store.ErrNotFound
+}
+
 type reconcileSessions struct{}
 
 func (reconcileSessions) Start(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error) {

@@ -68,6 +68,13 @@ func (s *processTestStore) CreateArtifact(_ context.Context, artifact store.Arti
 	s.artifacts = append(s.artifacts, artifact)
 	return artifact, nil
 }
+func (s *processTestStore) GetWorkspace(_ context.Context, projectID, workspaceID string) (store.Workspace, error) {
+	return store.Workspace{ID: workspaceID, ProjectID: projectID, WorkingBranch: "agent-board/AB-1", BootstrapStatus: "READY"}, nil
+}
+func (s *processTestStore) UpdateWorkspaceCurrentBranch(_ context.Context, projectID, workspaceID, currentBranch string) (store.Workspace, error) {
+	branch := currentBranch
+	return store.Workspace{ID: workspaceID, ProjectID: projectID, WorkingBranch: "agent-board/AB-1", CurrentBranch: &branch, BootstrapStatus: "READY"}, nil
+}
 
 type processTestResolver struct {
 	resolved executioncontext.Resolved
@@ -167,7 +174,7 @@ func TestProcessorProcessPersistsEvidenceAndCleansRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimes := &processTestRuntime{}
-	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate)
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +254,7 @@ func TestProcessorProcessAttachesLiveSessionWithoutRestarting(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimes := &processTestRuntime{}
-	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate)
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +326,7 @@ func TestProcessorProcessFailsWhenMultipleLiveSessionsExist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, &processTestRuntime{}, processTestSessions{}, registry, recorder, output, candidate)
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, &processTestRuntime{}, processTestSessions{}, registry, recorder, output, candidate, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +363,7 @@ func TestProcessorProcessReturnsFailedResultForResolverAndRuntimeErrors(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, candidate)
+		processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -439,7 +446,7 @@ func newProcessorWithStore(t *testing.T, workspace string, safe executioncontext
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate)
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +454,7 @@ func newProcessorWithStore(t *testing.T, workspace string, safe executioncontext
 }
 
 func TestProcessorHelpersCoverFailureAndPayloadShapes(t *testing.T) {
-	if _, err := NewProcessor(nil, nil, nil, nil, nil, nil, nil, nil); err == nil {
+	if _, err := NewProcessor(nil, nil, nil, nil, nil, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected dependency validation error")
 	}
 	if got := safeFailure(nil); got != "execution failed" {
@@ -470,6 +477,20 @@ func TestProcessorHelpersCoverFailureAndPayloadShapes(t *testing.T) {
 	toolPayload := processPayload(engine.ProcessRequest{Kind: "tool", Name: "x"}, nil, nil).(evidence.ToolPayload)
 	if toolPayload.Name != "x" {
 		t.Fatalf("tool payload=%+v", toolPayload)
+	}
+	flattened := flattenFailurePayload(evidence.ToolPayload{Kind: "tool", Name: "opencode-server", Command: []string{"opencode", "serve"}}, errors.New("process exited with code 137"))
+	mapped, ok := flattened.(map[string]any)
+	if !ok {
+		t.Fatalf("flattened type=%T", flattened)
+	}
+	if mapped["name"] != "opencode-server" || mapped["reason"] != "process exited with code 137" {
+		t.Fatalf("flattened=%+v", mapped)
+	}
+	if _, nested := mapped["result"]; nested {
+		t.Fatalf("flattened nested result: %+v", mapped)
+	}
+	if fallback, ok := flattenFailurePayload(make(chan int), errors.New("boom")).(map[string]any); !ok || fallback["reason"] != "boom" {
+		t.Fatalf("unencodable payload fallback=%#v", fallback)
 	}
 	original := map[string]string{"A": "B"}
 	cloned := cloneMap(original)
@@ -524,12 +545,16 @@ func processTestSafeContext(workspace string) executioncontext.SafeContext {
 }
 
 func hasProcessTestEvent(events []store.Event, eventType string) bool {
+	return processTestEvent(events, eventType).Type == eventType
+}
+
+func processTestEvent(events []store.Event, eventType string) store.Event {
 	for _, event := range events {
 		if event.Type == eventType {
-			return true
+			return event
 		}
 	}
-	return false
+	return store.Event{}
 }
 
 var _ scheduler.Lifecycle = processTestLifecycle{}

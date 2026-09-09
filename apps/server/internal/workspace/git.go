@@ -124,7 +124,15 @@ func (g *GitCLI) HeadRevision(ctx context.Context, repositoryPath string) (strin
 }
 
 func (g *GitCLI) CurrentBranch(ctx context.Context, repositoryPath string) (string, error) {
-	return g.run(ctx, "-C", repositoryPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	branch, err := g.run(ctx, "-C", repositoryPath, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err == nil {
+		return branch, nil
+	}
+	short, revErr := g.run(ctx, "-C", repositoryPath, "rev-parse", "--short", "HEAD")
+	if revErr != nil {
+		return "", err
+	}
+	return "HEAD@" + short, nil
 }
 
 func (g *GitCLI) OriginURL(ctx context.Context, repositoryPath string) (string, error) {

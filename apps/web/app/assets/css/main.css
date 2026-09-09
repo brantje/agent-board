@@ -186,7 +186,11 @@ input[type='radio']::after,
 .issue-last-event,
 .issue-last-event *,
 .issue-last-event::before,
-.issue-last-event::after {
+.issue-last-event::after,
+.run-status,
+.run-status *,
+.run-status::before,
+.run-status::after {
   border-radius: 9999px !important;
 }
 

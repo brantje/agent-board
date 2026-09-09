@@ -63,7 +63,7 @@ func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID str
 		}
 	}
 
-	workspace, err := workspaceForAssignment(ctx, tx, projectID, issueID, repositoryPath, defaultBranch)
+	workspace, err := workspaceForAssignment(ctx, tx, projectID, issueID, issue.Key, repositoryPath, defaultBranch)
 	if err != nil {
 		return store.Issue{}, store.Run{}, err
 	}
@@ -167,9 +167,9 @@ func latestActiveRun(ctx context.Context, tx pgx.Tx, projectID, issueID string) 
     `, projectID, issueID, activeRunStatuses))
 }
 
-func workspaceForAssignment(ctx context.Context, tx pgx.Tx, projectID, issueID, repositoryPath, defaultBranch string) (store.Workspace, error) {
+func workspaceForAssignment(ctx context.Context, tx pgx.Tx, projectID, issueID, issueKey, repositoryPath, defaultBranch string) (store.Workspace, error) {
 	workspace, err := scanWorkspace(tx.QueryRow(ctx, `
-        SELECT id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, bootstrap_status, created_at, updated_at
+        SELECT id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, current_branch, bootstrap_status, created_at, updated_at
         FROM workspaces WHERE project_id=$1 AND issue_id=$2
     `, projectID, issueID))
 	if err == nil {
@@ -179,11 +179,12 @@ func workspaceForAssignment(ctx context.Context, tx pgx.Tx, projectID, issueID, 
 		return store.Workspace{}, err
 	}
 
+	workingBranch := store.WorkingBranchForIssue(issueKey)
 	// #6 reserves only the durable identity. Issue #7 replaces the pending URI
 	// with the validated filesystem path when it materializes the Git checkout.
 	return scanWorkspace(tx.QueryRow(ctx, `
-        INSERT INTO workspaces (project_id, issue_id, path, repository_path, base_branch, working_branch, bootstrap_status)
-        VALUES ($1, $2, $3, $4, $5, $6, 'PENDING')
-        RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, bootstrap_status, created_at, updated_at
-    `, projectID, issueID, pendingWorkspacePrefix+issueID, repositoryPath, defaultBranch, "agent-board/issue-"+issueID))
+        INSERT INTO workspaces (project_id, issue_id, path, repository_path, base_branch, working_branch, current_branch, bootstrap_status)
+        VALUES ($1, $2, $3, $4, $5, $6, $6, 'PENDING')
+        RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, current_branch, bootstrap_status, created_at, updated_at
+    `, projectID, issueID, pendingWorkspacePrefix+issueID, repositoryPath, defaultBranch, workingBranch))
 }

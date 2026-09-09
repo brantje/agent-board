@@ -41,6 +41,6 @@ html[data-theme='light'] {
   --board-column-todo: #f7f8fa;
   --board-column-in-progress: #fcfaee;
   --board-column-blocked: #faf1f2;
-  --board-column-review: #f1f4fd;
-  --board-column-done: #f2f9f2;
+  --board-column-done: #f1f4fd;
+  --board-column-review: #f2f9f2;
 }

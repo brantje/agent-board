@@ -24,6 +24,7 @@ type ProjectContext struct {
 
 type IssueContext struct {
 	ID          string `json:"id"`
+	Key         string `json:"key"`
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Status      string `json:"status"`

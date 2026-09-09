@@ -77,6 +77,9 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	workspace, err := s.GetWorkspaceByIssue(ctx, p1.ID, issue.ID)
 	if err != nil { t.Fatal(err) }
 	if workspace.BootstrapStatus != "PENDING" || !strings.HasPrefix(workspace.Path, pendingWorkspacePrefix) { t.Fatalf("unexpected workspace: %+v", workspace) }
+	if workspace.WorkingBranch != "agent-board/"+issue.Key {
+		t.Fatalf("working branch = %q, want agent-board/%s", workspace.WorkingBranch, issue.Key)
+	}
 	runs, err := s.ListRuns(ctx, p1.ID)
 	if err != nil || len(runs) != 1 { t.Fatalf("runs=%d err=%v", len(runs), err) }
 	sameIssue, sameRun, err := s.AssignIssue(ctx, p1.ID, issue.ID, agent.ID)

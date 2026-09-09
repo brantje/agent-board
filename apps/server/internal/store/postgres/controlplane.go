@@ -34,9 +34,10 @@ func (s *Store) UpdateProject(ctx context.Context, input store.Project) (store.P
 
 func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT `+issueSelectColumns+`, `+lastEventSelectColumns+`
+		SELECT `+issueSelectColumns+`, `+issueCurrentBranchColumn+`, `+lastEventSelectColumns+`
 		FROM issues AS i
 		JOIN projects AS p ON p.id = i.project_id
+		`+issueWorkspaceJoin+`
 		`+lastEventLateralJoin+`
 		WHERE i.project_id=$1
 		ORDER BY i.created_at, i.id
@@ -113,14 +114,20 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 }
 
 func (s *Store) ListRuns(ctx context.Context, projectID string) ([]store.Run, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at FROM runs WHERE project_id=$1 ORDER BY created_at DESC, id`, projectID)
+	rows, err := s.pool.Query(ctx, `
+		SELECT `+runSelectColumns+`
+		FROM runs AS r
+		`+runWorkspaceJoin+`
+		WHERE r.project_id=$1
+		ORDER BY r.created_at DESC, r.id
+	`, projectID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []store.Run
 	for rows.Next() {
-		value, err := scanRun(rows)
+		value, err := scanRunWithBranch(rows)
 		if err != nil {
 			return nil, err
 		}

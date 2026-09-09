@@ -17,9 +17,10 @@ const lastEventLabel = computed(() => props.issue.lastEvent ? eventTitle(props.i
       <p class="font-mono text-xs leading-none text-dimmed">{{ issue.id }}</p>
       <h3 class="mt-1.5 text-sm font-semibold leading-snug text-highlighted break-words line-clamp-2">{{ issue.title }}</h3>
       <p v-if="issue.description.trim()" class="mt-1 truncate text-xs text-muted">{{ issue.description }}</p>
-      <div class="mt-3 flex items-center justify-between gap-2">
+        <div class="mt-3 flex items-center justify-between gap-2">
         <div class="flex min-w-0 items-center gap-2">
           <UAvatar v-if="assignedLabel" :alt="assignedLabel" :aria-label="assignedLabel" size="2xs" class="issue-identity" />
+          <WorkspaceBranch v-if="issue.currentBranch" :branch="issue.currentBranch" />
           <UBadge
             :label="priority.label"
             :icon="priority.icon"

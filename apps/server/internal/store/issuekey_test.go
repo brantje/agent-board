@@ -2,6 +2,12 @@ package store
 
 import "testing"
 
+func TestWorkingBranchForIssue(t *testing.T) {
+	if got := WorkingBranchForIssue("AB-12"); got != "agent-board/AB-12" {
+		t.Fatalf("WorkingBranchForIssue = %q, want agent-board/AB-12", got)
+	}
+}
+
 func TestFormatAndParseIssueKey(t *testing.T) {
 	key := FormatIssueKey("AB", 12)
 	if key != "AB-12" {

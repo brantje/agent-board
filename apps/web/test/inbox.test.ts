@@ -1,11 +1,12 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import InboxView from '../app/components/InboxView.vue'
+import RunStatus from '../app/components/RunStatus.vue'
 import { composeInbox } from '../app/utils/inbox'
 import { event, MockEventSource, project, question, review, run } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
-const global = { stubs: { ...uiStubs, NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' } } }
+const global = { stubs: { ...uiStubs, NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' } }, components: { RunStatus } }
 
 afterEach(() => {
   vi.unstubAllGlobals()

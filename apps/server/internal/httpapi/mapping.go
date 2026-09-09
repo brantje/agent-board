@@ -7,7 +7,7 @@ func projectDTO(v store.Project) ProjectDTO {
 }
 
 func issueDTO(v store.Issue) IssueDTO {
-	dto := IssueDTO{v.Key, v.ProjectID, v.Number, v.Title, v.Description, v.Status, v.Priority, v.AssignedAgentID, v.CreatedAt, v.UpdatedAt, nil}
+	dto := IssueDTO{v.Key, v.ProjectID, v.Number, v.Title, v.Description, v.Status, v.Priority, v.AssignedAgentID, v.CreatedAt, v.UpdatedAt, v.CurrentBranch, nil}
 	if v.LastEvent != nil {
 		event := eventEvidenceDTO(*v.LastEvent)
 		dto.LastEvent = &event
@@ -43,5 +43,5 @@ func agentDTO(v store.Agent) AgentDTO {
 }
 
 func runDTO(v store.Run, issueKeys map[string]string) RunDTO {
-	return RunDTO{v.ID, v.ProjectID, issueKeyForUUID(issueKeys, v.IssueID), v.WorkspaceID, v.AgentID, v.Attempt, v.Status, v.QueueReason, v.FailureReason, v.CreatedAt, v.StartedAt, v.CompletedAt, v.UpdatedAt}
+	return RunDTO{v.ID, v.ProjectID, issueKeyForUUID(issueKeys, v.IssueID), v.WorkspaceID, v.AgentID, v.Attempt, v.Status, v.QueueReason, v.FailureReason, v.CreatedAt, v.StartedAt, v.CompletedAt, v.UpdatedAt, v.CurrentBranch}
 }

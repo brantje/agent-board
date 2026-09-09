@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import type { ArtifactEvidence, EventEvidence } from '../types/api'
 import { apiPath, apiText } from '../utils/api'
 import { projectRunActivity } from '../utils/events'
-import { commandLabel, formatElapsed, runActivityStatusLabel, runStatusLabel } from '../utils/runs'
+import { commandLabel, formatElapsed, runStatusLabel } from '../utils/runs'
 import { useRunEvents } from '../composables/useRunEvents'
 
 const props = defineProps<{ projectId: string; runId: string }>()
@@ -77,37 +77,35 @@ function provenanceText() {
       <UButton v-if="matchingReview" label="Review" :to="`/projects/${projectId}/reviews/${matchingReview}`" variant="outline" />
     </template>
     <AsyncState :pending="pending" :error="error" @retry="refresh">
-      <div v-if="run" class="space-y-4">
-        <UAlert
-          v-if="connection === 'reconnecting'"
-          title="Reconnecting"
-          description="Live updates disconnected. This is not a Run failure. The timeline will resume from the last persisted sequence."
-          color="warning"
-        />
+      <div v-if="run" class="detail-grid">
+        <section class="min-w-0 space-y-4">
+          <UAlert
+            v-if="connection === 'reconnecting'"
+            title="Reconnecting"
+            description="Live updates disconnected. This is not a Run failure. The timeline will resume from the last persisted sequence."
+            color="warning"
+          />
 
-        <UCard data-run-work>
-          <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex min-w-0 items-center gap-2">
-              <span class="i-lucide-bot size-4 shrink-0 text-primary" aria-hidden="true" />
-              <span v-if="connection === 'live'" class="i-lucide-loader-circle size-3 shrink-0 animate-spin text-primary" aria-hidden="true" />
-              <span v-if="connection === 'live'" class="sr-only">live</span>
-              <strong class="truncate text-sm font-medium">{{ runActivityStatusLabel(run.status) }}</strong>
+          <UCard data-run-work>
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-3">
+                <RunStatus :status="run.status" :live="connection === 'live'" size="lg" />
+                <WorkspaceBranch v-if="run.currentBranch" :branch="run.currentBranch" />
+              </div>
+              <p class="text-xs text-muted">
+                {{ formatElapsed(run.startedAt, run.completedAt) }} · {{ toolCallCount }} {{ toolCallCount === 1 ? 'tool call' : 'tool calls' }}
+              </p>
             </div>
-            <p class="text-xs text-muted">
-              {{ formatElapsed(run.startedAt, run.completedAt) }} · {{ toolCallCount }} {{ toolCallCount === 1 ? 'tool call' : 'tool calls' }}
-            </p>
-          </div>
-          <p v-if="run.queueReason" class="mb-3 text-sm text-muted">Queue reason: {{ run.queueReason }}</p>
-          <p v-if="run.failureReason" class="mb-3 text-sm text-error">Execution failure: {{ run.failureReason }}</p>
-          <ActivityTimeline :items="activityItems" />
-        </UCard>
+            <p v-if="run.queueReason" class="mb-3 text-sm text-muted">Queue reason: {{ run.queueReason }}</p>
+            <p v-if="run.failureReason" class="mb-3 text-sm text-error">Execution failure: {{ run.failureReason }}</p>
+            <ActivityTimeline :items="activityItems" />
+          </UCard>
 
-        <QuestionPanel :project-id="projectId" :run-id="runId" />
+          <QuestionPanel :project-id="projectId" :run-id="runId" />
 
-        <details class="rounded-lg border border-default bg-default/40">
-          <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium">Run details</summary>
-          <div class="detail-grid border-t border-default p-4">
-            <section class="min-w-0 space-y-4">
+          <details class="border border-default bg-default/40">
+            <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium">Run details</summary>
+            <div class="space-y-4 border-t border-default p-4">
               <UCard>
                 <h2 class="section-label mb-3">Commands {{ evidence?.commands.length || 0 }}</h2>
                 <UAccordion :items="commandItems">
@@ -150,59 +148,63 @@ function provenanceText() {
                   </template>
                 </UAccordion>
               </UCard>
-            </section>
-            <aside class="space-y-4">
-              <UCard>
-                <h2 class="section-label mb-3">Properties</h2>
-                <dl class="space-y-3 text-sm">
-                  <div>
-                    <dt class="text-muted">Status</dt>
-                    <dd>{{ runStatusLabel(run.status) }}</dd>
-                  </div>
-                  <div>
-                    <dt class="text-muted">Issue</dt>
-                    <dd>
-                      <NuxtLink :to="`/projects/${projectId}/issues/${run.issueId}`" class="font-mono break-all hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{ run.issueId }}</NuxtLink>
-                    </dd>
-                  </div>
-                  <div>
-                    <dt class="text-muted">Agent</dt>
-                    <dd class="font-mono break-all">{{ run.agentId || 'Unassigned' }}</dd>
-                  </div>
-                  <div>
-                    <dt class="text-muted">Workspace</dt>
-                    <dd class="font-mono break-all">{{ run.workspaceId }}</dd>
-                  </div>
-                  <div>
-                    <dt class="text-muted">Attempt</dt>
-                    <dd>{{ run.attempt }}</dd>
-                  </div>
-                </dl>
-              </UCard>
-              <UCard>
-                <h2 class="section-label mb-3">Runtime instances</h2>
-                <div v-for="instance in evidence?.runtimeInstances" :key="instance.id" class="mb-3 text-sm">
-                  <p class="font-mono break-all">{{ instance.id }}</p>
-                  <p>Runtime <span class="font-mono">{{ instance.runtimeId }}</span></p>
-                  <p>{{ instance.status }} · runner {{ instance.runnerStatus }}</p>
-                </div>
-                <p v-if="!evidence?.runtimeInstances.length" class="text-sm text-muted">None</p>
-              </UCard>
-              <UCard>
-                <h2 class="section-label mb-3">Provenance</h2>
-                <pre>{{ provenanceText() }}</pre>
-              </UCard>
-              <UCard>
-                <h2 class="section-label mb-3">Artifacts</h2>
-                <ul class="space-y-2 text-sm">
-                  <li v-for="artifact in evidence?.artifacts" :key="artifact.id">
-                    <a :href="artifactHref(artifact)" class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{ artifact.name }}</a>
-                  </li>
-                </ul>
-              </UCard>
-            </aside>
-          </div>
-        </details>
+            </div>
+          </details>
+        </section>
+        <aside class="space-y-4">
+          <UCard>
+            <h2 class="section-label mb-3">Properties</h2>
+            <dl class="space-y-3 text-sm">
+              <div>
+                <dt class="text-muted">Status</dt>
+                <dd><RunStatus :status="run.status" :label="runStatusLabel(run.status)" /></dd>
+              </div>
+              <div>
+                <dt class="text-muted">Issue</dt>
+                <dd>
+                  <NuxtLink :to="`/projects/${projectId}/issues/${run.issueId}`" class="font-mono break-all hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{ run.issueId }}</NuxtLink>
+                </dd>
+              </div>
+              <div>
+                <dt class="text-muted">Agent</dt>
+                <dd class="font-mono break-all">{{ run.agentId || 'Unassigned' }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">Branch</dt>
+                <dd><WorkspaceBranch v-if="run.currentBranch" :branch="run.currentBranch" /><span v-else>None</span></dd>
+              </div>
+              <div>
+                <dt class="text-muted">Workspace</dt>
+                <dd class="font-mono break-all">{{ run.workspaceId }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">Attempt</dt>
+                <dd>{{ run.attempt }}</dd>
+              </div>
+            </dl>
+          </UCard>
+          <UCard>
+            <h2 class="section-label mb-3">Runtime instances</h2>
+            <div v-for="instance in evidence?.runtimeInstances" :key="instance.id" class="mb-3 text-sm">
+              <p class="font-mono break-all">{{ instance.id }}</p>
+              <p>Runtime <span class="font-mono">{{ instance.runtimeId }}</span></p>
+              <p>{{ instance.status }} · runner {{ instance.runnerStatus }}</p>
+            </div>
+            <p v-if="!evidence?.runtimeInstances.length" class="text-sm text-muted">None</p>
+          </UCard>
+          <UCard>
+            <h2 class="section-label mb-3">Provenance</h2>
+            <pre>{{ provenanceText() }}</pre>
+          </UCard>
+          <UCard>
+            <h2 class="section-label mb-3">Artifacts</h2>
+            <ul class="space-y-2 text-sm">
+              <li v-for="artifact in evidence?.artifacts" :key="artifact.id">
+                <a :href="artifactHref(artifact)" class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{ artifact.name }}</a>
+              </li>
+            </ul>
+          </UCard>
+        </aside>
       </div>
     </AsyncState>
   </PageFrame>

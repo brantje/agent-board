@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
+	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 )
 
@@ -45,6 +46,46 @@ func TestHandleReasoningPartPersistsFinalVisibleReasoningOnce(t *testing.T) {
 	event := sink.events[0]
 	if event.Type != "agent.message" || event.Payload["kind"] != "reasoning" || event.Payload["message"] != "Check the handlers first" || event.Payload["source"] != "opencode" {
 		t.Fatalf("event=%+v", event)
+	}
+}
+
+func TestPendingReasoningFlushesBeforeToolAndIdle(t *testing.T) {
+	sink := &recordingActivitySink{}
+	state := newRunState("ses_1", nil, sink)
+	reasoning := mustJSON(t, map[string]any{"id": "reason_open", "sessionID": "ses_1", "text": "Node is missing. Try apk.", "time": map[string]any{"start": 1}})
+	if err := state.handleReasoningPart(context.Background(), reasoning); err != nil {
+		t.Fatalf("buffer reasoning error=%v", err)
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("incomplete reasoning persisted early: %+v", sink.events)
+	}
+
+	tool := mustJSON(t, map[string]any{
+		"id": "tool_1", "tool": "bash",
+		"state": map[string]any{"status": "running", "title": "which apk", "output": ""},
+	})
+	if err := state.handleToolPart(context.Background(), tool); err != nil {
+		t.Fatalf("flush before tool error=%v", err)
+	}
+	if len(sink.events) != 2 {
+		t.Fatalf("events=%+v", sink.events)
+	}
+	if sink.events[0].Type != "agent.message" || sink.events[0].Payload["kind"] != "reasoning" || sink.events[0].Payload["message"] != "Node is missing. Try apk." {
+		t.Fatalf("flushed reasoning=%+v", sink.events[0])
+	}
+	if sink.events[1].Type != "tool.started" {
+		t.Fatalf("tool=%+v", sink.events[1])
+	}
+
+	followUp := mustJSON(t, map[string]any{"id": "txt_idle", "sessionID": "ses_1", "text": "Switch to static HTML.", "time": map[string]any{"start": 2}})
+	if err := state.handleTextPart(context.Background(), followUp); err != nil {
+		t.Fatalf("buffer text error=%v", err)
+	}
+	if err := state.handleEvent(context.Background(), nil, client.Event{Type: "session.idle", Properties: mustJSON(t, map[string]any{"sessionID": "ses_1"})}); err != nil {
+		t.Fatalf("idle flush error=%v", err)
+	}
+	if len(sink.events) != 3 || sink.events[2].Payload["kind"] != "message" || sink.events[2].Payload["message"] != "Switch to static HTML." {
+		t.Fatalf("idle events=%+v", sink.events)
 	}
 }
 

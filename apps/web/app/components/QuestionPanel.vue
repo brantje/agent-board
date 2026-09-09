@@ -2,8 +2,10 @@
 import { computed, reactive, ref } from 'vue'
 import type { Question, QuestionAnswer, QuestionAnswerResponse } from '../types/api'
 import { apiPath, apiQuery, apiRequest } from '../utils/api'
+import { refetchTargets } from '../utils/events'
 import { runStatusLabel } from '../utils/runs'
 import { useResource } from '../composables/useResource'
+import { useProjectEvents } from '../composables/useProjectEvents'
 
 const props = defineProps<{ projectId: string; issueId?: string; runId?: string }>()
 const path = computed(() => apiQuery(apiPath('questions', props.projectId), {
@@ -56,6 +58,12 @@ function answerBody(question: Question): QuestionAnswer | undefined {
 }
 
 const openQuestions = computed(() => (data.value || []).filter(question => question.status === 'OPEN'))
+
+useProjectEvents(() => props.projectId, async event => {
+  if (!refetchTargets(event.type).questions) return
+  if (props.runId && event.runId && event.runId !== props.runId) return
+  await refresh()
+})
 
 async function answer(question: Question) {
   const body = answerBody(question)

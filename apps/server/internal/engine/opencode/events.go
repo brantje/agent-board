@@ -17,6 +17,12 @@ type completedTextPart struct {
 	Text string
 }
 
+type pendingMessage struct {
+	key  string
+	kind string
+	text string
+}
+
 func (s *runState) handleEvent(ctx context.Context, native *client.Client, event client.Event) error {
 	switch event.Type {
 	case "question.asked", "question.v2.asked":
@@ -29,6 +35,8 @@ func (s *runState) handleEvent(ctx context.Context, native *client.Client, event
 		return s.handlePartUpdated(ctx, event.Properties)
 	case "session.error":
 		return s.handleSessionError(event.Properties)
+	case "session.idle":
+		return s.flushPendingMessages(ctx)
 	default:
 		return nil
 	}
@@ -92,7 +100,7 @@ func (s *runState) handlePartUpdated(ctx context.Context, properties json.RawMes
 	}
 }
 
-func decodeCompletedTextPart(data json.RawMessage) (completedTextPart, bool, error) {
+func decodeVisibleTextPart(data json.RawMessage) (completedTextPart, bool, bool, error) {
 	var part struct {
 		ID        string `json:"id"`
 		SessionID string `json:"sessionID"`
@@ -103,60 +111,34 @@ func decodeCompletedTextPart(data json.RawMessage) (completedTextPart, bool, err
 		} `json:"time,omitempty"`
 	}
 	if err := json.Unmarshal(data, &part); err != nil {
+		return completedTextPart{}, false, false, err
+	}
+	if part.ID == "" || part.Ignored || strings.TrimSpace(part.Text) == "" {
+		return completedTextPart{}, false, false, nil
+	}
+	complete := part.Time != nil && part.Time.End != nil
+	return completedTextPart{ID: part.ID, Text: part.Text}, true, complete, nil
+}
+
+func decodeCompletedTextPart(data json.RawMessage) (completedTextPart, bool, error) {
+	part, visible, complete, err := decodeVisibleTextPart(data)
+	if err != nil || !visible || !complete {
 		return completedTextPart{}, false, err
 	}
-	if part.ID == "" || part.Ignored || part.Time == nil || part.Time.End == nil || strings.TrimSpace(part.Text) == "" {
-		return completedTextPart{}, false, nil
-	}
-	return completedTextPart{ID: part.ID, Text: part.Text}, true, nil
+	return part, true, nil
 }
 
-func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) error {
-	part, complete, err := decodeCompletedTextPart(data)
-	if err != nil {
-		return fmt.Errorf("opencode engine: decode text part: %w", err)
-	}
-	if !complete {
-		return nil
-	}
-	if _, duplicate := s.seenTextParts[part.ID]; duplicate {
-		return nil
-	}
-	if s.activity != nil {
-		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{
-			Type: "agent.message",
-			Payload: map[string]any{
-				"message": part.Text,
-				"kind":    "message",
-				"source":  "opencode",
-			},
-		}); err != nil {
-			return err
-		}
-	}
-	s.seenTextParts[part.ID] = struct{}{}
-	s.lastVisibleMessage = part.Text
-	return nil
-}
-
-func (s *runState) handleReasoningPart(ctx context.Context, data json.RawMessage) error {
-	part, complete, err := decodeCompletedTextPart(data)
-	if err != nil {
-		return fmt.Errorf("opencode engine: decode reasoning part: %w", err)
-	}
-	if !complete {
-		return nil
-	}
-	key := "reasoning/" + part.ID
+func (s *runState) persistAgentMessage(ctx context.Context, key, kind, text string) error {
 	if _, duplicate := s.seenTextParts[key]; duplicate {
+		delete(s.pendingMessages, key)
 		return nil
 	}
 	if s.activity != nil {
 		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{
 			Type: "agent.message",
 			Payload: map[string]any{
-				"message": part.Text,
-				"kind":    "reasoning",
+				"message": text,
+				"kind":    kind,
 				"source":  "opencode",
 			},
 		}); err != nil {
@@ -164,20 +146,70 @@ func (s *runState) handleReasoningPart(ctx context.Context, data json.RawMessage
 		}
 	}
 	s.seenTextParts[key] = struct{}{}
+	delete(s.pendingMessages, key)
+	if kind == "message" {
+		s.lastVisibleMessage = text
+	}
 	return nil
 }
 
+func (s *runState) bufferOrPersistMessage(ctx context.Context, key, kind string, part completedTextPart, complete bool) error {
+	if complete {
+		return s.persistAgentMessage(ctx, key, kind, part.Text)
+	}
+	s.pendingMessages[key] = pendingMessage{key: key, kind: kind, text: part.Text}
+	return nil
+}
+
+func (s *runState) flushPendingMessages(ctx context.Context) error {
+	pending := make([]pendingMessage, 0, len(s.pendingMessages))
+	for _, message := range s.pendingMessages {
+		pending = append(pending, message)
+	}
+	for _, message := range pending {
+		if err := s.persistAgentMessage(ctx, message.key, message.kind, message.text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) error {
+	part, visible, complete, err := decodeVisibleTextPart(data)
+	if err != nil {
+		return fmt.Errorf("opencode engine: decode text part: %w", err)
+	}
+	if !visible {
+		return nil
+	}
+	return s.bufferOrPersistMessage(ctx, part.ID, "message", part, complete)
+}
+
+func (s *runState) handleReasoningPart(ctx context.Context, data json.RawMessage) error {
+	part, visible, complete, err := decodeVisibleTextPart(data)
+	if err != nil {
+		return fmt.Errorf("opencode engine: decode reasoning part: %w", err)
+	}
+	if !visible {
+		return nil
+	}
+	return s.bufferOrPersistMessage(ctx, "reasoning/"+part.ID, "reasoning", part, complete)
+}
+
 func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) error {
+	if err := s.flushPendingMessages(ctx); err != nil {
+		return err
+	}
 	var part struct {
 		ID     string `json:"id"`
 		CallID string `json:"callID,omitempty"`
 		Tool   string `json:"tool"`
 		State  struct {
-			Status string         `json:"status"`
-			Input  map[string]any `json:"input,omitempty"`
-			Output any            `json:"output,omitempty"`
-			Title  string         `json:"title,omitempty"`
-			Error  string         `json:"error,omitempty"`
+			Status string          `json:"status"`
+			Input  json.RawMessage `json:"input,omitempty"`
+			Output any             `json:"output,omitempty"`
+			Title  string          `json:"title,omitempty"`
+			Error  string          `json:"error,omitempty"`
 		} `json:"state"`
 	}
 	if err := json.Unmarshal(data, &part); err != nil {
@@ -209,7 +241,7 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 		Kind:       "tool",
 		Name:       part.Tool,
 		ToolCallID: toolCallID,
-		Input:      part.State.Input,
+		Input:      decodeToolInput(part.State.Input),
 		Summary:    evidence.BoundActivityPreview(part.State.Title),
 	}
 	if eventType == "tool.completed" {
@@ -239,6 +271,25 @@ func toolResultPreview(value any) string {
 		return evidence.BoundActivityPreview(fmt.Sprint(value))
 	}
 	return evidence.BoundActivityPreview(string(encoded))
+}
+
+func decodeToolInput(raw json.RawMessage) map[string]any {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	var object map[string]any
+	if err := json.Unmarshal(trimmed, &object); err == nil {
+		return object
+	}
+	var encoded string
+	if err := json.Unmarshal(trimmed, &encoded); err != nil {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(encoded), &object); err != nil {
+		return nil
+	}
+	return object
 }
 
 func toolPayloadMap(payload evidence.ToolPayload) map[string]any {

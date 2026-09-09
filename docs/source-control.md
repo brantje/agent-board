@@ -73,7 +73,7 @@ On first execution:
 1. ensure the Project Workspace exists and is ready
 2. create or restore the Issue Workspace
 3. materialize the current Project Workspace accepted revision into the Issue Workspace
-4. create/use a deterministic Issue working branch
+4. create/use a deterministic Issue working branch named `agent-board/{issue-key}` (for example `agent-board/AB-12`)
 5. attach the Issue Workspace to the Run
 6. mount it at `/workspace` in the Runtime
 

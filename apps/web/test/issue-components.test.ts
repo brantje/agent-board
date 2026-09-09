@@ -5,6 +5,7 @@ import IssueDetail from '../app/components/IssueDetail.vue'
 import IssueEditor from '../app/components/IssueEditor.vue'
 import IssueCard from '../app/components/IssueCard.vue'
 import QuestionPanel from '../app/components/QuestionPanel.vue'
+import RunStatus from '../app/components/RunStatus.vue'
 import { event, MockEventSource, question } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
@@ -19,6 +20,7 @@ const issue = {
   assignedAgentId: null,
   createdAt: '',
   updatedAt: '',
+  currentBranch: null,
   lastEvent: null
 }
 const agent = {
@@ -46,7 +48,8 @@ const run = {
   createdAt: '',
   startedAt: null,
   completedAt: null,
-  updatedAt: ''
+  updatedAt: '',
+  currentBranch: null
 }
 const global = {
   stubs: {
@@ -56,7 +59,8 @@ const global = {
     IssueRelationships: { template: '<section>Relationships</section>' },
     QuestionPanel: { props: ['projectId', 'issueId', 'runId'], template: '<section>Questions</section>' },
     NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' }
-  }
+  },
+  components: { RunStatus }
 }
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(value => value.text() === label)!
 const formForField = (wrapper: ReturnType<typeof mount>, name: string) => wrapper.findAll('form').find(form => form.find(`[data-field=${name}]`).exists())!
@@ -153,6 +157,14 @@ describe('Issue workflow components', () => {
     expect(wrapper.findAll('header h2')).toHaveLength(6)
     const columns = wrapper.findAll('[data-status]')
     expect(columns.map(column => column.attributes('data-status'))).toEqual(['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE'])
+    expect(columns.map(column => column.get('[data-icon]').attributes('data-icon'))).toEqual([
+      'i-lucide-inbox',
+      'i-lucide-circle',
+      'i-lucide-play',
+      'i-lucide-octagon-alert',
+      'i-lucide-scan-eye',
+      'i-lucide-circle-check'
+    ])
     expect(columns.map(column => column.classes().filter(name => name.startsWith('board-column')).sort().join(' '))).toEqual([
       'board-column board-column-backlog',
       'board-column board-column-todo',
@@ -336,7 +348,7 @@ describe('Issue workflow components', () => {
           ...global.stubs,
           QuestionPanel: false
         },
-        components: { QuestionPanel }
+        components: { QuestionPanel, RunStatus }
       }
     })
     await flushPromises()

@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import type { Agent, AssignmentResponse, Issue, Run } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { latestRun, statusLabel } from '../utils/issues'
-import { isBoardActivityEvent } from '../utils/events'
+import { isBoardActivityEvent, applyCurrentBranchToIssue } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
 import IssueRelationships from './IssueRelationships.vue'
@@ -36,6 +36,13 @@ async function reload() {
 }
 
 useProjectEvents(() => props.projectId, async event => {
+  if (event.type === 'git.branch_checked_out' && issue.value) {
+    const patched = applyCurrentBranchToIssue(issue.value, event)
+    if (patched) {
+      issue.value = patched
+      return
+    }
+  }
   if (!isBoardActivityEvent(event.type)) return
   await reload()
 })
@@ -91,7 +98,7 @@ async function saved(savedIssue: Issue) {
             <AsyncState :pending="runs.pending.value" :error="runs.error.value" :empty="!latest" empty-title="No Runs yet" empty-description="Assign an Agent to this Issue to schedule the first Run." @retry="runs.refresh">
               <template v-if="latest">
                 <div class="flex flex-wrap items-center gap-3">
-                  <UBadge :label="statusLabel(latest.status)" color="neutral" />
+                  <RunStatus :status="latest.status" :label="statusLabel(latest.status)" />
                   <span>Attempt {{ latest.attempt }}</span>
                   <UButton label="Open Run" :to="`/projects/${projectId}/runs/${latest.id}`" variant="outline" />
                 </div>
@@ -113,6 +120,10 @@ async function saved(savedIssue: Issue) {
               <div>
                 <dt class="text-muted">Board status</dt>
                 <dd>{{ statusLabel(issue.status) }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">Branch</dt>
+                <dd><WorkspaceBranch v-if="issue.currentBranch" :branch="issue.currentBranch" /><span v-else>None</span></dd>
               </div>
               <div>
                 <dt class="text-muted">Priority</dt>

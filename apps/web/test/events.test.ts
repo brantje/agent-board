@@ -1,7 +1,7 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref, defineComponent, h } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { eventTitle, mergeEvents, maxSequence, refetchTargets, isBoardActivityEvent, compareEvents, projectRunActivity } from '../app/utils/events'
+import { eventTitle, mergeEvents, maxSequence, refetchTargets, isBoardActivityEvent, compareEvents, projectRunActivity, formatActivityTime } from '../app/utils/events'
 import { useRunEvents } from '../app/composables/useRunEvents'
 import { useProjectEvents } from '../app/composables/useProjectEvents'
 import ActivityTimeline from '../app/components/ActivityTimeline.vue'
@@ -14,6 +14,18 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
   MockEventSource.reset()
+})
+
+describe('activity time formatting', () => {
+  it('formats activity timestamps as a compact 24-hour clock', () => {
+    expect(formatActivityTime('2026-09-09T10:23:29.308593Z', 'UTC', Date.parse('2026-09-09T15:00:00Z'))).toBe('10:23:29')
+    expect(formatActivityTime('not-a-date')).toBe('not-a-date')
+  })
+
+  it('includes the full date before the time when the activity is from a previous day', () => {
+    expect(formatActivityTime('2026-09-08T22:15:04.000Z', 'UTC', Date.parse('2026-09-09T15:00:00Z'))).toBe('8 Sept 2026 22:15:04')
+    expect(formatActivityTime('2026-08-31T07:01:00.000Z', 'UTC', Date.parse('2026-09-09T15:00:00Z'))).toBe('31 Aug 2026 07:01:00')
+  })
 })
 
 describe('event timeline projection', () => {
@@ -48,6 +60,7 @@ describe('event timeline projection', () => {
     expect(refetchTargets('review.approved')).toEqual({ run: false, questions: false, reviews: true, issue: false })
     expect(refetchTargets('issue.status_changed')).toEqual({ run: false, questions: false, reviews: false, issue: true })
     expect(refetchTargets('agent.message')).toEqual({ run: false, questions: false, reviews: false, issue: false })
+    expect(refetchTargets('git.branch_checked_out')).toEqual({ run: false, questions: false, reviews: false, issue: false })
     expect(isBoardActivityEvent('question.created')).toBe(true)
     expect(isBoardActivityEvent('decision.recorded')).toBe(true)
     expect(isBoardActivityEvent('project.resync')).toBe(true)
@@ -70,7 +83,7 @@ describe('ActivityTimeline', () => {
     expect(rendered[0]?.text()).toContain('Plan')
     expect(rendered[0]?.text()).toContain('Ship the candidate')
     expect(rendered[1]?.text()).toContain('future.unknown')
-    expect(rendered[1]?.text()).toContain('2026-01-01T00:02:00.000Z')
+    expect(rendered[1]?.get('time').attributes('datetime')).toBe('2026-01-01T00:02:00.000Z')
     expect(rendered[1]?.text()).toContain('"note": "keep"')
     expect(wrapper.text()).not.toMatch(/thought/i)
   })

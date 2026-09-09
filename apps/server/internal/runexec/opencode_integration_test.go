@@ -290,7 +290,7 @@ func newOpenCodeIntegrationFixture(t *testing.T) *openCodeIntegrationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

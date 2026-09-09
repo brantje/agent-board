@@ -1,7 +1,7 @@
 import { onBeforeUnmount, onMounted, ref, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import type { EventEvidence, Issue, Question, Review, Run, RunEvidence } from '../types/api'
 import { apiPath, apiQuery, apiRequest, type ApiError } from '../utils/api'
-import { maxSequence, mergeEvents, parseEventMessage, refetchTargets } from '../utils/events'
+import { maxSequence, mergeEvents, parseEventMessage, refetchTargets, applyCurrentBranchToRun } from '../utils/events'
 
 export const SSE_RECONNECT_MS = 2000
 export type RunEventConnection = 'connecting' | 'live' | 'reconnecting' | 'disconnected' | 'error'
@@ -69,6 +69,10 @@ export function useRunEvents(projectId: MaybeRefOrGetter<string>, runId: MaybeRe
       const incoming = parseEventMessage(message.data)
       if (!incoming) return
       events.value = mergeEvents(events.value, [incoming])
+      if (evidence.value?.run) {
+        const patched = applyCurrentBranchToRun(evidence.value.run, incoming)
+        if (patched) evidence.value = { ...evidence.value, run: patched }
+      }
       void refetchFor(incoming.type, ids)
     }
     source.onerror = () => {

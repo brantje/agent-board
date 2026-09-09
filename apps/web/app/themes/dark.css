@@ -42,6 +42,6 @@ html[data-theme='dark'] {
   --board-column-todo: #252628;
   --board-column-in-progress: #2a2820;
   --board-column-blocked: #2c2425;
-  --board-column-review: #242830;
-  --board-column-done: #232a26;
+  --board-column-done: #242830;
+  --board-column-review: #232a26;
 }

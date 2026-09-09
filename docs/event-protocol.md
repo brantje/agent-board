@@ -166,6 +166,7 @@ decision.recorded
 tool.started
 tool.output
 tool.completed
+tool.stopped
 tool.failed
 ```
 
@@ -182,6 +183,7 @@ Typical payload metadata:
 - summary
 - bounded `resultPreview`
 - failure reason
+- `tool.stopped` for an invocation that the control plane terminated on purpose (for example a long-running Engine sidecar after the Run finished). That is distinct from `tool.failed`, which remains a crash, nonzero exit, or launch error without a stop request.
 
 A stable `toolCallId` lets viewers project lifecycle Events for one invocation into a single logical row without changing the authoritative Event history. Fields are additive: historical Events without a call identifier remain valid and must still render through the generic Event fallback.
 
@@ -212,9 +214,12 @@ Prefer structured counts/results where adapters can provide them.
 
 ```text
 git.branch_created
+git.branch_checked_out
 git.commit_created
 git.push_completed
 ```
+
+`git.branch_checked_out` records the live Issue Workspace checkout when HEAD changes during execution. Payload includes `branch`, `previousBranch`, `detached`, and `issueKey`.
 
 GitHub/PR integration can extend this family later.
 
@@ -322,7 +327,7 @@ Example:
 ```text
 tool.started (A)
   -> tool.output (parent A)
-  -> tool.completed (parent A)
+  -> tool.completed | tool.stopped | tool.failed (parent A)
 ```
 
 For future squads:

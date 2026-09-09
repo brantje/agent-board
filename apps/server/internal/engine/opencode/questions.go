@@ -33,6 +33,7 @@ type runState struct {
 	nativeQuestions              map[string]*nativeQuestionState
 	seenTextParts                map[string]struct{}
 	seenToolStates               map[string]struct{}
+	pendingMessages              map[string]pendingMessage
 	acceptedReplyResolveFailures map[string][]error
 	lastVisibleMessage           string
 }
@@ -45,6 +46,7 @@ func newRunState(sessionID string, questions engine.InteractiveQuestioner, activ
 		nativeQuestions:              make(map[string]*nativeQuestionState),
 		seenTextParts:                make(map[string]struct{}),
 		seenToolStates:               make(map[string]struct{}),
+		pendingMessages:              make(map[string]pendingMessage),
 		acceptedReplyResolveFailures: make(map[string][]error),
 	}
 }

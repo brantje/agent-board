@@ -75,7 +75,8 @@ function itemStatus(item: InboxItem) {
               <NuxtLink :to="item.to" class="font-medium hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{ item.title }}</NuxtLink>
               <p class="text-xs text-muted">{{ item.projectName }} · {{ item.kind }}</p>
             </div>
-            <UBadge color="neutral" variant="subtle" :label="itemStatus(item)" />
+            <RunStatus v-if="item.kind === 'run'" :status="item.status" :label="itemStatus(item)" />
+            <UBadge v-else color="neutral" variant="subtle" :label="itemStatus(item)" />
           </div>
         </UCard>
       </div>

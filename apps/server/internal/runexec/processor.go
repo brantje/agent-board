@@ -2,6 +2,7 @@ package runexec
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ import (
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
 const (
@@ -31,6 +33,8 @@ type ContextResolver interface {
 type ExecutionStore interface {
 	executioncontext.ProvenanceStore
 	ListExecutionSessions(context.Context, string, []string) ([]store.ExecutionSession, error)
+	GetWorkspace(context.Context, string, string) (store.Workspace, error)
+	UpdateWorkspaceCurrentBranch(context.Context, string, string, string) (store.Workspace, error)
 }
 
 type SessionService interface {
@@ -59,6 +63,7 @@ type Processor struct {
 	events    *evidence.Recorder
 	output    *evidence.OutputRecorder
 	candidate *evidence.CandidateSnapshotter
+	branches  *branchObserver
 }
 
 func NewProcessor(
@@ -70,11 +75,15 @@ func NewProcessor(
 	events *evidence.Recorder,
 	output *evidence.OutputRecorder,
 	candidate *evidence.CandidateSnapshotter,
+	git workspace.Git,
 ) (*Processor, error) {
 	if store == nil || resolver == nil || runtimes == nil || sessions == nil || engines == nil || events == nil || output == nil || candidate == nil {
 		return nil, fmt.Errorf("run execution: all processor dependencies are required")
 	}
-	return &Processor{store: store, resolver: resolver, runtimes: runtimes, sessions: sessions, engines: engines, events: events, output: output, candidate: candidate}, nil
+	return &Processor{
+		store: store, resolver: resolver, runtimes: runtimes, sessions: sessions, engines: engines,
+		events: events, output: output, candidate: candidate, branches: newBranchObserver(store, git, events),
+	}, nil
 }
 
 func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission, lifecycle scheduler.Lifecycle) (scheduler.Result, error) {
@@ -110,6 +119,7 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 	if err := p.record(ctx, safe, runEventType, nil, nil, nil); err != nil {
 		return scheduler.Result{}, err
 	}
+	p.branches.observeIfChanged(ctx, safe, nil)
 	if err := p.record(ctx, safe, "runtime.provisioning", map[string]any{"runtimeId": safe.Runtime.ID}, nil, nil); err != nil {
 		return scheduler.Result{}, err
 	}
@@ -138,6 +148,7 @@ func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, 
 	if err := p.record(ctx, safe, "run.resumed", map[string]any{"reason": "lease_reconciliation"}, nil, nil); err != nil {
 		return scheduler.Result{}, err
 	}
+	p.branches.observeIfChanged(ctx, safe, nil)
 	started, err := p.runtimes.Start(ctx, run.ProjectID, session.RuntimeInstanceID)
 	if err != nil {
 		return failed(err), nil
@@ -185,6 +196,7 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 		runtimeInstanceID: instance.ID,
 		attachSessionID:   attachSessionID,
 		scope:             evidence.RunScope{ProjectID: run.ProjectID, IssueID: run.IssueID, RunID: run.ID},
+		branches:          p.branches,
 	}
 	request, err := p.engineRequest(ctx, safe, launcher, instance.ID)
 	if err != nil {
@@ -392,6 +404,7 @@ type processLauncher struct {
 	runtimeInstanceID string
 	attachSessionID   string
 	scope             evidence.RunScope
+	branches          *branchObserver
 }
 
 func (l *processLauncher) Start(ctx context.Context, request engine.ProcessRequest) (engine.Process, error) {
@@ -432,6 +445,12 @@ func (l *processLauncher) Attach(ctx context.Context) (engine.Process, error) {
 	return newCapturingProcess(ctx, process, l, engine.ProcessRequest{Kind: "tool", Name: "attached"}, ""), nil
 }
 
+func (l *processLauncher) observeBranchAfterTerminal(ctx context.Context, eventType string) {
+	if shouldObserveBranchAfterActivity(eventType) {
+		l.branches.observeIfChanged(ctx, l.safe, &l.runtimeInstanceID)
+	}
+}
+
 func (l *processLauncher) record(ctx context.Context, eventType string, payload any, parent *string) (store.Event, error) {
 	encoded, err := evidence.EncodePayload(payload)
 	if err != nil {
@@ -448,8 +467,24 @@ func (l *processLauncher) recordFailure(ctx context.Context, request engine.Proc
 		eventType = "test.failed"
 		payload = evidence.TestPayload{Command: append([]string(nil), request.Command...), Status: "failed", OutputChunkIDs: chunkIDs(chunks)}
 	}
-	_, err := l.record(ctx, eventType, map[string]any{"result": payload, "error": safeFailure(cause)}, parent)
+	_, err := l.record(ctx, eventType, flattenFailurePayload(payload, cause), parent)
 	return err
+}
+
+func flattenFailurePayload(payload any, cause error) any {
+	encoded, err := evidence.EncodePayload(payload)
+	if err != nil {
+		return map[string]any{"reason": safeFailure(cause)}
+	}
+	var mapped map[string]any
+	if err := json.Unmarshal(encoded, &mapped); err != nil {
+		return map[string]any{"reason": safeFailure(cause)}
+	}
+	if mapped == nil {
+		mapped = map[string]any{}
+	}
+	mapped["reason"] = safeFailure(cause)
+	return mapped
 }
 
 func processPayload(request engine.ProcessRequest, exitCode *int, outputChunkIDs []string) any {
@@ -535,6 +570,7 @@ type capturingProcess struct {
 	waitOnce      sync.Once
 	waitResult    engine.ProcessResult
 	waitErr       error
+	stopRequested atomic.Bool
 }
 
 func newCapturingProcess(ctx context.Context, process *app.AuthorizedExecutionProcess, launcher *processLauncher, request engine.ProcessRequest, parentEventID string) *capturingProcess {
@@ -561,9 +597,13 @@ func (p *capturingProcess) Stdout() io.Reader     { return p.stdout.Reader() }
 func (p *capturingProcess) Stderr() io.Reader     { return p.stderr.Reader() }
 func (p *capturingProcess) Stdin() io.WriteCloser { return p.process.Stdin() }
 func (p *capturingProcess) Terminate(ctx context.Context) error {
+	p.stopRequested.Store(true)
 	return p.process.Terminate(ctx)
 }
-func (p *capturingProcess) Kill(ctx context.Context) error { return p.process.Kill(ctx) }
+func (p *capturingProcess) Kill(ctx context.Context) error {
+	p.stopRequested.Store(true)
+	return p.process.Kill(ctx)
+}
 
 func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, error) {
 	p.waitOnce.Do(func() {
@@ -588,6 +628,14 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 		parent := optionalEventID(p.parentEventID)
 		terminalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processCancellationCleanupTimeout)
 		defer cancel()
+		if p.waitErr == nil && result.ExitCode != 0 && p.stopRequested.Load() && p.request.Kind != "test" {
+			if _, eventErr := p.launcher.record(terminalCtx, "tool.stopped", processPayload(p.request, &exitCode, chunkIDs(chunks)), parent); eventErr != nil {
+				p.waitErr = eventErr
+			} else {
+				p.launcher.observeBranchAfterTerminal(terminalCtx, "tool.stopped")
+			}
+			return
+		}
 		if p.waitErr != nil || result.ExitCode != 0 {
 			cause := p.waitErr
 			if cause == nil {
@@ -595,6 +643,12 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 			}
 			if eventErr := p.launcher.recordFailure(terminalCtx, p.request, parent, chunks, cause); eventErr != nil {
 				p.waitErr = errors.Join(p.waitErr, eventErr)
+			} else {
+				eventType := "tool.failed"
+				if p.request.Kind == "test" {
+					eventType = "test.failed"
+				}
+				p.launcher.observeBranchAfterTerminal(terminalCtx, eventType)
 			}
 			return
 		}
@@ -605,6 +659,8 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 		}
 		if _, eventErr := p.launcher.record(terminalCtx, eventType, payload, parent); eventErr != nil {
 			p.waitErr = eventErr
+		} else {
+			p.launcher.observeBranchAfterTerminal(terminalCtx, eventType)
 		}
 	})
 	return p.waitResult, p.waitErr

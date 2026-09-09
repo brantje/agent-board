@@ -238,14 +238,14 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 		return nil, err
 	}
 	services.ControlPlane.SetProjectRepositoryProvisioner(provisioner)
-	if err := configureExecutionScheduler(services); err != nil {
+	if err := configureExecutionScheduler(services, git); err != nil {
 		_ = services.Close()
 		return nil, err
 	}
 	return services, nil
 }
 
-func configureExecutionScheduler(services *app.Services) error {
+func configureExecutionScheduler(services *app.Services, git workspace.Git) error {
 	if services == nil || services.ExecutionStore == nil || services.ExecutionContext == nil || services.RuntimeInstances == nil || services.ExecutionSessions == nil || services.Redaction == nil {
 		return fmt.Errorf("execution services are incomplete")
 	}
@@ -294,7 +294,7 @@ func configureExecutionScheduler(services *app.Services) error {
 	if err != nil {
 		return err
 	}
-	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, candidate)
+	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, candidate, git)
 	if err != nil {
 		return err
 	}

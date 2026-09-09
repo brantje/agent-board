@@ -160,6 +160,7 @@ CREATE TABLE workspaces (
     base_branch text,
     base_revision text,
     working_branch text NOT NULL CHECK (btrim(working_branch) <> ''),
+    current_branch text CHECK (current_branch IS NULL OR btrim(current_branch) <> ''),
     bootstrap_status text NOT NULL DEFAULT 'PENDING' CHECK (bootstrap_status IN ('PENDING', 'READY', 'FAILED')),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),

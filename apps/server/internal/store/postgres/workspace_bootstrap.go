@@ -93,10 +93,11 @@ func (s *Store) MarkWorkspaceBootstrapPending(ctx context.Context, projectID, is
 		    base_branch=$6,
 		    base_revision=NULLIF($7, ''),
 		    working_branch=$8,
+		    current_branch=$8,
 		    bootstrap_status='PENDING',
 		    updated_at=now()
 		WHERE project_id=$1 AND issue_id=$2 AND id=$3 AND bootstrap_status <> 'READY'
-		RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, bootstrap_status, created_at, updated_at
+		RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, current_branch, bootstrap_status, created_at, updated_at
 	`, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, strings.TrimSpace(baseRevision), workingBranch))
 }
 
@@ -111,10 +112,11 @@ func (s *Store) MarkWorkspaceBootstrapReady(ctx context.Context, projectID, issu
 		    base_branch=$6,
 		    base_revision=$7,
 		    working_branch=$8,
+		    current_branch=$8,
 		    bootstrap_status='READY',
 		    updated_at=now()
 		WHERE project_id=$1 AND issue_id=$2 AND id=$3 AND bootstrap_status IN ('PENDING', 'FAILED')
-		RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, bootstrap_status, created_at, updated_at
+		RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, current_branch, bootstrap_status, created_at, updated_at
 	`, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, baseRevision, workingBranch))
 }
 
@@ -123,7 +125,7 @@ func (s *Store) MarkWorkspaceBootstrapFailed(ctx context.Context, projectID, iss
 		UPDATE workspaces
 		SET bootstrap_status='FAILED', updated_at=now()
 		WHERE project_id=$1 AND issue_id=$2 AND id=$3 AND bootstrap_status <> 'READY'
-		RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, bootstrap_status, created_at, updated_at
+		RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, current_branch, bootstrap_status, created_at, updated_at
 	`, projectID, issueID, workspaceID))
 }
 

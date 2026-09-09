@@ -265,6 +265,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 					return engine.Result{}, err
 				}
 				if !hadPending {
+					if err := state.flushPendingMessages(ctx); err != nil {
+						return engine.Result{}, err
+					}
 					return finishCompleted()
 				}
 				continue
