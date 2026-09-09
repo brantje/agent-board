@@ -424,13 +424,17 @@ function applyLatestTodoSnapshots(items: RunActivityItem[]) {
   const indexes = items.flatMap((item, index) => (
     item.kind === 'tool' && isTodoToolName(item.name) && item.todos?.length ? [index] : []
   ))
-  if (indexes.length < 2) return items
-  const latest = (items[indexes[indexes.length - 1]] as ToolActivityItem).todos!
+  const latestIndex = indexes.at(-1)
+  if (latestIndex == null || indexes.length < 2) return items
+  const latestItem = items[latestIndex]
+  if (latestItem?.kind !== 'tool' || !latestItem.todos?.length) return items
+  const latest = latestItem.todos
   const next = [...items]
-  for (let index = 0; index < indexes.length - 1; index++) {
-    const prior = next[indexes[index]] as ToolActivityItem
-    const todos = mergeTodoStatuses(prior.todos!, latest)
-    next[indexes[index]] = { ...prior, todos, target: todoProgressSummary(todos) }
+  for (const priorIndex of indexes.slice(0, -1)) {
+    const prior = next[priorIndex]
+    if (prior?.kind !== 'tool' || !prior.todos?.length) continue
+    const todos = mergeTodoStatuses(prior.todos, latest)
+    next[priorIndex] = { ...prior, todos, target: todoProgressSummary(todos) }
   }
   return next
 }

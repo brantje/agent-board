@@ -368,6 +368,37 @@ func TestUsageTelemetryUsesLaterPartEndAndIgnoresToolDuration(t *testing.T) {
 	assertTimeMillis(t, sink.samples[1].CompletedAt, 11000)
 }
 
+func TestUsageHistoryBackfillSkipsEmptyNonAssistantAndInvalidMessages(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/session/ses_1/message" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write(mustJSON(t, []any{
+			map[string]any{"parts": []any{}},
+			map[string]any{"info": map[string]any{"id": "user_1", "sessionID": "ses_1", "role": "user"}},
+			map[string]any{"info": 1},
+		}))
+	}))
+	t.Cleanup(server.Close)
+	native, err := client.New(server.Client(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sink := &recordingUsageSink{}
+	state := newRunState("ses_1", nil, sink)
+	state.seedModelUsage("openrouter", "model", nil)
+	if err := state.backfillUsageFromHistory(t.Context(), native); err == nil {
+		t.Fatal("expected invalid history header to fail")
+	}
+
+	emptyState := newRunState("ses_1", nil, sink)
+	if err := emptyState.backfillUsageFromHistory(t.Context(), nil); err != nil {
+		t.Fatalf("nil native backfill error=%v", err)
+	}
+}
+
 func assertTimeMillis(t *testing.T, got *time.Time, want int64) {
 	t.Helper()
 	if got == nil || got.UnixMilli() != want {
