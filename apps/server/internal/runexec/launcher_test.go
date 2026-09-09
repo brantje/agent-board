@@ -64,6 +64,31 @@ func (s *launcherSessionStore) GetExecutionSession(_ context.Context, projectID,
 	return session, nil
 }
 
+func (s *launcherSessionStore) ListExecutionSessionsByRunner(_ context.Context, runnerID string, statuses []string) ([]store.ExecutionSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sessions := make([]store.ExecutionSession, 0, len(s.sessions))
+	for _, session := range s.sessions {
+		if session.RunnerID != runnerID {
+			continue
+		}
+		if len(statuses) > 0 {
+			matched := false
+			for _, status := range statuses {
+				if session.Status == status {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
+}
+
 func (s *launcherSessionStore) TransitionExecutionSession(_ context.Context, transition store.ExecutionSessionTransition) (store.ExecutionSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

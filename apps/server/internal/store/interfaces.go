@@ -46,6 +46,7 @@ type ExecutionStore interface {
 	ListExecutionSessions(context.Context, string, []string) ([]ExecutionSession, error)
 	ListExecutionSessionsByRun(context.Context, string, string, []string) ([]ExecutionSession, error)
 	ListExecutionSessionsByRuntimeInstance(context.Context, string, string, []string) ([]ExecutionSession, error)
+	ListExecutionSessionsByRunner(context.Context, string, []string) ([]ExecutionSession, error)
 	TransitionExecutionSession(context.Context, ExecutionSessionTransition) (ExecutionSession, error)
 	CreateQuestion(context.Context, Question) (Question, error)
 	CreateDecision(context.Context, Decision) (Decision, error)

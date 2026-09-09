@@ -92,3 +92,30 @@ func TestExecutionSessionLifecycleAndSequentialReuse(t *testing.T) {
 		t.Fatalf("invalid status error=%v", err)
 	}
 }
+
+func TestListExecutionSessionsByRunner(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	fixture := seedRunFixture(t, s, "runner-session-list")
+	runner, err := s.CreateRunner(ctx, store.Runner{Name: "Build host", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+	session, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: fixture.project.ID, RunID: fixture.run.ID, RunnerID: runner.ID,
+		Status: "RUNNING", CommandArgv: json.RawMessage(`["true"]`),
+	})
+	if err != nil {
+		t.Fatalf("create runner session: %v", err)
+	}
+	active, err := s.ListExecutionSessionsByRunner(ctx, runner.ID, []string{"RUNNING"})
+	if err != nil || len(active) != 1 || active[0].ID != session.ID {
+		t.Fatalf("active runner sessions=%+v err=%v", active, err)
+	}
+	if _, err := s.ListExecutionSessionsByRunner(ctx, "", nil); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("empty runner id error=%v", err)
+	}
+	if _, err := s.ListExecutionSessionsByRunner(ctx, runner.ID, []string{"BOGUS"}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid status error=%v", err)
+	}
+}

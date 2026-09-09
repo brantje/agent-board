@@ -31,6 +31,26 @@ func (m *runnerMemory) RotateRunnerCredential(_ context.Context, id string, hash
 	m.value.TokenHash = hash
 	return m.value, nil
 }
+func (m *runnerMemory) RevokeRunner(_ context.Context, id string, deleted bool) (store.Runner, error) {
+	if id != m.value.ID {
+		return store.Runner{}, store.ErrNotFound
+	}
+	now := time.Now()
+	m.value.RevokedAt = &now
+	if deleted {
+		m.value.DeletedAt = &now
+	}
+	return m.value, nil
+}
+
+type runnerSessionTerminatorFake struct {
+	runnerID string
+}
+
+func (f *runnerSessionTerminatorFake) TerminateRunnerSessions(_ context.Context, runnerID string) error {
+	f.runnerID = runnerID
+	return nil
+}
 
 func TestRunnerCredentialsAreOneTimeHashedAndValidated(t *testing.T) {
 	ctx := context.Background()
@@ -75,6 +95,20 @@ func TestRunnerCredentialsAreOneTimeHashedAndValidated(t *testing.T) {
 	memory.value.DeletedAt = &now
 	if _, err = s.Authenticate(ctx, r.ID, next); !errors.Is(err, ErrRunnerAuthentication) {
 		t.Fatal("deleted accepted")
+	}
+}
+
+func TestRevokeTerminatesActiveRunnerSessions(t *testing.T) {
+	ctx := context.Background()
+	memory := &runnerMemory{value: store.Runner{ID: "runner-1"}}
+	terminator := &runnerSessionTerminatorFake{}
+	service := NewRunnerService(memory)
+	service.SetSessionTerminator(terminator)
+	if _, err := service.Revoke(ctx, "runner-1", false); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if terminator.runnerID != "runner-1" {
+		t.Fatalf("terminator runner=%q", terminator.runnerID)
 	}
 }
 

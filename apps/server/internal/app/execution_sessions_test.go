@@ -27,6 +27,22 @@ func (s *executionSessionStoreFake) CreateExecutionSession(_ context.Context, in
 	s.mu.Lock(); defer s.mu.Unlock(); input.ID = "session-1"; s.session = input; return input, nil
 }
 func (s *executionSessionStoreFake) GetExecutionSession(context.Context, string, string) (store.ExecutionSession, error) { s.mu.Lock(); defer s.mu.Unlock(); return s.session, nil }
+func (s *executionSessionStoreFake) ListExecutionSessionsByRunner(_ context.Context, runnerID string, statuses []string) ([]store.ExecutionSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if runnerID == "" || s.session.RunnerID != runnerID {
+		return nil, nil
+	}
+	if len(statuses) == 0 {
+		return []store.ExecutionSession{s.session}, nil
+	}
+	for _, status := range statuses {
+		if s.session.Status == status {
+			return []store.ExecutionSession{s.session}, nil
+		}
+	}
+	return nil, nil
+}
 func (s *executionSessionStoreFake) TransitionExecutionSession(_ context.Context, tr store.ExecutionSessionTransition) (store.ExecutionSession, error) {
 	s.mu.Lock(); defer s.mu.Unlock()
 	allowed := len(tr.FromStatuses) == 0

@@ -23,15 +23,24 @@ func (s *RunnerService) SetProjectRunners(ctx context.Context, id string, ids []
 	return translateStoreError(s.store.SetProjectRunnerIDs(ctx, id, ids), "project")
 }
 
+type RunnerSessionTerminator interface {
+	TerminateRunnerSessions(context.Context, string) error
+}
+
 type RunnerService struct {
 	store       store.RunnerStore
 	Connections *runner.Registry
+	sessions    RunnerSessionTerminator
 }
 
 func NewRunnerService(s store.RunnerStore) *RunnerService {
 	service := &RunnerService{store: s}
 	service.Connections = runner.NewRegistry(service, s)
 	return service
+}
+
+func (s *RunnerService) SetSessionTerminator(terminator RunnerSessionTerminator) {
+	s.sessions = terminator
 }
 
 func runnerCredential() (string, []byte, error) {
@@ -94,6 +103,9 @@ func (s *RunnerService) Rotate(ctx context.Context, id string) (store.Runner, st
 func (s *RunnerService) Revoke(ctx context.Context, id string, deleted bool) (store.Runner, error) {
 	r, err := s.store.RevokeRunner(ctx, id, deleted)
 	if err == nil {
+		if s.sessions != nil {
+			_ = s.sessions.TerminateRunnerSessions(ctx, id)
+		}
 		s.Connections.Disconnect(id)
 	}
 	return r, translateStoreError(err, "runner")

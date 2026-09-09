@@ -24,6 +24,7 @@ type ExecutionSessionStore interface {
 	GetRuntimeInstance(context.Context, string, string) (store.RuntimeInstance, error)
 	CreateExecutionSession(context.Context, store.ExecutionSession) (store.ExecutionSession, error)
 	GetExecutionSession(context.Context, string, string) (store.ExecutionSession, error)
+	ListExecutionSessionsByRunner(context.Context, string, []string) ([]store.ExecutionSession, error)
 	TransitionExecutionSession(context.Context, store.ExecutionSessionTransition) (store.ExecutionSession, error)
 	UpdateRuntimeInstanceRunnerStatus(context.Context, string, string, string) (store.RuntimeInstance, error)
 }

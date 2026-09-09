@@ -57,6 +57,32 @@ func TestReconcileRunnerSessionFailsAfterReconnectTimeout(t *testing.T) {
 	}
 }
 
+func TestTerminateRunnerSessionsFailsActiveSessions(t *testing.T) {
+	transport := newFakeExecutionTransport("session-1")
+	manager := &reconcileExecutionManager{transport: transport, active: true}
+	storeFake := &executionSessionStoreFake{
+		session: store.ExecutionSession{
+			ID: "session-1", ProjectID: "project-1", RunID: "run-1", RunnerID: "runner-1",
+			Status: "RUNNING", UpdatedAt: time.Now(),
+		},
+	}
+	service, err := NewExecutionSessionService(storeFake, manager, manager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.retainExecutionProcess(storeFake.session, transport)
+
+	if err := service.TerminateRunnerSessions(context.Background(), "runner-1"); err != nil {
+		t.Fatalf("terminate: %v", err)
+	}
+	if storeFake.session.Status != "FAILED" {
+		t.Fatalf("session status=%q", storeFake.session.Status)
+	}
+	if !transport.killed {
+		t.Fatal("expected live runner session to be killed")
+	}
+}
+
 func TestReconcileRunnerSessionReattachesActiveTransport(t *testing.T) {
 	transport := newFakeExecutionTransport("session-1")
 	manager := &reconcileExecutionManager{transport: transport, active: true}

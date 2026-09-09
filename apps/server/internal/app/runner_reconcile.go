@@ -74,3 +74,22 @@ func sessionAnchorTime(session store.ExecutionSession) time.Time {
 	}
 	return session.UpdatedAt
 }
+
+func (s *ExecutionSessionService) TerminateRunnerSessions(ctx context.Context, runnerID string) error {
+	sessions, err := s.store.ListExecutionSessionsByRunner(ctx, runnerID, []string{"PENDING", "STARTING", "RUNNING"})
+	if err != nil {
+		return translateStoreError(err, "execution_session")
+	}
+	var errs []error
+	for _, session := range sessions {
+		if process, ok := s.liveProcess(session.ProjectID, session.ID); ok {
+			if killErr := process.Kill(ctx); killErr != nil {
+				errs = append(errs, killErr)
+			}
+		}
+		if _, transitionErr := s.transition(ctx, session, []string{"PENDING", "STARTING", "RUNNING"}, "FAILED", nil); transitionErr != nil {
+			errs = append(errs, transitionErr)
+		}
+	}
+	return errors.Join(errs...)
+}

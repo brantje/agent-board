@@ -11,7 +11,7 @@ const agentMessageKinds: Record<string, string> = {
   reasoning: 'Thought'
 }
 
-const knownFamilies = new Set(['run', 'agent', 'runtime', 'question', 'decision', 'tool', 'file', 'test', 'artifact', 'issue', 'review', 'git'])
+const knownFamilies = new Set(['run', 'agent', 'runtime', 'workspace', 'question', 'decision', 'tool', 'file', 'test', 'artifact', 'issue', 'review', 'git'])
 
 export type AgentTextActivityItem = {
   kind: 'thought' | 'message'
@@ -105,6 +105,7 @@ const hiddenRunActivityTypes = new Set([
   'engine.file_created',
   'file.created',
   'model.usage',
+  'workspace.transfer.progress',
 ])
 
 const boardActivityFamilies = new Set(['issue', 'run', 'question', 'review', 'decision', 'project'])
@@ -162,8 +163,34 @@ export function eventTitle(event: EventEvidence) {
   return event.type
 }
 
+function workspaceTransferDirection(direction: unknown) {
+  if (direction === 'to_runner') return 'To runner'
+  if (direction === 'from_runner') return 'From runner'
+  return typeof direction === 'string' && direction.trim() ? direction : undefined
+}
+
+function formatTransferBytes(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return undefined
+  if (value < 1024) return `${value} B`
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KiB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MiB`
+}
+
 export function eventDescription(event: EventEvidence) {
   const payload = event.payload || {}
+  if (event.type.startsWith('workspace.transfer.')) {
+    const direction = workspaceTransferDirection(payload.direction)
+    if (event.type === 'workspace.transfer.failed' && typeof payload.reason === 'string' && payload.reason.trim()) {
+      return direction ? `${direction}: ${payload.reason}` : payload.reason
+    }
+    const transferred = formatTransferBytes(payload.bytesTransferred)
+    const total = formatTransferBytes(payload.totalBytes)
+    if (transferred && total) {
+      const size = transferred === total ? transferred : `${transferred} / ${total}`
+      return direction ? `${direction} · ${size}` : size
+    }
+    return direction || ''
+  }
   if (event.type === 'git.branch_checked_out' && typeof payload.branch === 'string') {
     const previous = typeof payload.previousBranch === 'string' ? payload.previousBranch : undefined
     return previous ? `${previous} → ${payload.branch}` : payload.branch
@@ -218,6 +245,7 @@ export function toolActivityIcon(name: string) {
 const eventFamilyIcons: Record<string, string> = {
   run: 'i-lucide-play',
   runtime: 'i-lucide-box',
+  workspace: 'i-lucide-folder-sync',
   engine: 'i-lucide-cog',
   decision: 'i-lucide-check',
   agent: 'i-lucide-bot',

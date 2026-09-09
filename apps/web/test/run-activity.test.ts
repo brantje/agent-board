@@ -62,6 +62,25 @@ describe('run activity projection', () => {
     })
   })
 
+  it('projects workspace transfer lifecycle events and hides progress noise', () => {
+    const items = projectRunActivity([
+      event({ id: 'xfer-start', type: 'workspace.transfer.started', sequence: 1, payload: { direction: 'to_runner', runnerId: 'runner-1', transferId: 'xfer-1' } }),
+      event({ id: 'xfer-progress', type: 'workspace.transfer.progress', sequence: 2, payload: { direction: 'to_runner', bytesTransferred: 65536, totalBytes: 131072 } }),
+      event({ id: 'xfer-done', type: 'workspace.transfer.completed', sequence: 3, payload: { direction: 'to_runner', bytesTransferred: 131072, totalBytes: 131072 } }),
+      event({ id: 'sync-fail', type: 'workspace.transfer.failed', sequence: 4, payload: { direction: 'from_runner', reason: 'runner disconnected' } })
+    ])
+    expect(items).toHaveLength(3)
+    expect(items.map(item => item.kind === 'event' ? item.title : item.kind)).toEqual([
+      'Workspace Transfer Started',
+      'Workspace Transfer Completed',
+      'Workspace Transfer Failed'
+    ])
+    expect(items[0]).toMatchObject({ description: 'To runner' })
+    expect(items[1]).toMatchObject({ description: 'To runner · 128.0 KiB' })
+    expect(items[2]).toMatchObject({ description: 'From runner: runner disconnected' })
+    expect(eventActivityIcon('workspace.transfer.started')).toBe('i-lucide-folder-sync')
+  })
+
   it('projects an intentional process stop as stopped rather than failed', () => {
     const items = projectRunActivity([
       event({

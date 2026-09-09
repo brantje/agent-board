@@ -50,6 +50,39 @@ func (s *Store) ListExecutionSessionsByRuntimeInstance(ctx context.Context, proj
 	return s.listExecutionSessions(ctx, projectID, runtimeInstanceID, "", statuses)
 }
 
+func (s *Store) ListExecutionSessionsByRunner(ctx context.Context, runnerID string, statuses []string) ([]store.ExecutionSession, error) {
+	if strings.TrimSpace(runnerID) == "" {
+		return nil, store.ErrInvalidArgument
+	}
+	for _, status := range statuses {
+		if _, ok := executionSessionStatuses[status]; !ok {
+			return nil, store.ErrInvalidArgument
+		}
+	}
+	rows, err := s.pool.Query(ctx, executionSessionSelect+`
+		FROM execution_sessions
+		WHERE runner_id = $1
+		  AND (coalesce(cardinality($2::text[]), 0) = 0 OR status = ANY($2::text[]))
+		ORDER BY created_at, id
+	`, runnerID, statuses)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	defer rows.Close()
+	sessions := make([]store.ExecutionSession, 0)
+	for rows.Next() {
+		session, err := scanExecutionSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
 func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeInstanceID, runID string, statuses []string) ([]store.ExecutionSession, error) {
 	if strings.TrimSpace(projectID) == "" {
 		return nil, store.ErrInvalidArgument
