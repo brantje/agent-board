@@ -159,17 +159,49 @@ export class MockEventSource {
   static reset() {
     this.instances = []
   }
+
   url: string
-  closed = false
-  onopen: (() => void) | null = null
+  onopen: ((event: Event) => void) | null = null
   onmessage: ((event: MessageEvent<string>) => void) | null = null
-  onerror: (() => void) | null = null
+  onerror: ((event: Event) => void) | null = null
+  closed = false
+  readyState = 1
+  private named = new Map<string, Array<(event: MessageEvent<string>) => void>>()
+
   constructor(url: string) {
     this.url = url
     MockEventSource.instances.push(this)
+    queueMicrotask(() => {
+      if (!this.closed) this.onopen?.(new Event('open'))
+    })
   }
-  close() { this.closed = true }
-  emit(value: EventEvidence) { this.emitRaw(JSON.stringify(value)) }
-  emitRaw(value: string) { this.onmessage?.({ data: value } as MessageEvent<string>) }
-  fail() { this.onerror?.() }
+
+  emit(data: unknown) {
+    this.emitRaw(JSON.stringify(data))
+  }
+
+  emitRaw(data: string) {
+    this.onmessage?.({ data } as MessageEvent<string>)
+  }
+
+  emitNamed(type: string, data = '{}') {
+    for (const listener of this.named.get(type) ?? []) {
+      listener({ data } as MessageEvent<string>)
+    }
+  }
+
+  addEventListener(type: string, listener: EventListener) {
+    const list = this.named.get(type) ?? []
+    list.push(listener as (event: MessageEvent<string>) => void)
+    this.named.set(type, list)
+  }
+
+  fail() {
+    this.onerror?.(new Event('error'))
+  }
+
+  close() {
+    this.closed = true
+    this.readyState = 2
+  }
 }
