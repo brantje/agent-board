@@ -33,7 +33,7 @@ func (s *Service) AssignIssue(ctx context.Context, projectID, issueID, agentID s
 		return store.Issue{}, store.Run{}, executionConfigError(nil)
 	}
 
-	provider, err := s.GetProvider(ctx, model.ProviderID)
+	provider, err := s.GetProvider(ctx, scope, model.ProviderID)
 	if err != nil {
 		return store.Issue{}, store.Run{}, executionConfigError(err)
 	}

@@ -70,7 +70,7 @@ An Agent selects Engine, Model Profile and Runtime directly and may define opera
 
 ### Provider
 
-Configured model/inference connection and credential boundary.
+Configured model/inference connection and credential boundary. Shared (instance-wide) or Project-owned; shared Providers are visible and read-only inside a Project.
 
 ### Model Profile
 

@@ -33,6 +33,16 @@ func TestResolveBaseURLUsesBuiltInDefault(t *testing.T) {
 	}
 }
 
+func TestResolveBaseURLUsesOpenRouterDefault(t *testing.T) {
+	got, err := ResolveBaseURL(store.Provider{Kind: "openrouter"})
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if got != "https://openrouter.ai/api/v1" {
+		t.Fatalf("baseURL=%q", got)
+	}
+}
+
 func TestResolveBaseURLRequiresBaseURLForCustomProvider(t *testing.T) {
 	_, err := ResolveBaseURL(store.Provider{Kind: "llamarack"})
 	if err == nil || !strings.Contains(err.Error(), "baseUrl") {

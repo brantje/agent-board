@@ -17,11 +17,11 @@ func (a *api) registerConfigurationRoutes(r chi.Router) {
 	r.Patch("/projects/{projectID}", a.updateProject)
 	a.registerScopedConfig(r)
 
-	r.Get("/providers", a.listProviders)
-	r.Post("/providers", a.createProvider)
-	r.Get("/providers/{resourceID}", a.getProvider)
-	r.Put("/providers/{resourceID}", a.updateProvider)
-	r.Get("/providers/{resourceID}/models", a.listProviderModels)
+	r.Get("/providers", a.listGlobalProviders)
+	r.Post("/providers", a.createGlobalProvider)
+	r.Get("/providers/{resourceID}", a.getGlobalProvider)
+	r.Put("/providers/{resourceID}", a.updateGlobalProvider)
+	r.Get("/providers/{resourceID}/models", a.listGlobalProviderModels)
 
 	a.registerGlobalConfig(r)
 }
@@ -42,6 +42,11 @@ func (a *api) registerGlobalConfig(r chi.Router) {
 }
 
 func (a *api) registerScopedConfig(r chi.Router) {
+	r.Get("/projects/{projectID}/providers", a.listProjectProviders)
+	r.Post("/projects/{projectID}/providers", a.createProjectProvider)
+	r.Get("/projects/{projectID}/providers/{resourceID}", a.getProjectProvider)
+	r.Put("/projects/{projectID}/providers/{resourceID}", a.updateProjectProvider)
+	r.Get("/projects/{projectID}/providers/{resourceID}/models", a.listProjectProviderModels)
 	r.Get("/projects/{projectID}/model-profiles", a.listProjectModelProfiles)
 	r.Post("/projects/{projectID}/model-profiles", a.createProjectModelProfile)
 	r.Get("/projects/{projectID}/model-profiles/{resourceID}", a.getProjectModelProfile)
@@ -147,8 +152,8 @@ func (a *api) updateProject(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, projectDTO(v))
 }
 
-func (a *api) listProviders(w http.ResponseWriter, r *http.Request) {
-	values, err := a.service.ListProviders(r.Context())
+func (a *api) listProviders(w http.ResponseWriter, r *http.Request, scope *string) {
+	values, err := a.service.ListProviders(r.Context(), scope)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -159,7 +164,7 @@ func (a *api) listProviders(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, out)
 }
-func (a *api) createProvider(w http.ResponseWriter, r *http.Request) {
+func (a *api) createProvider(w http.ResponseWriter, r *http.Request, scope *string) {
 	var req CreateProviderRequest
 	if !decodeJSON(w, r, &req) {
 		return
@@ -168,21 +173,21 @@ func (a *api) createProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "secret_storage_unavailable", "Secret storage is not configured for this deployment.")
 		return
 	}
-	v, err := a.service.CreateProvider(r.Context(), store.Provider{Name: req.Name, Kind: req.Kind, BaseURL: req.BaseURL, CredentialRef: req.CredentialRef, Enabled: boolDefault(req.Enabled, true), SafeMetadata: req.SafeMetadata})
+	v, err := a.service.CreateProvider(r.Context(), store.Provider{ProjectID: scope, Name: req.Name, Kind: req.Kind, BaseURL: req.BaseURL, CredentialRef: req.CredentialRef, Enabled: boolDefault(req.Enabled, true), SafeMetadata: req.SafeMetadata})
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	if hasProviderCredential(req.Credential) {
 		ref := providerCredentialRef(req.CredentialRef, v.ID, v.CredentialRef)
-		if _, err := a.secrets.Put(r.Context(), secrets.Scope{}, ref, []byte(strings.TrimSpace(*req.Credential))); err != nil {
+		if _, err := a.secrets.Put(r.Context(), secrets.Scope{ProjectID: scope}, ref, []byte(strings.TrimSpace(*req.Credential))); err != nil {
 			writeAppError(w, err)
 			return
 		}
 		if v.CredentialRef == nil || *v.CredentialRef != ref {
 			refValue := ref
 			v.CredentialRef = &refValue
-			v, err = a.service.UpdateProvider(r.Context(), v)
+			v, err = a.service.UpdateProvider(r.Context(), scope, v)
 			if err != nil {
 				writeAppError(w, err)
 				return
@@ -191,19 +196,19 @@ func (a *api) createProvider(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 201, providerDTO(v))
 }
-func (a *api) getProvider(w http.ResponseWriter, r *http.Request) {
+func (a *api) getProvider(w http.ResponseWriter, r *http.Request, scope *string) {
 	id, ok := resourceID(w, r)
 	if !ok {
 		return
 	}
-	v, err := a.service.GetProvider(r.Context(), id)
+	v, err := a.service.GetProvider(r.Context(), scope, id)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	writeJSON(w, 200, providerDTO(v))
 }
-func (a *api) updateProvider(w http.ResponseWriter, r *http.Request) {
+func (a *api) updateProvider(w http.ResponseWriter, r *http.Request, scope *string) {
 	id, ok := resourceID(w, r)
 	if !ok {
 		return
@@ -216,7 +221,7 @@ func (a *api) updateProvider(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "secret_storage_unavailable", "Secret storage is not configured for this deployment.")
 		return
 	}
-	current, err := a.service.GetProvider(r.Context(), id)
+	current, err := a.service.GetProvider(r.Context(), scope, id)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -231,14 +236,14 @@ func (a *api) updateProvider(w http.ResponseWriter, r *http.Request) {
 	current.SafeMetadata = req.SafeMetadata
 	if hasProviderCredential(req.Credential) {
 		ref := providerCredentialRef(req.CredentialRef, current.ID, current.CredentialRef)
-		if _, err := a.secrets.Put(r.Context(), secrets.Scope{}, ref, []byte(strings.TrimSpace(*req.Credential))); err != nil {
+		if _, err := a.secrets.Put(r.Context(), secrets.Scope{ProjectID: scope}, ref, []byte(strings.TrimSpace(*req.Credential))); err != nil {
 			writeAppError(w, err)
 			return
 		}
 		refValue := ref
 		current.CredentialRef = &refValue
 	}
-	v, err := a.service.UpdateProvider(r.Context(), current)
+	v, err := a.service.UpdateProvider(r.Context(), scope, current)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -260,12 +265,12 @@ func providerCredentialRef(explicit *string, providerID string, existing *string
 	return "provider:" + providerID
 }
 
-func (a *api) listProviderModels(w http.ResponseWriter, r *http.Request) {
+func (a *api) listProviderModels(w http.ResponseWriter, r *http.Request, scope *string) {
 	id, ok := resourceID(w, r)
 	if !ok {
 		return
 	}
-	models, err := a.service.ListProviderModels(r.Context(), id, a.secretResolver, nil)
+	models, err := a.service.ListProviderModels(r.Context(), scope, id, a.secretResolver, nil)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -275,6 +280,51 @@ func (a *api) listProviderModels(w http.ResponseWriter, r *http.Request) {
 		out = append(out, ProviderModelDTO{ID: model.ID, Name: model.Name})
 	}
 	writeJSON(w, 200, ProviderModelListDTO{Models: out})
+}
+func (a *api) listGlobalProviders(w http.ResponseWriter, r *http.Request) {
+	a.listProviders(w, r, nil)
+}
+func (a *api) createGlobalProvider(w http.ResponseWriter, r *http.Request) {
+	a.createProvider(w, r, nil)
+}
+func (a *api) getGlobalProvider(w http.ResponseWriter, r *http.Request) {
+	a.getProvider(w, r, nil)
+}
+func (a *api) updateGlobalProvider(w http.ResponseWriter, r *http.Request) {
+	a.updateProvider(w, r, nil)
+}
+func (a *api) listGlobalProviderModels(w http.ResponseWriter, r *http.Request) {
+	a.listProviderModels(w, r, nil)
+}
+func (a *api) listProjectProviders(w http.ResponseWriter, r *http.Request) {
+	s, ok := scopeFromProject(w, r)
+	if ok {
+		a.listProviders(w, r, s)
+	}
+}
+func (a *api) createProjectProvider(w http.ResponseWriter, r *http.Request) {
+	s, ok := scopeFromProject(w, r)
+	if ok {
+		a.createProvider(w, r, s)
+	}
+}
+func (a *api) getProjectProvider(w http.ResponseWriter, r *http.Request) {
+	s, ok := scopeFromProject(w, r)
+	if ok {
+		a.getProvider(w, r, s)
+	}
+}
+func (a *api) updateProjectProvider(w http.ResponseWriter, r *http.Request) {
+	s, ok := scopeFromProject(w, r)
+	if ok {
+		a.updateProvider(w, r, s)
+	}
+}
+func (a *api) listProjectProviderModels(w http.ResponseWriter, r *http.Request) {
+	s, ok := scopeFromProject(w, r)
+	if ok {
+		a.listProviderModels(w, r, s)
+	}
 }
 
 func (a *api) listModelProfiles(w http.ResponseWriter, r *http.Request, scope *string) {

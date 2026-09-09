@@ -20,9 +20,9 @@ type ControlPlaneStore interface {
 	ListRuns(context.Context, string) ([]Run, error)
 	AssignIssue(context.Context, string, string, string) (Issue, Run, error)
 
-	ListProviders(context.Context) ([]Provider, error)
-	GetProvider(context.Context, string) (Provider, error)
-	UpdateProvider(context.Context, Provider) (Provider, error)
+	ListProviders(context.Context, *string) ([]Provider, error)
+	GetProvider(context.Context, *string, string) (Provider, error)
+	UpdateProvider(context.Context, *string, Provider) (Provider, error)
 
 	ListModelProfiles(context.Context, *string) ([]ModelProfile, error)
 	GetModelProfile(context.Context, *string, string) (ModelProfile, error)

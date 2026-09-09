@@ -38,6 +38,12 @@ paths:
     $ref: ./paths/agents.yaml#/path2
   /api/projects/{projectID}/secrets:
     $ref: ./paths/secrets.yaml#/path2
+  /api/projects/{projectID}/providers:
+    $ref: ./paths/providers.yaml#/path4
+  /api/projects/{projectID}/providers/{resourceID}:
+    $ref: ./paths/providers.yaml#/path5
+  /api/projects/{projectID}/providers/{resourceID}/models:
+    $ref: ./paths/providers.yaml#/path6
   /api/projects/{projectID}/model-profiles:
     $ref: ./paths/model-profiles.yaml#/path3
   /api/projects/{projectID}/model-profiles/{resourceID}:

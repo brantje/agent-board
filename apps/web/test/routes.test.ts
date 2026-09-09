@@ -37,6 +37,9 @@ it('binds configuration routes to the correct scope and resource',()=>{
     else expect(manager.attributes('data-project')).toBeUndefined()
     expect(manager.attributes('data-kind')).toBeTruthy()
   }
+  expect(Object.keys(pages).some(path => path.endsWith('/projects/[projectID]/settings/providers.vue'))).toBe(true)
+  expect(Object.keys(pages).some(path => path.endsWith('/settings/agents.vue') && !path.includes('[projectID]'))).toBe(true)
+  expect(Object.keys(pages).some(path => path.endsWith('/pages/agents.vue'))).toBe(false)
 })
 
 it('binds Issue and Board routes to Project and Issue IDs', async()=>{

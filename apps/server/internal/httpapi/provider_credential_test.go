@@ -28,7 +28,7 @@ func (s *captureProviderCredentialStore) CreateProvider(_ context.Context, p sto
 	return p, nil
 }
 
-func (s *captureProviderCredentialStore) UpdateProvider(_ context.Context, p store.Provider) (store.Provider, error) {
+func (s *captureProviderCredentialStore) UpdateProvider(_ context.Context, _ *string, p store.Provider) (store.Provider, error) {
 	s.updated = p
 	return p, nil
 }

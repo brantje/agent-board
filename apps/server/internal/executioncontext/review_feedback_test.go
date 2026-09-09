@@ -36,7 +36,7 @@ func (s *reviewFeedbackStore) GetAgentInScope(context.Context, *string, string) 
 func (s *reviewFeedbackStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) {
 	return store.ModelProfile{}, store.ErrNotFound
 }
-func (s *reviewFeedbackStore) GetProvider(context.Context, string) (store.Provider, error) {
+func (s *reviewFeedbackStore) GetProvider(context.Context, *string, string) (store.Provider, error) {
 	return store.Provider{}, store.ErrNotFound
 }
 func (s *reviewFeedbackStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) {

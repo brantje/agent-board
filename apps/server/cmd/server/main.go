@@ -60,6 +60,14 @@ func main() {
 		baseHandler := slog.NewTextHandler(os.Stderr, nil)
 		slog.SetDefault(slog.New(redaction.NewSlogHandler(baseHandler, application.services.Redaction)))
 	}
+	if application, ok := handler.(*applicationHandler); ok && application.services != nil {
+		if err := app.EnsureOpenRouterFromEnv(ctx, application.services.ControlPlane, app.SecretStoreFromWriter(application.services.Secrets), os.Getenv); err != nil {
+			slog.Error("bootstrap OpenRouter provider", "error", err)
+			closeStore()
+			stop()
+			os.Exit(1)
+		}
+	}
 	if err := reconcileRuntimeInstances(ctx, handler); err != nil {
 		slog.Error("reconcile Runtime Instance", "error", err)
 		closeStore()
