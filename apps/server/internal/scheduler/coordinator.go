@@ -20,6 +20,8 @@ const (
 	defaultMaxInFlight       = 32
 )
 
+var ErrRunCancellation = errors.New("scheduler: run cancellation requested")
+
 type Config struct {
 	OwnerID           string
 	PollInterval      time.Duration
@@ -63,6 +65,9 @@ type Coordinator struct {
 	processor  Processor
 	reconciler Reconciler
 	config     Config
+
+	activeMu sync.Mutex
+	active   map[string]context.CancelCauseFunc
 }
 
 func New(s store.SchedulerStore, processor Processor, reconciler Reconciler, config Config) (*Coordinator, error) {
@@ -84,7 +89,54 @@ func New(s store.SchedulerStore, processor Processor, reconciler Reconciler, con
 	if config.ReportError == nil {
 		config.ReportError = func(error) {}
 	}
-	return &Coordinator{store: s, processor: processor, reconciler: reconciler, config: config}, nil
+	return &Coordinator{
+		store: s, processor: processor, reconciler: reconciler, config: config,
+		active: make(map[string]context.CancelCauseFunc),
+	}, nil
+}
+
+func activeRunKey(projectID, runID string) string {
+	return projectID + "/" + runID
+}
+
+// CancelRun interrupts the processor that currently owns an admitted Run. The
+// worker keeps renewing its lease until cleanup finishes so it can persist the
+// authoritative CANCELLED transition instead of leaving cancellation to lease
+// expiry/reconciliation.
+func (c *Coordinator) CancelRun(projectID, runID string) bool {
+	if c == nil || strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" {
+		return false
+	}
+	key := activeRunKey(projectID, runID)
+	c.activeMu.Lock()
+	cancel := c.active[key]
+	c.activeMu.Unlock()
+	if cancel == nil {
+		return false
+	}
+	cancel(ErrRunCancellation)
+	return true
+}
+
+func (c *Coordinator) registerActiveRun(claim *store.SchedulerAdmission, cancel context.CancelCauseFunc) {
+	if c == nil || claim == nil || cancel == nil {
+		return
+	}
+	c.activeMu.Lock()
+	c.active[activeRunKey(claim.Job.ProjectID, claim.Run.ID)] = cancel
+	c.activeMu.Unlock()
+}
+
+func (c *Coordinator) unregisterActiveRun(claim *store.SchedulerAdmission, cancel context.CancelCauseFunc) {
+	if c == nil || claim == nil {
+		return
+	}
+	key := activeRunKey(claim.Job.ProjectID, claim.Run.ID)
+	c.activeMu.Lock()
+	if current := c.active[key]; current != nil {
+		delete(c.active, key)
+	}
+	c.activeMu.Unlock()
 }
 
 func (c *Coordinator) Run(ctx context.Context) error {
@@ -195,8 +247,10 @@ func (c *Coordinator) reconcileOne(ctx context.Context) (*store.SchedulerAdmissi
 }
 
 func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmission) {
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
+	ctx, cancel := context.WithCancelCause(parent)
+	defer cancel(nil)
+	c.registerActiveRun(claim, cancel)
+	defer c.unregisterActiveRun(claim, cancel)
 
 	heartbeatDone := make(chan struct{})
 	var leaseLost atomic.Bool
@@ -210,16 +264,16 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 			select {
 			case <-heartbeatDone:
 				return
-			case <-ctx.Done():
+			case <-parent.Done():
 				return
 			case <-ticker.C:
-				if _, err := c.store.RenewLease(ctx, claim.Job.ProjectID, claim.Job.ID, claim.Lease.LeaseToken, c.config.LeaseDuration); err != nil {
+				if _, err := c.store.RenewLease(parent, claim.Job.ProjectID, claim.Job.ID, claim.Lease.LeaseToken, c.config.LeaseDuration); err != nil {
 					if parent.Err() != nil {
 						return
 					}
 					c.config.ReportError(err)
 					leaseLost.Store(true)
-					cancel()
+					cancel(err)
 					return
 				}
 			}
@@ -230,6 +284,11 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 	result, err := c.processor.Process(ctx, claim, lifecycle)
 	close(heartbeatDone)
 	heartbeat.Wait()
+	runCancelled := errors.Is(context.Cause(ctx), ErrRunCancellation)
+	if runCancelled {
+		result = Result{RunStatus: "CANCELLED"}
+		err = nil
+	}
 	if err != nil {
 		if !errors.Is(err, context.Canceled) {
 			c.config.ReportError(err)
