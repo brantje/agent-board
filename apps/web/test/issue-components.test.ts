@@ -1,11 +1,11 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h } from 'vue'
 import ProjectBoard from '../app/components/ProjectBoard.vue'
 import IssueDetail from '../app/components/IssueDetail.vue'
 import IssueEditor from '../app/components/IssueEditor.vue'
 import IssueCard from '../app/components/IssueCard.vue'
-import { useRefresh } from '../app/composables/useRefresh'
+import QuestionPanel from '../app/components/QuestionPanel.vue'
+import { event, MockEventSource, question } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
 const issue = {
@@ -18,7 +18,8 @@ const issue = {
   priority: 0,
   assignedAgentId: null,
   createdAt: '',
-  updatedAt: ''
+  updatedAt: '',
+  lastEvent: null
 }
 const agent = {
   id: 'a',
@@ -63,6 +64,7 @@ const formForField = (wrapper: ReturnType<typeof mount>, name: string) => wrappe
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
+  MockEventSource.reset()
 })
 
 describe('Issue workflow components', () => {
@@ -76,6 +78,15 @@ describe('Issue workflow components', () => {
     expect(text).not.toContain('Unassigned')
     expect(text).not.toContain('TODO')
     expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(false)
+
+    await wrapper.setProps({
+      issue: {
+        ...issue,
+        lastEvent: event({ id: 'evt-q', type: 'question.created', sequence: null, payload: { prompt: 'Choose' } })
+      }
+    })
+    expect(wrapper.text()).toContain('Question Created')
+    expect(wrapper.text()).not.toContain('TODO')
 
     await wrapper.setProps({ issue: { ...issue, assignedAgentId: 'a', priority: 3, description: '' } })
     expect(wrapper.text()).toContain('High')
@@ -168,6 +179,38 @@ describe('Issue workflow components', () => {
     await flushPromises()
     expect(wrapper.find('[role=dialog]').exists()).toBe(false)
     expect(fetch.mock.calls.filter(([, options]) => options.method === 'GET').length).toBeGreaterThanOrEqual(6)
+    wrapper.unmount()
+  })
+
+  it('updates column membership and last-event badge from Project SSE without a loading skeleton', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    let current = {
+      ...issue,
+      lastEvent: event({ id: 'evt-1', type: 'issue.created', sequence: null })
+    }
+    const fetch = vi.fn(async (path: string) => {
+      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/issues')) return new Response(JSON.stringify([current]))
+      return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectBoard, { props: { projectId: 'p' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Issue Created')
+    expect(wrapper.text()).not.toContain('Loading')
+    expect(wrapper.get('[data-status=TODO]').text()).toContain('Fix scheduler')
+
+    current = {
+      ...issue,
+      status: 'IN_PROGRESS',
+      lastEvent: event({ id: 'evt-2', type: 'question.created', sequence: null })
+    }
+    MockEventSource.instances[0]?.emit(current.lastEvent)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Loading')
+    expect(wrapper.get('[data-status=IN_PROGRESS]').text()).toContain('Fix scheduler')
+    expect(wrapper.get('[data-status=IN_PROGRESS]').text()).toContain('Question Created')
+    expect(wrapper.get('[data-status=TODO]').text()).not.toContain('Fix scheduler')
     wrapper.unmount()
   })
 
@@ -275,25 +318,40 @@ describe('Issue workflow components', () => {
     doneWrapper.unmount()
   })
 
-  it('refreshes on focus and interval without overlapping or leaking after unmount', async () => {
-    vi.useFakeTimers()
-    let resolve!: () => void
-    const refresh = vi.fn(() => new Promise<void>(value => { resolve = value }))
-    const wrapper = mount(defineComponent({ setup() { useRefresh(refresh, 100); return () => h('div') } }))
+  it('refreshes Issue detail and open questions from Project SSE without a loading skeleton', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    let current = { ...issue, title: 'Fix scheduler' }
+    let questions = [] as ReturnType<typeof question>[]
+    const fetch = vi.fn(async (path: string) => {
+      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+      if (path.includes('/questions')) return new Response(JSON.stringify(questions))
+      return new Response(JSON.stringify(current))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(IssueDetail, {
+      props: { projectId: 'p', issueId: issue.id },
+      global: {
+        stubs: {
+          ...global.stubs,
+          QuestionPanel: false
+        },
+        components: { QuestionPanel }
+      }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Fix scheduler')
+    expect(wrapper.text()).not.toContain('Which strategy?')
+    expect(MockEventSource.instances[0]?.url).toBe('/api/projects/p/events')
 
-    window.dispatchEvent(new Event('focus'))
-    expect(refresh).toHaveBeenCalledTimes(1)
-    await vi.advanceTimersByTimeAsync(100)
-    expect(refresh).toHaveBeenCalledTimes(1)
-    resolve()
+    current = { ...issue, title: 'Live title', status: 'BLOCKED' }
+    questions = [question({ issueId: issue.id })]
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-q', type: 'question.created', sequence: null }))
     await flushPromises()
-    await vi.advanceTimersByTimeAsync(100)
-    expect(refresh).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).not.toContain('Loading')
+    expect(wrapper.text()).toContain('Live title')
+    expect(wrapper.text()).toContain('Blocked')
+    expect(wrapper.text()).toContain('Which strategy?')
     wrapper.unmount()
-    resolve()
-    await flushPromises()
-    window.dispatchEvent(new Event('focus'))
-    await vi.advanceTimersByTimeAsync(300)
-    expect(refresh).toHaveBeenCalledTimes(2)
   })
 })

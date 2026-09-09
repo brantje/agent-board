@@ -3,24 +3,28 @@ import { computed, onMounted, ref } from 'vue'
 import type { Project, Run } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { runStatusLabel } from '../utils/runs'
-import { useRefresh } from '../composables/useRefresh'
+import { isBoardActivityEvent } from '../utils/events'
+import { useProjectEvents } from '../composables/useProjectEvents'
 
 const props = defineProps<{ projectId?: string }>()
 const pending = ref(true)
 const error = ref<Error>()
 const rows = ref<(Run & { projectName?: string })[]>([])
 const partialErrors = ref<{ id: string; name: string; message: string }[]>([])
+const projectIds = ref<string[]>([])
 
 async function load() {
   pending.value = !rows.value.length
   error.value = undefined
   try {
     if (props.projectId) {
+      projectIds.value = [props.projectId]
       rows.value = await apiRequest<Run[]>(apiPath('runs', props.projectId))
       partialErrors.value = []
       return
     }
     const projects = await apiRequest<Project[]>(apiPath('projects'))
+    projectIds.value = projects.map(project => project.id)
     const results = await Promise.all(projects.map(async project => {
       try {
         const runs = await apiRequest<Run[]>(apiPath('runs', project.id))
@@ -34,14 +38,18 @@ async function load() {
   } catch (failure) {
     error.value = failure as Error
     rows.value = []
+    projectIds.value = []
   } finally {
     pending.value = false
   }
 }
 
-useRefresh(load)
+useProjectEvents(projectIds, event => {
+  if (!isBoardActivityEvent(event.type)) return
+  void load()
+})
 onMounted(load)
-const empty = computed(() => !pending.value && !error.value && !rows.value.length)
+const empty = computed(() => !pending.value && !error.value && !rows.value.length && !partialErrors.value.length)
 </script>
 
 <template>

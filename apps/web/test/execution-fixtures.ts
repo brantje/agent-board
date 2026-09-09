@@ -31,6 +31,9 @@ export function event(partial: Partial<EventEvidence> & Pick<EventEvidence, 'id'
   return {
     schemaVersion: 1,
     occurredAt: '2026-01-01T00:01:00.000Z',
+    projectId: project.id,
+    issueId: null,
+    runId: null,
     sequence: 1,
     agentId: 'agent-1',
     workspaceId: 'workspace-1',
@@ -162,6 +165,7 @@ export class MockEventSource {
   onerror: ((event: Event) => void) | null = null
   closed = false
   readyState = 1
+  private named = new Map<string, Array<(event: MessageEvent<string>) => void>>()
 
   constructor(url: string) {
     this.url = url
@@ -173,6 +177,18 @@ export class MockEventSource {
 
   emit(data: unknown) {
     this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent<string>)
+  }
+
+  emitNamed(type: string, data = '{}') {
+    for (const listener of this.named.get(type) ?? []) {
+      listener({ data } as MessageEvent<string>)
+    }
+  }
+
+  addEventListener(type: string, listener: EventListener) {
+    const list = this.named.get(type) ?? []
+    list.push(listener as (event: MessageEvent<string>) => void)
+    this.named.set(type, list)
   }
 
   fail() {

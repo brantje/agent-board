@@ -72,6 +72,68 @@ describe('RunList', () => {
     expect(wrapper.get('a[href="/projects/project-a/runs/run-1"]').exists()).toBe(true)
     wrapper.unmount()
   })
+
+  it('keeps partial Project failures visible on the global Runs index', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/projects') return new Response(JSON.stringify([project, { ...project, id: 'project-b', name: 'Other' }]))
+      if (path === '/api/projects/project-b/runs') return new Response(JSON.stringify({ error: { code: 'project_not_found' } }), { status: 404 })
+      if (path === '/api/projects/project-a/runs') return new Response(JSON.stringify([run]))
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(RunList, { global })
+    await flushPromises()
+    expect(wrapper.get('a[href="/projects/project-a/runs/run-1"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Other')
+    expect(wrapper.text()).toContain('unavailable or belongs to another project')
+    wrapper.unmount()
+  })
+
+  it('keeps all-project Run fetch failures visible instead of the empty state', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/projects') return new Response(JSON.stringify([project, { ...project, id: 'project-b', name: 'Other' }]))
+      return new Response(JSON.stringify({ error: { code: 'project_not_found' } }), { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(RunList, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Other')
+    expect(wrapper.text()).toContain('unavailable or belongs to another project')
+    expect(wrapper.text()).not.toContain('No Runs yet')
+    wrapper.unmount()
+  })
+
+  it('shows an error when the Project list cannot be loaded', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'project_not_found' } }), { status: 404 })))
+    const wrapper = mount(RunList, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('unavailable or belongs to another project')
+    wrapper.unmount()
+  })
+
+  it('refreshes rendered Runs from Project SSE without a loading skeleton', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    let listed: typeof run[] = []
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/projects') return new Response(JSON.stringify([project]))
+      if (path === '/api/projects/project-a/runs') return new Response(JSON.stringify(listed))
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(RunList, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('No Runs yet')
+    expect(MockEventSource.instances[0]?.url).toBe('/api/projects/project-a/events')
+
+    listed = [{ ...run, status: 'FAILED', failureReason: 'engine' }]
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-run', type: 'run.failed', sequence: null }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Loading')
+    expect(wrapper.text()).not.toContain('No Runs yet')
+    expect(wrapper.get('a[href="/projects/project-a/runs/run-1"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Run · Failed')
+    wrapper.unmount()
+  })
 })
 
 describe('RunDetail', () => {

@@ -52,6 +52,7 @@ describe('theme CSS architecture', () => {
     expect(main).toContain('border-radius: 0 !important')
     expect(main).toContain('.issue-identity')
     expect(main).toContain('.issue-priority')
+    expect(main).toContain('.issue-last-event')
     expect(main).not.toContain('--color-steel-500')
     expect(main).not.toContain('.dark {')
 
