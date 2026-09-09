@@ -9,7 +9,13 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
 )
+
+type completedTextPart struct {
+	ID   string
+	Text string
+}
 
 func (s *runState) handleEvent(ctx context.Context, native *client.Client, event client.Event) error {
 	switch event.Type {
@@ -36,8 +42,6 @@ func (s *runState) handleSessionError(properties json.RawMessage) error {
 	if err := json.Unmarshal(properties, &update); err != nil {
 		return fmt.Errorf("opencode engine: decode native session error: %w", err)
 	}
-	// The event stream is instance-scoped and may contain errors for another
-	// session. Only the native session owned by this Run is terminal here.
 	if update.SessionID == "" || update.SessionID != s.sessionID {
 		return nil
 	}
@@ -64,10 +68,6 @@ func (s *runState) handleSessionError(properties json.RawMessage) error {
 
 func (s *runState) handlePartUpdated(ctx context.Context, properties json.RawMessage) error {
 	trimmed := bytes.TrimSpace(properties)
-	// message.part.updated is best-effort visible telemetry. OpenCode can emit
-	// an envelope before the optional properties payload is populated; there is
-	// no control state to recover from that empty update, so ignore it and wait
-	// for a later complete part update instead of failing the Run.
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil
 	}
@@ -99,15 +99,13 @@ func (s *runState) handlePartUpdated(ctx context.Context, properties json.RawMes
 	case "tool":
 		return s.handleToolPart(ctx, update.Part)
 	case "reasoning":
-		// Native reasoning parts may contain private chain-of-thought. Agent
-		// Board intentionally does not persist or transform them.
-		return nil
+		return s.handleReasoningPart(ctx, update.Part)
 	default:
 		return nil
 	}
 }
 
-func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) error {
+func decodeCompletedTextPart(data json.RawMessage) (completedTextPart, bool, error) {
 	var part struct {
 		ID        string `json:"id"`
 		SessionID string `json:"sessionID"`
@@ -118,11 +116,20 @@ func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) err
 		} `json:"time,omitempty"`
 	}
 	if err := json.Unmarshal(data, &part); err != nil {
+		return completedTextPart{}, false, err
+	}
+	if part.ID == "" || part.Ignored || part.Time == nil || part.Time.End == nil || strings.TrimSpace(part.Text) == "" {
+		return completedTextPart{}, false, nil
+	}
+	return completedTextPart{ID: part.ID, Text: part.Text}, true, nil
+}
+
+func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) error {
+	part, complete, err := decodeCompletedTextPart(data)
+	if err != nil {
 		return fmt.Errorf("opencode engine: decode text part: %w", err)
 	}
-	// message.part.updated can publish the same whole text part repeatedly as
-	// it streams. Persist only the final explicit visible text once.
-	if part.ID == "" || part.Ignored || part.Time == nil || part.Time.End == nil || strings.TrimSpace(part.Text) == "" {
+	if !complete {
 		return nil
 	}
 	if _, duplicate := s.seenTextParts[part.ID]; duplicate {
@@ -145,14 +152,45 @@ func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) err
 	return nil
 }
 
+func (s *runState) handleReasoningPart(ctx context.Context, data json.RawMessage) error {
+	part, complete, err := decodeCompletedTextPart(data)
+	if err != nil {
+		return fmt.Errorf("opencode engine: decode reasoning part: %w", err)
+	}
+	if !complete {
+		return nil
+	}
+	key := "reasoning/" + part.ID
+	if _, duplicate := s.seenTextParts[key]; duplicate {
+		return nil
+	}
+	if s.activity != nil {
+		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{
+			Type: "agent.message",
+			Payload: map[string]any{
+				"message": part.Text,
+				"kind":    "reasoning",
+				"source":  "opencode",
+			},
+		}); err != nil {
+			return err
+		}
+	}
+	s.seenTextParts[key] = struct{}{}
+	return nil
+}
+
 func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) error {
 	var part struct {
-		ID   string `json:"id"`
-		Tool string `json:"tool"`
-		State struct {
-			Status string `json:"status"`
-			Title  string `json:"title,omitempty"`
-			Error  string `json:"error,omitempty"`
+		ID     string `json:"id"`
+		CallID string `json:"callID,omitempty"`
+		Tool   string `json:"tool"`
+		State  struct {
+			Status string         `json:"status"`
+			Input  map[string]any `json:"input,omitempty"`
+			Output string         `json:"output,omitempty"`
+			Title  string         `json:"title,omitempty"`
+			Error  string         `json:"error,omitempty"`
 		} `json:"state"`
 	}
 	if err := json.Unmarshal(data, &part); err != nil {
@@ -176,21 +214,41 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 	if _, duplicate := s.seenToolStates[key]; duplicate {
 		return nil
 	}
-	payload := map[string]any{
-		"name":   part.Tool,
-		"source": "opencode",
+	toolCallID := strings.TrimSpace(part.CallID)
+	if toolCallID == "" {
+		toolCallID = part.ID
 	}
-	if title := strings.TrimSpace(part.State.Title); title != "" {
-		payload["summary"] = title
+	payload := evidence.ToolPayload{
+		Kind:       "tool",
+		Name:       part.Tool,
+		ToolCallID: toolCallID,
+		Input:      part.State.Input,
+		Summary:    evidence.BoundActivityPreview(part.State.Title),
 	}
-	if eventType == "tool.failed" && strings.TrimSpace(part.State.Error) != "" {
-		payload["reason"] = part.State.Error
+	if eventType == "tool.completed" {
+		payload.ResultPreview = evidence.BoundActivityPreview(part.State.Output)
+	}
+	if eventType == "tool.failed" {
+		payload.Reason = evidence.BoundActivityPreview(part.State.Error)
 	}
 	if s.activity != nil {
-		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{Type: eventType, Payload: payload}); err != nil {
+		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{Type: eventType, Payload: toolPayloadMap(payload)}); err != nil {
 			return err
 		}
 	}
 	s.seenToolStates[key] = struct{}{}
 	return nil
+}
+
+func toolPayloadMap(payload evidence.ToolPayload) map[string]any {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return map[string]any{"name": payload.Name, "toolCallId": payload.ToolCallID}
+	}
+	var mapped map[string]any
+	if err := json.Unmarshal(encoded, &mapped); err != nil {
+		return map[string]any{"name": payload.Name, "toolCallId": payload.ToolCallID}
+	}
+	mapped["source"] = "opencode"
+	return mapped
 }
