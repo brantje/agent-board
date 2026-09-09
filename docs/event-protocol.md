@@ -13,6 +13,7 @@ The Event stream must make it possible to reconstruct:
 - which Runtime Instance executed it
 - what the Agent said and did
 - which tools/commands/tests ran
+- how model usage accumulated during the Run
 - what files changed
 - which Questions were asked
 - what humans answered
@@ -141,6 +142,31 @@ agent.failed
 Store user-visible agent messages, structured summaries, plans, explicitly emitted reasoning/progress traces, Decisions, tool activity, and other operationally relevant information. An Engine may map reasoning text that its native user-observable protocol explicitly emits to `agent.message` with `kind: "reasoning"` so the Run UI can present it as a Thought.
 
 Do not infer reasoning from tool calls, reconstruct reasoning the Engine did not emit, or make another model request just to manufacture or classify timeline thoughts.
+
+### Model usage
+
+```text
+model.usage
+```
+
+`model.usage` is one normalized completed model-step sample. Engine adapters translate their native telemetry into this payload; Run-level totals and averages are derived in shared application code from the persisted samples.
+
+Payload fields:
+
+- `sampleId`: stable native-step identity used to make replay/duplicate delivery harmless
+- `providerId` and `modelId`: identifiers for the model used by the step
+- `inputTokens`, `outputTokens`, `reasoningTokens`, `cacheReadTokens`, `cacheWriteTokens`: non-negative native usage counters
+- `contextTokens`: current context usage snapshot for that completed step
+- `contextLimitTokens`: runtime-resolved model context limit when known; omitted when unavailable
+- `startedAt`, `firstOutputAt`, `completedAt`: optional step timing used to derive time-to-first-token and generation throughput
+
+Current context is a latest-step snapshot, not the cumulative Run input total. For OpenCode, the snapshot follows its model-call accounting: input + output + reasoning + cache read + cache write. Run-level input, output and cache-read metrics are cumulative across unique samples.
+
+`model.usage` is durable evidence and remains in the Run SSE stream so reconnect cursors stay authoritative, but it is intentionally not rendered as a generic activity-timeline row. The Nuxt client refreshes the server-owned usage projection instead of reimplementing aggregation logic in the browser.
+
+Timing is best-effort. Missing timing produces unavailable TTFT/throughput metrics rather than fabricated zeroes. Missing model context metadata likewise leaves the limit unknown and must never fail an otherwise valid Run.
+
+Reasoning token counts or timing may be recorded when the Engine exposes them, but private reasoning content is not part of `model.usage`.
 
 ### Question
 
@@ -365,6 +391,7 @@ run.started
 runtime.provisioning
 runtime.started
 agent.message
+model.usage
 tool.started
 tool.completed
 file.modified
