@@ -1,10 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import type { EventEvidence } from '../types/api'
-import { projectRunActivity } from '../utils/events'
+import type { RunActivityItem } from '../utils/events'
 
-const props = defineProps<{ events: EventEvidence[] }>()
-const items = computed(() => projectRunActivity(props.events))
+defineProps<{ items: RunActivityItem[] }>()
 </script>
 
 <template>
