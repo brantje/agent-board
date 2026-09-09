@@ -31,7 +31,12 @@ func (s *runState) handleEvent(ctx context.Context, native *client.Client, event
 			return fmt.Errorf("opencode engine: decode native Question event: %w", err)
 		}
 		return s.handleQuestion(ctx, native, request)
+	case "message.updated":
+		return s.handleUsageMessageUpdated(ctx, native, event.Properties)
 	case "message.part.updated":
+		if err := s.handleUsagePartUpdated(ctx, event.Properties); err != nil {
+			return err
+		}
 		return s.handlePartUpdated(ctx, event.Properties)
 	case "session.error":
 		return s.handleSessionError(event.Properties)
