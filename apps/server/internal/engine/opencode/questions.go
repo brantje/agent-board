@@ -30,23 +30,32 @@ type runState struct {
 	sessionID                    string
 	questions                    engine.InteractiveQuestioner
 	activity                     engine.ActivitySink
+	usage                        engine.UsageSink
 	nativeQuestions              map[string]*nativeQuestionState
 	seenTextParts                map[string]struct{}
 	seenToolStates               map[string]struct{}
+	seenUsageSamples             map[string]struct{}
 	pendingMessages              map[string]pendingMessage
 	pendingMessageOrder          []string
 	acceptedReplyResolveFailures map[string][]error
+	activeModelStep              *modelStepState
+	providerID                   string
+	modelID                      string
+	contextLimitTokens           *int64
 	lastVisibleMessage           string
 }
 
 func newRunState(sessionID string, questions engine.InteractiveQuestioner, activity engine.ActivitySink) *runState {
+	usage, _ := activity.(engine.UsageSink)
 	return &runState{
 		sessionID:                    sessionID,
 		questions:                    questions,
 		activity:                     activity,
+		usage:                        usage,
 		nativeQuestions:              make(map[string]*nativeQuestionState),
 		seenTextParts:                make(map[string]struct{}),
 		seenToolStates:               make(map[string]struct{}),
+		seenUsageSamples:             make(map[string]struct{}),
 		pendingMessages:              make(map[string]pendingMessage),
 		acceptedReplyResolveFailures: make(map[string][]error),
 	}
