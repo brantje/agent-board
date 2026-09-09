@@ -55,6 +55,12 @@ LEFT JOIN LATERAL (
 ) AS last_event ON true
 `
 
+const issueWorkspaceJoin = `
+LEFT JOIN workspaces AS w ON w.project_id = i.project_id AND w.issue_id = i.id
+`
+
+const issueCurrentBranchColumn = `COALESCE(w.current_branch, w.working_branch) AS current_branch`
+
 func (s *Store) CreateProject(ctx context.Context, input store.Project) (store.Project, error) {
 	prefix := store.NormalizeIssuePrefix(input.IssuePrefix)
 	if !store.ValidIssuePrefix(prefix) {
@@ -120,9 +126,10 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 
 func (s *Store) GetIssue(ctx context.Context, projectID, issueID string) (store.Issue, error) {
 	return scanIssueJoinedWithLastEvent(s.pool.QueryRow(ctx, `
-		SELECT `+issueSelectColumns+`, `+lastEventSelectColumns+`
+		SELECT `+issueSelectColumns+`, `+issueCurrentBranchColumn+`, `+lastEventSelectColumns+`
 		FROM issues AS i
 		JOIN projects AS p ON p.id = i.project_id
+		`+issueWorkspaceJoin+`
 		`+lastEventLateralJoin+`
 		WHERE i.project_id = $1 AND i.id = $2
 	`, projectID, issueID))
@@ -199,6 +206,7 @@ func scanIssueJoinedWithLastEvent(row pgx.Row) (store.Issue, error) {
 	if err := row.Scan(
 		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
 		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedAt, &value.UpdatedAt,
+		&value.CurrentBranch,
 		&eventID, &schemaVersion, &eventType, &occurredAt, &eventProjectID, &eventIssueID, &eventRunID,
 		&eventAgentID, &eventWorkspaceID, &eventRuntimeInstanceID, &eventCorrelationID, &eventParentID,
 		&sequence, &actor, &payload, &createdAt,

@@ -60,7 +60,7 @@ func newFailureCoverageProcessor(t *testing.T, workspace string, resolver Contex
 		t.Fatal(err)
 	}
 	runtimes := &processTestRuntime{}
-	processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, candidate)
+	processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

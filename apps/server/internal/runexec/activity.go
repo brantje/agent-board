@@ -29,7 +29,13 @@ func (l *processLauncher) RecordActivity(ctx context.Context, activity engine.Ac
 		return fmt.Errorf("run execution: unsupported engine activity type %q", activity.Type)
 	}
 	_, err := l.record(ctx, activity.Type, activity.Payload, nil)
-	return err
+	if err != nil {
+		return err
+	}
+	if shouldObserveBranchAfterActivity(activity.Type) {
+		l.branches.observeIfChanged(ctx, l.safe, &l.runtimeInstanceID)
+	}
+	return nil
 }
 
 var _ engine.ActivitySink = (*processLauncher)(nil)

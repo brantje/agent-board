@@ -9,7 +9,19 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
 )
+
+type completedTextPart struct {
+	ID   string
+	Text string
+}
+
+type pendingMessage struct {
+	key  string
+	kind string
+	text string
+}
 
 func (s *runState) handleEvent(ctx context.Context, native *client.Client, event client.Event) error {
 	switch event.Type {
@@ -23,6 +35,8 @@ func (s *runState) handleEvent(ctx context.Context, native *client.Client, event
 		return s.handlePartUpdated(ctx, event.Properties)
 	case "session.error":
 		return s.handleSessionError(event.Properties)
+	case "session.idle":
+		return s.flushPendingMessages(ctx)
 	default:
 		return nil
 	}
@@ -36,38 +50,19 @@ func (s *runState) handleSessionError(properties json.RawMessage) error {
 	if err := json.Unmarshal(properties, &update); err != nil {
 		return fmt.Errorf("opencode engine: decode native session error: %w", err)
 	}
-	// The event stream is instance-scoped and may contain errors for another
-	// session. Only the native session owned by this Run is terminal here.
 	if update.SessionID == "" || update.SessionID != s.sessionID {
 		return nil
 	}
 
-	message := "native session failed"
-	if len(bytes.TrimSpace(update.Error)) != 0 && !bytes.Equal(bytes.TrimSpace(update.Error), []byte("null")) {
-		var nativeError struct {
-			Name string `json:"name"`
-			Data struct {
-				Message string `json:"message"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(update.Error, &nativeError); err != nil {
-			return fmt.Errorf("opencode engine: decode native session error details: %w", err)
-		}
-		if value := strings.TrimSpace(nativeError.Data.Message); value != "" {
-			message = value
-		} else if value := strings.TrimSpace(nativeError.Name); value != "" {
-			message = value
-		}
+	message, err := client.DecodeNativeErrorMessage(update.Error)
+	if err != nil {
+		return fmt.Errorf("opencode engine: decode native session error details: %w", err)
 	}
 	return fmt.Errorf("opencode engine: native session error: %s", message)
 }
 
 func (s *runState) handlePartUpdated(ctx context.Context, properties json.RawMessage) error {
 	trimmed := bytes.TrimSpace(properties)
-	// message.part.updated is best-effort visible telemetry. OpenCode can emit
-	// an envelope before the optional properties payload is populated; there is
-	// no control state to recover from that empty update, so ignore it and wait
-	// for a later complete part update instead of failing the Run.
 	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
 		return nil
 	}
@@ -99,15 +94,13 @@ func (s *runState) handlePartUpdated(ctx context.Context, properties json.RawMes
 	case "tool":
 		return s.handleToolPart(ctx, update.Part)
 	case "reasoning":
-		// Native reasoning parts may contain private chain-of-thought. Agent
-		// Board intentionally does not persist or transform them.
-		return nil
+		return s.handleReasoningPart(ctx, update.Part)
 	default:
 		return nil
 	}
 }
 
-func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) error {
+func decodeVisibleTextPart(data json.RawMessage) (completedTextPart, bool, bool, error) {
 	var part struct {
 		ID        string `json:"id"`
 		SessionID string `json:"sessionID"`
@@ -118,41 +111,109 @@ func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) err
 		} `json:"time,omitempty"`
 	}
 	if err := json.Unmarshal(data, &part); err != nil {
-		return fmt.Errorf("opencode engine: decode text part: %w", err)
+		return completedTextPart{}, false, false, err
 	}
-	// message.part.updated can publish the same whole text part repeatedly as
-	// it streams. Persist only the final explicit visible text once.
-	if part.ID == "" || part.Ignored || part.Time == nil || part.Time.End == nil || strings.TrimSpace(part.Text) == "" {
-		return nil
+	if part.ID == "" || part.Ignored || strings.TrimSpace(part.Text) == "" {
+		return completedTextPart{}, false, false, nil
 	}
-	if _, duplicate := s.seenTextParts[part.ID]; duplicate {
+	complete := part.Time != nil && part.Time.End != nil
+	return completedTextPart{ID: part.ID, Text: part.Text}, true, complete, nil
+}
+
+func decodeCompletedTextPart(data json.RawMessage) (completedTextPart, bool, error) {
+	part, visible, complete, err := decodeVisibleTextPart(data)
+	if err != nil || !visible || !complete {
+		return completedTextPart{}, false, err
+	}
+	return part, true, nil
+}
+
+func (s *runState) persistAgentMessage(ctx context.Context, key, kind, text string) error {
+	if _, duplicate := s.seenTextParts[key]; duplicate {
+		delete(s.pendingMessages, key)
 		return nil
 	}
 	if s.activity != nil {
 		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{
 			Type: "agent.message",
 			Payload: map[string]any{
-				"message": part.Text,
-				"kind":    "message",
+				"message": text,
+				"kind":    kind,
 				"source":  "opencode",
 			},
 		}); err != nil {
 			return err
 		}
 	}
-	s.seenTextParts[part.ID] = struct{}{}
-	s.lastVisibleMessage = part.Text
+	s.seenTextParts[key] = struct{}{}
+	delete(s.pendingMessages, key)
+	if kind == "message" {
+		s.lastVisibleMessage = text
+	}
 	return nil
 }
 
+func (s *runState) bufferOrPersistMessage(ctx context.Context, key, kind string, part completedTextPart, complete bool) error {
+	if complete {
+		return s.persistAgentMessage(ctx, key, kind, part.Text)
+	}
+	if _, exists := s.pendingMessages[key]; !exists {
+		s.pendingMessageOrder = append(s.pendingMessageOrder, key)
+	}
+	s.pendingMessages[key] = pendingMessage{key: key, kind: kind, text: part.Text}
+	return nil
+}
+
+func (s *runState) flushPendingMessages(ctx context.Context) error {
+	for _, key := range s.pendingMessageOrder {
+		message, ok := s.pendingMessages[key]
+		if !ok {
+			continue
+		}
+		if err := s.persistAgentMessage(ctx, message.key, message.kind, message.text); err != nil {
+			return err
+		}
+	}
+	s.pendingMessageOrder = nil
+	return nil
+}
+
+func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) error {
+	part, visible, complete, err := decodeVisibleTextPart(data)
+	if err != nil {
+		return fmt.Errorf("opencode engine: decode text part: %w", err)
+	}
+	if !visible {
+		return nil
+	}
+	return s.bufferOrPersistMessage(ctx, part.ID, "message", part, complete)
+}
+
+func (s *runState) handleReasoningPart(ctx context.Context, data json.RawMessage) error {
+	part, visible, complete, err := decodeVisibleTextPart(data)
+	if err != nil {
+		return fmt.Errorf("opencode engine: decode reasoning part: %w", err)
+	}
+	if !visible {
+		return nil
+	}
+	return s.bufferOrPersistMessage(ctx, "reasoning/"+part.ID, "reasoning", part, complete)
+}
+
 func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) error {
+	if err := s.flushPendingMessages(ctx); err != nil {
+		return err
+	}
 	var part struct {
-		ID   string `json:"id"`
-		Tool string `json:"tool"`
-		State struct {
-			Status string `json:"status"`
-			Title  string `json:"title,omitempty"`
-			Error  string `json:"error,omitempty"`
+		ID     string `json:"id"`
+		CallID string `json:"callID,omitempty"`
+		Tool   string `json:"tool"`
+		State  struct {
+			Status string          `json:"status"`
+			Input  json.RawMessage `json:"input,omitempty"`
+			Output any             `json:"output,omitempty"`
+			Title  string          `json:"title,omitempty"`
+			Error  string          `json:"error,omitempty"`
 		} `json:"state"`
 	}
 	if err := json.Unmarshal(data, &part); err != nil {
@@ -176,21 +237,74 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 	if _, duplicate := s.seenToolStates[key]; duplicate {
 		return nil
 	}
-	payload := map[string]any{
-		"name":   part.Tool,
-		"source": "opencode",
+	toolCallID := strings.TrimSpace(part.CallID)
+	if toolCallID == "" {
+		toolCallID = part.ID
 	}
-	if title := strings.TrimSpace(part.State.Title); title != "" {
-		payload["summary"] = title
+	payload := evidence.ToolPayload{
+		Kind:       "tool",
+		Name:       part.Tool,
+		ToolCallID: toolCallID,
+		Input:      decodeToolInput(part.State.Input),
+		Summary:    evidence.BoundActivityPreview(part.State.Title),
 	}
-	if eventType == "tool.failed" && strings.TrimSpace(part.State.Error) != "" {
-		payload["reason"] = part.State.Error
+	if eventType == "tool.completed" {
+		payload.ResultPreview = toolResultPreview(part.State.Output)
+	}
+	if eventType == "tool.failed" {
+		payload.Reason = evidence.BoundActivityPreview(part.State.Error)
 	}
 	if s.activity != nil {
-		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{Type: eventType, Payload: payload}); err != nil {
+		if err := s.activity.RecordActivity(ctx, engine.ActivityEvent{Type: eventType, Payload: toolPayloadMap(payload)}); err != nil {
 			return err
 		}
 	}
 	s.seenToolStates[key] = struct{}{}
 	return nil
+}
+
+func toolResultPreview(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return evidence.BoundActivityPreview(text)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return evidence.BoundActivityPreview(fmt.Sprint(value))
+	}
+	return evidence.BoundActivityPreview(string(encoded))
+}
+
+func decodeToolInput(raw json.RawMessage) map[string]any {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil
+	}
+	var object map[string]any
+	if err := json.Unmarshal(trimmed, &object); err == nil {
+		return object
+	}
+	var encoded string
+	if err := json.Unmarshal(trimmed, &encoded); err != nil {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(encoded), &object); err != nil {
+		return nil
+	}
+	return object
+}
+
+func toolPayloadMap(payload evidence.ToolPayload) map[string]any {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return map[string]any{"name": payload.Name, "toolCallId": payload.ToolCallID}
+	}
+	var mapped map[string]any
+	if err := json.Unmarshal(encoded, &mapped); err != nil {
+		return map[string]any{"name": payload.Name, "toolCallId": payload.ToolCallID}
+	}
+	mapped["source"] = "opencode"
+	return mapped
 }

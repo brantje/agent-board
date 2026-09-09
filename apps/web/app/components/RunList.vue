@@ -76,7 +76,7 @@ const empty = computed(() => !pending.value && !error.value && !rows.value.lengt
                 <template v-if="run.agentId"> · Agent <span class="font-mono">{{ run.agentId }}</span></template>
               </p>
             </div>
-            <UBadge color="neutral" variant="subtle" :label="runStatusLabel(run.status)" />
+            <RunStatus :status="run.status" :label="runStatusLabel(run.status)" />
             <UButton label="Open Run" :to="`/projects/${run.projectId}/runs/${run.id}`" variant="outline" />
           </div>
           <p v-if="run.queueReason" class="mt-2 text-sm">Queue reason: {{ run.queueReason }}</p>

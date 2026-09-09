@@ -2,6 +2,17 @@ import type { Issue, Run } from '../types/api'
 
 export const issueStatuses = ['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE'] as const
 
+export type StatusColor = 'neutral' | 'warning' | 'error' | 'primary' | 'success'
+
+const issueStatusPresentations: Record<typeof issueStatuses[number], { icon: string; color: StatusColor; textClass: string }> = {
+  BACKLOG: { icon: 'i-lucide-inbox', color: 'neutral', textClass: 'text-muted' },
+  TODO: { icon: 'i-lucide-circle', color: 'neutral', textClass: 'text-muted' },
+  IN_PROGRESS: { icon: 'i-lucide-play', color: 'warning', textClass: 'text-warning' },
+  BLOCKED: { icon: 'i-lucide-octagon-alert', color: 'error', textClass: 'text-error' },
+  REVIEW: { icon: 'i-lucide-scan-eye', color: 'success', textClass: 'text-success' },
+  DONE: { icon: 'i-lucide-circle-check', color: 'primary', textClass: 'text-primary' }
+}
+
 const issuePriorities = [
   { label: 'Low', variant: 'subtle' as const, icon: 'i-lucide-signal-low' },
   { label: 'Low', variant: 'subtle' as const, icon: 'i-lucide-signal-low' },
@@ -25,11 +36,22 @@ export function boardColumnSurface(status: string) {
   return `board-column board-column-${status.toLowerCase().replaceAll('_', '-')}`
 }
 
+export function issueStatusPresentation(status: string) {
+  const presentation = issueStatusPresentations[status as typeof issueStatuses[number]]
+  return {
+    label: statusLabel(status),
+    icon: presentation?.icon ?? 'i-lucide-circle',
+    color: presentation?.color ?? 'neutral' as const,
+    textClass: presentation?.textClass ?? 'text-muted',
+    surface: boardColumnSurface(status)
+  }
+}
+
 export function boardColumns(issues: Issue[], search = '') {
   const query = search.trim().toLowerCase()
   return issueStatuses.map(status => ({
     status,
-    label: statusLabel(status),
+    ...issueStatusPresentation(status),
     issues: issues.filter(issue => issue.status === status && `${issue.title} ${issue.id} ${issue.description}`.toLowerCase().includes(query))
   }))
 }

@@ -176,7 +176,11 @@ export class MockEventSource {
   }
 
   emit(data: unknown) {
-    this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent<string>)
+    this.emitRaw(JSON.stringify(data))
+  }
+
+  emitRaw(data: string) {
+    this.onmessage?.({ data } as MessageEvent<string>)
   }
 
   emitNamed(type: string, data = '{}') {

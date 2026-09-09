@@ -2,8 +2,10 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import RunList from '../app/components/RunList.vue'
 import RunDetail from '../app/components/RunDetail.vue'
-import { runStatusLabel } from '../app/utils/runs'
-import { event, evidence, MockEventSource, project, run } from './execution-fixtures'
+import RunStatus from '../app/components/RunStatus.vue'
+import QuestionPanel from '../app/components/QuestionPanel.vue'
+import { runStatusLabel, runStatusPresentation } from '../app/utils/runs'
+import { event, evidence, MockEventSource, project, question, run } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
 const global = {
@@ -12,7 +14,8 @@ const global = {
     NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' },
     QuestionPanel: { props: ['projectId', 'runId', 'issueId'], template: '<section>Questions for {{runId || issueId}}</section>' },
     ActivityTimeline: { props: ['events'], template: '<ol><li v-for="item in events" :key="item.id">{{item.type}} {{item.payload?.kind}} {{item.payload?.message}}</li></ol>' }
-  }
+  },
+  components: { RunStatus }
 }
 
 afterEach(() => {
@@ -26,6 +29,21 @@ describe('run status labels', () => {
     expect(runStatusLabel('QUEUED')).toBe('Run · Queued')
     expect(runStatusLabel('READY_FOR_REVIEW')).toBe('Run · Ready For Review')
     expect(runStatusLabel('READY_FOR_REVIEW')).not.toBe('Review')
+  })
+
+  it('derives Run colors and icons from the matching Board column', () => {
+    expect(runStatusPresentation('QUEUED')).toMatchObject({ boardStatus: 'TODO', icon: 'i-lucide-circle', color: 'neutral', live: false })
+    expect(runStatusPresentation('STARTING')).toMatchObject({ boardStatus: 'IN_PROGRESS', icon: 'i-lucide-play', color: 'warning', live: true })
+    expect(runStatusPresentation('RUNNING')).toMatchObject({ boardStatus: 'IN_PROGRESS', icon: 'i-lucide-play', color: 'warning', live: true })
+    expect(runStatusPresentation('WAITING_FOR_INPUT')).toMatchObject({ boardStatus: 'BLOCKED', icon: 'i-lucide-octagon-alert', color: 'error', live: false })
+    expect(runStatusPresentation('PAUSED')).toMatchObject({ boardStatus: 'BLOCKED', icon: 'i-lucide-pause', color: 'error', live: false })
+    expect(runStatusPresentation('READY_FOR_REVIEW')).toMatchObject({ boardStatus: 'REVIEW', icon: 'i-lucide-scan-eye', color: 'success', live: false })
+    expect(runStatusPresentation('COMPLETED')).toMatchObject({ boardStatus: 'DONE', icon: 'i-lucide-circle-check', color: 'primary', live: false })
+    expect(runStatusPresentation('FAILED')).toMatchObject({ boardStatus: 'BLOCKED', icon: 'i-lucide-circle-x', color: 'error', live: false })
+    expect(runStatusPresentation('CANCELLED')).toMatchObject({ boardStatus: 'BACKLOG', icon: 'i-lucide-ban', color: 'neutral', live: false })
+    expect(runStatusPresentation('UNKNOWN')).toMatchObject({ boardStatus: null, icon: 'i-lucide-circle', color: 'neutral', live: false })
+    expect(runStatusPresentation('FAILED').icon).not.toBe(runStatusPresentation('WAITING_FOR_INPUT').icon)
+    expect(runStatusPresentation('CANCELLED').icon).not.toBe(runStatusPresentation('QUEUED').icon)
   })
 })
 
@@ -161,6 +179,14 @@ describe('RunDetail', () => {
     await flushPromises()
 
     expect(wrapper.find('.detail-grid').exists()).toBe(true)
+    expect(wrapper.find('details aside').exists()).toBe(false)
+    const sidebar = wrapper.get('.detail-grid > aside')
+    expect(sidebar.text()).toContain('Properties')
+    expect(sidebar.text()).toContain('Runtime instances')
+    expect(sidebar.text()).toContain('Provenance')
+    expect(sidebar.text()).toContain('Artifacts')
+    expect(wrapper.get('details').text()).toContain('Commands 1')
+    expect(wrapper.get('details').text()).not.toContain('Properties')
     expect(wrapper.text()).toContain('Run · Running')
     expect(wrapper.text()).toContain('Commands 1')
     expect(wrapper.text()).toContain('Files 1')
@@ -172,6 +198,11 @@ describe('RunDetail', () => {
     expect(wrapper.text()).toContain('Questions for run-1')
     expect(wrapper.get('a[href="/projects/project-a/issues/AB-1"]').exists()).toBe(true)
     expect(wrapper.get('a[href="/api/projects/project-a/runs/run-1/artifacts/art-1"]').exists()).toBe(true)
+
+    const workCard = wrapper.get('[data-run-work]')
+    expect(workCard.get('[data-run-status=RUNNING]').attributes('data-icon')).toBe('i-lucide-play')
+    expect(workCard.get('[data-run-status=RUNNING]').attributes('data-color')).toBe('warning')
+    expect(workCard.find('[data-icon="i-lucide-loader-circle"]').exists()).toBe(true)
 
     await wrapper.findAll('button').find(value => value.text() === 'Load log')!.trigger('click')
     await flushPromises()
@@ -195,6 +226,67 @@ describe('RunDetail', () => {
     expect(wrapper.text()).toContain('not a Run failure')
     expect(wrapper.text()).toContain('Run · Running')
     expect(wrapper.text()).not.toContain('Run · Failed')
+    wrapper.unmount()
+  })
+
+  it('shows Ready for review with the Board review icon instead of a live spinner', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/evidence')) {
+        return new Response(JSON.stringify(evidence({
+          run: { ...run, status: 'READY_FOR_REVIEW', completedAt: '2026-01-01T00:10:00.000Z' },
+          events: [event({ id: 'one', type: 'run.completed', sequence: 1 })]
+        })))
+      }
+      return new Response(JSON.stringify([]))
+    }))
+    const wrapper = mount(RunDetail, { props: { projectId: 'project-a', runId: 'run-1' }, global })
+    await flushPromises()
+    const workCard = wrapper.get('[data-run-work]')
+    expect(workCard.text()).toContain('Ready for review')
+    expect(workCard.get('[data-run-status=READY_FOR_REVIEW]').attributes('data-icon')).toBe('i-lucide-scan-eye')
+    expect(workCard.get('[data-run-status=READY_FOR_REVIEW]').attributes('data-color')).toBe('success')
+    expect(workCard.find('[data-icon="i-lucide-loader-circle"]').exists()).toBe(false)
+    expect(workCard.find('[data-icon="i-lucide-bot"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('shows newly asked questions from Project SSE without a full reload', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    let questions: ReturnType<typeof question>[] = []
+    const snapshot = evidence({ events: [event({ id: 'one', type: 'run.started', sequence: 1 })] })
+    const fetch = vi.fn(async (path: string) => {
+      if (path.endsWith('/evidence')) return new Response(JSON.stringify(snapshot))
+      if (path.includes('/questions')) return new Response(JSON.stringify(questions))
+      if (path.includes('/reviews')) return new Response(JSON.stringify([]))
+      return new Response(JSON.stringify(snapshot.run))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(RunDetail, {
+      props: { projectId: 'project-a', runId: 'run-1' },
+      global: {
+        stubs: {
+          ...global.stubs,
+          QuestionPanel: false
+        },
+        components: { QuestionPanel, RunStatus }
+      }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('No open questions')
+    expect(MockEventSource.instances.some(instance => instance.url === '/api/projects/project-a/events')).toBe(true)
+    expect(MockEventSource.instances.some(instance => instance.url.includes('/runs/run-1/events'))).toBe(true)
+
+    questions = [question({ runId: 'run-1', prompt: 'Which marker should I write?' })]
+    MockEventSource.instances.find(instance => instance.url === '/api/projects/project-a/events')?.emit(event({
+      id: 'evt-q',
+      type: 'question.created',
+      sequence: null,
+      runId: 'run-1'
+    }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Loading')
+    expect(wrapper.text()).toContain('Which marker should I write?')
     wrapper.unmount()
   })
 })

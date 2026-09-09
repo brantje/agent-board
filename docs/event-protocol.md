@@ -138,7 +138,9 @@ agent.completed
 agent.failed
 ```
 
-Do not attempt to persist private hidden chain-of-thought. Store user-visible agent messages, structured summaries, plans where explicitly emitted, Decisions, tool activity, and other operationally relevant information.
+Store user-visible agent messages, structured summaries, plans, explicitly emitted reasoning/progress traces, Decisions, tool activity, and other operationally relevant information. An Engine may map reasoning text that its native user-observable protocol explicitly emits to `agent.message` with `kind: "reasoning"` so the Run UI can present it as a Thought.
+
+Do not infer reasoning from tool calls, reconstruct reasoning the Engine did not emit, or make another model request just to manufacture or classify timeline thoughts.
 
 ### Question
 
@@ -164,6 +166,7 @@ decision.recorded
 tool.started
 tool.output
 tool.completed
+tool.stopped
 tool.failed
 ```
 
@@ -171,14 +174,20 @@ Typical payload metadata:
 
 - tool kind
 - command/tool name
-- sanitized arguments where safe
+- stable native `toolCallId` where available
+- sanitized input/arguments where safe
 - working directory
 - start/end/duration
 - exit code
 - output blob references
 - summary
+- bounded `resultPreview`
+- failure reason
+- `tool.stopped` for an invocation that the control plane terminated on purpose (for example a long-running Engine sidecar after the Run finished). That is distinct from `tool.failed`, which remains a crash, nonzero exit, or launch error without a stop request.
 
-Large stdout/stderr belongs in blob storage rather than oversized Event payloads.
+A stable `toolCallId` lets viewers project lifecycle Events for one invocation into a single logical row without changing the authoritative Event history. Fields are additive: historical Events without a call identifier remain valid and must still render through the generic Event fallback.
+
+Large stdout/stderr or tool results belong in blob/raw-output storage rather than oversized Event payloads. A preview is presentation evidence, not a replacement for complete raw output.
 
 ### File
 
@@ -205,9 +214,12 @@ Prefer structured counts/results where adapters can provide them.
 
 ```text
 git.branch_created
+git.branch_checked_out
 git.commit_created
 git.push_completed
 ```
+
+`git.branch_checked_out` records the live Issue Workspace checkout when HEAD changes during execution. Payload includes `branch`, `previousBranch`, `detached`, and `issueKey`.
 
 GitHub/PR integration can extend this family later.
 
@@ -290,7 +302,7 @@ When possible, represent secret access as metadata:
 
 not the value.
 
-Runtime and Engine adapter output must pass through a centralized redaction layer before being persisted as raw or structured logs.
+Runtime and Engine adapter output must pass through a centralized redaction layer before being persisted as raw or structured logs. This includes reasoning messages and nested tool input/result metadata.
 
 ## Raw logs
 
@@ -315,7 +327,7 @@ Example:
 ```text
 tool.started (A)
   -> tool.output (parent A)
-  -> tool.completed (parent A)
+  -> tool.completed | tool.stopped | tool.failed (parent A)
 ```
 
 For future squads:

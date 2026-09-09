@@ -32,6 +32,7 @@ type Issue struct {
 	UpdatedAt       time.Time
 	LastEvent       *Event
 	PreviousStatus  string
+	CurrentBranch   *string
 }
 
 type IssueRelationship struct {
@@ -116,6 +117,7 @@ type Workspace struct {
 	BaseBranch      *string
 	BaseRevision    *string
 	WorkingBranch   string
+	CurrentBranch   *string
 	BootstrapStatus string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -135,6 +137,7 @@ type Run struct {
 	StartedAt     *time.Time
 	CompletedAt   *time.Time
 	UpdatedAt     time.Time
+	CurrentBranch *string
 }
 
 type RuntimeInstance struct {

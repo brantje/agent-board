@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { ArtifactEvidence, EventEvidence } from '../types/api'
 import { apiPath, apiText } from '../utils/api'
+import { projectRunActivity } from '../utils/events'
 import { commandLabel, formatElapsed, runStatusLabel } from '../utils/runs'
 import { useRunEvents } from '../composables/useRunEvents'
 
@@ -12,6 +13,8 @@ const logError = ref<Error>()
 
 const run = computed(() => evidence.value?.run)
 const matchingReview = computed(() => evidence.value?.run.issueId && reviews.value.find(item => item.runId === props.runId)?.id)
+const activityItems = computed(() => projectRunActivity(events.value))
+const toolCallCount = computed(() => activityItems.value.filter(item => item.kind === 'tool').length)
 
 const commandItems = computed(() => (evidence.value?.commands || []).map(session => ({
   label: commandLabel(session.command) || session.id,
@@ -82,71 +85,80 @@ function provenanceText() {
             description="Live updates disconnected. This is not a Run failure. The timeline will resume from the last persisted sequence."
             color="warning"
           />
-          <UAlert v-else-if="connection === 'live'" title="Live updates" description="live" color="neutral" />
-          <UCard>
-            <h2 class="section-label mb-3">Working state</h2>
-            <div class="flex flex-wrap items-center gap-3">
-              <UBadge color="neutral" variant="subtle" :label="runStatusLabel(run.status)" />
-              <span>Elapsed {{ formatElapsed(run.startedAt, run.completedAt) }}</span>
+
+          <UCard data-run-work>
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-3">
+                <RunStatus :status="run.status" :live="connection === 'live'" size="lg" />
+                <WorkspaceBranch v-if="run.currentBranch" :branch="run.currentBranch" />
+              </div>
+              <p class="text-xs text-muted">
+                {{ formatElapsed(run.startedAt, run.completedAt) }} · {{ toolCallCount }} {{ toolCallCount === 1 ? 'tool call' : 'tool calls' }}
+              </p>
             </div>
-            <p class="mt-3 text-sm">Agent <span class="font-mono">{{ run.agentId || 'Unassigned' }}</span></p>
-            <p class="mt-1 text-sm">Runtime instance <span class="font-mono">{{ evidence?.runtimeInstances[0]?.id || 'None' }}</span></p>
-            <p class="mt-1 text-sm">Commands {{ evidence?.commands.length || 0 }} · Files {{ evidence?.fileChanges.length || 0 }} · Tests {{ evidence?.tests.length || 0 }}</p>
-            <p v-if="run.queueReason" class="mt-3 text-sm">Queue reason: {{ run.queueReason }}</p>
-            <p v-if="run.failureReason" class="mt-3 text-sm text-error">Execution failure: {{ run.failureReason }}</p>
+            <p v-if="run.queueReason" class="mb-3 text-sm text-muted">Queue reason: {{ run.queueReason }}</p>
+            <p v-if="run.failureReason" class="mb-3 text-sm text-error">Execution failure: {{ run.failureReason }}</p>
+            <ActivityTimeline :items="activityItems" />
           </UCard>
-          <UCard>
-            <h2 class="section-label mb-3">Activity</h2>
-            <ActivityTimeline :events="events" />
-          </UCard>
-          <UCard>
-            <h2 class="section-label mb-3">Commands</h2>
-            <UAccordion :items="commandItems">
-              <template #command="{ item }">
-                <dl class="space-y-1 py-2 text-sm">
-                  <p>Status: {{ item.session.status }}</p>
-                  <p class="font-mono break-all">{{ commandLabel(item.session.command) }}</p>
-                  <p>Exit code: {{ item.session.exitCode ?? 'None' }}</p>
-                </dl>
-              </template>
-            </UAccordion>
-          </UCard>
-          <UCard>
-            <h2 class="section-label mb-3">Files</h2>
-            <UAccordion :items="fileItems">
-              <template #file="{ item }">
-                <p class="py-2 text-sm">{{ fileLabel(item.event) }}</p>
-                <a v-if="fileArtifact(item.event)" class="text-sm hover:text-primary" :href="artifactHref(fileArtifact(item.event)!)">{{ fileArtifact(item.event)!.name }}</a>
-              </template>
-            </UAccordion>
-          </UCard>
-          <UCard>
-            <h2 class="section-label mb-3">Tests</h2>
-            <UAccordion :items="testItems">
-              <template #test="{ item }">
-                <p class="py-2 text-sm">{{ testLabel(item.event) }}</p>
-              </template>
-            </UAccordion>
-          </UCard>
+
           <QuestionPanel :project-id="projectId" :run-id="runId" />
-          <UCard>
-            <h2 class="section-label mb-3">Raw logs</h2>
-            <UAlert v-if="logError" title="Unable to load log" :description="logError.message" color="error" class="mb-3" />
-            <p class="mb-3 text-sm text-muted">Raw output is secondary and loaded one bounded chunk at a time.</p>
-            <UAccordion :items="rawItems">
-              <template #raw="{ item }">
-                <div class="space-y-2 py-2">
-                  <UButton label="Load log" variant="outline" @click="loadChunk(item.chunk.id)" />
-                  <pre v-if="logs[item.chunk.id]">{{ logs[item.chunk.id] }}</pre>
-                </div>
-              </template>
-            </UAccordion>
-          </UCard>
+
+          <details class="border border-default bg-default/40">
+            <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium">Run details</summary>
+            <div class="space-y-4 border-t border-default p-4">
+              <UCard>
+                <h2 class="section-label mb-3">Commands {{ evidence?.commands.length || 0 }}</h2>
+                <UAccordion :items="commandItems">
+                  <template #command="{ item }">
+                    <dl class="space-y-1 py-2 text-sm">
+                      <p>Status: {{ item.session.status }}</p>
+                      <p class="font-mono break-all">{{ commandLabel(item.session.command) }}</p>
+                      <p>Exit code: {{ item.session.exitCode ?? 'None' }}</p>
+                    </dl>
+                  </template>
+                </UAccordion>
+              </UCard>
+              <UCard>
+                <h2 class="section-label mb-3">Files {{ evidence?.fileChanges.length || 0 }}</h2>
+                <UAccordion :items="fileItems">
+                  <template #file="{ item }">
+                    <p class="py-2 text-sm">{{ fileLabel(item.event) }}</p>
+                    <a v-if="fileArtifact(item.event)" class="text-sm hover:text-primary" :href="artifactHref(fileArtifact(item.event)!)">{{ fileArtifact(item.event)!.name }}</a>
+                  </template>
+                </UAccordion>
+              </UCard>
+              <UCard>
+                <h2 class="section-label mb-3">Tests {{ evidence?.tests.length || 0 }}</h2>
+                <UAccordion :items="testItems">
+                  <template #test="{ item }">
+                    <p class="py-2 text-sm">{{ testLabel(item.event) }}</p>
+                  </template>
+                </UAccordion>
+              </UCard>
+              <UCard>
+                <h2 class="section-label mb-3">Raw logs</h2>
+                <UAlert v-if="logError" title="Unable to load log" :description="logError.message" color="error" class="mb-3" />
+                <p class="mb-3 text-sm text-muted">Raw output is secondary and loaded one bounded chunk at a time.</p>
+                <UAccordion :items="rawItems">
+                  <template #raw="{ item }">
+                    <div class="space-y-2 py-2">
+                      <UButton label="Load log" variant="outline" @click="loadChunk(item.chunk.id)" />
+                      <pre v-if="logs[item.chunk.id]">{{ logs[item.chunk.id] }}</pre>
+                    </div>
+                  </template>
+                </UAccordion>
+              </UCard>
+            </div>
+          </details>
         </section>
         <aside class="space-y-4">
           <UCard>
             <h2 class="section-label mb-3">Properties</h2>
             <dl class="space-y-3 text-sm">
+              <div>
+                <dt class="text-muted">Status</dt>
+                <dd><RunStatus :status="run.status" :label="runStatusLabel(run.status)" /></dd>
+              </div>
               <div>
                 <dt class="text-muted">Issue</dt>
                 <dd>
@@ -156,6 +168,10 @@ function provenanceText() {
               <div>
                 <dt class="text-muted">Agent</dt>
                 <dd class="font-mono break-all">{{ run.agentId || 'Unassigned' }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">Branch</dt>
+                <dd><WorkspaceBranch v-if="run.currentBranch" :branch="run.currentBranch" /><span v-else>None</span></dd>
               </div>
               <div>
                 <dt class="text-muted">Workspace</dt>

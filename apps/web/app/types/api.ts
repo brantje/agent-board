@@ -26,6 +26,7 @@ export interface Issue {
   assignedAgentId: string | null
   createdAt: string
   updatedAt: string
+  currentBranch: string | null
   lastEvent: EventEvidence | null
 }
 
@@ -52,6 +53,7 @@ export interface Run {
   startedAt: string | null
   completedAt: string | null
   updatedAt: string
+  currentBranch: string | null
 }
 
 export interface AssignmentResponse {

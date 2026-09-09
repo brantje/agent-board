@@ -79,6 +79,7 @@ func TestProcessorPreservesCreatedRuntimeIdentityWhenStartFails(t *testing.T) {
 		recorder,
 		output,
 		candidate,
+		nil,
 	)
 	if err != nil {
 		t.Fatal(err)

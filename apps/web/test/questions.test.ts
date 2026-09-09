@@ -1,13 +1,16 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import QuestionPanel from '../app/components/QuestionPanel.vue'
-import { question, run } from './execution-fixtures'
+import { event, MockEventSource, question, run } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
 const global = { stubs: { ...uiStubs, NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' } } }
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(value => value.text() === label)!
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  MockEventSource.reset()
+})
 
 describe('QuestionPanel', () => {
   it('loads open blocking questions for an Issue and replaces local state from the answer response', async () => {
@@ -112,5 +115,49 @@ describe('QuestionPanel', () => {
     expect(wrapper.text()).toContain('No open questions')
     expect(wrapper.text()).toContain('When a Run needs a human decision, the Agent\'s question will appear here.')
     expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
+  })
+
+  it('refreshes open questions from Project SSE without a loading skeleton', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    let questions: ReturnType<typeof question>[] = []
+    const fetch = vi.fn(async (path: string) => {
+      if (path.includes('/questions')) return new Response(JSON.stringify(questions))
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(QuestionPanel, { props: { projectId: 'project-a', issueId: 'AB-1' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('No open questions')
+    expect(MockEventSource.instances[0]?.url).toBe('/api/projects/project-a/events')
+
+    questions = [question({ issueId: 'AB-1' })]
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-q', type: 'question.created', sequence: null, runId: run.id }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Loading')
+    expect(wrapper.text()).toContain('Which strategy?')
+    wrapper.unmount()
+  })
+
+  it('refreshes run-scoped questions only for matching runId events', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    let questions: ReturnType<typeof question>[] = []
+    const fetch = vi.fn(async (path: string) => {
+      if (path.includes('/questions')) return new Response(JSON.stringify(questions))
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(QuestionPanel, { props: { projectId: 'project-a', runId: 'run-1' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('No open questions')
+
+    questions = [question({ runId: 'run-1', prompt: 'Pick a marker' })]
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-other', type: 'question.created', sequence: null, runId: 'run-2' }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('No open questions')
+
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-q', type: 'question.created', sequence: null, runId: 'run-1' }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('Pick a marker')
+    wrapper.unmount()
   })
 })

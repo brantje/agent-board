@@ -223,6 +223,9 @@ Issue:
     assignedAgentId: {type: [string, 'null'], format: uuid}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
+    currentBranch:
+      type: [string, 'null']
+      description: Live Issue Workspace Git checkout. Null when no Workspace exists yet.
     lastEvent:
       description: Latest Issue, Run, Question, Review, or Decision Event for this Issue. Tool and agent.message chatter is excluded.
       oneOf:
@@ -296,6 +299,9 @@ Run:
     startedAt: {type: [string, 'null'], format: date-time}
     completedAt: {type: [string, 'null'], format: date-time}
     updatedAt: {type: string, format: date-time}
+    currentBranch:
+      type: [string, 'null']
+      description: Live Issue Workspace Git checkout for this Run.
 AssignmentInput:
   type: object
   additionalProperties: false

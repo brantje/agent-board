@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -14,18 +15,52 @@ func (s *Store) CreateWorkspace(ctx context.Context, input store.Workspace) (sto
 		status = "PENDING"
 	}
 	return scanWorkspace(s.pool.QueryRow(ctx, `
-		INSERT INTO workspaces (project_id, issue_id, path, repository_path, base_branch, base_revision, working_branch, bootstrap_status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, bootstrap_status, created_at, updated_at
+		INSERT INTO workspaces (project_id, issue_id, path, repository_path, base_branch, base_revision, working_branch, current_branch, bootstrap_status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)
+		RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, current_branch, bootstrap_status, created_at, updated_at
 	`, input.ProjectID, input.IssueID, input.Path, input.RepositoryPath, input.BaseBranch, input.BaseRevision, input.WorkingBranch, status))
 }
 
 func (s *Store) GetWorkspaceByIssue(ctx context.Context, projectID, issueID string) (store.Workspace, error) {
 	return scanWorkspace(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, bootstrap_status, created_at, updated_at
+		SELECT id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, current_branch, bootstrap_status, created_at, updated_at
 		FROM workspaces WHERE project_id = $1 AND issue_id = $2
 	`, projectID, issueID))
 }
+
+func (s *Store) UpdateWorkspaceCurrentBranch(ctx context.Context, projectID, workspaceID, currentBranch string) (store.Workspace, error) {
+	currentBranch = strings.TrimSpace(currentBranch)
+	if currentBranch == "" {
+		return store.Workspace{}, store.ErrInvalidArgument
+	}
+	return scanWorkspace(s.pool.QueryRow(ctx, `
+		UPDATE workspaces
+		SET current_branch=$3, updated_at=now()
+		WHERE project_id=$1 AND id=$2
+		RETURNING id::text, project_id::text, issue_id::text, path, repository_path, base_branch, base_revision, working_branch, current_branch, bootstrap_status, created_at, updated_at
+	`, projectID, workspaceID, currentBranch))
+}
+
+const runSelectColumns = `
+	r.id::text,
+	r.project_id::text,
+	r.issue_id::text,
+	r.workspace_id::text,
+	r.agent_id::text,
+	r.attempt,
+	r.status,
+	r.queue_reason,
+	r.failure_reason,
+	r.created_at,
+	r.started_at,
+	r.completed_at,
+	r.updated_at,
+	COALESCE(w.current_branch, w.working_branch) AS current_branch
+`
+
+const runWorkspaceJoin = `
+LEFT JOIN workspaces AS w ON w.project_id = r.project_id AND w.id = r.workspace_id
+`
 
 func (s *Store) CreateRun(ctx context.Context, input store.Run) (store.Run, error) {
 	status := input.Status
@@ -40,9 +75,11 @@ func (s *Store) CreateRun(ctx context.Context, input store.Run) (store.Run, erro
 }
 
 func (s *Store) GetRun(ctx context.Context, projectID, runID string) (store.Run, error) {
-	return scanRun(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-		FROM runs WHERE project_id = $1 AND id = $2
+	return scanRunWithBranch(s.pool.QueryRow(ctx, `
+		SELECT `+runSelectColumns+`
+		FROM runs AS r
+		`+runWorkspaceJoin+`
+		WHERE r.project_id = $1 AND r.id = $2
 	`, projectID, runID))
 }
 
@@ -161,7 +198,7 @@ func (s *Store) CreateReview(ctx context.Context, input store.Review) (store.Rev
 
 func scanWorkspace(row pgx.Row) (store.Workspace, error) {
 	var value store.Workspace
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.IssueID, &value.Path, &value.RepositoryPath, &value.BaseBranch, &value.BaseRevision, &value.WorkingBranch, &value.BootstrapStatus, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.IssueID, &value.Path, &value.RepositoryPath, &value.BaseBranch, &value.BaseRevision, &value.WorkingBranch, &value.CurrentBranch, &value.BootstrapStatus, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Workspace{}, notFound(err)
 	}
 	return value, nil
@@ -170,6 +207,14 @@ func scanWorkspace(row pgx.Row) (store.Workspace, error) {
 func scanRun(row pgx.Row) (store.Run, error) {
 	var value store.Run
 	if err := row.Scan(&value.ID, &value.ProjectID, &value.IssueID, &value.WorkspaceID, &value.AgentID, &value.Attempt, &value.Status, &value.QueueReason, &value.FailureReason, &value.CreatedAt, &value.StartedAt, &value.CompletedAt, &value.UpdatedAt); err != nil {
+		return store.Run{}, notFound(err)
+	}
+	return value, nil
+}
+
+func scanRunWithBranch(row pgx.Row) (store.Run, error) {
+	var value store.Run
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.IssueID, &value.WorkspaceID, &value.AgentID, &value.Attempt, &value.Status, &value.QueueReason, &value.FailureReason, &value.CreatedAt, &value.StartedAt, &value.CompletedAt, &value.UpdatedAt, &value.CurrentBranch); err != nil {
 		return store.Run{}, notFound(err)
 	}
 	return value, nil

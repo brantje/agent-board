@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,34 +25,203 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
-func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
-	if os.Getenv("AGENT_BOARD_TEST_OPENCODE") != "1" {
-		t.Skip("AGENT_BOARD_TEST_OPENCODE=1 is required for the credential-gated OpenCode integration")
-	}
-	if os.Getenv("AGENT_BOARD_TEST_DOCKER") != "1" {
-		t.Skip("AGENT_BOARD_TEST_DOCKER=1 is required for the OpenCode Docker integration")
-	}
-	databaseURL := strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_DATABASE_URL"))
-	apiKey := strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_API_KEY"))
-	providerKind := strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND"))
-	modelName := strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_MODEL"))
-	if databaseURL == "" || apiKey == "" || providerKind == "" || modelName == "" {
-		t.Skip("database URL, OpenCode API key, provider kind and model are required")
-	}
-	image := strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE"))
-	if image == "" {
-		image = "agent-board-opencode-runtime:manual"
-	}
+const invalidOpenRouterIntegrationKey = "agent-board-invalid-openrouter-key-DO-NOT-LEAK-7d39d483b53e4cba"
 
-	resetRunexecIntegrationDatabase(t, databaseURL)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+type openCodeIntegrationEnv struct {
+	databaseURL  string
+	apiKey       string
+	providerKind string
+	modelName    string
+	image        string
+}
 
-	database, err := postgres.Open(ctx, databaseURL)
+type openCodeIntegrationFixture struct {
+	ctx            context.Context
+	database       *postgres.Store
+	services       *app.Services
+	secretService  *secrets.Service
+	repositoryPath string
+	env            openCodeIntegrationEnv
+	coordinator    *scheduler.Coordinator
+	started        bool
+}
+
+type openCodeRunSpec struct {
+	apiKey           string
+	roleInstructions string
+	title            string
+	description      string
+}
+
+func TestOpenCodeDockerNormalCodingRun(t *testing.T) {
+	fixture := newOpenCodeIntegrationFixture(t)
+	project, run := fixture.createRun(t, openCodeRunSpec{
+		roleInstructions: "Follow the issue instructions exactly. Do not ask a Question unless the issue explicitly requires human input.",
+		title:            "Prove the normal OpenCode coding path",
+		description:      "Do not ask any Question. Create /workspace/opencode-result.txt containing exactly normal-run-ok with no trailing newline. Do not modify any other file. After writing that file, stop.",
+	})
+	fixture.startScheduler(t)
+
+	terminal := waitForScriptedRun(t, fixture.ctx, fixture.database, project.ID, run.ID)
+	if terminal.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
+	}
+	assertOpenCodeWorkspaceFile(t, fixture.ctx, fixture.database, project.ID, terminal.WorkspaceID, "opencode-result.txt", "normal-run-ok")
+
+	filterRunID := run.ID
+	questions, err := fixture.database.ListQuestions(fixture.ctx, project.ID, store.QuestionFilter{RunID: &filterRunID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
+	if len(questions) != 0 {
+		t.Fatalf("normal OpenCode run unexpectedly created Questions: %+v", questions)
+	}
+	assertOpenCodeServerSession(t, fixture.ctx, fixture.database, project.ID, run.ID, false)
+}
+
+func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
+	fixture := newOpenCodeIntegrationFixture(t)
+	project, run := fixture.createRun(t, openCodeRunSpec{
+		roleInstructions: "Follow the issue instructions exactly. Use OpenCode's native Question tool for the requested human choice and wait for the answer before editing.",
+		title:            "Prove the native OpenCode Question round trip",
+		description:      "Before changing any files, use OpenCode's native Question tool to ask exactly one blocking single-choice Question: 'Which marker should I write?' with options 'alpha' and 'beta'. Do not use a free-form answer. After the human answer, create opencode-result.txt containing only the selected marker; a single trailing newline is allowed. Do not ask any other Question and do not modify other files.",
+	})
+	fixture.startScheduler(t)
+
+	t.Log("waiting for native OpenCode Question")
+	question := waitForOpenCodeQuestion(t, fixture.ctx, fixture.database, project.ID, run.ID)
+	if question.Kind != "SINGLE_CHOICE" {
+		t.Fatalf("native OpenCode Question kind=%q want SINGLE_CHOICE", question.Kind)
+	}
+	betaOption := optionIDByLabel(t, question, "beta")
+	if _, err := fixture.services.Questions.Answer(fixture.ctx, project.ID, question.ID, store.QuestionAnswer{
+		Kind: "SINGLE_CHOICE", OptionIDs: []string{betaOption},
+	}, nil); err != nil {
+		t.Fatalf("answer OpenCode Question through Agent Board: %v", err)
+	}
+
+	terminal := waitForScriptedRun(t, fixture.ctx, fixture.database, project.ID, run.ID)
+	if terminal.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
+	}
+	assertOpenCodeWorkspaceFileEither(t, fixture.ctx, fixture.database, project.ID, terminal.WorkspaceID, "opencode-result.txt", "beta", "beta\n")
+
+	events, err := fixture.database.ListRunEvents(fixture.ctx, project.ID, run.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOpenCodeQuestionEventOrder(t, events)
+	for _, eventType := range []string{"question.created", "run.waiting_for_input", "question.answered", "run.resumed"} {
+		assertOpenCodeEventCount(t, events, eventType, 1)
+	}
+	assertOpenCodeServerSession(t, fixture.ctx, fixture.database, project.ID, run.ID, false)
+}
+
+func TestOpenCodeDockerInvalidCredentialsFailWithoutSecretLeak(t *testing.T) {
+	fixture := newOpenCodeIntegrationFixture(t)
+	project, run := fixture.createRun(t, openCodeRunSpec{
+		apiKey:           invalidOpenRouterIntegrationKey,
+		roleInstructions: "Follow the issue instructions exactly. Do not ask a Question.",
+		title:            "Prove OpenRouter authentication failure handling",
+		description:      "Respond to this task using the configured model. Do not ask a Question. If model access succeeds, create /workspace/should-not-exist.txt containing unexpected-success, then stop.",
+	})
+	fixture.startScheduler(t)
+
+	terminal := waitForScriptedRun(t, fixture.ctx, fixture.database, project.ID, run.ID)
+	if terminal.Status != "FAILED" {
+		t.Fatalf("invalid credential run status=%s failure=%q; want FAILED", terminal.Status, openCodeFailureReason(terminal.FailureReason))
+	}
+	if terminal.FailureReason == nil || strings.TrimSpace(*terminal.FailureReason) == "" {
+		t.Fatal("invalid credential failure did not surface through Run failure_reason")
+	}
+	events, err := fixture.database.ListRunEvents(fixture.ctx, project.ID, run.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if openCodeEventIndex(events, "run.failed") < 0 {
+		t.Fatalf("invalid credential failure did not persist run.failed: %v", eventTypes(events))
+	}
+	assertOpenCodeSecretAbsent(t, fixture, project.ID, run.ID, invalidOpenRouterIntegrationKey)
+}
+
+func TestOpenCodeDockerCancelWhileWaitingForQuestion(t *testing.T) {
+	fixture := newOpenCodeIntegrationFixture(t)
+	project, run := fixture.createRun(t, openCodeRunSpec{
+		roleInstructions: "Follow the issue instructions exactly. Use OpenCode's native Question tool for the requested human choice and wait for the answer before editing.",
+		title:            "Cancel a native OpenCode Question",
+		description:      "Before changing any files, use OpenCode's native Question tool to ask exactly one blocking single-choice Question: 'Which marker should I write?' with options 'alpha' and 'beta'. Wait for the human answer. Only after an answer, create /workspace/opencode-result.txt containing the selected marker. Do not ask another Question or modify another file.",
+	})
+	fixture.startScheduler(t)
+
+	question := waitForOpenCodeQuestion(t, fixture.ctx, fixture.database, project.ID, run.ID)
+	if err := fixture.services.CancelRun(fixture.ctx, project.ID, run.ID); err != nil {
+		t.Fatalf("cancel waiting OpenCode Run: %v", err)
+	}
+	terminal := waitForScriptedRun(t, fixture.ctx, fixture.database, project.ID, run.ID)
+	if terminal.Status != "CANCELLED" {
+		t.Fatalf("cancelled Run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
+	}
+
+	session := waitForOpenCodeSessionStatus(t, fixture.ctx, fixture.database, project.ID, run.ID, "CANCELLED")
+	if !strings.Contains(string(session.CommandArgv), "opencode") || !strings.Contains(string(session.CommandArgv), "serve") {
+		t.Fatalf("cancelled execution session command=%s", session.CommandArgv)
+	}
+	workspaceRecord, err := fixture.database.GetWorkspace(fixture.ctx, project.ID, terminal.WorkspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRecord.Path, "opencode-result.txt")); !os.IsNotExist(err) {
+		t.Fatalf("post-answer result file exists after cancellation: err=%v", err)
+	}
+
+	events, err := fixture.database.ListRunEvents(fixture.ctx, project.ID, run.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if openCodeEventIndex(events, "run.resumed") >= 0 {
+		t.Fatalf("cancelled Question Run unexpectedly resumed: %v", eventTypes(events))
+	}
+	if openCodeEventIndex(events, "question.cancelled") < 0 {
+		t.Fatalf("cancelled Question was not durably cancelled: %v", eventTypes(events))
+	}
+
+	betaOption := optionIDByLabel(t, question, "beta")
+	if _, err := fixture.services.Questions.Answer(fixture.ctx, project.ID, question.ID, store.QuestionAnswer{
+		Kind: "SINGLE_CHOICE", OptionIDs: []string{betaOption},
+	}, nil); err == nil {
+		t.Fatal("stale answer to cancelled Question unexpectedly succeeded")
+	}
+	after, err := fixture.database.GetRun(fixture.ctx, project.ID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != "CANCELLED" {
+		t.Fatalf("stale Question answer changed cancelled Run to %s", after.Status)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRecord.Path, "opencode-result.txt")); !os.IsNotExist(err) {
+		t.Fatalf("stale answer produced result file after cancellation: err=%v", err)
+	}
+	events, err = fixture.database.ListRunEvents(fixture.ctx, project.ID, run.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if openCodeEventIndex(events, "run.resumed") >= 0 {
+		t.Fatalf("stale answer resumed cancelled Run: %v", eventTypes(events))
+	}
+}
+
+func newOpenCodeIntegrationFixture(t *testing.T) *openCodeIntegrationFixture {
+	t.Helper()
+	env := requireOpenCodeIntegrationEnv(t)
+	resetRunexecIntegrationDatabase(t, env.databaseURL)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	t.Cleanup(cancel)
+
+	database, err := postgres.Open(ctx, env.databaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(database.Close)
 	cipher, err := secrets.NewAESGCM(1, map[int][]byte{1: bytes.Repeat([]byte{0x5a}, 32)})
 	if err != nil {
 		t.Fatal(err)
@@ -82,12 +252,7 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services, err := app.NewServicesWithRuntimes(
-		database,
-		materializer,
-		map[string]runtimepkg.Implementation{"docker": dockerRuntime},
-		secretService,
-	)
+	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime}, secretService)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,12 +262,15 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 		}
 	})
 
-	project, run := createOpenCodeIntegrationRun(t, ctx, services.ControlPlane, secretService, repositoryPath, image, providerKind, modelName, apiKey)
 	baseBlobs, err := evidence.NewFileBlobStore(filepath.Join(t.TempDir(), "evidence"), 8<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	blobs, err := evidence.NewRedactingBlobStore(baseBlobs, services.Redaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services.RunEvidence, err = app.NewRunEvidenceService(services.ExecutionStore, blobs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,20 +290,10 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(
-		services.ExecutionStore,
-		services.ExecutionContext,
-		services.RuntimeInstances,
-		services.ExecutionSessions,
-		engines,
-		recorder,
-		output,
-		candidate,
-	)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	config := scheduler.DefaultConfig("opencode-integration")
 	config.PollInterval = 20 * time.Millisecond
 	config.LeaseDuration = 5 * time.Second
@@ -146,156 +304,119 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schedulerCtx, stopScheduler := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	go func() { done <- coordinator.Run(schedulerCtx) }()
-	defer func() {
-		stopScheduler()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Error("scheduler did not stop")
-		}
-	}()
+	services.Scheduler = coordinator
 
-	t.Log("waiting for native OpenCode Question")
-	question := waitForOpenCodeQuestion(t, ctx, database, project.ID, run.ID)
-	t.Logf("received native OpenCode Question %s", question.ID)
-	if question.Kind != "SINGLE_CHOICE" {
-		t.Fatalf("native OpenCode Question kind=%q want SINGLE_CHOICE", question.Kind)
-	}
-	betaOption := optionIDByLabel(t, question, "beta")
-	t.Log("answering native OpenCode Question with beta")
-	if _, err := services.Questions.Answer(ctx, project.ID, question.ID, store.QuestionAnswer{
-		Kind:      "SINGLE_CHOICE",
-		OptionIDs: []string{betaOption},
-	}, nil); err != nil {
-		t.Fatalf("answer OpenCode Question through Agent Board: %v", err)
-	}
-
-	t.Log("waiting for run completion after native Question reply")
-	terminal := waitForScriptedRun(t, ctx, database, project.ID, run.ID)
-	t.Logf("run reached terminal status %s", terminal.Status)
-	if terminal.Status != "READY_FOR_REVIEW" {
-		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
-	}
-	workspaceRecord, err := database.GetWorkspace(ctx, project.ID, terminal.WorkspaceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := os.ReadFile(filepath.Join(workspaceRecord.Path, "opencode-result.txt"))
-	if err != nil {
-		t.Fatalf("read OpenCode result: %v", err)
-	}
-	if got := string(result); got != "beta" && got != "beta\n" {
-		t.Fatalf("OpenCode result=%q want %q or %q", result, "beta", "beta\n")
-	}
-
-	events, err := database.ListRunEvents(ctx, project.ID, run.ID, 0, 500)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertOpenCodeQuestionEventOrder(t, events)
-	for _, eventType := range []string{"question.created", "run.waiting_for_input", "question.answered", "run.resumed"} {
-		assertOpenCodeEventCount(t, events, eventType, 1)
-	}
-	sessions, err := database.ListExecutionSessionsByRun(ctx, project.ID, run.ID, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sessions) != 1 || !strings.Contains(string(sessions[0].CommandArgv), "opencode") || !strings.Contains(string(sessions[0].CommandArgv), "serve") {
-		t.Fatalf("execution sessions=%+v", sessions)
+	return &openCodeIntegrationFixture{
+		ctx: ctx, database: database, services: services, secretService: secretService,
+		repositoryPath: repositoryPath, env: env, coordinator: coordinator,
 	}
 }
 
-func createOpenCodeIntegrationRun(
-	t *testing.T,
-	ctx context.Context,
-	control *app.Service,
-	secretService *secrets.Service,
-	repositoryPath, image, providerKind, modelName, apiKey string,
-) (store.Project, store.Run) {
+func requireOpenCodeIntegrationEnv(t *testing.T) openCodeIntegrationEnv {
 	t.Helper()
-	project, err := control.CreateProject(ctx, store.Project{
-		Name:             "OpenCode integration",
-		IssuePrefix:      "OC",
-		RepositoryPath:   repositoryPath,
-		DefaultBranch:    "main",
-		WorkflowSettings: store.EmptyObject,
+	if os.Getenv("AGENT_BOARD_TEST_OPENCODE") != "1" {
+		t.Skip("AGENT_BOARD_TEST_OPENCODE=1 is required for the credential-gated OpenCode integration")
+	}
+	if os.Getenv("AGENT_BOARD_TEST_DOCKER") != "1" {
+		t.Skip("AGENT_BOARD_TEST_DOCKER=1 is required for the OpenCode Docker integration")
+	}
+	env := openCodeIntegrationEnv{
+		databaseURL: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_DATABASE_URL")),
+		apiKey: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_API_KEY")),
+		providerKind: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND")),
+		modelName: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_MODEL")),
+		image: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE")),
+	}
+	if env.databaseURL == "" || env.apiKey == "" || env.providerKind == "" || env.modelName == "" {
+		t.Skip("database URL, OpenCode API key, provider kind and model are required")
+	}
+	if env.image == "" {
+		env.image = "agent-board-opencode-runtime:manual"
+	}
+	return env
+}
+
+func (f *openCodeIntegrationFixture) startScheduler(t *testing.T) {
+	t.Helper()
+	if f.started {
+		t.Fatal("OpenCode integration scheduler already started")
+	}
+	f.started = true
+	schedulerCtx, stopScheduler := context.WithCancel(f.ctx)
+	done := make(chan error, 1)
+	go func() { done <- f.coordinator.Run(schedulerCtx) }()
+	t.Cleanup(func() {
+		stopScheduler()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("scheduler stopped with error: %v", err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Error("scheduler did not stop")
+		}
+	})
+}
+
+func (f *openCodeIntegrationFixture) createRun(t *testing.T, spec openCodeRunSpec) (store.Project, store.Run) {
+	t.Helper()
+	apiKey := spec.apiKey
+	if apiKey == "" {
+		apiKey = f.env.apiKey
+	}
+	project, err := f.services.ControlPlane.CreateProject(f.ctx, store.Project{
+		Name: "OpenCode integration", IssuePrefix: "OC", RepositoryPath: f.repositoryPath,
+		DefaultBranch: "main", WorkflowSettings: store.EmptyObject,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	credentialRef := "opencode-integration-provider-key"
-	if _, err := secretService.Put(ctx, secrets.Scope{ProjectID: &project.ID}, credentialRef, []byte(apiKey)); err != nil {
+	if _, err := f.secretService.Put(f.ctx, secrets.Scope{ProjectID: &project.ID}, credentialRef, []byte(apiKey)); err != nil {
 		t.Fatalf("store provider credential: %v", err)
 	}
 	var baseURL *string
 	if value := strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_BASE_URL")); value != "" {
 		baseURL = &value
 	}
-	provider, err := control.CreateProvider(ctx, store.Provider{
-		Name:          "OpenCode integration provider",
-		Kind:          providerKind,
-		BaseURL:       baseURL,
-		CredentialRef: &credentialRef,
-		Enabled:       true,
-		HealthStatus:  "HEALTHY",
-		SafeMetadata:  store.EmptyObject,
+	provider, err := f.services.ControlPlane.CreateProvider(f.ctx, store.Provider{
+		Name: "OpenCode integration provider", Kind: f.env.providerKind, BaseURL: baseURL,
+		CredentialRef: &credentialRef, Enabled: true, HealthStatus: "HEALTHY", SafeMetadata: store.EmptyObject,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	scope := project.ID
-	model, err := control.CreateModelProfile(ctx, store.ModelProfile{
-		ProjectID:          &scope,
-		ProviderID:         provider.ID,
-		Name:               "OpenCode integration model",
-		Model:              modelName,
-		GenerationSettings: store.EmptyObject,
-		Enabled:            true,
+	model, err := f.services.ControlPlane.CreateModelProfile(f.ctx, store.ModelProfile{
+		ProjectID: &scope, ProviderID: provider.ID, Name: "OpenCode integration model", Model: f.env.modelName,
+		GenerationSettings: store.EmptyObject, Enabled: true,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeConfig, err := control.CreateRuntime(ctx, store.Runtime{
-		ProjectID:       &scope,
-		Name:            "OpenCode integration runtime",
-		Kind:            "docker",
-		Image:           image,
-		NetworkPolicy:   "outbound",
-		WorkspacePolicy: "issue",
-		Capabilities:    store.EmptyObject,
-		Enabled:         true,
-		HealthStatus:    "HEALTHY",
+	runtimeConfig, err := f.services.ControlPlane.CreateRuntime(f.ctx, store.Runtime{
+		ProjectID: &scope, Name: "OpenCode integration runtime", Kind: "docker", Image: f.env.image,
+		NetworkPolicy: "outbound", WorkspacePolicy: "issue", Capabilities: store.EmptyObject,
+		Enabled: true, HealthStatus: "HEALTHY",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := control.CreateAgent(ctx, store.Agent{
-		ProjectID:        &scope,
-		Name:             "OpenCode integration agent",
-		RoleInstructions: "Follow the issue instructions exactly. Use OpenCode's native Question tool for the requested human choice and wait for the answer before editing.",
-		Engine:           opencode.Name,
-		ModelProfileID:   model.ID,
-		RuntimeID:        runtimeConfig.ID,
-		EngineSettings:   store.EmptyObject,
-		ConcurrencyLimit: 1,
-		State:            "ENABLED",
+	agent, err := f.services.ControlPlane.CreateAgent(f.ctx, store.Agent{
+		ProjectID: &scope, Name: "OpenCode integration agent", RoleInstructions: spec.roleInstructions,
+		Engine: opencode.Name, ModelProfileID: model.ID, RuntimeID: runtimeConfig.ID,
+		EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	issue, err := control.CreateIssue(ctx, store.Issue{
-		ProjectID: project.ID,
-		Title:     "Prove the native OpenCode Question round trip",
-		Description: "Before changing any files, use OpenCode's native Question tool to ask exactly one blocking single-choice Question: 'Which marker should I write?' with options 'alpha' and 'beta'. Do not use a free-form answer. After the human answer, create opencode-result.txt containing only the selected marker; a single trailing newline is allowed. Do not ask any other Question and do not modify other files.",
-		Status:    "TODO",
+	issue, err := f.services.ControlPlane.CreateIssue(f.ctx, store.Issue{
+		ProjectID: project.ID, Title: spec.title, Description: spec.description, Status: "TODO",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, run, err := control.AssignIssue(ctx, project.ID, issue.ID, agent.ID)
+	_, run, err := f.services.ControlPlane.AssignIssue(f.ctx, project.ID, issue.ID, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,6 +457,106 @@ func waitForOpenCodeQuestion(t *testing.T, ctx context.Context, database *postgr
 			t.Fatalf("timed out waiting for OpenCode Question: %v", ctx.Err())
 		case <-ticker.C:
 		}
+	}
+}
+
+func waitForOpenCodeSessionStatus(t *testing.T, ctx context.Context, database *postgres.Store, projectID, runID, status string) store.ExecutionSession {
+	t.Helper()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		sessions, err := database.ListExecutionSessionsByRun(ctx, projectID, runID, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sessions) == 1 && sessions[0].Status == status {
+			return sessions[0]
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for OpenCode session status %s: sessions=%+v", status, sessions)
+		case <-ticker.C:
+		}
+	}
+}
+
+func assertOpenCodeServerSession(t *testing.T, ctx context.Context, database *postgres.Store, projectID, runID string, requireCancelled bool) {
+	t.Helper()
+	sessions, err := database.ListExecutionSessionsByRun(ctx, projectID, runID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 1 || !strings.Contains(string(sessions[0].CommandArgv), "opencode") || !strings.Contains(string(sessions[0].CommandArgv), "serve") {
+		t.Fatalf("execution sessions=%+v", sessions)
+	}
+	if requireCancelled && sessions[0].Status != "CANCELLED" {
+		t.Fatalf("execution session status=%s want CANCELLED", sessions[0].Status)
+	}
+}
+
+func assertOpenCodeWorkspaceFile(t *testing.T, ctx context.Context, database *postgres.Store, projectID, workspaceID, name, want string) {
+	t.Helper()
+	assertOpenCodeWorkspaceFileEither(t, ctx, database, projectID, workspaceID, name, want)
+}
+
+func assertOpenCodeWorkspaceFileEither(t *testing.T, ctx context.Context, database *postgres.Store, projectID, workspaceID, name string, want ...string) {
+	t.Helper()
+	workspaceRecord, err := database.GetWorkspace(ctx, projectID, workspaceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(filepath.Join(workspaceRecord.Path, name))
+	if err != nil {
+		t.Fatalf("read OpenCode result: %v", err)
+	}
+	for _, candidate := range want {
+		if string(content) == candidate {
+			return
+		}
+	}
+	t.Fatalf("OpenCode result=%q want one of %q", content, want)
+}
+
+func assertOpenCodeSecretAbsent(t *testing.T, fixture *openCodeIntegrationFixture, projectID, runID, secret string) {
+	t.Helper()
+	snapshot, err := fixture.services.RunEvidence.Inspect(fixture.ctx, projectID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(name string, value []byte) {
+		t.Helper()
+		if bytes.Contains(value, []byte(secret)) {
+			t.Fatalf("invalid OpenRouter credential leaked through %s", name)
+		}
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("Run evidence metadata", encoded)
+	for _, chunk := range snapshot.RawOutput {
+		_, reader, err := fixture.services.RunEvidence.OpenRawOutput(fixture.ctx, projectID, runID, chunk.ID)
+		if err != nil {
+			t.Fatalf("open raw output %s: %v", chunk.ID, err)
+		}
+		data, readErr := io.ReadAll(reader)
+		closeErr := reader.Close()
+		if readErr != nil || closeErr != nil {
+			t.Fatalf("read raw output %s: read=%v close=%v", chunk.ID, readErr, closeErr)
+		}
+		check("raw output blob "+chunk.ID, data)
+	}
+	for _, artifact := range snapshot.Artifacts {
+		_, reader, err := fixture.services.RunEvidence.OpenArtifact(fixture.ctx, projectID, runID, artifact.ID)
+		if err != nil {
+			t.Fatalf("open artifact %s: %v", artifact.ID, err)
+		}
+		data, readErr := io.ReadAll(reader)
+		closeErr := reader.Close()
+		if readErr != nil || closeErr != nil {
+			t.Fatalf("read artifact %s: read=%v close=%v", artifact.ID, readErr, closeErr)
+		}
+		check("artifact blob "+artifact.ID, data)
 	}
 }
 

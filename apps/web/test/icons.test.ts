@@ -1,9 +1,18 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 function source(path: string) {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
+}
+
+function vueFiles(dir: string): string[] {
+  const entries = readdirSync(dir)
+  return entries.flatMap((entry) => {
+    const path = join(dir, entry)
+    if (statSync(path).isDirectory()) return vueFiles(path)
+    return path.endsWith('.vue') ? [path] : []
+  })
 }
 
 describe('local Lucide icon delivery', () => {
@@ -16,5 +25,12 @@ describe('local Lucide icon delivery', () => {
     expect(config).toContain('serverBundle: \'local\'')
     expect(config).toContain('globInclude: [\'app/**/*.{vue,ts}\']')
     expect(source('app/utils/navigation.ts')).toContain("icon: 'i-lucide-")
+  })
+
+  it('does not render Lucide icons as raw CSS classes in product Vue templates', () => {
+    const offenders = vueFiles(resolve(process.cwd(), 'app')).filter((path) =>
+      /class="[^"]*\bi-lucide-/.test(source(path.replace(resolve(process.cwd()) + '/', '')))
+    )
+    expect(offenders).toEqual([])
   })
 })

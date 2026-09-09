@@ -30,10 +30,10 @@ concurrency:
 
 jobs:
   openrouter:
-    name: OpenRouter native Question round trip
+    name: OpenRouter live integration
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: pgvector/pgvector:pg18
@@ -42,14 +42,13 @@ jobs:
           POSTGRES_USER: agent_board
           POSTGRES_PASSWORD: agent_board
         ports:
-          - 5432:5432
+          - 5432/tcp
         options: >-
           --health-cmd "pg_isready -U agent_board -d agent_board_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      AGENT_BOARD_TEST_DATABASE_URL: postgres://agent_board:agent_board@127.0.0.1:5432/agent_board_test?sslmode=disable
       AGENT_BOARD_TEST_DATABASE_RESET: "1"
       OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
       OPENROUTER_WHITELIST: ${{ vars.OPENROUTER_WHITELIST || secrets.OPENROUTER_WHITELIST }}
@@ -61,6 +60,8 @@ jobs:
         with:
           go-version-file: apps/server/go.mod
           cache-dependency-path: apps/server/go.sum
+      - name: Configure test database URL
+        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
       - name: Select allowlisted OpenRouter model
         shell: bash
         run: |
@@ -101,7 +102,7 @@ jobs:
           --file apps/agent-runner/Dockerfile
           --tag agent-board-opencode-runtime:ci
           .
-      - name: Run real OpenCode native Question round trip
+      - name: Run real OpenCode/OpenRouter integration suite
         working-directory: apps/server
         env:
           AGENT_BOARD_TEST_OPENCODE: "1"
@@ -111,21 +112,21 @@ jobs:
           AGENT_BOARD_TEST_OPENCODE_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          if timeout --signal=TERM --kill-after=10s 360s \
-            go test -count=1 -run '^TestOpenCodeDockerInteractiveQuestionRoundTrip$' -v ./internal/runexec; then
+          if timeout --signal=TERM --kill-after=10s 480s \
+            go test -count=1 -failfast -run '^TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)$' -v ./internal/runexec; then
             exit 0
           fi
 
           echo '--- OpenCode Run diagnostics (durable, redacted state only) ---'
           PGPASSWORD=agent_board psql \
-            -h 127.0.0.1 -U agent_board -d agent_board_test -x \
+            -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
             -c 'SELECT id, status, failure_reason FROM runs ORDER BY created_at DESC LIMIT 1' || true
           echo '--- Execution Sessions ---'
           PGPASSWORD=agent_board psql \
-            -h 127.0.0.1 -U agent_board -d agent_board_test -x \
+            -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
             -c 'SELECT status, cwd, command_argv, exit_code FROM execution_sessions ORDER BY created_at' || true
           echo '--- Run Events ---'
           PGPASSWORD=agent_board psql \
-            -h 127.0.0.1 -U agent_board -d agent_board_test -x \
+            -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
             -c 'SELECT sequence, type, payload FROM events ORDER BY sequence' || true
           exit 1

@@ -162,6 +162,19 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		}
 		return engine.Result{Summary: state.lastVisibleMessage}, nil
 	}
+	finishCompleted := func() (engine.Result, error) {
+		if err := state.flushPendingMessages(ctx); err != nil {
+			return engine.Result{}, err
+		}
+		message, failed, err := native.LatestAssistantError(ctx, session.ID)
+		if err != nil {
+			return engine.Result{}, fmt.Errorf("opencode engine: inspect native assistant completion: %w", err)
+		}
+		if failed {
+			return engine.Result{}, fmt.Errorf("opencode engine: native session error: %s", message)
+		}
+		return finish()
+	}
 
 	events := readEvents(eventCtx, stream)
 	statePoll := time.NewTicker(nativeStatePollInterval)
@@ -215,7 +228,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			}
 			inactivePolls++
 			if inactivePolls >= inactivePollsBeforeComplete {
-				return finish()
+				return finishCompleted()
 			}
 		case eventRead := <-events:
 			if eventRead.err != nil {
@@ -255,7 +268,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 					return engine.Result{}, err
 				}
 				if !hadPending {
-					return finish()
+					return finishCompleted()
 				}
 				continue
 			}

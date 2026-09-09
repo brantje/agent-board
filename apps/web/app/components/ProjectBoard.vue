@@ -2,8 +2,8 @@
 import { computed, ref } from 'vue'
 import type { Agent, Issue, Project } from '../types/api'
 import { apiPath } from '../utils/api'
-import { boardColumnSurface, boardColumns } from '../utils/issues'
-import { isBoardActivityEvent } from '../utils/events'
+import { boardColumns } from '../utils/issues'
+import { isBoardActivityEvent, applyCurrentBranchToIssues } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
 
@@ -33,6 +33,13 @@ async function created() {
 }
 
 useProjectEvents(() => props.projectId, async event => {
+  if (event.type === 'git.branch_checked_out') {
+    const next = applyCurrentBranchToIssues(issues.data.value || [], event)
+    if (next !== issues.data.value) {
+      issues.data.value = next
+      return
+    }
+  }
   if (!isBoardActivityEvent(event.type)) return
   await refreshAll()
 })
@@ -52,10 +59,13 @@ useProjectEvents(() => props.projectId, async event => {
           v-for="column in columns"
           :key="column.status"
           :data-status="column.status"
-          :class="['w-64 min-w-64 flex-1 border border-default', boardColumnSurface(column.status)]"
+          :class="['w-64 min-w-64 flex-1 border border-default', column.surface]"
         >
           <header class="flex items-center justify-between gap-2 border-b border-default p-3">
-            <h2 class="section-label">{{ column.label }}</h2>
+            <h2 class="section-label flex min-w-0 items-center gap-1.5">
+              <UIcon :name="column.icon" :class="['size-3.5 shrink-0', column.textClass]" aria-hidden="true" />
+              {{ column.label }}
+            </h2>
             <UBadge :label="String(column.issues.length)" color="neutral" variant="subtle" />
           </header>
           <div class="space-y-2 p-2">

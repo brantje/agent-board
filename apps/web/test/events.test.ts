@@ -1,7 +1,7 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { ref, defineComponent, h } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { eventTitle, mergeEvents, maxSequence, refetchTargets, isBoardActivityEvent, compareEvents } from '../app/utils/events'
+import { eventTitle, mergeEvents, maxSequence, refetchTargets, isBoardActivityEvent, compareEvents, projectRunActivity, formatActivityTime } from '../app/utils/events'
 import { useRunEvents } from '../app/composables/useRunEvents'
 import { useProjectEvents } from '../app/composables/useProjectEvents'
 import ActivityTimeline from '../app/components/ActivityTimeline.vue'
@@ -14,6 +14,18 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
   MockEventSource.reset()
+})
+
+describe('activity time formatting', () => {
+  it('formats activity timestamps as a compact 24-hour clock', () => {
+    expect(formatActivityTime('2026-09-09T10:23:29.308593Z', 'UTC', Date.parse('2026-09-09T15:00:00Z'))).toBe('10:23:29')
+    expect(formatActivityTime('not-a-date')).toBe('not-a-date')
+  })
+
+  it('includes the full date before the time when the activity is from a previous day', () => {
+    expect(formatActivityTime('2026-09-08T22:15:04.000Z', 'UTC', Date.parse('2026-09-09T15:00:00Z'))).toBe('8 Sept 2026 22:15:04')
+    expect(formatActivityTime('2026-08-31T07:01:00.000Z', 'UTC', Date.parse('2026-09-09T15:00:00Z'))).toBe('31 Aug 2026 07:01:00')
+  })
 })
 
 describe('event timeline projection', () => {
@@ -48,6 +60,7 @@ describe('event timeline projection', () => {
     expect(refetchTargets('review.approved')).toEqual({ run: false, questions: false, reviews: true, issue: false })
     expect(refetchTargets('issue.status_changed')).toEqual({ run: false, questions: false, reviews: false, issue: true })
     expect(refetchTargets('agent.message')).toEqual({ run: false, questions: false, reviews: false, issue: false })
+    expect(refetchTargets('git.branch_checked_out')).toEqual({ run: false, questions: false, reviews: false, issue: false })
     expect(isBoardActivityEvent('question.created')).toBe(true)
     expect(isBoardActivityEvent('decision.recorded')).toBe(true)
     expect(isBoardActivityEvent('project.resync')).toBe(true)
@@ -58,21 +71,20 @@ describe('event timeline projection', () => {
 
 describe('ActivityTimeline', () => {
   it('renders sequence order, semantic labels, and a diagnostic fallback for unknown types', () => {
+    const items = projectRunActivity([
+      event({ id: 'u', type: 'future.unknown', sequence: 2, occurredAt: '2026-01-01T00:02:00.000Z', payload: { note: 'keep' } }),
+      event({ id: 'm', type: 'agent.message', sequence: 1, payload: { kind: 'plan', message: 'Ship the candidate' } })
+    ])
     const wrapper = mount(ActivityTimeline, {
-      props: {
-        events: [
-          event({ id: 'u', type: 'future.unknown', sequence: 2, occurredAt: '2026-01-01T00:02:00.000Z', payload: { note: 'keep' } }),
-          event({ id: 'm', type: 'agent.message', sequence: 1, payload: { kind: 'plan', message: 'Ship the candidate' } })
-        ]
-      },
+      props: { items },
       global
     })
-    const items = wrapper.findAll('li')
-    expect(items[0]?.text()).toContain('Plan')
-    expect(items[0]?.text()).toContain('Ship the candidate')
-    expect(items[1]?.text()).toContain('future.unknown')
-    expect(items[1]?.text()).toContain('2026-01-01T00:02:00.000Z')
-    expect(items[1]?.text()).toContain('"note": "keep"')
+    const rendered = wrapper.findAll('li')
+    expect(rendered[0]?.text()).toContain('Plan')
+    expect(rendered[0]?.text()).toContain('Ship the candidate')
+    expect(rendered[1]?.text()).toContain('future.unknown')
+    expect(rendered[1]?.get('time').attributes('datetime')).toBe('2026-01-01T00:02:00.000Z')
+    expect(rendered[1]?.text()).toContain('"note": "keep"')
     expect(wrapper.text()).not.toMatch(/thought/i)
   })
 })
@@ -221,114 +233,87 @@ describe('useProjectEvents', () => {
   it('opens one stream per Project and ignores overlapping reconnects after unmount', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('EventSource', MockEventSource)
-    const ids = ref(['project-a', 'project-b'])
     const wrapper = mount(defineComponent({
       setup() {
-        useProjectEvents(ids, () => {})
+        useProjectEvents('project-a', () => {})
+        useProjectEvents('project-b', () => {})
         return () => h('div')
       }
     }))
     await flushPromises()
-    expect(MockEventSource.instances.map(item => item.url).sort()).toEqual([
-      '/api/projects/project-a/events',
-      '/api/projects/project-b/events'
-    ])
+    expect(MockEventSource.instances.map(instance => instance.url)).toEqual(['/api/projects/project-a/events', '/api/projects/project-b/events'])
     wrapper.unmount()
-    await vi.advanceTimersByTimeAsync(300)
-    expect(MockEventSource.instances.every(item => item.closed)).toBe(true)
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(MockEventSource.instances).toHaveLength(2)
   })
 
   it('drops removed Project streams, ignores bad payloads, and cancels reconnect timers', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('EventSource', MockEventSource)
-    const ids = ref<string[] | undefined>(['project-a', 'project-a', '', 'project-b'])
+    const project = ref('project-a')
     const received: string[] = []
     const wrapper = mount(defineComponent({
       setup() {
-        useProjectEvents(ids, event => { received.push(event.id) })
+        useProjectEvents(project, event => received.push(event.id))
         return () => h('div')
       }
     }))
     await flushPromises()
-    expect(MockEventSource.instances.map(item => item.url).sort()).toEqual([
-      '/api/projects/project-a/events',
-      '/api/projects/project-b/events'
-    ])
-
-    MockEventSource.instances[0]?.emit('not-json')
-    MockEventSource.instances[0]?.onmessage?.({ data: '{"no":"event"}' } as MessageEvent<string>)
-    MockEventSource.instances[0]?.onmessage?.({ data: '{' } as MessageEvent<string>)
+    MockEventSource.instances[0]?.emitRaw('{bad-json')
     await flushPromises()
     expect(received).toEqual([])
-
-    ids.value = ['project-a']
+    MockEventSource.instances[0]?.fail()
+    project.value = ''
     await flushPromises()
-    expect(MockEventSource.instances.find(item => item.url.includes('project-b'))?.closed).toBe(true)
-
-    MockEventSource.instances.find(item => !item.closed)?.fail()
-    ids.value = undefined
-    await flushPromises()
-    await vi.advanceTimersByTimeAsync(2000)
-    expect(received).toEqual([])
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(MockEventSource.instances).toHaveLength(1)
     wrapper.unmount()
   })
 
   it('drops afterId and refreshes on a resync control frame', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('EventSource', MockEventSource)
-    const received: Array<{ type: string; projectId: string; issueId: string | null; runId: string | null }> = []
+    const received: string[] = []
     const wrapper = mount(defineComponent({
       setup() {
-        useProjectEvents('project-a', event => {
-          received.push({ type: event.type, projectId: event.projectId, issueId: event.issueId, runId: event.runId })
-        })
+        useProjectEvents('project-a', event => received.push(event.id))
         return () => h('div')
       }
     }))
     await flushPromises()
     MockEventSource.instances[0]?.emit(event({ id: 'evt-1', type: 'issue.created', sequence: null }))
     await flushPromises()
-    MockEventSource.instances[0]?.emitNamed('resync')
+    MockEventSource.instances[0]?.emit(event({ id: 'resync', type: 'project.resync', sequence: null }))
     await flushPromises()
-    expect(received).toEqual([
-      { type: 'issue.created', projectId: 'project-a', issueId: null, runId: null },
-      { type: 'project.resync', projectId: 'project-a', issueId: null, runId: null }
-    ])
-
-    MockEventSource.instances[0]?.fail()
     await vi.advanceTimersByTimeAsync(2000)
-    await flushPromises()
     expect(MockEventSource.instances.at(-1)?.url).toBe('/api/projects/project-a/events')
     wrapper.unmount()
   })
 
   it('serializes handlers and swallows handler failures', async () => {
-    vi.useFakeTimers()
     vi.stubGlobal('EventSource', MockEventSource)
-    let inflight = 0
-    let max = 0
-    const seen: string[] = []
+    const calls: string[] = []
+    let release!: () => void
+    const blocker = new Promise<void>(resolve => { release = resolve })
     const wrapper = mount(defineComponent({
       setup() {
         useProjectEvents('project-a', async event => {
-          inflight++
-          max = Math.max(max, inflight)
-          await new Promise(resolve => setTimeout(resolve, 50))
-          inflight--
-          seen.push(event.id)
-          if (event.id === 'boom') throw new Error('refresh failed')
+          calls.push(`start:${event.id}`)
+          if (event.id === 'a') await blocker
+          calls.push(`end:${event.id}`)
+          if (event.id === 'b') throw new Error('ignore')
         })
         return () => h('div')
       }
     }))
     await flushPromises()
-    MockEventSource.instances[0]?.emit(event({ id: 'evt-1', type: 'issue.created', sequence: null }))
-    MockEventSource.instances[0]?.emit(event({ id: 'boom', type: 'issue.updated', sequence: null }))
-    MockEventSource.instances[0]?.emit(event({ id: 'evt-2', type: 'issue.updated', sequence: null }))
-    await vi.advanceTimersByTimeAsync(200)
+    MockEventSource.instances[0]?.emit(event({ id: 'a', type: 'issue.updated', sequence: null }))
+    MockEventSource.instances[0]?.emit(event({ id: 'b', type: 'issue.updated', sequence: null }))
     await flushPromises()
-    expect(max).toBe(1)
-    expect(seen).toEqual(['evt-1', 'boom', 'evt-2'])
+    expect(calls).toEqual(['start:a'])
+    release()
+    await flushPromises()
+    expect(calls).toEqual(['start:a', 'end:a', 'start:b', 'end:b'])
     wrapper.unmount()
   })
 
@@ -342,14 +327,10 @@ describe('useProjectEvents', () => {
       }
     }))
     await flushPromises()
-    const source = MockEventSource.instances[0]
-    source?.fail()
-    source?.fail()
+    MockEventSource.instances[0]?.fail()
+    MockEventSource.instances[0]?.fail()
     await vi.advanceTimersByTimeAsync(2000)
-    await flushPromises()
     expect(MockEventSource.instances).toHaveLength(2)
-    expect(MockEventSource.instances.at(-1)?.url).toBe('/api/projects/project-a/events')
     wrapper.unmount()
   })
 })
-

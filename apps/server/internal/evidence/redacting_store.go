@@ -59,6 +59,14 @@ func (s *RedactingStore) AppendEvent(ctx context.Context, input store.Event) (st
 	return s.ControlPlaneStore.AppendEvent(ctx, input)
 }
 
+func (s *RedactingStore) TransitionAdmittedJob(ctx context.Context, input store.SchedulerTransition) (store.Run, error) {
+	if input.FailureReason != nil {
+		value := s.registry.RedactString(input.RunID, *input.FailureReason)
+		input.FailureReason = &value
+	}
+	return s.ControlPlaneStore.TransitionAdmittedJob(ctx, input)
+}
+
 func (s *RedactingStore) CreateRawOutputChunk(ctx context.Context, input store.RawOutputChunk) (store.RawOutputChunk, error) {
 	input.StorageRef = s.registry.RedactString(input.RunID, input.StorageRef)
 	if input.Digest != nil {

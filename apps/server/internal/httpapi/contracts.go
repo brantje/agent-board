@@ -36,6 +36,7 @@ type IssueDTO struct {
 	AssignedAgentID *string           `json:"assignedAgentId"`
 	CreatedAt       time.Time         `json:"createdAt"`
 	UpdatedAt       time.Time         `json:"updatedAt"`
+	CurrentBranch   *string           `json:"currentBranch"`
 	LastEvent       *EventEvidenceDTO `json:"lastEvent"`
 }
 
@@ -134,6 +135,7 @@ type RunDTO struct {
 	StartedAt     *time.Time `json:"startedAt"`
 	CompletedAt   *time.Time `json:"completedAt"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
+	CurrentBranch *string    `json:"currentBranch"`
 }
 
 type CreateProjectRequest struct {

@@ -53,6 +53,7 @@ describe('theme CSS architecture', () => {
     expect(main).toContain('.issue-identity')
     expect(main).toContain('.issue-priority')
     expect(main).toContain('.issue-last-event')
+    expect(main).toContain('.run-status')
     expect(main).not.toContain('--color-steel-500')
     expect(main).not.toContain('.dark {')
 
@@ -68,8 +69,8 @@ describe('theme CSS architecture', () => {
     expect(dark).toContain('--board-column-todo:')
     expect(dark).toContain('--board-column-in-progress:')
     expect(dark).toContain('--board-column-blocked:')
-    expect(dark).toContain('--board-column-review:')
-    expect(dark).toContain('--board-column-done:')
+    expect(dark).toContain('--board-column-review: #232a26')
+    expect(dark).toContain('--board-column-done: #242830')
 
     expect(light).toContain("html[data-theme='light']")
     expect(light).toContain('--color-bg:')
@@ -77,8 +78,8 @@ describe('theme CSS architecture', () => {
     expect(light).toContain('--board-column-todo:')
     expect(light).toContain('--board-column-in-progress:')
     expect(light).toContain('--board-column-blocked:')
-    expect(light).toContain('--board-column-review:')
-    expect(light).toContain('--board-column-done:')
+    expect(light).toContain('--board-column-review: #f2f9f2')
+    expect(light).toContain('--board-column-done: #f1f4fd')
     expect(light).not.toContain(':root,')
 
     expect(main).toContain('.board-column-backlog')

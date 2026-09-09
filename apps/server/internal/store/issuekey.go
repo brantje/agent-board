@@ -6,9 +6,16 @@ import (
 	"strings"
 )
 
+const issueWorkingBranchPrefix = "agent-board/"
+
 // FormatIssueKey builds the public Issue identifier from a Project prefix and number.
 func FormatIssueKey(prefix string, number int) string {
 	return fmt.Sprintf("%s-%d", prefix, number)
+}
+
+// WorkingBranchForIssue returns the deterministic Issue Workspace working branch name.
+func WorkingBranchForIssue(issueKey string) string {
+	return issueWorkingBranchPrefix + strings.TrimSpace(issueKey)
 }
 
 // NormalizeIssuePrefix uppercases and trims a Project issue prefix.

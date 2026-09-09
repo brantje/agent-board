@@ -3,6 +3,7 @@ package runexec
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"strings"
@@ -127,6 +128,7 @@ type launcherClient struct {
 	exitCode int
 	waitErr  error
 	done     chan struct{}
+	waitGate *launcherWaitGate
 }
 
 func newLauncherClient(stdout, stderr string, exitCode int, waitErr error) *launcherClient {
@@ -135,12 +137,13 @@ func newLauncherClient(stdout, stderr string, exitCode int, waitErr error) *laun
 
 func (c *launcherClient) transport(sessionID string) runner.ProcessSession {
 	return &launcherTransportProcess{
-		id:      sessionID,
-		stdout:  strings.NewReader(c.stdout),
-		stderr:  strings.NewReader(c.stderr),
-		stdin:   &launcherStdin{},
-		result:  runner.Result{ExitCode: c.exitCode},
-		waitErr: c.waitErr,
+		id:       sessionID,
+		stdout:   strings.NewReader(c.stdout),
+		stderr:   strings.NewReader(c.stderr),
+		stdin:    &launcherStdin{},
+		result:   runner.Result{ExitCode: c.exitCode},
+		waitErr:  c.waitErr,
+		waitGate: c.waitGate,
 	}
 }
 
@@ -168,23 +171,56 @@ type launcherStdin struct{ bytes.Buffer }
 func (*launcherStdin) Close() error { return nil }
 
 type launcherTransportProcess struct {
-	id      string
-	stdout  io.Reader
-	stderr  io.Reader
-	stdin   io.WriteCloser
-	result  runner.Result
-	waitErr error
+	id       string
+	stdout   io.Reader
+	stderr   io.Reader
+	stdin    io.WriteCloser
+	result   runner.Result
+	waitErr  error
+	waitGate *launcherWaitGate
+}
+
+type launcherWaitGate struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newLauncherWaitGate() *launcherWaitGate {
+	return &launcherWaitGate{started: make(chan struct{}), release: make(chan struct{})}
+}
+
+func (g *launcherWaitGate) stop() {
+	g.once.Do(func() { close(g.release) })
 }
 
 func (p *launcherTransportProcess) ID() string            { return p.id }
 func (p *launcherTransportProcess) Stdout() io.Reader     { return p.stdout }
 func (p *launcherTransportProcess) Stderr() io.Reader     { return p.stderr }
 func (p *launcherTransportProcess) Stdin() io.WriteCloser { return p.stdin }
-func (p *launcherTransportProcess) Wait(context.Context) (runner.Result, error) {
+func (p *launcherTransportProcess) Wait(ctx context.Context) (runner.Result, error) {
+	if p.waitGate != nil {
+		close(p.waitGate.started)
+		select {
+		case <-p.waitGate.release:
+		case <-ctx.Done():
+			return runner.Result{}, ctx.Err()
+		}
+	}
 	return p.result, p.waitErr
 }
-func (*launcherTransportProcess) Terminate(context.Context) error { return nil }
-func (*launcherTransportProcess) Kill(context.Context) error      { return nil }
+func (p *launcherTransportProcess) Terminate(context.Context) error {
+	if p.waitGate != nil {
+		p.waitGate.stop()
+	}
+	return nil
+}
+func (p *launcherTransportProcess) Kill(context.Context) error {
+	if p.waitGate != nil {
+		p.waitGate.stop()
+	}
+	return nil
+}
 
 type failingLauncherSessions struct{ err error }
 
@@ -198,16 +234,19 @@ func (failingLauncherSessions) ReconcileAll(context.Context) error { return nil 
 
 func TestProcessLauncherCapturesAuthorizedProcessEvidence(t *testing.T) {
 	cases := []struct {
-		name        string
-		exitCode    int
-		waitErr     error
-		wantEvent   string
-		wantErr     bool
-		requestKind string
+		name           string
+		exitCode       int
+		waitErr        error
+		wantEvent      string
+		wantErr        bool
+		requestKind    string
+		stopBeforeWait bool
 	}{
-		{name: "test success", exitCode: 0, wantEvent: "test.completed", requestKind: "test"},
+		{name: "test success", exitCode: 0, wantEvent: "test.completed", requestKind: "test", stopBeforeWait: true},
 		{name: "tool nonzero exit", exitCode: 7, wantEvent: "tool.failed", wantErr: false, requestKind: "tool"},
-		{name: "test wait failure", exitCode: 1, waitErr: errors.New("transport ended"), wantEvent: "test.failed", wantErr: true, requestKind: "test"},
+		{name: "tool stopped after terminate", exitCode: 137, wantEvent: "tool.stopped", requestKind: "tool", stopBeforeWait: true},
+		{name: "tool wait failure after stop", exitCode: 137, waitErr: errors.New("transport ended"), wantEvent: "tool.failed", wantErr: true, requestKind: "tool", stopBeforeWait: true},
+		{name: "test wait failure", exitCode: 1, waitErr: errors.New("transport ended"), wantEvent: "test.failed", wantErr: true, requestKind: "test", stopBeforeWait: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -257,11 +296,13 @@ func TestProcessLauncherCapturesAuthorizedProcessEvidence(t *testing.T) {
 			if process.Stdin() == nil {
 				t.Fatal("process stdin is nil")
 			}
-			if err := process.Terminate(t.Context()); err != nil {
-				t.Fatal(err)
-			}
-			if err := process.Kill(t.Context()); err != nil {
-				t.Fatal(err)
+			if tc.stopBeforeWait {
+				if err := process.Terminate(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+				if err := process.Kill(t.Context()); err != nil {
+					t.Fatal(err)
+				}
 			}
 			stdoutDone := make(chan struct{})
 			stderrDone := make(chan struct{})
@@ -282,10 +323,119 @@ func TestProcessLauncherCapturesAuthorizedProcessEvidence(t *testing.T) {
 			if !hasProcessTestEvent(evidenceStore.events, tc.wantEvent) {
 				t.Fatalf("missing event %q in %+v", tc.wantEvent, evidenceStore.events)
 			}
+			if tc.wantEvent == "tool.failed" {
+				failed := processTestEvent(evidenceStore.events, "tool.failed")
+				var payload map[string]any
+				if err := json.Unmarshal(failed.Payload, &payload); err != nil {
+					t.Fatalf("decode tool.failed payload: %v", err)
+				}
+				if payload["name"] != "fixture" || payload["reason"] == nil || payload["reason"] == "" {
+					t.Fatalf("flattened tool.failed payload=%+v", payload)
+				}
+				if _, nested := payload["result"]; nested {
+					t.Fatalf("tool.failed nested result unexpectedly present: %+v", payload)
+				}
+			}
+			if tc.wantEvent == "tool.stopped" {
+				stopped := processTestEvent(evidenceStore.events, "tool.stopped")
+				var payload map[string]any
+				if err := json.Unmarshal(stopped.Payload, &payload); err != nil {
+					t.Fatalf("decode tool.stopped payload: %v", err)
+				}
+				if payload["name"] != "fixture" {
+					t.Fatalf("tool.stopped name=%v want fixture in %+v", payload["name"], payload)
+				}
+				if payload["reason"] != nil && payload["reason"] != "" {
+					t.Fatalf("tool.stopped reason unexpectedly present: %+v", payload)
+				}
+				code, _ := payload["exitCode"].(float64)
+				if int(code) != tc.exitCode {
+					t.Fatalf("tool.stopped exitCode=%v want %d in %+v", payload["exitCode"], tc.exitCode, payload)
+				}
+				if hasProcessTestEvent(evidenceStore.events, "tool.failed") {
+					t.Fatalf("intentional stop recorded tool.failed: %+v", evidenceStore.events)
+				}
+			}
 			if len(evidenceStore.chunks) < 2 {
 				t.Fatalf("raw output chunks=%d, want at least stdout and stderr evidence", len(evidenceStore.chunks))
 			}
 		})
+	}
+}
+
+func TestProcessLauncherRecordsStoppedWhenTerminatedDuringWait(t *testing.T) {
+	safe := processTestSafeContext(t.TempDir())
+	evidenceStore := &processTestStore{}
+	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := evidence.NewRecorder(evidenceStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := evidence.NewOutputRecorder(evidenceStore, blobs, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionStore := &launcherSessionStore{
+		run:      store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
+		instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, RuntimeID: safe.Runtime.ID, Status: "RUNNING"},
+	}
+	gate := newLauncherWaitGate()
+	client := newLauncherClient("", "", 137, nil)
+	client.waitGate = gate
+	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, err := app.NewAuthorizedExecutionSessionService(transportSessions, launcherPreparer{runtimeID: safe.Runtime.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &processLauncher{
+		sessions:          authorized,
+		events:            recorder,
+		output:            output,
+		safe:              safe,
+		runtimeInstanceID: "runtime-instance",
+		scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+	}
+	process, err := launcher.Start(t.Context(), engine.ProcessRequest{
+		Kind:    "tool",
+		Name:    "opencode-server",
+		Command: []string{"opencode", "serve"},
+		CWD:     "/workspace",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitDone := make(chan error, 1)
+	go func() {
+		_, waitErr := process.Wait(t.Context())
+		waitDone <- waitErr
+	}()
+	select {
+	case <-gate.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait() did not start")
+	}
+	if err := process.Terminate(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case waitErr := <-waitDone:
+		if waitErr != nil {
+			t.Fatalf("Wait() error=%v", waitErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait() did not return after Terminate()")
+	}
+	if !hasProcessTestEvent(evidenceStore.events, "tool.stopped") {
+		t.Fatalf("missing tool.stopped in %+v", evidenceStore.events)
+	}
+	if hasProcessTestEvent(evidenceStore.events, "tool.failed") {
+		t.Fatalf("intentional stop recorded tool.failed: %+v", evidenceStore.events)
 	}
 }
 
@@ -318,6 +468,24 @@ func TestProcessLauncherRecordsStartFailure(t *testing.T) {
 	}
 	if !hasProcessTestEvent(evidenceStore.events, "tool.started") || !hasProcessTestEvent(evidenceStore.events, "tool.failed") {
 		t.Fatalf("start failure events=%+v", evidenceStore.events)
+	}
+	failed := processTestEvent(evidenceStore.events, "tool.failed")
+	var payload map[string]any
+	if err := json.Unmarshal(failed.Payload, &payload); err != nil {
+		t.Fatalf("decode tool.failed payload: %v", err)
+	}
+	if payload["name"] != "fixture" {
+		t.Fatalf("tool.failed name=%v want fixture in %+v", payload["name"], payload)
+	}
+	command, _ := payload["command"].([]any)
+	if len(command) != 1 || command[0] != "fixture" {
+		t.Fatalf("tool.failed command=%v want [fixture] in %+v", payload["command"], payload)
+	}
+	if payload["reason"] != "launch unavailable" {
+		t.Fatalf("tool.failed reason=%v want launch unavailable in %+v", payload["reason"], payload)
+	}
+	if _, nested := payload["result"]; nested {
+		t.Fatalf("tool.failed nested result unexpectedly present: %+v", payload)
 	}
 }
 
