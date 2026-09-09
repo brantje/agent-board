@@ -50,9 +50,9 @@ type QuestionRequest struct {
 }
 
 // Event is the normalized native OpenCode event envelope used by the adapter.
-// OpenCode v1.18.29's /api/event SSE surface carries payloads in `data`, while
-// older/fake event fixtures may use `properties`. UnmarshalJSON accepts both so
-// the rest of the adapter has one stable payload field.
+// The pinned OpenCode Runtime's /api/event SSE surface carries payloads in
+// `data`, while older/fake event fixtures may use `properties`. UnmarshalJSON
+// accepts both so the rest of the adapter has one stable payload field.
 type Event struct {
 	ID         string          `json:"id"`
 	Type       string          `json:"type"`
