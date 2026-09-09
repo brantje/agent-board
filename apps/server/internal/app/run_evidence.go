@@ -38,6 +38,7 @@ type RunEvidence struct {
 	Sessions         []store.ExecutionSession
 	RuntimeInstances []store.RuntimeInstance
 	Events           []store.Event
+	Usage            *RunUsage
 	RawOutput        []store.RawOutputChunk
 	Artifacts        []store.Artifact
 }
@@ -71,6 +72,7 @@ func (s *RunEvidenceService) Inspect(ctx context.Context, projectID, runID strin
 	if err != nil {
 		return RunEvidence{}, err
 	}
+	usage := runUsageFromEvents(events)
 	rawOutput, err := s.store.ListRawOutputChunks(ctx, projectID, runID)
 	if err != nil {
 		return RunEvidence{}, fmt.Errorf("list raw output: %w", err)
@@ -90,6 +92,7 @@ func (s *RunEvidenceService) Inspect(ctx context.Context, projectID, runID strin
 		Sessions:         sessions,
 		RuntimeInstances: runtimeInstances,
 		Events:           events,
+		Usage:            usage,
 		RawOutput:        rawOutput,
 		Artifacts:        artifacts,
 	}, nil
