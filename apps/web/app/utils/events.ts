@@ -218,10 +218,6 @@ export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
   return items
 }
 
-export function countRunToolCalls(events: EventEvidence[]) {
-  return projectRunActivity(events).filter(item => item.kind === 'tool').length
-}
-
 export function parseEventMessage(data: string): EventEvidence | undefined {
   try {
     const parsed = JSON.parse(data) as EventEvidence
