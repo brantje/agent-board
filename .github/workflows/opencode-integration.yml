@@ -30,10 +30,10 @@ concurrency:
 
 jobs:
   openrouter:
-    name: OpenRouter native Question round trip
+    name: OpenRouter live integration
     if: github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: pgvector/pgvector:pg18
@@ -101,7 +101,7 @@ jobs:
           --file apps/agent-runner/Dockerfile
           --tag agent-board-opencode-runtime:ci
           .
-      - name: Run real OpenCode native Question round trip
+      - name: Run real OpenCode/OpenRouter integration suite
         working-directory: apps/server
         env:
           AGENT_BOARD_TEST_OPENCODE: "1"
@@ -111,8 +111,8 @@ jobs:
           AGENT_BOARD_TEST_OPENCODE_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          if timeout --signal=TERM --kill-after=10s 360s \
-            go test -count=1 -run '^TestOpenCodeDockerInteractiveQuestionRoundTrip$' -v ./internal/runexec; then
+          if timeout --signal=TERM --kill-after=10s 480s \
+            go test -count=1 -failfast -run '^TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)$' -v ./internal/runexec; then
             exit 0
           fi
 
