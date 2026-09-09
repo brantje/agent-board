@@ -143,6 +143,13 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	defer cancelEventReads()
 
 	state := newRunState(session.ID, request.InteractiveQuestions, activitySink(request.Launcher))
+	state.seedModelUsage(settings.ProviderID, request.Context.Model.Model, nil)
+	if limit, err := native.ModelContextLimit(ctx, settings.ProviderID, request.Context.Model.Model); err == nil {
+		state.contextLimitTokens = cloneInt64(limit)
+	}
+	if err := state.backfillUsageFromHistory(ctx, native); err != nil {
+		return engine.Result{}, err
+	}
 	if promptRequired {
 		if err := native.Prompt(ctx, session.ID, initialTaskPrompt(request.Context)); err != nil {
 			return engine.Result{}, fmt.Errorf("opencode engine: send initial task: %w", err)

@@ -63,16 +63,17 @@ func (s Sample) Validate() error {
 // Aggregate deduplicates samples by SampleID and projects the requested Run metrics.
 // Input order is authoritative, matching the persisted Run Event sequence.
 func Aggregate(samples []Sample) *Summary {
-	seen := make(map[string]struct{}, len(samples))
+	seen := make(map[string]int, len(samples))
 	valid := make([]Sample, 0, len(samples))
 	for _, sample := range samples {
 		if sample.Validate() != nil {
 			continue
 		}
-		if _, duplicate := seen[sample.SampleID]; duplicate {
+		if index, duplicate := seen[sample.SampleID]; duplicate {
+			valid[index] = mergeSampleTiming(valid[index], sample)
 			continue
 		}
-		seen[sample.SampleID] = struct{}{}
+		seen[sample.SampleID] = len(valid)
 		valid = append(valid, sample)
 	}
 	if len(valid) == 0 {
@@ -118,6 +119,27 @@ func Aggregate(samples []Sample) *Summary {
 		summary.TokensPerSecond = &value
 	}
 	return summary
+}
+
+func mergeSampleTiming(kept, extra Sample) Sample {
+	if kept.StartedAt == nil {
+		kept.StartedAt = cloneTime(extra.StartedAt)
+	}
+	if extra.FirstOutputAt != nil && (kept.FirstOutputAt == nil || extra.FirstOutputAt.Before(*kept.FirstOutputAt)) {
+		kept.FirstOutputAt = cloneTime(extra.FirstOutputAt)
+	}
+	if extra.CompletedAt != nil && (kept.CompletedAt == nil || extra.CompletedAt.After(*kept.CompletedAt)) {
+		kept.CompletedAt = cloneTime(extra.CompletedAt)
+	}
+	return kept
+}
+
+func cloneTime(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func cloneInt64(value *int64) *int64 {

@@ -38,6 +38,31 @@ func TestAggregateRunUsage(t *testing.T) {
 	}
 }
 
+func TestAggregateMergesTimingFromLaterDuplicateSamples(t *testing.T) {
+	start := time.UnixMilli(1000).UTC()
+	firstOutput := time.UnixMilli(2500).UTC()
+	complete := time.UnixMilli(4000).UTC()
+	lateOutput := time.UnixMilli(3800).UTC()
+
+	summary := Aggregate([]Sample{
+		{SampleID: "one", ProviderID: "openrouter", ModelID: "model", InputTokens: 8498, OutputTokens: 263, ContextTokens: 8957},
+		{SampleID: "one", ProviderID: "openrouter", ModelID: "model", InputTokens: 1, OutputTokens: 1, ContextTokens: 2, StartedAt: &start, FirstOutputAt: &lateOutput, CompletedAt: &complete},
+		{SampleID: "one", ProviderID: "openrouter", ModelID: "model", InputTokens: 1, OutputTokens: 1, ContextTokens: 2, FirstOutputAt: &firstOutput},
+	})
+	if summary == nil {
+		t.Fatal("Aggregate() = nil")
+	}
+	if summary.InputTokens != 8498 || summary.OutputTokens != 263 || summary.ContextTokens != 8957 {
+		t.Fatalf("duplicate tokens were counted or replaced: %+v", summary)
+	}
+	if summary.AverageWaitMs == nil || *summary.AverageWaitMs != 1500 {
+		t.Fatalf("average wait=%v", summary.AverageWaitMs)
+	}
+	if summary.TokensPerSecond == nil {
+		t.Fatal("tokens/sec is nil")
+	}
+}
+
 func TestAggregateSkipsInvalidAndMissingTiming(t *testing.T) {
 	limit := int64(1000)
 	summary := Aggregate([]Sample{
