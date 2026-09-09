@@ -11,8 +11,7 @@ func validSpec() RuntimeSpec {
 		ProjectID:         "project-1",
 		IssueID:           "issue-1",
 		WorkspaceID:       "workspace-1",
-		RuntimeID:         "runtime-1",
-		Image:             "agent-board-runtime:test",
+				Image:             "agent-board-runtime:test",
 		WorkingDirectory:  "/workspace",
 		Workspace: WorkspaceMount{
 			WorkspaceID: "workspace-1",

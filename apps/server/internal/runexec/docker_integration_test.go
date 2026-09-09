@@ -102,7 +102,7 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, nil)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -219,11 +219,11 @@ func createScriptedIntegrationRun(t *testing.T, ctx context.Context, control *ap
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeConfig, err := control.CreateRuntime(ctx, store.Runtime{ProjectID: &scope, Name: "Scripted runtime", Kind: "docker", Image: image, NetworkPolicy: "outbound", WorkspacePolicy: "issue", Capabilities: store.EmptyObject, Enabled: true, HealthStatus: "HEALTHY"})
+	_, err = control.CreateRuntime(ctx, store.Runtime{ProjectID: &scope, Name: "Scripted runtime", Kind: "docker", Image: image, NetworkPolicy: "outbound", WorkspacePolicy: "issue", Capabilities: store.EmptyObject, Enabled: true, HealthStatus: "HEALTHY"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := control.CreateAgent(ctx, store.Agent{ProjectID: &scope, Name: "Scripted agent", Engine: scripted.Name, ModelProfileID: model.ID, RuntimeID: runtimeConfig.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
+	agent, err := control.CreateAgent(ctx, store.Agent{ProjectID: &scope, Name: "Scripted agent", Engine: scripted.Name, ModelProfileID: model.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
 	if err != nil {
 		t.Fatal(err)
 	}

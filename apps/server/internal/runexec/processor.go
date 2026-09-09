@@ -54,16 +54,26 @@ type RuntimeService interface {
 	Destroy(context.Context, string, string) (store.RuntimeInstance, error)
 }
 
+type RunnerConnector interface {
+	Connect(context.Context, string, string) (runnerClient, error)
+}
+
+type runnerClient interface {
+	SendTransfer(context.Context, string, string, string, []byte) error
+}
+
 type Processor struct {
 	store     ExecutionStore
 	resolver  ContextResolver
 	runtimes  RuntimeService
+	runners   RunnerConnector
 	sessions  SessionService
 	engines   *engine.Registry
 	events    *evidence.Recorder
 	output    *evidence.OutputRecorder
 	candidate *evidence.CandidateSnapshotter
 	branches  *branchObserver
+	git       workspace.Git
 }
 
 func NewProcessor(
@@ -76,13 +86,14 @@ func NewProcessor(
 	output *evidence.OutputRecorder,
 	candidate *evidence.CandidateSnapshotter,
 	git workspace.Git,
+	runners RunnerConnector,
 ) (*Processor, error) {
-	if store == nil || resolver == nil || runtimes == nil || sessions == nil || engines == nil || events == nil || output == nil || candidate == nil {
+	if store == nil || resolver == nil || sessions == nil || engines == nil || events == nil || output == nil || candidate == nil || git == nil {
 		return nil, fmt.Errorf("run execution: all processor dependencies are required")
 	}
 	return &Processor{
-		store: store, resolver: resolver, runtimes: runtimes, sessions: sessions, engines: engines,
-		events: events, output: output, candidate: candidate, branches: newBranchObserver(store, git, events),
+		store: store, resolver: resolver, runtimes: runtimes, runners: runners, sessions: sessions, engines: engines,
+		events: events, output: output, candidate: candidate, branches: newBranchObserver(store, git, events), git: git,
 	}, nil
 }
 
@@ -112,6 +123,10 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 }
 
 func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext) (scheduler.Result, error) {
+	runnerID := strings.TrimSpace(claim.RunnerID)
+	if runnerID == "" {
+		return failed(fmt.Errorf("scheduler admission is missing runner id")), nil
+	}
 	runEventType := "run.started"
 	if claim.Job.Kind == "RESUME" {
 		runEventType = "run.resumed"
@@ -120,28 +135,13 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 		return scheduler.Result{}, err
 	}
 	p.branches.observeIfChanged(ctx, safe, nil)
-	if err := p.record(ctx, safe, "runtime.provisioning", map[string]any{"runtimeId": safe.Runtime.ID}, nil, nil); err != nil {
-		return scheduler.Result{}, err
-	}
-
-	instance, err := p.acquireRuntime(ctx, run.ProjectID, run.IssueID, safe.Runtime.ID)
-	if err != nil {
+	if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
 		return failed(err), nil
 	}
-	started, err := p.runtimes.Start(ctx, run.ProjectID, instance.ID)
-	if err != nil {
-		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
-		return failed(errors.Join(err, cleanupErr)), nil
-	}
-	instance, safe, err = p.materializeExecution(ctx, run, safe, started)
-	if err != nil {
+	if err := p.transferWorkspaceToRunner(ctx, safe, runnerID); err != nil {
 		return failed(err), nil
 	}
-	if err := p.record(ctx, safe, "runtime.started", map[string]any{"runtimeId": safe.Runtime.ID}, &instance.ID, nil); err != nil {
-		_ = p.cleanupRuntime(ctx, safe, instance)
-		return scheduler.Result{}, err
-	}
-	return p.runEngine(ctx, run, safe, instance, "")
+	return p.runEngineOnRunner(ctx, run, safe, runnerID, "")
 }
 
 func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, session store.ExecutionSession) (scheduler.Result, error) {
@@ -149,6 +149,12 @@ func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, 
 		return scheduler.Result{}, err
 	}
 	p.branches.observeIfChanged(ctx, safe, nil)
+	if session.RunnerID != "" {
+		return p.runEngineOnRunner(ctx, run, safe, session.RunnerID, session.ID)
+	}
+	if p.runtimes == nil {
+		return failed(fmt.Errorf("legacy runtime execution is unavailable")), nil
+	}
 	started, err := p.runtimes.Start(ctx, run.ProjectID, session.RuntimeInstanceID)
 	if err != nil {
 		return failed(err), nil
@@ -396,12 +402,18 @@ var _ scheduler.Reconciler = (*Processor)(nil)
 var _ engine.ProcessLauncher = (*processLauncher)(nil)
 var _ engine.ProcessAttacher = (*processLauncher)(nil)
 
+type runnerSessionStarter interface {
+	StartOnRunner(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error)
+	Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error)
+}
+
 type processLauncher struct {
 	sessions          SessionService
 	events            *evidence.Recorder
 	output            *evidence.OutputRecorder
 	safe              executioncontext.SafeContext
 	runtimeInstanceID string
+	runnerID          string
 	attachSessionID   string
 	scope             evidence.RunScope
 	branches          *branchObserver
@@ -417,13 +429,28 @@ func (l *processLauncher) Start(ctx context.Context, request engine.ProcessReque
 	if err != nil {
 		return nil, err
 	}
-	process, err := l.sessions.Start(ctx, l.scope.ProjectID, l.scope.RunID, l.runtimeInstanceID, app.AuthorizedExecutionRequest{
-		Command:               append([]string(nil), request.Command...),
-		CWD:                   request.CWD,
-		Env:                   cloneMap(request.Env),
-		ProviderCredentialEnv: request.ProviderCredentialEnv,
-		RuntimeSecretRefs:     cloneMap(request.RuntimeSecretRefs),
-	})
+	var process *app.AuthorizedExecutionProcess
+	if l.runnerID != "" {
+		starter, ok := l.sessions.(runnerSessionStarter)
+		if !ok {
+			return nil, fmt.Errorf("run execution: runner session starter is unavailable")
+		}
+		process, err = starter.StartOnRunner(ctx, l.scope.ProjectID, l.scope.RunID, l.runnerID, app.AuthorizedExecutionRequest{
+			Command:               append([]string(nil), request.Command...),
+			CWD:                   request.CWD,
+			Env:                   cloneMap(request.Env),
+			ProviderCredentialEnv: request.ProviderCredentialEnv,
+			RuntimeSecretRefs:     cloneMap(request.RuntimeSecretRefs),
+		})
+	} else {
+		process, err = l.sessions.Start(ctx, l.scope.ProjectID, l.scope.RunID, l.runtimeInstanceID, app.AuthorizedExecutionRequest{
+			Command:               append([]string(nil), request.Command...),
+			CWD:                   request.CWD,
+			Env:                   cloneMap(request.Env),
+			ProviderCredentialEnv: request.ProviderCredentialEnv,
+			RuntimeSecretRefs:     cloneMap(request.RuntimeSecretRefs),
+		})
+	}
 	if err != nil {
 		_ = l.recordFailure(ctx, request, &started.ID, nil, err)
 		return nil, err
@@ -679,4 +706,116 @@ func chunkIDs(chunks []store.RawOutputChunk) []string {
 		ids = append(ids, chunk.ID)
 	}
 	return ids
+}
+
+func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID string) error {
+	if p.runners == nil {
+		return fmt.Errorf("runner connector is unavailable")
+	}
+	gitCLI, ok := p.git.(*workspace.GitCLI)
+	if !ok {
+		return fmt.Errorf("workspace git transfer is unavailable")
+	}
+	locker, ok := p.store.(workspaceLocker)
+	if !ok {
+		return fmt.Errorf("workspace lock store is unavailable")
+	}
+	transferID := fmt.Sprintf("%s-%d", safe.Run.ID, time.Now().UnixNano())
+	if err := p.record(ctx, safe, "workspace.transfer.started", map[string]any{
+		"direction": "to_runner", "runnerId": runnerID, "transferId": transferID,
+	}, nil, nil); err != nil {
+		return err
+	}
+	lock, err := locker.AcquireWorkspaceBootstrapLock(ctx, safe.Workspace.ID)
+	if err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
+			"direction": "to_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
+		}, nil, nil)
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	payload, err := gitCLI.TransferSnapshot(ctx, safe.Workspace.Path, transferID)
+	if err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
+			"direction": "to_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
+		}, nil, nil)
+		return err
+	}
+	client, err := p.runners.Connect(ctx, safe.Project.ID, runnerID)
+	if err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
+			"direction": "to_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
+		}, nil, nil)
+		return err
+	}
+	if err := client.SendTransfer(ctx, safe.Run.ID, transferID, "to_runner", payload); err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
+			"direction": "to_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
+		}, nil, nil)
+		return err
+	}
+	return p.record(ctx, safe, "workspace.transfer.completed", map[string]any{
+		"direction": "to_runner", "runnerId": runnerID, "transferId": transferID,
+		"bytesTransferred": len(payload), "totalBytes": len(payload),
+	}, nil, nil)
+}
+
+func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe executioncontext.SafeContext, runnerID, attachSessionID string) (scheduler.Result, error) {
+	adapter, err := p.engines.Get(safe.Agent.Engine)
+	if err != nil {
+		return failed(err), nil
+	}
+	launcher := &processLauncher{
+		sessions: p.sessions, events: p.events, output: p.output, safe: safe,
+		runnerID: runnerID, attachSessionID: attachSessionID,
+		scope: evidence.RunScope{ProjectID: run.ProjectID, IssueID: run.IssueID, RunID: run.ID},
+		branches: p.branches,
+	}
+	request, err := p.engineRequest(ctx, safe, launcher, "")
+	if err != nil {
+		return failed(err), nil
+	}
+	engineResult, engineErr := adapter.Execute(ctx, request)
+	if errors.Is(engineErr, engine.ErrWaitingForInput) {
+		return p.finishWaitingForInputRunner(ctx, safe)
+	}
+	snapshot, snapshotErr := p.candidate.Snapshot(ctx, launcher.scope, safe.Workspace.Path)
+	if snapshotErr == nil {
+		snapshotErr = p.recordCandidate(ctx, safe, "", snapshot)
+	}
+	if engineErr == nil && snapshotErr == nil && engineResult.Summary != "" {
+		engineErr = p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, nil, nil)
+	}
+	if ctx.Err() != nil {
+		return scheduler.Result{}, ctx.Err()
+	}
+	if combined := errors.Join(engineErr, snapshotErr); combined != nil {
+		reason := safeFailure(combined)
+		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
+		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
+	}
+	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"candidateManifestArtifactId": snapshot.Manifest.ID}, nil, nil); err != nil {
+		return scheduler.Result{}, err
+	}
+	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
+}
+
+func (p *Processor) finishWaitingForInputRunner(ctx context.Context, safe executioncontext.SafeContext) (scheduler.Result, error) {
+	if !store.SupportsQuestionStore(p.store) {
+		return failed(fmt.Errorf("run execution: Question store capability is required for WAITING_FOR_INPUT")), nil
+	}
+	questions := any(p.store).(store.QuestionStore)
+	question, err := questions.GetOpenBlockingQuestion(ctx, safe.Project.ID, safe.Run.ID)
+	if err != nil {
+		if ctx.Err() != nil {
+			return scheduler.Result{}, ctx.Err()
+		}
+		return failed(fmt.Errorf("run execution: persisted blocking Question is required before WAITING_FOR_INPUT: %w", err)), nil
+	}
+	_ = p.record(ctx, safe, "run.waiting_for_input", map[string]any{"questionId": question.ID}, nil, nil)
+	return scheduler.Result{RunStatus: "WAITING_FOR_INPUT"}, nil
+}
+
+type workspaceLocker interface {
+	AcquireWorkspaceBootstrapLock(context.Context, string) (store.WorkspaceBootstrapLock, error)
 }

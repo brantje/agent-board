@@ -17,8 +17,7 @@ func TestRuntimeInstanceStopTimeIsStable(t *testing.T) {
 	instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
 		ProjectID:   f.project.ID,
 		WorkspaceID: f.workspace.ID,
-		RuntimeID:   f.runtime.ID,
-	})
+			})
 	if err != nil {
 		t.Fatalf("create runtime instance: %v", err)
 	}
@@ -120,8 +119,7 @@ func TestImmutableEvidenceBlocksParentDeletion(t *testing.T) {
 		Name:           "history-agent",
 		Engine:         "test",
 		ModelProfileID: f.model.ID,
-		RuntimeID:      f.runtime.ID,
-		EngineSettings: store.EmptyObject,
+				EngineSettings: store.EmptyObject,
 	})
 	if err != nil {
 		t.Fatalf("create history agent: %v", err)

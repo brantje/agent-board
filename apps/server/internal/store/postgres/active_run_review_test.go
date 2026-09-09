@@ -44,8 +44,7 @@ func TestAssignIssueTreatsReadyForReviewRunAsActive(t *testing.T) {
 		Name:             "ready-review",
 		Engine:           "test",
 		ModelProfileID:   model.ID,
-		RuntimeID:        runtime.ID,
-		EngineSettings:   store.EmptyObject,
+				EngineSettings:   store.EmptyObject,
 		ConcurrencyLimit: 1,
 		State:            "ENABLED",
 	})

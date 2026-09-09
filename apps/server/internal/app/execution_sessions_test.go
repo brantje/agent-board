@@ -84,7 +84,7 @@ func executionServiceFixture(t *testing.T) (*ExecutionSessionService, *execution
 		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
 	}
-	service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+	service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
 	if err != nil { t.Fatal(err) }
 	return service, storeFake, transport
 }

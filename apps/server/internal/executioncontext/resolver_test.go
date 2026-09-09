@@ -38,7 +38,7 @@ func validStore() fakeStore {
 		issue: store.Issue{ID: "i1", ProjectID: projectID, Title: "Issue", Description: "Do work", Status: "IN_PROGRESS"},
 		run: store.Run{ID: "r1", ProjectID: projectID, IssueID: "i1", WorkspaceID: "w1", AgentID: &agentID, Attempt: 2},
 		workspace: store.Workspace{ID: "w1", ProjectID: projectID, IssueID: "i1", Path: "/work/w1", WorkingBranch: "issue/i1", BootstrapStatus: "READY"},
-		agent: store.Agent{ID: agentID, ProjectID: &projectID, Name: "Coder", RoleInstructions: "Implement", Engine: "opencode", ModelProfileID: "m1", RuntimeID: "rt1", EngineSettings: json.RawMessage(`{}`), State: "ENABLED"},
+		agent: store.Agent{ID: agentID, ProjectID: &projectID, Name: "Coder", RoleInstructions: "Implement", Engine: "opencode", ModelProfileID: "m1", EngineSettings: json.RawMessage(`{}`), State: "ENABLED"},
 		model: store.ModelProfile{ID: "m1", ProjectID: &projectID, ProviderID: "pr1", Name: "model", Model: "gpt", Enabled: true},
 		provider: store.Provider{ID: "pr1", Name: "provider", Kind: "openai-compatible", BaseURL: &baseURL, CredentialRef: &credentialRef, Enabled: true},
 		runtime: store.Runtime{ID: "rt1", ProjectID: &projectID, Name: "runtime", Kind: "docker", Image: "runtime:test", NetworkPolicy: "restricted", WorkspacePolicy: "issue", AllowedSecretRefs: []string{"runtime-token"}, Enabled: true},

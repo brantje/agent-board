@@ -49,7 +49,7 @@ func TestRuntimeInstanceReconcileRecoversMissingExternalIdentity(t *testing.T) {
 	projectID := "project-1"
 	workspace := store.Workspace{ID: "workspace-1", ProjectID: projectID, IssueID: "issue-1", Path: "/workspaces/one", BootstrapStatus: "READY"}
 	runtimeConfig := store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runtime:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Enabled: false}
-	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{ID: "instance-1", ProjectID: projectID, WorkspaceID: workspace.ID, RuntimeID: runtimeConfig.ID, Status: "PROVISIONING", RunnerStatus: "CONNECTING"}}
+	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{ID: "instance-1", ProjectID: projectID, WorkspaceID: workspace.ID, Status: "PROVISIONING", RunnerStatus: "CONNECTING"}}
 	rs := &reconcileStore{runtimeServiceStore: base, workspace: workspace}
 	implementation := &recoveringRuntime{}
 	service, err := NewRuntimeInstanceService(rs, &runtimeWorkspaceEnsurer{workspace: workspace}, map[string]runtimepkg.Implementation{"docker": implementation})
@@ -66,7 +66,7 @@ func TestRuntimeInstanceReconcileRecoversMissingExternalIdentity(t *testing.T) {
 func TestRuntimeInstanceReconcileAllUsesPersistedHandle(t *testing.T) {
 	service, base, implementation, workspace := runtimeServiceFixture(t)
 	externalID := "container-1"
-	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, RuntimeID: base.runtime.ID, Status: "RUNNING", ExternalID: &externalID, SafeHandleMetadata: json.RawMessage(`{"safe":true}`)}
+	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, Status: "RUNNING", ExternalID: &externalID, SafeHandleMetadata: json.RawMessage(`{"safe":true}`)}
 	rs := &reconcileStore{runtimeServiceStore: base, workspace: workspace}
 	service.store = rs
 	implementation.inspectState = runtimepkg.StateStopped

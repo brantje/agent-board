@@ -135,7 +135,7 @@ func (f *fakeControlPlaneStore) UpdateRuntime(_ context.Context, _ *string, v st
 	return v, nil
 }
 func agentFixture(scope *string) store.Agent {
-	return store.Agent{ID: agentID, ProjectID: scoped(scope), Name: "Agent", Engine: "test", ModelProfileID: modelID, RuntimeID: runtimeID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"}
+	return store.Agent{ID: agentID, ProjectID: scoped(scope), Name: "Agent", Engine: "test", ModelProfileID: modelID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"}
 }
 func (f *fakeControlPlaneStore) ListAgents(_ context.Context, scope *string) ([]store.Agent, error) {
 	return []store.Agent{agentFixture(scope)}, nil
@@ -227,7 +227,7 @@ func TestControlPlaneRoutes(t *testing.T) {
 	providerBody := `{"name":"Provider","kind":"test","credentialRef":"secret-ref","safeMetadata":{}}`
 	modelBody := `{"providerId":"` + providerID + `","name":"Model","model":"model","generationSettings":{}}`
 	runtimeBody := `{"name":"Runtime","kind":"docker","image":"image","networkPolicy":"none","capabilities":{}}`
-	agentBody := `{"name":"Agent","engine":"test","modelProfileId":"` + modelID + `","runtimeId":"` + runtimeID + `","engineSettings":{},"concurrencyLimit":1,"state":"ENABLED"}`
+	agentBody := `{"name":"Agent","engine":"test","modelProfileId":"` + modelID + `","engineSettings":{},"concurrencyLimit":1,"state":"ENABLED"}`
 	issueBody := `{"title":"Issue","status":"TODO"}`
 	cases := []struct {
 		name, method, path, body string

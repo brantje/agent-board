@@ -21,7 +21,7 @@ func coverageRuntime() store.Runtime {
 	return store.Runtime{ID: "runtime", ProjectID: coverageScope(), Name: "Runtime", Kind: "docker", Image: "image", NetworkPolicy: "none", WorkspacePolicy: "issue", Capabilities: store.EmptyObject, Enabled: true, HealthStatus: "UNKNOWN"}
 }
 func coverageAgent() store.Agent {
-	return store.Agent{ID: "agent", ProjectID: coverageScope(), Name: "Agent", Engine: "test", ModelProfileID: "model", RuntimeID: "runtime", EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"}
+	return store.Agent{ID: "agent", ProjectID: coverageScope(), Name: "Agent", Engine: "test", ModelProfileID: "model", EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"}
 }
 func coverageIssue() store.Issue {
 	return store.Issue{ID: "issue", ProjectID: coverageProjectID(), Key: "AB-1", Number: 1, Title: "Issue", Status: "TODO"}
@@ -176,7 +176,7 @@ func TestValidatorsAndStoreErrorTranslation(t *testing.T) {
 		validateProvider(store.Provider{}), validateProvider(store.Provider{Name: "p", Kind: "k", SafeMetadata: json.RawMessage(`[]`)}),
 		validateModelProfile(store.ModelProfile{}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", Temperature: &low}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", Temperature: &high}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", MaxTokens: &zero}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", MaxConcurrent: &zero}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", GenerationSettings: json.RawMessage(`[]`)}),
 		validateRuntime(store.Runtime{}), validateRuntime(store.Runtime{Name: "r", Kind: "docker", Image: "i", NetworkPolicy: "bad"}), validateRuntime(store.Runtime{Name: "r", Kind: "docker", Image: "i", NetworkPolicy: "none", WorkspacePolicy: "bad"}), validateRuntime(store.Runtime{Name: "r", Kind: "docker", Image: "i", NetworkPolicy: "none", Capabilities: json.RawMessage(`[]`)}),
-		validateAgent(store.Agent{}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", RuntimeID: "r", EngineSettings: json.RawMessage(`[]`), ConcurrencyLimit: 1, State: "ENABLED"}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", RuntimeID: "r", EngineSettings: store.EmptyObject, ConcurrencyLimit: 0, State: "ENABLED"}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", RuntimeID: "r", EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "BAD"}), validateIssue(store.Issue{Status: "TODO"}), validateIssue(store.Issue{Title: "i", Status: "BAD"}),
+		validateAgent(store.Agent{}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", EngineSettings: json.RawMessage(`[]`), ConcurrencyLimit: 1, State: "ENABLED"}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", EngineSettings: store.EmptyObject, ConcurrencyLimit: 0, State: "ENABLED"}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "BAD"}), validateIssue(store.Issue{Status: "TODO"}), validateIssue(store.Issue{Title: "i", Status: "BAD"}),
 	}
 	for _, err := range invalids {
 		if ae, ok := AsError(err); !ok || ae.Code != "invalid_argument" {

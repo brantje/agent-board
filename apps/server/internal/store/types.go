@@ -101,7 +101,6 @@ type Agent struct {
 	RoleInstructions string
 	Engine           string
 	ModelProfileID   string
-	RuntimeID        string
 	EngineSettings   json.RawMessage
 	ConcurrencyLimit int
 	State            string
@@ -161,6 +160,7 @@ type ExecutionSession struct {
 	ProjectID         string
 	RunID             string
 	RuntimeInstanceID string
+	RunnerID          string
 	Status            string
 	CWD               string
 	CommandArgv       json.RawMessage

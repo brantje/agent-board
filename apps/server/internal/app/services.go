@@ -87,7 +87,11 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 		_ = runtimeInstances.Close()
 		return nil, err
 	}
-	transportSessions, err := NewExecutionSessionService(securedStore, runnerConnections)
+	var runnerRegistry RunnerRegistry
+	if services.ControlPlane.Runners != nil {
+		runnerRegistry = services.ControlPlane.Runners.Connections
+	}
+	transportSessions, err := NewExecutionSessionService(securedStore, runnerConnections, runnerRegistry)
 	if err != nil {
 		_ = runnerConnections.Close()
 		_ = runtimeInstances.Close()

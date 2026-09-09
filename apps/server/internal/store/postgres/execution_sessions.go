@@ -8,6 +8,11 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+const executionSessionSelect = `
+		SELECT id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at`
+
+const executionSessionReturning = `id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at`
+
 var executionSessionStatuses = map[string]struct{}{
 	"PENDING":   {},
 	"STARTING":  {},
@@ -21,8 +26,7 @@ func (s *Store) GetExecutionSession(ctx context.Context, projectID, sessionID st
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(sessionID) == "" {
 		return store.ExecutionSession{}, store.ErrInvalidArgument
 	}
-	return scanExecutionSession(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
+	return scanExecutionSession(s.pool.QueryRow(ctx, executionSessionSelect+`
 		FROM execution_sessions
 		WHERE project_id = $1 AND id = $2
 	`, projectID, sessionID))
@@ -55,8 +59,7 @@ func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeIns
 			return nil, store.ErrInvalidArgument
 		}
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
+	rows, err := s.pool.Query(ctx, executionSessionSelect+`
 		FROM execution_sessions
 		WHERE project_id = $1
 		  AND (nullif($2, '')::uuid IS NULL OR runtime_instance_id = nullif($2, '')::uuid)
@@ -103,7 +106,7 @@ func (s *Store) TransitionExecutionSession(ctx context.Context, transition store
 		    updated_at = now()
 		WHERE project_id = $1 AND id = $2
 		  AND status = ANY($5::text[])
-		RETURNING id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
+		RETURNING `+executionSessionReturning+`
 	`, transition.ProjectID, transition.SessionID, transition.Status, transition.ExitCode, transition.FromStatuses))
 	if err == nil {
 		return value, nil

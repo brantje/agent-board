@@ -17,7 +17,6 @@ type Store interface {
 	GetAgentInScope(context.Context, *string, string) (store.Agent, error)
 	GetModelProfile(context.Context, *string, string) (store.ModelProfile, error)
 	GetProvider(context.Context, *string, string) (store.Provider, error)
-	GetRuntime(context.Context, *string, string) (store.Runtime, error)
 }
 
 type Error struct {
@@ -94,13 +93,6 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 	if !provider.Enabled || !scopeAllows(provider.ProjectID, projectID) {
 		return Resolved{}, fail("execution_provider_unavailable", "Provider is not available for execution", nil)
 	}
-	runtime, err := r.store.GetRuntime(ctx, scope, agent.RuntimeID)
-	if err != nil {
-		return Resolved{}, fail("execution_runtime_unavailable", "Runtime configuration is unavailable", err)
-	}
-	if !runtime.Enabled || !scopeAllows(runtime.ProjectID, projectID) {
-		return Resolved{}, fail("execution_runtime_unavailable", "Runtime is not available for execution", nil)
-	}
 	reviewFeedback, err := resolveReviewFeedback(ctx, r.store, projectID, issue.ID, run)
 	if err != nil {
 		return Resolved{}, fail("execution_review_feedback_unavailable", "Review feedback is unavailable for the follow-up attempt", err)
@@ -114,12 +106,10 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 			Agent:          AgentContext{ID: agent.ID, Name: agent.Name, RoleInstructions: agent.RoleInstructions, Engine: agent.Engine, EngineSettings: cloneJSON(agent.EngineSettings)},
 			Model:          ModelContext{ID: model.ID, Name: model.Name, Model: model.Model, Temperature: cloneFloat64(model.Temperature), MaxTokens: cloneInt(model.MaxTokens), GenerationSettings: cloneJSON(model.GenerationSettings)},
 			Provider:       ProviderContext{ID: provider.ID, Name: provider.Name, Kind: provider.Kind, BaseURL: cloneString(provider.BaseURL), SafeMetadata: cloneJSON(provider.SafeMetadata)},
-			Runtime:        RuntimeContext{ID: runtime.ID, Name: runtime.Name, Kind: runtime.Kind, Image: runtime.Image, CPULimitMillis: cloneInt(runtime.CPULimitMillis), MemoryLimitBytes: cloneInt64(runtime.MemoryLimitBytes), PIDLimit: cloneInt(runtime.PIDLimit), TimeoutSeconds: cloneInt(runtime.TimeoutSeconds), NetworkPolicy: runtime.NetworkPolicy, WorkspacePolicy: runtime.WorkspacePolicy, Capabilities: cloneJSON(runtime.Capabilities)},
 			Workspace:      WorkspaceContext{ID: workspace.ID, Path: workspace.Path, RepositoryPath: cloneString(workspace.RepositoryPath), BaseBranch: cloneString(workspace.BaseBranch), BaseRevision: cloneString(workspace.BaseRevision), WorkingBranch: workspace.WorkingBranch, BootstrapStatus: workspace.BootstrapStatus},
 			ReviewFeedback: reviewFeedback,
 		},
 		ProviderCredentialRef: cloneString(provider.CredentialRef),
-		AllowedSecretRefs:     append([]string(nil), runtime.AllowedSecretRefs...),
 	}, nil
 }
 

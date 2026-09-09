@@ -13,7 +13,7 @@ func TestProjectScopedEndpointsHideMissingProject(t *testing.T) {
 	router := NewRouter(app.New(&fakeControlPlaneStore{}))
 	modelBody := `{"providerId":"` + providerID + `","name":"Model","model":"model","generationSettings":{}}`
 	runtimeBody := `{"name":"Runtime","kind":"docker","image":"image","networkPolicy":"none","capabilities":{}}`
-	agentBody := `{"name":"Agent","engine":"test","modelProfileId":"` + modelID + `","runtimeId":"` + runtimeID + `","engineSettings":{},"concurrencyLimit":1,"state":"ENABLED"}`
+	agentBody := `{"name":"Agent","engine":"test","modelProfileId":"` + modelID + `","engineSettings":{},"concurrencyLimit":1,"state":"ENABLED"}`
 	issueBody := `{"title":"Issue","status":"TODO"}`
 	cases := []struct{ method, path, body string }{
 		{http.MethodGet, "/api/projects/" + otherID, ""},

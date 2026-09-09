@@ -31,6 +31,10 @@ const (
 	TypeConnected      MessageType = "connected"
 	TypeConnectData    MessageType = "connect_data"
 	TypeConnectClose   MessageType = "connect_close"
+	TypeTransferBegin  MessageType = "transfer_begin"
+	TypeTransferChunk  MessageType = "transfer_chunk"
+	TypeTransferEnd    MessageType = "transfer_end"
+	TypeTransferFailed MessageType = "transfer_failed"
 	TypeError          MessageType = "error"
 )
 
@@ -181,7 +185,8 @@ func knownType(typ MessageType) bool {
 	case TypeServerHello, TypeRunnerHello, TypeHealth, TypeStart, TypeSessionStarted,
 		TypeStdin, TypeStdinClose, TypeStdout, TypeStderr, TypeExit,
 		TypeTerminate, TypeKill, TypeConnect, TypeConnected, TypeConnectData,
-		TypeConnectClose, TypeError:
+		TypeConnectClose, TypeTransferBegin, TypeTransferChunk, TypeTransferEnd,
+		TypeTransferFailed, TypeError:
 		return true
 	default:
 		return false
@@ -192,7 +197,8 @@ func requiresSession(typ MessageType) bool {
 	switch typ {
 	case TypeStart, TypeSessionStarted, TypeStdin, TypeStdinClose, TypeStdout,
 		TypeStderr, TypeExit, TypeTerminate, TypeKill, TypeConnect, TypeConnected,
-		TypeConnectData, TypeConnectClose:
+		TypeConnectData, TypeConnectClose, TypeTransferBegin, TypeTransferChunk,
+		TypeTransferEnd, TypeTransferFailed:
 		return true
 	default:
 		return false

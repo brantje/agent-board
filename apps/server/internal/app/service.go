@@ -214,9 +214,6 @@ func (s *Service) CreateAgent(ctx context.Context, input store.Agent) (store.Age
 	if _, err := s.GetModelProfile(ctx, input.ProjectID, input.ModelProfileID); err != nil {
 		return store.Agent{}, err
 	}
-	if _, err := s.GetRuntime(ctx, input.ProjectID, input.RuntimeID); err != nil {
-		return store.Agent{}, err
-	}
 	value, err := s.store.CreateAgent(ctx, input)
 	return value, translateStoreError(err, "agent")
 }
@@ -228,9 +225,6 @@ func (s *Service) UpdateAgent(ctx context.Context, scope *string, input store.Ag
 		return store.Agent{}, err
 	}
 	if _, err := s.GetModelProfile(ctx, scope, input.ModelProfileID); err != nil {
-		return store.Agent{}, err
-	}
-	if _, err := s.GetRuntime(ctx, scope, input.RuntimeID); err != nil {
 		return store.Agent{}, err
 	}
 	value, err := s.store.UpdateAgent(ctx, scope, input)
@@ -497,8 +491,8 @@ func validateRuntime(v store.Runtime) error {
 	return nil
 }
 func validateAgent(v store.Agent) error {
-	if strings.TrimSpace(v.Name) == "" || strings.TrimSpace(v.Engine) == "" || strings.TrimSpace(v.ModelProfileID) == "" || strings.TrimSpace(v.RuntimeID) == "" {
-		return invalid("agent name, engine, modelProfileId and runtimeId are required")
+	if strings.TrimSpace(v.Name) == "" || strings.TrimSpace(v.Engine) == "" || strings.TrimSpace(v.ModelProfileID) == "" {
+		return invalid("agent name, engine and modelProfileId are required")
 	}
 	if !validObject(v.EngineSettings) {
 		return invalid("engineSettings must be a JSON object")

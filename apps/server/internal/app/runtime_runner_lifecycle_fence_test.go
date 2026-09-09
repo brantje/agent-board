@@ -48,8 +48,7 @@ func TestRunnerStatusWritesRejectConcurrentLifecycleMovement(t *testing.T) {
 		ID:           "instance-1",
 		ProjectID:    workspace.ProjectID,
 		WorkspaceID:  workspace.ID,
-		RuntimeID:    runtimeStore.runtime.ID,
-		Status:       "RUNNING",
+				Status:       "RUNNING",
 		RunnerStatus: "READY",
 	}
 	fenced := &lifecycleFenceRuntimeStore{runtimeServiceStore: runtimeStore, mutateBeforeWrite: true}

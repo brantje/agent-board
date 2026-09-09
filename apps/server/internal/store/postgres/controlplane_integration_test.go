@@ -90,7 +90,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Agent", Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
+	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Agent", Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 		t.Fatalf("runCount=%d jobCount=%d", runCount, jobCount)
 	}
 
-	otherAgent, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Agent Two", Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
+	otherAgent, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Agent Two", Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if _, _, err = s.AssignIssue(ctx, p1.ID, done.ID, otherAgent.ID); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("done assignment err=%v", err)
 	}
-	disabled, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Disabled", Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "DISABLED"})
+	disabled, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Disabled", Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "DISABLED"})
 	if err != nil {
 		t.Fatal(err)
 	}

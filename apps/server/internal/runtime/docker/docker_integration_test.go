@@ -126,8 +126,7 @@ func integrationSpec(image, workspace, instanceID string) runtimepkg.RuntimeSpec
 		ProjectID:         "integration-project",
 		IssueID:           "integration-issue",
 		WorkspaceID:       "integration-workspace",
-		RuntimeID:         "integration-runtime",
-		Image:             image,
+				Image:             image,
 		WorkingDirectory:  runtimepkg.WorkspaceTarget,
 		Resources: runtimepkg.ResourcePolicy{
 			CPULimitMillis:   &cpu,

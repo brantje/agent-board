@@ -15,7 +15,6 @@ type SecretRequest struct {
 
 type Prepared struct {
 	Safe             SafeContext
-	RuntimeID        string
 	Secrets          map[string]string
 	RedactionValues  []string
 	ReleaseRedaction func()
@@ -107,7 +106,6 @@ func (p *Preparer) Prepare(ctx context.Context, projectID, runID string, request
 
 	return Prepared{
 		Safe:             resolved.Safe,
-		RuntimeID:        resolved.Safe.Runtime.ID,
 		Secrets:          executionSecrets,
 		RedactionValues:  redactionValues,
 		ReleaseRedaction: releaseRedaction,

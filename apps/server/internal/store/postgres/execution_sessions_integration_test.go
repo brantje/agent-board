@@ -16,7 +16,7 @@ func TestExecutionSessionLifecycleAndSequentialReuse(t *testing.T) {
 	other := seedRunFixture(t, s, "execution-session-other")
 
 	instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
-		ProjectID: fixture.project.ID, WorkspaceID: fixture.workspace.ID, RuntimeID: fixture.runtime.ID,
+		ProjectID: fixture.project.ID, WorkspaceID: fixture.workspace.ID,
 	})
 	if err != nil {
 		t.Fatalf("create runtime instance: %v", err)

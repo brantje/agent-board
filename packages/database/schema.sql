@@ -128,7 +128,6 @@ CREATE TABLE agents (
     role_instructions text NOT NULL DEFAULT '',
     engine text NOT NULL CHECK (btrim(engine) <> ''),
     model_profile_id uuid NOT NULL REFERENCES model_profiles(id) ON DELETE RESTRICT,
-    runtime_id uuid NOT NULL REFERENCES runtimes(id) ON DELETE RESTRICT,
     engine_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(engine_settings) = 'object'),
     concurrency_limit integer NOT NULL DEFAULT 1 CHECK (concurrency_limit >= 1),
     state text NOT NULL DEFAULT 'ENABLED' CHECK (state IN ('DRAFT', 'ENABLED', 'DISABLED', 'ARCHIVED')),
@@ -140,7 +139,6 @@ CREATE TABLE agents (
 CREATE UNIQUE INDEX agents_global_name_uq ON agents (lower(name)) WHERE project_id IS NULL;
 CREATE UNIQUE INDEX agents_project_name_uq ON agents (project_id, lower(name)) WHERE project_id IS NOT NULL;
 CREATE INDEX agents_model_profile_idx ON agents (model_profile_id);
-CREATE INDEX agents_runtime_idx ON agents (runtime_id);
 
 CREATE TABLE issues (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -295,7 +293,8 @@ CREATE TABLE execution_sessions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL,
     run_id uuid NOT NULL,
-    runtime_instance_id uuid NOT NULL,
+    runtime_instance_id uuid,
+    runner_id uuid REFERENCES runners(id) ON DELETE RESTRICT,
     status text NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'STARTING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')),
     cwd text NOT NULL DEFAULT '/workspace' CHECK (btrim(cwd) <> ''),
     command_argv jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(command_argv) = 'array'),
@@ -306,13 +305,21 @@ CREATE TABLE execution_sessions (
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT execution_sessions_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
     CONSTRAINT execution_sessions_runtime_instance_fk FOREIGN KEY (project_id, runtime_instance_id) REFERENCES runtime_instances(project_id, id) ON DELETE RESTRICT,
+    CONSTRAINT execution_sessions_owner_check CHECK (
+        (runner_id IS NOT NULL AND runtime_instance_id IS NULL) OR
+        (runner_id IS NULL AND runtime_instance_id IS NOT NULL)
+    ),
     UNIQUE (project_id, id)
 );
 
 CREATE INDEX execution_sessions_run_idx ON execution_sessions (run_id, created_at);
+CREATE INDEX execution_sessions_runner_idx ON execution_sessions (runner_id, created_at) WHERE runner_id IS NOT NULL;
 CREATE UNIQUE INDEX execution_sessions_one_active_per_instance_uq
     ON execution_sessions (runtime_instance_id)
-    WHERE status IN ('PENDING', 'STARTING', 'RUNNING');
+    WHERE status IN ('PENDING', 'STARTING', 'RUNNING') AND runtime_instance_id IS NOT NULL;
+CREATE UNIQUE INDEX execution_sessions_one_active_per_runner_uq
+    ON execution_sessions (runner_id)
+    WHERE status IN ('PENDING', 'STARTING', 'RUNNING') AND runner_id IS NOT NULL;
 
 CREATE TABLE questions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -483,10 +490,6 @@ BEGIN
         IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
             RAISE EXCEPTION 'agent cannot reference model profile from another project' USING ERRCODE = '23514';
         END IF;
-        SELECT project_id INTO referenced_project_id FROM runtimes WHERE id = NEW.runtime_id;
-        IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
-            RAISE EXCEPTION 'agent cannot reference runtime from another project' USING ERRCODE = '23514';
-        END IF;
     ELSIF TG_TABLE_NAME = 'issues' THEN
         IF NEW.assigned_agent_id IS NOT NULL THEN
             SELECT project_id INTO referenced_project_id FROM agents WHERE id = NEW.assigned_agent_id;
@@ -526,9 +529,6 @@ BEGIN
         END IF;
     ELSIF TG_TABLE_NAME = 'runtimes' THEN
         IF EXISTS (
-            SELECT 1 FROM agents
-            WHERE runtime_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
-        ) OR EXISTS (
             SELECT 1 FROM runtime_instances
             WHERE runtime_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
         ) THEN
@@ -542,7 +542,7 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER model_profiles_owner_change_check BEFORE UPDATE OF project_id ON model_profiles FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 CREATE TRIGGER runtimes_owner_change_check BEFORE UPDATE OF project_id ON runtimes FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 
-CREATE TRIGGER agents_scope_check BEFORE INSERT OR UPDATE OF project_id, model_profile_id, runtime_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
+CREATE TRIGGER agents_scope_check BEFORE INSERT OR UPDATE OF project_id, model_profile_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER issues_scope_check BEFORE INSERT OR UPDATE OF project_id, assigned_agent_id ON issues FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER runs_scope_check BEFORE INSERT OR UPDATE OF project_id, agent_id ON runs FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER runtime_instances_scope_check BEFORE INSERT OR UPDATE OF project_id, runtime_id ON runtime_instances FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
@@ -565,6 +565,9 @@ DECLARE
     run_workspace_id uuid;
     instance_workspace_id uuid;
 BEGIN
+    IF NEW.runtime_instance_id IS NULL THEN
+        RETURN NEW;
+    END IF;
     SELECT workspace_id INTO run_workspace_id FROM runs WHERE project_id = NEW.project_id AND id = NEW.run_id;
     SELECT workspace_id INTO instance_workspace_id FROM runtime_instances WHERE project_id = NEW.project_id AND id = NEW.runtime_instance_id;
     IF run_workspace_id IS NULL OR instance_workspace_id IS NULL OR run_workspace_id IS DISTINCT FROM instance_workspace_id THEN

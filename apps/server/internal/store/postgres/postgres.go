@@ -24,6 +24,14 @@ func (s *Store) SetRunnerCandidates(candidates func(string) []string) {
 	s.runnerCandidates = candidates
 }
 
+// LiveRunnerCandidates exposes the configured live-registry supplier for tests.
+func (s *Store) LiveRunnerCandidates(engine string) []string {
+	if s.runnerCandidates == nil {
+		return nil
+	}
+	return s.runnerCandidates(engine)
+}
+
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {

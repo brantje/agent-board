@@ -46,9 +46,6 @@ func TestPrepareBuildsOnlyRequestedExecutionSecretsAndProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.RuntimeID != "rt1" {
-		t.Fatalf("runtime ID = %q", prepared.RuntimeID)
-	}
 	if prepared.Secrets["PROVIDER_TOKEN"] != "provider-plain" || prepared.Secrets["RUNTIME_TOKEN"] != "runtime-plain" {
 		t.Fatalf("execution secrets = %+v", prepared.Secrets)
 	}

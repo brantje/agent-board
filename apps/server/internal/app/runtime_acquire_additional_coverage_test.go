@@ -123,8 +123,7 @@ func TestRuntimeInstanceServiceAcquireReportsLockReleaseFailure(t *testing.T) {
 		ID:                 "instance-running",
 		ProjectID:          workspace.ProjectID,
 		WorkspaceID:        workspace.ID,
-		RuntimeID:          baseStore.runtime.ID,
-		Status:             string(runtimepkg.StateRunning),
+				Status:             string(runtimepkg.StateRunning),
 		ExternalID:         &externalID,
 		RunnerStatus:       "READY",
 		SafeHandleMetadata: json.RawMessage(`{"safe":true}`),
@@ -194,7 +193,7 @@ func TestRuntimeInstanceServiceAcquireRestartsRecoveredStoppedRuntime(t *testing
 	workspace := store.Workspace{ID: "workspace-1", ProjectID: projectID, IssueID: "issue-1", Path: "/workspaces/one", BootstrapStatus: "READY"}
 	runtimeConfig := store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runtime:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Enabled: true}
 	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{
-		ID: "instance-interrupted", ProjectID: projectID, WorkspaceID: workspace.ID, RuntimeID: runtimeConfig.ID,
+		ID: "instance-interrupted", ProjectID: projectID, WorkspaceID: workspace.ID,
 		Status: string(runtimepkg.StateProvisioning), RunnerStatus: "CONNECTING",
 	}}
 	rs := &reconcileStore{runtimeServiceStore: base, workspace: workspace}
@@ -221,7 +220,7 @@ func TestRuntimeInstanceServiceAcquireReplacesRecoveredMissingRuntime(t *testing
 	workspace := store.Workspace{ID: "workspace-1", ProjectID: projectID, IssueID: "issue-1", Path: "/workspaces/one", BootstrapStatus: "READY"}
 	runtimeConfig := store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runtime:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Enabled: true}
 	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{
-		ID: "instance-missing", ProjectID: projectID, WorkspaceID: workspace.ID, RuntimeID: runtimeConfig.ID,
+		ID: "instance-missing", ProjectID: projectID, WorkspaceID: workspace.ID,
 		Status: string(runtimepkg.StateProvisioning), RunnerStatus: "CONNECTING",
 	}}
 	rs := &reconcileStore{runtimeServiceStore: base, workspace: workspace}
@@ -248,7 +247,7 @@ func TestRuntimeInstanceServiceAcquireRejectsUnsettledRecoveredRuntime(t *testin
 	workspace := store.Workspace{ID: "workspace-1", ProjectID: projectID, IssueID: "issue-1", Path: "/workspaces/one", BootstrapStatus: "READY"}
 	runtimeConfig := store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runtime:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Enabled: true}
 	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{
-		ID: "instance-unsettled", ProjectID: projectID, WorkspaceID: workspace.ID, RuntimeID: runtimeConfig.ID,
+		ID: "instance-unsettled", ProjectID: projectID, WorkspaceID: workspace.ID,
 		Status: string(runtimepkg.StateProvisioning), RunnerStatus: "CONNECTING",
 	}}
 	rs := &reconcileStore{runtimeServiceStore: base, workspace: workspace}
@@ -273,7 +272,7 @@ func TestRuntimeInstanceServiceAcquireReplacesDisappearedRunningRuntime(t *testi
 	runtimeConfig := store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runtime:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Enabled: true}
 	externalID := "container-disappeared"
 	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{
-		ID: "instance-running", ProjectID: projectID, WorkspaceID: workspace.ID, RuntimeID: runtimeConfig.ID,
+		ID: "instance-running", ProjectID: projectID, WorkspaceID: workspace.ID,
 		Status: string(runtimepkg.StateRunning), ExternalID: &externalID, RunnerStatus: "READY", SafeHandleMetadata: json.RawMessage(`{"safe":true}`),
 	}}
 	rs := &reconcileStore{runtimeServiceStore: base, workspace: workspace}
@@ -301,7 +300,7 @@ func TestRuntimeInstanceServiceAcquireReturnsRunningInspectionFailure(t *testing
 	runtimeConfig := store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runtime:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Enabled: true}
 	externalID := "container-running"
 	base := &runtimeServiceStore{runtime: runtimeConfig, instance: store.RuntimeInstance{
-		ID: "instance-running", ProjectID: projectID, WorkspaceID: workspace.ID, RuntimeID: runtimeConfig.ID,
+		ID: "instance-running", ProjectID: projectID, WorkspaceID: workspace.ID,
 		Status: string(runtimepkg.StateRunning), ExternalID: &externalID, RunnerStatus: "READY", SafeHandleMetadata: json.RawMessage(`{"safe":true}`),
 	}}
 	implementationErr := errors.New("inspect transport unavailable")

@@ -49,7 +49,7 @@ func TestReconcileRestoresLiveSessionWithoutStartingDuplicate(t *testing.T) {
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "UNAVAILABLE"},
 		session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "STARTING"},
 	}
-	service, err := NewExecutionSessionService(base, &reconcileExecutionManager{transport: transport, active: true})
+	service, err := NewExecutionSessionService(base, &reconcileExecutionManager{transport: transport, active: true}, nil)
 	if err != nil { t.Fatal(err) }
 	process, err := service.Reconcile(context.Background(), "project-1", "session-1")
 	if err != nil || process == nil || process.Record().Status != "RUNNING" || base.instance.RunnerStatus != "BUSY" {
@@ -104,7 +104,7 @@ func TestReconcileDrainsAttachedOutputWhenBusyPersistenceFails(t *testing.T) {
 		stdout:                 newReadSignalReader(),
 		stderr:                 newReadSignalReader(),
 	}
-	service, err := NewExecutionSessionService(storeWithFailure, &reconcileExecutionManager{transport: transport, active: true})
+	service, err := NewExecutionSessionService(storeWithFailure, &reconcileExecutionManager{transport: transport, active: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestReconcileConsumesRetainedTerminalResultBeforeFailing(t *testing.T) {
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "UNAVAILABLE"},
 		session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
 	}
-	service, _ := NewExecutionSessionService(base, &reconcileExecutionManager{transport: transport, active: false})
+	service, _ := NewExecutionSessionService(base, &reconcileExecutionManager{transport: transport, active: false}, nil)
 	process, err := service.Reconcile(context.Background(), "project-1", "session-1")
 	if err != nil || process != nil || base.session.Status != "COMPLETED" || base.session.ExitCode == nil || *base.session.ExitCode != 23 {
 		t.Fatalf("process=%v session=%+v err=%v", process, base.session, err)
@@ -143,7 +143,7 @@ func TestReconcileTransportFailureLeavesSessionNonTerminal(t *testing.T) {
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING"},
 		session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
 	}
-	service, _ := NewExecutionSessionService(base, &reconcileExecutionManager{err: runner.ErrDisconnected})
+	service, _ := NewExecutionSessionService(base, &reconcileExecutionManager{err: runner.ErrDisconnected}, nil)
 	_, err := service.Reconcile(context.Background(), "project-1", "session-1")
 	if err == nil || base.session.Status != "RUNNING" {
 		t.Fatalf("session=%+v err=%v", base.session, err)
@@ -156,7 +156,7 @@ func TestReconcileCallerDeadlineLeavesSessionNonTerminal(t *testing.T) {
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING"},
 		session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
 	}
-	service, _ := NewExecutionSessionService(base, &reconcileExecutionManager{transport: transport, active: false})
+	service, _ := NewExecutionSessionService(base, &reconcileExecutionManager{transport: transport, active: false}, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	_, err := service.Reconcile(ctx, "project-1", "session-1")
@@ -171,7 +171,7 @@ func TestReconcileAllHandlesNeverStartedPendingSession(t *testing.T) {
 		session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "PENDING"},
 	}
 	wrapped := &reconcileExecutionStore{executionSessionStoreFake: base, projects: []store.Project{{ID: "project-1"}}}
-	service, _ := NewExecutionSessionService(wrapped, &reconcileExecutionManager{})
+	service, _ := NewExecutionSessionService(wrapped, &reconcileExecutionManager{}, nil)
 	if err := service.ReconcileAll(context.Background()); err != nil || base.session.Status != "FAILED" {
 		t.Fatalf("session=%+v err=%v", base.session, err)
 	}

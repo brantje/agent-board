@@ -13,6 +13,7 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
+	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 )
 
 func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
@@ -29,6 +30,12 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	secretWriteToken := strings.Repeat("w", 32)
 	t.Setenv("AGENT_BOARD_SECRET_WRITE_TOKEN", secretWriteToken)
 
+	database, err := postgres.Open(context.Background(), databaseURL)
+	if err != nil {
+		t.Fatalf("postgres.Open() error = %v", err)
+	}
+	defer database.Close()
+
 	handler, closeStore, err := controlPlaneHandler(context.Background(), databaseURL)
 	if err != nil {
 		t.Fatalf("controlPlaneHandler() error = %v", err)
@@ -43,6 +50,17 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	}
 	if got := configuredReviewCandidateRoot(); got != filepath.Join(workspaceRoot, ".review-candidates") {
 		t.Fatalf("configuredReviewCandidateRoot()=%q", got)
+	}
+	if application.services.ControlPlane.Runners == nil {
+		t.Fatal("runner service was not wired")
+	}
+	database.SetRunnerCandidates(nil)
+	if candidates := database.LiveRunnerCandidates("opencode"); candidates != nil {
+		t.Fatalf("nil candidate supplier should not return candidates: %v", candidates)
+	}
+	database.SetRunnerCandidates(application.services.ControlPlane.Runners.Connections.Candidates)
+	if application.services.ControlPlane.Runners.Connections.Candidates("opencode") == nil {
+		t.Fatal("registry candidate supplier returned nil slice")
 	}
 
 	// An authorized invalid request is rejected before persistence, so this

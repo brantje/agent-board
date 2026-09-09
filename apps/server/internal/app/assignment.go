@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -38,14 +37,6 @@ func (s *Service) AssignIssue(ctx context.Context, projectID, issueID, agentID s
 		return store.Issue{}, store.Run{}, executionConfigError(err)
 	}
 	if !provider.Enabled || provider.HealthStatus == "UNHEALTHY" {
-		return store.Issue{}, store.Run{}, executionConfigError(nil)
-	}
-
-	runtime, err := s.GetRuntime(ctx, scope, agent.RuntimeID)
-	if err != nil {
-		return store.Issue{}, store.Run{}, executionConfigError(err)
-	}
-	if !runtime.Enabled || runtime.HealthStatus == "UNHEALTHY" || runtime.Kind != "docker" || strings.TrimSpace(runtime.Image) == "" {
 		return store.Issue{}, store.Run{}, executionConfigError(nil)
 	}
 

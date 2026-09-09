@@ -124,10 +124,10 @@ func (s *Store) CreateExecutionSession(ctx context.Context, input store.Executio
 		cwd = "/workspace"
 	}
 	return scanExecutionSession(s.pool.QueryRow(ctx, `
-		INSERT INTO execution_sessions (project_id, run_id, runtime_instance_id, status, cwd, command_argv, exit_code)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
-	`, input.ProjectID, input.RunID, input.RuntimeInstanceID, status, cwd, arrayJSON(input.CommandArgv), input.ExitCode))
+		INSERT INTO execution_sessions (project_id, run_id, runtime_instance_id, runner_id, status, cwd, command_argv, exit_code)
+		VALUES ($1, $2, nullif($3, '')::uuid, nullif($4, '')::uuid, $5, $6, $7, $8)
+		RETURNING id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
+	`, input.ProjectID, input.RunID, input.RuntimeInstanceID, input.RunnerID, status, cwd, arrayJSON(input.CommandArgv), input.ExitCode))
 }
 
 func (s *Store) CreateQuestion(ctx context.Context, input store.Question) (store.Question, error) {
@@ -230,7 +230,7 @@ func scanRuntimeInstance(row pgx.Row) (store.RuntimeInstance, error) {
 
 func scanExecutionSession(row pgx.Row) (store.ExecutionSession, error) {
 	var value store.ExecutionSession
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.RunID, &value.RuntimeInstanceID, &value.Status, &value.CWD, &value.CommandArgv, &value.ExitCode, &value.CreatedAt, &value.StartedAt, &value.CompletedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.RunID, &value.RuntimeInstanceID, &value.RunnerID, &value.Status, &value.CWD, &value.CommandArgv, &value.ExitCode, &value.CreatedAt, &value.StartedAt, &value.CompletedAt, &value.UpdatedAt); err != nil {
 		return store.ExecutionSession{}, notFound(err)
 	}
 	return value, nil

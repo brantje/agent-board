@@ -68,7 +68,6 @@ export interface Agent {
   roleInstructions: string
   engine: string
   modelProfileId: string
-  runtimeId: string
   engineSettings: Record<string, unknown>
   concurrencyLimit: number
   state: string
@@ -128,7 +127,6 @@ export interface EventEvidence {
 
 export interface RuntimeInstanceEvidence {
   id: string
-  runtimeId: string
   status: string
   runnerStatus: string
   createdAt: string

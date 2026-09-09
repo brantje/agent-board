@@ -17,8 +17,7 @@ func TestReconcileAllWithReporterSeparatesInstanceAndStoreFailures(t *testing.T)
 		ID:                 "instance-1",
 		ProjectID:          workspace.ProjectID,
 		WorkspaceID:        workspace.ID,
-		RuntimeID:          base.runtime.ID,
-		Status:             string(runtimepkg.StateRunning),
+				Status:             string(runtimepkg.StateRunning),
 		ExternalID:         &externalID,
 		SafeHandleMetadata: json.RawMessage(`{"safe":true}`),
 	}

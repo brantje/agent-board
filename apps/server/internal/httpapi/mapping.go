@@ -39,7 +39,7 @@ func runtimeDTO(v store.Runtime) RuntimeDTO {
 }
 
 func agentDTO(v store.Agent) AgentDTO {
-	return AgentDTO{v.ID, v.ProjectID, v.Name, v.RoleInstructions, v.Engine, v.ModelProfileID, v.RuntimeID, v.EngineSettings, v.ConcurrencyLimit, v.State, v.CreatedAt, v.UpdatedAt}
+	return AgentDTO{v.ID, v.ProjectID, v.Name, v.RoleInstructions, v.Engine, v.ModelProfileID, v.EngineSettings, v.ConcurrencyLimit, v.State, v.CreatedAt, v.UpdatedAt}
 }
 
 func runDTO(v store.Run, issueKeys map[string]string) RunDTO {

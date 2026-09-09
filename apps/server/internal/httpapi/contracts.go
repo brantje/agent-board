@@ -114,7 +114,6 @@ type AgentDTO struct {
 	RoleInstructions string          `json:"roleInstructions"`
 	Engine           string          `json:"engine"`
 	ModelProfileID   string          `json:"modelProfileId"`
-	RuntimeID        string          `json:"runtimeId"`
 	EngineSettings   json.RawMessage `json:"engineSettings"`
 	ConcurrencyLimit int             `json:"concurrencyLimit"`
 	State            string          `json:"state"`
@@ -224,7 +223,6 @@ type CreateAgentRequest struct {
 	RoleInstructions string          `json:"roleInstructions"`
 	Engine           string          `json:"engine"`
 	ModelProfileID   string          `json:"modelProfileId"`
-	RuntimeID        string          `json:"runtimeId"`
 	EngineSettings   json.RawMessage `json:"engineSettings"`
 	ConcurrencyLimit int             `json:"concurrencyLimit"`
 	State            string          `json:"state"`

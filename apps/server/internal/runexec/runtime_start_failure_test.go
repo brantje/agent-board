@@ -24,8 +24,7 @@ func (r *startFailureRuntime) Create(_ context.Context, projectID, _, runtimeID 
 	return store.RuntimeInstance{
 		ID:        "runtime-instance",
 		ProjectID: projectID,
-		RuntimeID: runtimeID,
-		Status:    string(runtimepkg.StateProvisioning),
+				Status:    string(runtimepkg.StateProvisioning),
 	}, nil
 }
 
@@ -79,6 +78,7 @@ func TestProcessorPreservesCreatedRuntimeIdentityWhenStartFails(t *testing.T) {
 		recorder,
 		output,
 		candidate,
+		nil,
 		nil,
 	)
 	if err != nil {

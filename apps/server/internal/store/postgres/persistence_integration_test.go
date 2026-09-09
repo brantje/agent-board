@@ -63,7 +63,7 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
-	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject})
+	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestExecutionPersistenceInvariants(t *testing.T) {
 	}
 
 	instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
-		ProjectID: f.project.ID, WorkspaceID: f.workspace.ID, RuntimeID: f.runtime.ID,
+		ProjectID: f.project.ID, WorkspaceID: f.workspace.ID,
 	})
 	if err != nil {
 		t.Fatalf("create runtime instance: %v", err)

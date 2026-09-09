@@ -42,7 +42,7 @@ func TestUncertainStartPersistsBusyAfterCallerContextExpires(t *testing.T) {
 		fakeExecutionClient: &fakeExecutionClient{transport: transport, done: make(chan struct{})},
 		cancel:              cancel,
 	}
-	service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+	service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

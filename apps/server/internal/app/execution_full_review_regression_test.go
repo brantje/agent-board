@@ -38,7 +38,7 @@ func (s *deadlineCheckingExecutionStore) UpdateRuntimeInstanceRunnerStatus(ctx c
 func newExecutionServiceForTransport(t *testing.T, sessionStore ExecutionSessionStore, transport runner.ProcessSession) *ExecutionSessionService {
 	t.Helper()
 	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
-	service, err := NewExecutionSessionService(sessionStore, &fakeExecutionManager{client: client})
+	service, err := NewExecutionSessionService(sessionStore, &fakeExecutionManager{client: client}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -45,6 +45,17 @@ func NewAuthorizedExecutionSessionService(sessions *ExecutionSessionService, pre
 }
 
 func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID, runID, runtimeInstanceID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
+	return s.start(ctx, projectID, runID, "", runtimeInstanceID, request)
+}
+
+func (s *AuthorizedExecutionSessionService) StartOnRunner(ctx context.Context, projectID, runID, runnerID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
+	if len(request.RuntimeSecretRefs) > 0 {
+		return nil, NewError("execution_secret_unavailable", "Runtime-only secret references are not available on the Runner execution path", store.ErrInvalidArgument)
+	}
+	return s.start(ctx, projectID, runID, runnerID, "", request)
+}
+
+func (s *AuthorizedExecutionSessionService) start(ctx context.Context, projectID, runID, runnerID, runtimeInstanceID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
 	prepared, err := s.preparer.Prepare(ctx, projectID, runID, executioncontext.SecretRequest{
 		ProviderCredentialEnv: request.ProviderCredentialEnv,
 		RuntimeSecretRefs:     cloneMap(request.RuntimeSecretRefs),
@@ -60,26 +71,29 @@ func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID
 		}
 	}()
 
-	instance, err := s.sessions.store.GetRuntimeInstance(ctx, projectID, runtimeInstanceID)
-	if err != nil {
-		return nil, translateStoreError(err, "runtime_instance")
+	var process *ExecutionProcess
+	if runnerID != "" {
+		process, err = s.sessions.StartOnRunner(ctx, projectID, runID, runnerID, ExecutionRequest{
+			Command: append([]string(nil), request.Command...),
+			CWD:     request.CWD,
+			Env:     cloneMap(request.Env),
+			Secrets: cloneMap(prepared.Secrets),
+		})
+	} else {
+		if _, err = s.sessions.store.GetRuntimeInstance(ctx, projectID, runtimeInstanceID); err != nil {
+			return nil, translateStoreError(err, "runtime_instance")
+		}
+		process, err = s.sessions.Start(ctx, projectID, runID, runtimeInstanceID, ExecutionRequest{
+			Command: append([]string(nil), request.Command...),
+			CWD:     request.CWD,
+			Env:     cloneMap(request.Env),
+			Secrets: cloneMap(prepared.Secrets),
+		})
 	}
-	if instance.RuntimeID != prepared.RuntimeID {
-		return nil, NewError("runtime_configuration_mismatch", "Runtime Instance does not match the resolved execution Runtime", store.ErrInvalidArgument)
-	}
-	process, err := s.sessions.Start(ctx, projectID, runID, runtimeInstanceID, ExecutionRequest{
-		Command: append([]string(nil), request.Command...),
-		CWD:     request.CWD,
-		Env:     cloneMap(request.Env),
-		Secrets: cloneMap(prepared.Secrets),
-	})
 	if err != nil {
 		return nil, redaction.WrapError(err, prepared.RedactionValues)
 	}
 
-	// Keep one registration for the whole Run so Events and candidate evidence
-	// emitted after the last subprocess still use the same redaction values. All
-	// later subprocess registrations retain their normal process-scoped release.
 	processRelease := releaseRedaction
 	if s.retainRunRedaction(runID, releaseRedaction) {
 		processRelease = nil
@@ -109,12 +123,10 @@ func (s *AuthorizedExecutionSessionService) Attach(ctx context.Context, projectI
 		}
 	}()
 
-	instance, err := s.sessions.store.GetRuntimeInstance(ctx, projectID, session.RuntimeInstanceID)
-	if err != nil {
-		return nil, translateStoreError(err, "runtime_instance")
-	}
-	if instance.RuntimeID != prepared.RuntimeID {
-		return nil, NewError("runtime_configuration_mismatch", "Runtime Instance does not match the resolved execution Runtime", store.ErrInvalidArgument)
+	if session.RuntimeInstanceID != "" {
+		if _, err := s.sessions.store.GetRuntimeInstance(ctx, projectID, session.RuntimeInstanceID); err != nil {
+			return nil, translateStoreError(err, "runtime_instance")
+		}
 	}
 
 	process, err := s.sessions.Reconcile(ctx, projectID, sessionID)

@@ -18,7 +18,7 @@ func TestRunScopedExecutionEvidenceQueries(t *testing.T) {
 	createSession := func(t *testing.T, f runFixture) store.ExecutionSession {
 		t.Helper()
 		instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
-			ProjectID: f.project.ID, WorkspaceID: f.workspace.ID, RuntimeID: f.runtime.ID,
+			ProjectID: f.project.ID, WorkspaceID: f.workspace.ID,
 		})
 		if err != nil {
 			t.Fatalf("create runtime instance: %v", err)

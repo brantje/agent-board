@@ -251,19 +251,30 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	dockerRuntime, err := dockerruntime.New()
-	if err != nil {
-		return nil, err
+	dockerRuntime, dockerErr := dockerruntime.New()
+	if dockerErr != nil {
+		slog.Warn("Docker runtime unavailable; runner execution remains available", "error", dockerErr)
 	}
 	secretResolver, err := configuredSecretResolver(database)
 	if err != nil {
-		_ = dockerRuntime.Close()
+		if dockerRuntime != nil {
+			_ = dockerRuntime.Close()
+		}
 		return nil, err
 	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime}, secretResolver)
+	implementations := map[string]runtimepkg.Implementation{}
+	if dockerRuntime != nil {
+		implementations["docker"] = dockerRuntime
+	}
+	services, err := app.NewServicesWithRuntimes(database, materializer, implementations, secretResolver)
 	if err != nil {
-		_ = dockerRuntime.Close()
+		if dockerRuntime != nil {
+			_ = dockerRuntime.Close()
+		}
 		return nil, err
+	}
+	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
+		database.SetRunnerCandidates(services.ControlPlane.Runners.Connections.Candidates)
 	}
 	services.ControlPlane.SetProjectRepositoryProvisioner(provisioner)
 	if err := configureExecutionScheduler(services, git); err != nil {
@@ -322,7 +333,11 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if err != nil {
 		return err
 	}
-	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, candidate, git)
+	var runnerConnector runexec.RunnerConnector
+	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
+		runnerConnector = runexec.NewRegistryConnector(services.ControlPlane.Runners.Connections)
+	}
+	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, candidate, git, runnerConnector)
 	if err != nil {
 		return err
 	}

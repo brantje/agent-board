@@ -51,7 +51,7 @@ func (s *httpRunEvidenceStore) GetRuntimeInstance(_ context.Context, pid, id str
 	if pid != projectID || id != evidenceRuntimeID {
 		return store.RuntimeInstance{}, store.ErrNotFound
 	}
-	return store.RuntimeInstance{ID: id, ProjectID: pid, RuntimeID: runtimeID, Status: "DESTROYED", RunnerStatus: "UNAVAILABLE"}, nil
+	return store.RuntimeInstance{ID: id, ProjectID: pid, Status: "DESTROYED", RunnerStatus: "UNAVAILABLE"}, nil
 }
 
 func (s *httpRunEvidenceStore) ListRunEvents(_ context.Context, pid, id string, after int64, _ int) ([]store.Event, error) {

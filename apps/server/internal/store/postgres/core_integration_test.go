@@ -60,7 +60,7 @@ func TestConfigurationStoreAllowsGlobalButRejectsForeignProjectReferences(t *tes
 	if err != nil {
 		t.Fatalf("create project runtime: %v", err)
 	}
-	if _, err := s.CreateAgent(ctx, store.Agent{ProjectID: &projectB.ID, Name: "bad", Engine: "scripted", ModelProfileID: modelA.ID, RuntimeID: runtimeA.ID}); err == nil {
+	if _, err := s.CreateAgent(ctx, store.Agent{ProjectID: &projectB.ID, Name: "bad", Engine: "scripted", ModelProfileID: modelA.ID}); err == nil {
 		t.Fatal("expected foreign project configuration reference to fail")
 	}
 
@@ -72,7 +72,7 @@ func TestConfigurationStoreAllowsGlobalButRejectsForeignProjectReferences(t *tes
 	if err != nil {
 		t.Fatalf("create global runtime: %v", err)
 	}
-	agent, err := s.CreateAgent(ctx, store.Agent{Name: "global-agent", Engine: "scripted", ModelProfileID: globalModel.ID, RuntimeID: globalRuntime.ID, ConcurrencyLimit: 2})
+	agent, err := s.CreateAgent(ctx, store.Agent{Name: "global-agent", Engine: "scripted", ModelProfileID: globalModel.ID, ConcurrencyLimit: 2})
 	if err != nil {
 		t.Fatalf("create global agent: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestConfigurationStoreAllowsGlobalButRejectsForeignProjectReferences(t *tes
 		t.Fatalf("get global agent from project: got=%+v err=%v", got, err)
 	}
 
-	agentA, err := s.CreateAgent(ctx, store.Agent{ProjectID: &projectA.ID, Name: "agent-a", Engine: "scripted", ModelProfileID: modelA.ID, RuntimeID: runtimeA.ID})
+	agentA, err := s.CreateAgent(ctx, store.Agent{ProjectID: &projectA.ID, Name: "agent-a", Engine: "scripted", ModelProfileID: modelA.ID})
 	if err != nil {
 		t.Fatalf("create project agent: %v", err)
 	}

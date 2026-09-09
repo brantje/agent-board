@@ -102,7 +102,7 @@ func (s *launcherSessionStore) UpdateRuntimeInstanceRunnerStatus(_ context.Conte
 type launcherPreparer struct{ runtimeID string }
 
 func (p launcherPreparer) Prepare(context.Context, string, string, executioncontext.SecretRequest) (executioncontext.Prepared, error) {
-	return executioncontext.Prepared{RuntimeID: p.runtimeID}, nil
+	return executioncontext.Prepared{}, nil
 }
 
 type launcherRunnerManager struct{ client runner.Client }
@@ -267,10 +267,10 @@ func TestProcessLauncherCapturesAuthorizedProcessEvidence(t *testing.T) {
 
 			sessionStore := &launcherSessionStore{
 				run:      store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
-				instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, RuntimeID: safe.Runtime.ID, Status: "RUNNING"},
+				instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"},
 			}
 			client := newLauncherClient(strings.Repeat("stdout-", 8), "stderr-data", tc.exitCode, tc.waitErr)
-			transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client})
+			transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client}, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -380,12 +380,12 @@ func TestProcessLauncherRecordsStoppedWhenTerminatedDuringWait(t *testing.T) {
 	}
 	sessionStore := &launcherSessionStore{
 		run:      store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
-		instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, RuntimeID: safe.Runtime.ID, Status: "RUNNING"},
+		instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"},
 	}
 	gate := newLauncherWaitGate()
 	client := newLauncherClient("", "", 137, nil)
 	client.waitGate = gate
-	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client})
+	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +508,7 @@ func TestProcessLauncherAttachDoesNotRecordToolStarted(t *testing.T) {
 		run: store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
 		instance: store.RuntimeInstance{
 			ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID,
-			RuntimeID: safe.Runtime.ID, Status: "RUNNING",
+			Status: "RUNNING",
 		},
 		sessions: map[string]store.ExecutionSession{
 			"session-1": {
@@ -518,7 +518,7 @@ func TestProcessLauncherAttachDoesNotRecordToolStarted(t *testing.T) {
 		},
 	}
 	client := newLauncherClient("stdout", "stderr", 0, nil)
-	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client})
+	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

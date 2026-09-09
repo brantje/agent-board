@@ -68,8 +68,7 @@ func (s *RuntimeInstanceService) Create(ctx context.Context, projectID, issueID,
 	instance, err := s.store.CreateRuntimeInstance(ctx, store.RuntimeInstance{
 		ProjectID:    projectID,
 		WorkspaceID:  workspace.ID,
-		RuntimeID:    runtimeConfig.ID,
-		Status:       string(runtimepkg.StateProvisioning),
+				Status:       string(runtimepkg.StateProvisioning),
 		RunnerStatus: "CONNECTING",
 	})
 	if err != nil {
@@ -256,8 +255,7 @@ func runtimeSpec(instance store.RuntimeInstance, workspace store.Workspace, issu
 		ProjectID:         instance.ProjectID,
 		IssueID:           issueID,
 		WorkspaceID:       workspace.ID,
-		RuntimeID:         runtimeConfig.ID,
-		Image:             runtimeConfig.Image,
+				Image:             runtimeConfig.Image,
 		WorkingDirectory:  runtimepkg.WorkspaceTarget,
 		Resources: runtimepkg.ResourcePolicy{
 			CPULimitMillis:   runtimeConfig.CPULimitMillis,

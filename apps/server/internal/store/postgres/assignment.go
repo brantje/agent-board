@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -128,29 +127,24 @@ func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID stri
 }
 
 func verifyRunnableAgent(ctx context.Context, tx pgx.Tx, projectID, agentID string) error {
-	var agentState, providerHealth, runtimeHealth, runtimeKind, runtimeImage string
-	var modelEnabled, providerEnabled, runtimeEnabled bool
+	var agentState, providerHealth string
+	var modelEnabled, providerEnabled bool
 	err := tx.QueryRow(ctx, `
-        SELECT agent.state, model.enabled, provider.enabled, provider.health_status,
-               runtime.enabled, runtime.health_status, runtime.kind, runtime.image
+        SELECT agent.state, model.enabled, provider.enabled, provider.health_status
         FROM agents AS agent
         JOIN model_profiles AS model ON model.id=agent.model_profile_id
         JOIN providers AS provider ON provider.id=model.provider_id
-        JOIN runtimes AS runtime ON runtime.id=agent.runtime_id
         WHERE agent.id=$2
           AND (agent.project_id IS NULL OR agent.project_id=$1)
           AND (model.project_id IS NULL OR model.project_id=$1)
-          AND (runtime.project_id IS NULL OR runtime.project_id=$1)
-        FOR SHARE OF agent, model, provider, runtime
+        FOR SHARE OF agent, model, provider
     `, projectID, agentID).Scan(
 		&agentState, &modelEnabled, &providerEnabled, &providerHealth,
-		&runtimeEnabled, &runtimeHealth, &runtimeKind, &runtimeImage,
 	)
 	if err != nil {
 		return notFound(err)
 	}
-	if agentState != "ENABLED" || !modelEnabled || !providerEnabled || providerHealth == "UNHEALTHY" ||
-		!runtimeEnabled || runtimeHealth == "UNHEALTHY" || runtimeKind != "docker" || strings.TrimSpace(runtimeImage) == "" {
+	if agentState != "ENABLED" || !modelEnabled || !providerEnabled || providerHealth == "UNHEALTHY" {
 		return store.ErrConflict
 	}
 	return nil

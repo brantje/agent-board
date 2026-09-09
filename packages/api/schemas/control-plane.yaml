@@ -178,7 +178,7 @@ RuntimeInput:
     enabled: {type: boolean, default: true}
 Agent:
   type: object
-  required: [id, projectId, name, roleInstructions, engine, modelProfileId, runtimeId, engineSettings, concurrencyLimit, state, createdAt, updatedAt]
+  required: [id, projectId, name, roleInstructions, engine, modelProfileId, engineSettings, concurrencyLimit, state, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: [string, 'null'], format: uuid}
@@ -186,7 +186,6 @@ Agent:
     roleInstructions: {type: string}
     engine: {type: string}
     modelProfileId: {type: string, format: uuid}
-    runtimeId: {type: string, format: uuid}
     engineSettings: {$ref: '#/JSONMap'}
     concurrencyLimit: {type: integer, minimum: 1}
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED]}
@@ -195,13 +194,12 @@ Agent:
 AgentInput:
   type: object
   additionalProperties: false
-  required: [name, engine, modelProfileId, runtimeId]
+  required: [name, engine, modelProfileId]
   properties:
     name: {type: string}
     roleInstructions: {type: string}
     engine: {type: string}
     modelProfileId: {type: string, format: uuid}
-    runtimeId: {type: string, format: uuid}
     engineSettings: {$ref: '#/JSONMap'}
     concurrencyLimit: {type: integer, minimum: 1, default: 1}
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}

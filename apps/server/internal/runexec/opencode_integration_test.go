@@ -290,7 +290,7 @@ func newOpenCodeIntegrationFixture(t *testing.T) *openCodeIntegrationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, nil)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func (f *openCodeIntegrationFixture) createRun(t *testing.T, spec openCodeRunSpe
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtimeConfig, err := f.services.ControlPlane.CreateRuntime(f.ctx, store.Runtime{
+	_, err = f.services.ControlPlane.CreateRuntime(f.ctx, store.Runtime{
 		ProjectID: &scope, Name: "OpenCode integration runtime", Kind: "docker", Image: f.env.image,
 		NetworkPolicy: "outbound", WorkspacePolicy: "issue", Capabilities: store.EmptyObject,
 		Enabled: true, HealthStatus: "HEALTHY",
@@ -404,7 +404,7 @@ func (f *openCodeIntegrationFixture) createRun(t *testing.T, spec openCodeRunSpe
 	}
 	agent, err := f.services.ControlPlane.CreateAgent(f.ctx, store.Agent{
 		ProjectID: &scope, Name: "OpenCode integration agent", RoleInstructions: spec.roleInstructions,
-		Engine: opencode.Name, ModelProfileID: model.ID, RuntimeID: runtimeConfig.ID,
+		Engine: opencode.Name, ModelProfileID: model.ID,
 		EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED",
 	})
 	if err != nil {

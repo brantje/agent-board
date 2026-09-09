@@ -66,14 +66,14 @@ func (s *branchExecutionStore) UpdateRuntimeInstanceRunnerStatus(ctx context.Con
 func newBranchExecutionStore() *branchExecutionStore {
 	return &branchExecutionStore{executionSessionStoreFake: &executionSessionStoreFake{
 		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-config-1", Status: "RUNNING", RunnerStatus: "READY"},
+		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
 	}}
 }
 
 func newBranchExecutionService(t *testing.T, sessionStore ExecutionSessionStore, transport runner.ProcessSession, startErr error) *ExecutionSessionService {
 	t.Helper()
 	client := &fakeExecutionClient{transport: transport, startErr: startErr, done: make(chan struct{})}
-	service, err := NewExecutionSessionService(sessionStore, &fakeExecutionManager{client: client})
+	service, err := NewExecutionSessionService(sessionStore, &fakeExecutionManager{client: client}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,10 +83,10 @@ func newBranchExecutionService(t *testing.T, sessionStore ExecutionSessionStore,
 func TestExecutionSessionConstructorAndValidationBranches(t *testing.T) {
 	manager := &fakeExecutionManager{}
 	storeFake := newBranchExecutionStore()
-	if _, err := NewExecutionSessionService(nil, manager); err == nil {
+	if _, err := NewExecutionSessionService(nil, manager, nil); err == nil {
 		t.Fatal("expected nil store rejection")
 	}
-	if _, err := NewExecutionSessionService(storeFake, nil); err == nil {
+	if _, err := NewExecutionSessionService(storeFake, nil, nil); err == nil {
 		t.Fatal("expected nil manager rejection")
 	}
 
@@ -164,7 +164,7 @@ func TestExecutionSessionStartFailureBranches(t *testing.T) {
 
 	t.Run("connect failure persists failed", func(t *testing.T) {
 		storeFake := newBranchExecutionStore()
-		service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{err: errors.New("dial failed")})
+		service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{err: errors.New("dial failed")}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -377,7 +377,7 @@ func runtimeRunnerService(t *testing.T, implementation runtimepkg.Implementation
 	externalID := "container-1"
 	statusStore.runtime = store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runner:test", Enabled: true}
 	statusStore.instance = store.RuntimeInstance{
-		ID: "instance-1", ProjectID: projectID, WorkspaceID: "workspace-1", RuntimeID: "runtime-1",
+		ID: "instance-1", ProjectID: projectID, WorkspaceID: "workspace-1",
 		Status: "RUNNING", RunnerStatus: "READY", ExternalID: &externalID, SafeHandleMetadata: store.EmptyObject,
 	}
 	service, err := NewRuntimeInstanceService(statusStore, &runtimeWorkspaceEnsurer{}, map[string]runtimepkg.Implementation{"docker": implementation})
