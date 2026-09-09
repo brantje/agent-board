@@ -31,6 +31,9 @@ export function event(partial: Partial<EventEvidence> & Pick<EventEvidence, 'id'
   return {
     schemaVersion: 1,
     occurredAt: '2026-01-01T00:01:00.000Z',
+    projectId: project.id,
+    issueId: null,
+    runId: null,
     sequence: 1,
     agentId: 'agent-1',
     workspaceId: 'workspace-1',

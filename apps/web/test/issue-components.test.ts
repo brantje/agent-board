@@ -4,7 +4,8 @@ import ProjectBoard from '../app/components/ProjectBoard.vue'
 import IssueDetail from '../app/components/IssueDetail.vue'
 import IssueEditor from '../app/components/IssueEditor.vue'
 import IssueCard from '../app/components/IssueCard.vue'
-import { event, MockEventSource } from './execution-fixtures'
+import QuestionPanel from '../app/components/QuestionPanel.vue'
+import { event, MockEventSource, question } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
 const issue = {
@@ -315,5 +316,42 @@ describe('Issue workflow components', () => {
     expect(button(doneWrapper, 'Assign Agent').attributes('disabled')).toBeDefined()
     expect(doneWrapper.text()).toContain('Reopen this Issue')
     doneWrapper.unmount()
+  })
+
+  it('refreshes Issue detail and open questions from Project SSE without a loading skeleton', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    let current = { ...issue, title: 'Fix scheduler' }
+    let questions = [] as ReturnType<typeof question>[]
+    const fetch = vi.fn(async (path: string) => {
+      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+      if (path.includes('/questions')) return new Response(JSON.stringify(questions))
+      return new Response(JSON.stringify(current))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(IssueDetail, {
+      props: { projectId: 'p', issueId: issue.id },
+      global: {
+        stubs: {
+          ...global.stubs,
+          QuestionPanel: false
+        },
+        components: { QuestionPanel }
+      }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Fix scheduler')
+    expect(wrapper.text()).not.toContain('Which strategy?')
+    expect(MockEventSource.instances[0]?.url).toBe('/api/projects/p/events')
+
+    current = { ...issue, title: 'Live title', status: 'BLOCKED' }
+    questions = [question({ issueId: issue.id })]
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-q', type: 'question.created', sequence: null }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Loading')
+    expect(wrapper.text()).toContain('Live title')
+    expect(wrapper.text()).toContain('Blocked')
+    expect(wrapper.text()).toContain('Which strategy?')
+    wrapper.unmount()
   })
 })

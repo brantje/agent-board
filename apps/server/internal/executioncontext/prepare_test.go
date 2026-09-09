@@ -68,6 +68,41 @@ func TestPrepareBuildsOnlyRequestedExecutionSecretsAndProvenance(t *testing.T) {
 	}
 }
 
+func TestPrepareRedactsAuthorizedSecretsWithoutInjectingThem(t *testing.T) {
+	values := validStore()
+	resolver, err := NewResolver(values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretResolver := &fakeSecretResolver{values: map[string][]byte{
+		"provider-token": []byte("provider-plain"),
+		"runtime-token":  []byte("runtime-plain"),
+	}}
+	redaction := &fakeRedactionRegistrar{}
+	preparer, err := NewPreparer(resolver, secretResolver, &fakeProvenanceStore{}, redaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prepared, err := preparer.Prepare(context.Background(), "p1", "r1", SecretRequest{RedactAuthorizedSecrets: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prepared.Secrets) != 0 {
+		t.Fatalf("attach must not inject secrets: %+v", prepared.Secrets)
+	}
+	if len(prepared.RedactionValues) != 2 {
+		t.Fatalf("redaction values=%v", prepared.RedactionValues)
+	}
+	seen := map[string]bool{}
+	for _, value := range prepared.RedactionValues {
+		seen[value] = true
+	}
+	if !seen["provider-plain"] || !seen["runtime-plain"] {
+		t.Fatalf("redaction values=%v", prepared.RedactionValues)
+	}
+}
+
 func TestPrepareRejectsUnauthorizedSecretBeforeProvenance(t *testing.T) {
 	values := validStore()
 	resolver, err := NewResolver(values)

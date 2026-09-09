@@ -88,16 +88,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	if err != nil {
 		return engine.Result{}, fmt.Errorf("opencode engine: parse native server address: %w", err)
 	}
-	process, err := request.Launcher.Start(ctx, engine.ProcessRequest{
-		Command: []string{"opencode", "serve", "--hostname", host, "--port", port},
-		CWD:                   "/workspace",
-		Env:                   env,
-		ProviderCredentialEnv: providerCredentialEnv,
-		Kind:                  "tool",
-		Name:                  "opencode-server",
-	})
+	process, recovered, err := launchOpenCodeProcess(ctx, request.Launcher, host, port, env)
 	if err != nil {
-		return engine.Result{}, fmt.Errorf("opencode engine: start server: %w", err)
+		return engine.Result{}, err
 	}
 
 	var drainWG sync.WaitGroup
@@ -136,16 +129,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, err
 	}
 
-	session, err := native.CreateSession(ctx, client.CreateSessionRequest{
-		Directory: "/workspace",
-		Model: client.ModelRef{
-			ID:         request.Context.Model.Model,
-			ProviderID: settings.ProviderID,
-			Variant:    settings.Variant,
-		},
-	})
+	session, promptRequired, err := ensureNativeSession(ctx, native, request.Context, settings, recovered)
 	if err != nil {
-		return engine.Result{}, fmt.Errorf("opencode engine: create native session: %w", err)
+		return engine.Result{}, err
 	}
 
 	stream, err := native.Subscribe(ctx)
@@ -157,8 +143,10 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	defer cancelEventReads()
 
 	state := newRunState(session.ID, request.InteractiveQuestions, activitySink(request.Launcher))
-	if err := native.Prompt(ctx, session.ID, initialTaskPrompt(request.Context)); err != nil {
-		return engine.Result{}, fmt.Errorf("opencode engine: send initial task: %w", err)
+	if promptRequired {
+		if err := native.Prompt(ctx, session.ID, initialTaskPrompt(request.Context)); err != nil {
+			return engine.Result{}, fmt.Errorf("opencode engine: send initial task: %w", err)
+		}
 	}
 
 	finish := func() (engine.Result, error) {
@@ -178,7 +166,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	events := readEvents(eventCtx, stream)
 	statePoll := time.NewTicker(nativeStatePollInterval)
 	defer statePoll.Stop()
-	executionObserved := false
+	executionObserved := recovered && !promptRequired
 	inactivePolls := 0
 	promptStallPolls := 0
 	statePollFailures := 0
@@ -345,6 +333,85 @@ func serverEnvironment(safe executioncontext.SafeContext, providerID string) (ma
 		return nil, fmt.Errorf("opencode engine: encode provider config: %w", err)
 	}
 	return map[string]string{"OPENCODE_CONFIG_CONTENT": string(encoded)}, nil
+}
+
+func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string) (engine.Process, bool, error) {
+	if attacher, ok := launcher.(engine.ProcessAttacher); ok {
+		process, err := attacher.Attach(ctx)
+		if err == nil {
+			if process == nil {
+				return nil, false, fmt.Errorf("opencode engine: attached process is unavailable")
+			}
+			return process, true, nil
+		}
+		if !errors.Is(err, engine.ErrNotAttachable) {
+			return nil, false, fmt.Errorf("opencode engine: attach existing server: %w", err)
+		}
+	}
+	process, err := launcher.Start(ctx, engine.ProcessRequest{
+		Command:               []string{"opencode", "serve", "--hostname", host, "--port", port},
+		CWD:                   "/workspace",
+		Env:                   env,
+		ProviderCredentialEnv: providerCredentialEnv,
+		Kind:                  "tool",
+		Name:                  "opencode-server",
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("opencode engine: start server: %w", err)
+	}
+	return process, false, nil
+}
+
+func ensureNativeSession(ctx context.Context, native *client.Client, safe executioncontext.SafeContext, settings settings, recovered bool) (client.Session, bool, error) {
+	if recovered {
+		listed, err := native.ListSessions(ctx)
+		if err != nil {
+			return client.Session{}, false, fmt.Errorf("opencode engine: list native sessions: %w", err)
+		}
+		session, err := pickNativeSession(ctx, native, listed)
+		if err != nil {
+			return client.Session{}, false, err
+		}
+		if strings.TrimSpace(session.ID) != "" {
+			return session, false, nil
+		}
+	}
+	session, err := native.CreateSession(ctx, client.CreateSessionRequest{
+		Directory: "/workspace",
+		Model: client.ModelRef{
+			ID:         safe.Model.Model,
+			ProviderID: settings.ProviderID,
+			Variant:    settings.Variant,
+		},
+	})
+	if err != nil {
+		return client.Session{}, false, fmt.Errorf("opencode engine: create native session: %w", err)
+	}
+	return session, true, nil
+}
+
+func pickNativeSession(ctx context.Context, native *client.Client, sessions []client.Session) (client.Session, error) {
+	if len(sessions) == 0 {
+		return client.Session{}, nil
+	}
+	for _, session := range sessions {
+		if strings.TrimSpace(session.ID) == "" {
+			continue
+		}
+		active, err := native.SessionActive(ctx, session.ID)
+		if err != nil {
+			return client.Session{}, fmt.Errorf("opencode engine: query native session %s: %w", session.ID, err)
+		}
+		if active {
+			return session, nil
+		}
+	}
+	for _, session := range sessions {
+		if strings.TrimSpace(session.ID) != "" {
+			return session, nil
+		}
+	}
+	return client.Session{}, nil
 }
 
 func initialTaskPrompt(safe executioncontext.SafeContext) string {

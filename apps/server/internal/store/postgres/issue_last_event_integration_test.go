@@ -63,3 +63,39 @@ func TestIssueLastEventSkipsToolChatterAndIsolatesProjects(t *testing.T) {
 		t.Fatal("leaked lastEvent across projects")
 	}
 }
+
+func TestIssueLastEventUsesInsertOrderWhenTimestampsTie(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "last-event-tie")
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	earlierID := "ffffffff-ffff-4fff-8fff-ffffffffffff"
+	laterID := "00000000-0000-4000-8000-000000000001"
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO events (id, type, project_id, issue_id, actor, payload)
+		VALUES ($1, 'question.answered', $2, $3, '{}'::jsonb, '{}'::jsonb)
+	`, earlierID, f.project.ID, f.issue.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO events (id, type, project_id, issue_id, actor, payload)
+		VALUES ($1, 'decision.recorded', $2, $3, '{}'::jsonb, '{}'::jsonb)
+	`, laterID, f.project.ID, f.issue.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetIssue(ctx, f.project.ID, f.issue.ID)
+	if err != nil || got.LastEvent == nil || got.LastEvent.ID != laterID || got.LastEvent.Type != "decision.recorded" {
+		t.Fatalf("lastEvent=%+v err=%v want decision %s", got.LastEvent, err, laterID)
+	}
+}

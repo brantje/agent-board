@@ -23,6 +23,10 @@ func (s *capturingRequestSessions) Start(_ context.Context, _, _, _ string, requ
 	return nil, s.err
 }
 
+func (*capturingRequestSessions) Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error) {
+	return nil, errors.New("unexpected process attach")
+}
+
 func (*capturingRequestSessions) ReconcileAll(context.Context) error { return nil }
 
 func TestProcessLauncherPreservesCredentialAndSecretSelectors(t *testing.T) {

@@ -38,7 +38,7 @@ describe('ReviewDetail', () => {
           review: { ...detail.review, status: 'APPROVED', decidedAt: '2026-01-01T00:11:00.000Z' },
           decision: { id: 'd1', outcome: 'APPROVED', actorType: 'HUMAN', actorId: 'user', safeDetails: {}, createdAt: '2026-01-01T00:11:00.000Z' },
           run: { ...run, status: 'COMPLETED', completedAt: '2026-01-01T00:11:00.000Z' },
-          issue: { id: 'AB-1', projectId: 'project-a', title: 'Fix', description: '', status: 'DONE', priority: 0, assignedAgentId: 'agent-1', createdAt: '', updatedAt: '' }
+          issue: { id: 'AB-1', projectId: 'project-a', number: 1, title: 'Fix', description: '', status: 'DONE', priority: 0, assignedAgentId: 'agent-1', createdAt: '', updatedAt: '', lastEvent: null }
         }))
       }
       return new Response(JSON.stringify(detail))
@@ -65,7 +65,7 @@ describe('ReviewDetail', () => {
           review: { ...detail.review, status: 'CHANGES_REQUESTED' },
           decision: { id: 'd2', outcome: 'CHANGES_REQUESTED', actorType: 'HUMAN', actorId: 'user', safeDetails: { feedback: 'Fix tests' }, createdAt: '2026-01-01T00:12:00.000Z' },
           run: { ...run, id: 'run-2', attempt: 2, status: 'QUEUED' },
-          issue: { id: 'AB-1', projectId: 'project-a', title: 'Fix', description: '', status: 'IN_PROGRESS', priority: 0, assignedAgentId: 'agent-1', createdAt: '', updatedAt: '' },
+          issue: { id: 'AB-1', projectId: 'project-a', number: 1, title: 'Fix', description: '', status: 'IN_PROGRESS', priority: 0, assignedAgentId: 'agent-1', createdAt: '', updatedAt: '', lastEvent: null },
           jobId: 'job-9'
         }), { status: 202 })
       }

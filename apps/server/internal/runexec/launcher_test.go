@@ -110,8 +110,15 @@ func (m launcherRunnerManager) Connect(context.Context, string, string) (runner.
 	return m.client, nil
 }
 
-func (m launcherRunnerManager) Reconcile(context.Context, string, string, string) (runner.ProcessSession, bool, error) {
-	return nil, false, nil
+func (m launcherRunnerManager) Reconcile(_ context.Context, _, _, sessionID string) (runner.ProcessSession, bool, error) {
+	if m.client == nil {
+		return nil, false, nil
+	}
+	session, err := m.client.Attach(sessionID)
+	if err != nil {
+		return nil, false, err
+	}
+	return session, session != nil, nil
 }
 
 type launcherClient struct {
@@ -126,9 +133,7 @@ func newLauncherClient(stdout, stderr string, exitCode int, waitErr error) *laun
 	return &launcherClient{stdout: stdout, stderr: stderr, exitCode: exitCode, waitErr: waitErr, done: make(chan struct{})}
 }
 
-func (*launcherClient) Capabilities() protocol.Capabilities { return protocol.Capabilities{} }
-func (*launcherClient) Health() protocol.Health             { return protocol.Health{} }
-func (c *launcherClient) Start(_ context.Context, sessionID string, _ runner.Request) (runner.ProcessSession, error) {
+func (c *launcherClient) transport(sessionID string) runner.ProcessSession {
 	return &launcherTransportProcess{
 		id:      sessionID,
 		stdout:  strings.NewReader(c.stdout),
@@ -136,10 +141,16 @@ func (c *launcherClient) Start(_ context.Context, sessionID string, _ runner.Req
 		stdin:   &launcherStdin{},
 		result:  runner.Result{ExitCode: c.exitCode},
 		waitErr: c.waitErr,
-	}, nil
+	}
 }
-func (*launcherClient) Attach(string) (runner.ProcessSession, error) {
-	return nil, errors.New("attach unsupported")
+
+func (c *launcherClient) Start(_ context.Context, sessionID string, _ runner.Request) (runner.ProcessSession, error) {
+	return c.transport(sessionID), nil
+}
+func (*launcherClient) Capabilities() protocol.Capabilities { return protocol.Capabilities{} }
+func (*launcherClient) Health() protocol.Health             { return protocol.Health{} }
+func (c *launcherClient) Attach(sessionID string) (runner.ProcessSession, error) {
+	return c.transport(sessionID), nil
 }
 func (c *launcherClient) Done() <-chan struct{} { return c.done }
 func (*launcherClient) Err() error              { return nil }
@@ -178,6 +189,9 @@ func (*launcherTransportProcess) Kill(context.Context) error      { return nil }
 type failingLauncherSessions struct{ err error }
 
 func (s failingLauncherSessions) Start(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error) {
+	return nil, s.err
+}
+func (s failingLauncherSessions) Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error) {
 	return nil, s.err
 }
 func (failingLauncherSessions) ReconcileAll(context.Context) error { return nil }
@@ -305,4 +319,142 @@ func TestProcessLauncherRecordsStartFailure(t *testing.T) {
 	if !hasProcessTestEvent(evidenceStore.events, "tool.started") || !hasProcessTestEvent(evidenceStore.events, "tool.failed") {
 		t.Fatalf("start failure events=%+v", evidenceStore.events)
 	}
+}
+
+func TestProcessLauncherAttachDoesNotRecordToolStarted(t *testing.T) {
+	safe := processTestSafeContext(t.TempDir())
+	evidenceStore := &processTestStore{}
+	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := evidence.NewRecorder(evidenceStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := evidence.NewOutputRecorder(evidenceStore, blobs, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionStore := &launcherSessionStore{
+		run: store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
+		instance: store.RuntimeInstance{
+			ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID,
+			RuntimeID: safe.Runtime.ID, Status: "RUNNING",
+		},
+		sessions: map[string]store.ExecutionSession{
+			"session-1": {
+				ID: "session-1", ProjectID: safe.Project.ID, RunID: safe.Run.ID,
+				RuntimeInstanceID: "runtime-instance", Status: "RUNNING",
+			},
+		},
+	}
+	client := newLauncherClient("stdout", "stderr", 0, nil)
+	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorized, err := app.NewAuthorizedExecutionSessionService(transportSessions, launcherPreparer{runtimeID: safe.Runtime.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &processLauncher{
+		sessions:          authorized,
+		events:            recorder,
+		output:            output,
+		safe:              safe,
+		runtimeInstanceID: "runtime-instance",
+		attachSessionID:   "session-1",
+		scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+	}
+	process, err := launcher.Attach(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process.ID() != "session-1" {
+		t.Fatalf("attached id=%q", process.ID())
+	}
+	go func() { _, _ = io.Copy(io.Discard, process.Stdout()) }()
+	go func() { _, _ = io.Copy(io.Discard, process.Stderr()) }()
+	if _, err := process.Wait(t.Context()); err != nil {
+		t.Fatalf("Wait() error=%v", err)
+	}
+	if hasProcessTestEvent(evidenceStore.events, "tool.started") {
+		t.Fatalf("attach must not record tool.started: %+v", evidenceStore.events)
+	}
+	var completed *store.Event
+	for index := range evidenceStore.events {
+		if evidenceStore.events[index].Type == "tool.completed" {
+			completed = &evidenceStore.events[index]
+			break
+		}
+	}
+	if completed == nil {
+		t.Fatalf("missing tool.completed in %+v", evidenceStore.events)
+	}
+	if completed.ParentEventID != nil {
+		t.Fatalf("attached tool.completed parent=%v", *completed.ParentEventID)
+	}
+}
+
+func TestProcessLauncherAttachFailureBoundaries(t *testing.T) {
+	safe := processTestSafeContext(t.TempDir())
+	evidenceStore := &processTestStore{}
+	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := evidence.NewRecorder(evidenceStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := evidence.NewOutputRecorder(evidenceStore, blobs, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("missing session", func(t *testing.T) {
+		launcher := &processLauncher{
+			sessions:          failingLauncherSessions{},
+			events:            recorder,
+			output:            output,
+			safe:              safe,
+			runtimeInstanceID: "runtime-instance",
+			scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+		}
+		if _, err := launcher.Attach(t.Context()); !errors.Is(err, engine.ErrNotAttachable) {
+			t.Fatalf("Attach() error=%v", err)
+		}
+	})
+
+	t.Run("session error", func(t *testing.T) {
+		want := errors.New("session attach failed")
+		launcher := &processLauncher{
+			sessions:          failingLauncherSessions{err: want},
+			events:            recorder,
+			output:            output,
+			safe:              safe,
+			runtimeInstanceID: "runtime-instance",
+			attachSessionID:   "session-1",
+			scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+		}
+		if _, err := launcher.Attach(t.Context()); !errors.Is(err, want) {
+			t.Fatalf("Attach() error=%v want=%v", err, want)
+		}
+	})
+
+	t.Run("unavailable process", func(t *testing.T) {
+		launcher := &processLauncher{
+			sessions:          failingLauncherSessions{},
+			events:            recorder,
+			output:            output,
+			safe:              safe,
+			runtimeInstanceID: "runtime-instance",
+			attachSessionID:   "session-1",
+			scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+		}
+		if _, err := launcher.Attach(t.Context()); err == nil || !strings.Contains(err.Error(), "attached Execution Session is unavailable") {
+			t.Fatalf("Attach() error=%v", err)
+		}
+	})
 }

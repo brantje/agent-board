@@ -97,6 +97,27 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 	return health, nil
 }
 
+func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
+	raw, err := c.getRawJSON(ctx, "/session")
+	if isNotFound(err) {
+		raw, err = c.getRawJSON(ctx, "/api/session")
+	}
+	if err != nil {
+		return nil, err
+	}
+	var sessions []Session
+	if err := json.Unmarshal(raw, &sessions); err == nil {
+		return sessions, nil
+	}
+	var wrapped struct {
+		Data []Session `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return nil, fmt.Errorf("opencode: decode session list: %w", err)
+	}
+	return wrapped.Data, nil
+}
+
 func (c *Client) CreateSession(ctx context.Context, request CreateSessionRequest) (Session, error) {
 	if strings.TrimSpace(request.Directory) == "" || strings.TrimSpace(request.Model.ID) == "" || strings.TrimSpace(request.Model.ProviderID) == "" {
 		return Session{}, fmt.Errorf("opencode: session directory, provider and model are required")
@@ -303,4 +324,12 @@ func (c *Client) doJSON(ctx context.Context, method, path string, payload, outpu
 		return fmt.Errorf("opencode: decode %s %s response: %w", method, path, err)
 	}
 	return nil
+}
+
+func (c *Client) getRawJSON(ctx context.Context, path string) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &raw); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }

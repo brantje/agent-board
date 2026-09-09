@@ -56,7 +56,7 @@ func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput
 	transport.stderr = "runner-error plain-secret"
 	client := &requestCapturingClient{fakeExecutionClient: &fakeExecutionClient{transport: transport, done: make(chan struct{})}}
 	storeFake := &executionSessionStoreFake{
-		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
+		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-config-1", Status: "RUNNING", RunnerStatus: "READY"},
 	}
 	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
@@ -123,7 +123,7 @@ func TestAuthorizedExecutionRedactsStartErrorsAndReleasesRegistration(t *testing
 		done:      make(chan struct{}),
 	}
 	storeFake := &executionSessionStoreFake{
-		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
+		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-config-1", Status: "RUNNING", RunnerStatus: "READY"},
 	}
 	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
@@ -155,7 +155,7 @@ func TestAuthorizedExecutionRedactsStartErrorsAndReleasesRegistration(t *testing
 
 func TestAuthorizedExecutionRejectsRuntimeMismatchBeforeSessionCreation(t *testing.T) {
 	storeFake := &executionSessionStoreFake{
-		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
+		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
 		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-a", Status: "RUNNING"},
 	}
 	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: &fakeExecutionClient{transport: newFakeExecutionTransport("session-1"), done: make(chan struct{})}})
@@ -198,6 +198,107 @@ func assertRunRedactionRetainedAndRelease(t *testing.T, service *AuthorizedExecu
 		t.Fatal("Run redaction lease was not released")
 	}
 	service.ReleaseRunRedaction(runID)
+}
+
+func TestAuthorizedExecutionAttachReusesLiveSession(t *testing.T) {
+	lowLevel, storeFake, transport := executionServiceFixture(t)
+	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.Start(t.Context(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"sleep", "10"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached, err := service.Attach(t.Context(), "project-1", started.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attached.ID() != started.ID() {
+		t.Fatalf("attached=%q started=%q", attached.ID(), started.ID())
+	}
+	if storeFake.session.ID != started.ID() {
+		t.Fatalf("attach created a new session: %+v", storeFake.session)
+	}
+	close(transport.resultCh)
+}
+
+func TestAuthorizedExecutionAttachPreparesAuthorizedSecretRedaction(t *testing.T) {
+	lowLevel, _, transport := executionServiceFixture(t)
+	preparer := &fakeExecutionPreparer{prepared: executioncontext.Prepared{RuntimeID: ""}}
+	service, err := NewAuthorizedExecutionSessionService(lowLevel, preparer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := service.Start(t.Context(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{
+		Command:               []string{"sleep", "10"},
+		ProviderCredentialEnv: "PROVIDER_TOKEN",
+		RuntimeSecretRefs:     map[string]string{"RUNTIME_TOKEN": "runtime-token"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preparer.request.RedactAuthorizedSecrets {
+		t.Fatal("Start must not switch to attach redaction")
+	}
+	_, err = service.Attach(t.Context(), "project-1", started.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preparer.request.RedactAuthorizedSecrets {
+		t.Fatalf("Attach SecretRequest=%+v", preparer.request)
+	}
+	close(transport.resultCh)
+}
+
+func TestAuthorizedExecutionAttachFailureBoundaries(t *testing.T) {
+	t.Run("unavailable service", func(t *testing.T) {
+		var service *AuthorizedExecutionSessionService
+		_, err := service.Attach(t.Context(), "project-1", "session-1")
+		apiErr, ok := AsError(err)
+		if !ok || apiErr.Code != "execution_session_unavailable" {
+			t.Fatalf("err=%v api=%+v", err, apiErr)
+		}
+	})
+
+	t.Run("runtime mismatch", func(t *testing.T) {
+		lowLevel, _, transport := executionServiceFixture(t)
+		preparer := &fakeExecutionPreparer{}
+		service, err := NewAuthorizedExecutionSessionService(lowLevel, preparer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		started, err := service.Start(t.Context(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"sleep", "10"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		preparer.prepared.RuntimeID = "other-runtime"
+		_, err = service.Attach(t.Context(), "project-1", started.ID())
+		apiErr, ok := AsError(err)
+		if !ok || apiErr.Code != "runtime_configuration_mismatch" {
+			t.Fatalf("err=%v api=%+v", err, apiErr)
+		}
+		close(transport.resultCh)
+	})
+
+	t.Run("session not running", func(t *testing.T) {
+		lowLevel, storeFake, transport := executionServiceFixture(t)
+		service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		started, err := service.Start(t.Context(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"sleep", "10"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		storeFake.session.Status = "COMPLETED"
+		_, err = service.Attach(t.Context(), "project-1", started.ID())
+		apiErr, ok := AsError(err)
+		if !ok || apiErr.Code != "execution_session_not_running" {
+			t.Fatalf("err=%v api=%+v", err, apiErr)
+		}
+		close(transport.resultCh)
+	})
 }
 
 type requestCapturingClient struct {

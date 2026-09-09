@@ -31,6 +31,9 @@ type reconcileSessions struct{}
 func (reconcileSessions) Start(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error) {
 	return nil, nil
 }
+func (reconcileSessions) Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error) {
+	return nil, nil
+}
 func (reconcileSessions) ReconcileAll(context.Context) error { return nil }
 
 func TestReconcileDoesNotBlindlyReplayExistingExecution(t *testing.T) {
