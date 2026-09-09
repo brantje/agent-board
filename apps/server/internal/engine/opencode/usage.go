@@ -47,7 +47,7 @@ func (s *runState) backfillUsageFromHistory(ctx context.Context, native *client.
 	}
 	for _, message := range messages {
 		if err := s.replayUsageMessage(ctx, native, message); err != nil {
-			return err
+			continue
 		}
 	}
 	return nil

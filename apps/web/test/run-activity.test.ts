@@ -651,6 +651,32 @@ describe('ActivityTimeline run feed', () => {
     expect(tool.find('.run-activity-todo-list').exists()).toBe(true)
   })
 
+  it('renders a failed todo tool reason below the checklist', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'start',
+        type: 'tool.started',
+        sequence: 1,
+        payload: { toolCallId: 'todo-1', name: 'Todowrite', input: { todos: [{ content: 'Ship feature', status: 'in progress' }] } }
+      }),
+      event({
+        id: 'failed',
+        type: 'tool.failed',
+        sequence: 2,
+        payload: { toolCallId: 'todo-1', name: 'Todowrite', reason: 'todo write failed' }
+      })
+    ])
+    const wrapper = mount(ActivityTimeline, {
+      props: { items },
+      global: { stubs: uiStubs }
+    })
+    const tool = wrapper.get('[data-tool-kind="todo"]')
+    expect(tool.attributes('data-tool-status')).toBe('failed')
+    expect(tool.text()).toContain('failed')
+    expect(tool.text()).toContain('Ship feature')
+    expect(tool.text()).toContain('error: todo write failed')
+  })
+
   it('renders two Todowrite rows independently', () => {
     const items = projectRunActivity([
       event({

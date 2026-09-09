@@ -86,6 +86,9 @@ function todoStatusClass(status: string) {
               <span class="min-w-0 leading-5" :class="todoStatusClass(todo.status)">{{ todo.content }}</span>
             </li>
           </ul>
+          <p v-if="item.status === 'failed' && item.reason" class="ml-5 mt-1 font-mono text-xs text-error">
+            <span class="font-medium">error:</span> {{ item.reason }}
+          </p>
         </div>
 
         <div v-else-if="item.kind === 'tool'" class="overflow-hidden py-1" :data-tool-status="item.status">

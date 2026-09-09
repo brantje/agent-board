@@ -419,7 +419,7 @@ func TestUsageBackfillIgnoresHistoryFetchErrors(t *testing.T) {
 	}
 }
 
-func TestUsageHistoryBackfillSkipsEmptyNonAssistantAndInvalidMessages(t *testing.T) {
+func TestUsageHistoryBackfillSkipsMalformedMessagesAndContinues(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/session/ses_1/message" {
 			http.NotFound(w, r)
@@ -429,6 +429,16 @@ func TestUsageHistoryBackfillSkipsEmptyNonAssistantAndInvalidMessages(t *testing
 			map[string]any{"parts": []any{}},
 			map[string]any{"info": map[string]any{"id": "user_1", "sessionID": "ses_1", "role": "user"}},
 			map[string]any{"info": 1},
+			map[string]any{
+				"info": map[string]any{
+					"id": "msg_done", "sessionID": "ses_1", "role": "assistant", "providerID": "openrouter", "modelID": "model",
+					"time": map[string]any{"created": 1000, "completed": 4000},
+				},
+				"parts": []any{
+					map[string]any{"id": "start_1", "sessionID": "ses_1", "messageID": "msg_done", "type": "step-start"},
+					map[string]any{"id": "finish_1", "sessionID": "ses_1", "messageID": "msg_done", "type": "step-finish", "tokens": map[string]any{"input": 10, "output": 4, "reasoning": 0, "cache": map[string]any{"read": 0, "write": 0}}},
+				},
+			},
 		}))
 	}))
 	t.Cleanup(server.Close)
@@ -440,8 +450,11 @@ func TestUsageHistoryBackfillSkipsEmptyNonAssistantAndInvalidMessages(t *testing
 	sink := &recordingUsageSink{}
 	state := newRunState("ses_1", nil, sink)
 	state.seedModelUsage("openrouter", "model", nil)
-	if err := state.backfillUsageFromHistory(t.Context(), native); err == nil {
-		t.Fatal("expected invalid history header to fail")
+	if err := state.backfillUsageFromHistory(t.Context(), native); err != nil {
+		t.Fatalf("malformed history must not fail the run: %v", err)
+	}
+	if len(sink.samples) != 1 || sink.samples[0].SampleID != "opencode:ses_1:finish_1" {
+		t.Fatalf("samples=%+v", sink.samples)
 	}
 
 	emptyState := newRunState("ses_1", nil, sink)
