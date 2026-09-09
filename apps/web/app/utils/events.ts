@@ -7,10 +7,48 @@ const agentMessageKinds: Record<string, string> = {
   rationale: 'Rationale',
   progress: 'Progress',
   discovery: 'Discovery',
-  summary: 'Summary'
+  summary: 'Summary',
+  reasoning: 'Thought'
 }
 
 const knownFamilies = new Set(['run', 'agent', 'runtime', 'question', 'decision', 'tool', 'file', 'test', 'artifact', 'issue', 'review'])
+
+export type ThoughtActivityItem = {
+  kind: 'thought'
+  id: string
+  occurredAt: string
+  sequence: number | null
+  message: string
+}
+
+export type ToolActivityItem = {
+  kind: 'tool'
+  id: string
+  occurredAt: string
+  sequence: number | null
+  toolCallId: string
+  name: string
+  label: string
+  target: string
+  status: 'running' | 'completed' | 'failed'
+  input?: Record<string, unknown>
+  summary?: string
+  resultPreview?: string
+  reason?: string
+}
+
+export type GenericActivityItem = {
+  kind: 'event'
+  id: string
+  occurredAt: string
+  sequence: number | null
+  title: string
+  description: string
+  event: EventEvidence
+  unknown: boolean
+}
+
+export type RunActivityItem = ThoughtActivityItem | ToolActivityItem | GenericActivityItem
 
 export function compareEvents(left: EventEvidence, right: EventEvidence) {
   const leftSequence = left.sequence ?? Number.MAX_SAFE_INTEGER
@@ -72,6 +110,116 @@ export function eventDescription(event: EventEvidence) {
 
 export function isUnknownEvent(event: EventEvidence) {
   return eventTitle(event) === event.type
+}
+
+const toolLabels: Record<string, string> = {
+  read: 'Read',
+  edit: 'Edit',
+  write: 'Write',
+  bash: 'Bash',
+  grep: 'Search',
+  glob: 'Search'
+}
+
+export function toolActivityLabel(name: string) {
+  const normalized = name.trim().toLowerCase()
+  if (!normalized) return 'Tool'
+  if (toolLabels[normalized]) return toolLabels[normalized]
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1).replaceAll('_', ' ')
+}
+
+export function toolActivityTarget(input: unknown) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return ''
+  const values = input as Record<string, unknown>
+  for (const key of ['filePath', 'path', 'command', 'pattern', 'query']) {
+    const value = values[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (Array.isArray(value) && value.length) return value.map(String).join(' ')
+  }
+  return ''
+}
+
+function toolStatus(type: string): ToolActivityItem['status'] {
+  if (type === 'tool.failed') return 'failed'
+  if (type === 'tool.completed') return 'completed'
+  return 'running'
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
+  const items: RunActivityItem[] = []
+  const toolIndexes = new Map<string, number>()
+
+  for (const event of [...events].sort(compareEvents)) {
+    const payload = event.payload || {}
+    if (event.type === 'agent.message' && payload.kind === 'reasoning' && typeof payload.message === 'string' && payload.message.trim()) {
+      items.push({ kind: 'thought', id: event.id, occurredAt: event.occurredAt, sequence: event.sequence, message: payload.message })
+      continue
+    }
+
+    const toolCallId = event.type.startsWith('tool.') ? stringValue(payload.toolCallId) : undefined
+    if (toolCallId) {
+      const input = payload.input && typeof payload.input === 'object' && !Array.isArray(payload.input)
+        ? payload.input as Record<string, unknown>
+        : undefined
+      const existingIndex = toolIndexes.get(toolCallId)
+      if (existingIndex != null) {
+        const existing = items[existingIndex]
+        if (existing?.kind === 'tool') {
+          items[existingIndex] = {
+            ...existing,
+            name: stringValue(payload.name) || existing.name,
+            label: toolActivityLabel(stringValue(payload.name) || existing.name),
+            target: toolActivityTarget(input) || existing.target,
+            status: toolStatus(event.type),
+            input: input || existing.input,
+            summary: stringValue(payload.summary) || existing.summary,
+            resultPreview: stringValue(payload.resultPreview) || existing.resultPreview,
+            reason: stringValue(payload.reason) || existing.reason
+          }
+          continue
+        }
+      }
+
+      const name = stringValue(payload.name) || 'tool'
+      toolIndexes.set(toolCallId, items.length)
+      items.push({
+        kind: 'tool',
+        id: event.id,
+        occurredAt: event.occurredAt,
+        sequence: event.sequence,
+        toolCallId,
+        name,
+        label: toolActivityLabel(name),
+        target: toolActivityTarget(input),
+        status: toolStatus(event.type),
+        input,
+        summary: stringValue(payload.summary),
+        resultPreview: stringValue(payload.resultPreview),
+        reason: stringValue(payload.reason)
+      })
+      continue
+    }
+
+    items.push({
+      kind: 'event',
+      id: event.id,
+      occurredAt: event.occurredAt,
+      sequence: event.sequence,
+      title: eventTitle(event),
+      description: eventDescription(event),
+      event,
+      unknown: isUnknownEvent(event)
+    })
+  }
+  return items
+}
+
+export function countRunToolCalls(events: EventEvidence[]) {
+  return projectRunActivity(events).filter(item => item.kind === 'tool').length
 }
 
 export function parseEventMessage(data: string): EventEvidence | undefined {
