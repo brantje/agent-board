@@ -35,6 +35,7 @@ type ExecutionStore interface {
 
 type SessionService interface {
 	Start(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error)
+	Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error)
 	ReconcileAll(context.Context) error
 }
 
@@ -91,7 +92,17 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	if err != nil {
 		return failed(err), nil
 	}
-	safe := resolved.Safe
+	live, err := p.liveExecutionSession(ctx, run)
+	if err != nil {
+		return failed(err), nil
+	}
+	if live != nil {
+		return p.attachExistingExecution(ctx, run, resolved.Safe, *live)
+	}
+	return p.startNewExecution(ctx, claim, run, resolved.Safe)
+}
+
+func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext) (scheduler.Result, error) {
 	runEventType := "run.started"
 	if claim.Job.Kind == "RESUME" {
 		runEventType = "run.resumed"
@@ -112,8 +123,33 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 		return failed(errors.Join(err, cleanupErr)), nil
 	}
-	instance = started
+	instance, safe, err = p.materializeExecution(ctx, run, safe, started)
+	if err != nil {
+		return failed(err), nil
+	}
+	if err := p.record(ctx, safe, "runtime.started", map[string]any{"runtimeId": safe.Runtime.ID}, &instance.ID, nil); err != nil {
+		_ = p.cleanupRuntime(ctx, safe, instance)
+		return scheduler.Result{}, err
+	}
+	return p.runEngine(ctx, run, safe, instance, "")
+}
 
+func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, session store.ExecutionSession) (scheduler.Result, error) {
+	if err := p.record(ctx, safe, "run.resumed", map[string]any{"reason": "lease_reconciliation"}, nil, nil); err != nil {
+		return scheduler.Result{}, err
+	}
+	started, err := p.runtimes.Start(ctx, run.ProjectID, session.RuntimeInstanceID)
+	if err != nil {
+		return failed(err), nil
+	}
+	instance, safe, err := p.materializeExecution(ctx, run, safe, started)
+	if err != nil {
+		return failed(err), nil
+	}
+	return p.runEngine(ctx, run, safe, instance, session.ID)
+}
+
+func (p *Processor) materializeExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance) (store.RuntimeInstance, executioncontext.SafeContext, error) {
 	// Runtime creation is also the boundary that materializes a placeholder
 	// Issue Workspace. Resolve again after that boundary so immutable provenance,
 	// Engine context and candidate collection all refer to the same durable
@@ -121,22 +157,21 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	materialized, err := p.resolver.Resolve(ctx, run.ProjectID, run.ID)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
-		return failed(errors.Join(err, cleanupErr)), nil
+		return store.RuntimeInstance{}, executioncontext.SafeContext{}, errors.Join(err, cleanupErr)
 	}
 	if materialized.Safe.Runtime.ID != safe.Runtime.ID || materialized.Safe.Workspace.ID != safe.Workspace.ID {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
-		return failed(errors.Join(fmt.Errorf("run execution: execution bindings changed during Runtime provisioning"), cleanupErr)), nil
+		return store.RuntimeInstance{}, executioncontext.SafeContext{}, errors.Join(fmt.Errorf("run execution: execution bindings changed during Runtime provisioning"), cleanupErr)
 	}
 	safe = materialized.Safe
 	if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
-		return scheduler.Result{}, errors.Join(err, cleanupErr)
+		return store.RuntimeInstance{}, executioncontext.SafeContext{}, errors.Join(err, cleanupErr)
 	}
-	if err := p.record(ctx, safe, "runtime.started", map[string]any{"runtimeId": safe.Runtime.ID}, &instance.ID, nil); err != nil {
-		_ = p.cleanupRuntime(ctx, safe, instance)
-		return scheduler.Result{}, err
-	}
+	return instance, safe, nil
+}
 
+func (p *Processor) runEngine(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance, attachSessionID string) (scheduler.Result, error) {
 	adapter, err := p.engines.Get(safe.Agent.Engine)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
@@ -148,6 +183,7 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		output:            p.output,
 		safe:              safe,
 		runtimeInstanceID: instance.ID,
+		attachSessionID:   attachSessionID,
 		scope:             evidence.RunScope{ProjectID: run.ProjectID, IssueID: run.IssueID, RunID: run.ID},
 	}
 	request, err := p.engineRequest(ctx, safe, launcher, instance.ID)
@@ -181,6 +217,30 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		return scheduler.Result{}, err
 	}
 	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
+}
+
+func (p *Processor) liveExecutionSession(ctx context.Context, run store.Run) (*store.ExecutionSession, error) {
+	sessions, err := p.store.ListExecutionSessions(ctx, run.ProjectID, []string{"PENDING", "STARTING", "RUNNING"})
+	if err != nil {
+		return nil, err
+	}
+	var live []store.ExecutionSession
+	for _, session := range sessions {
+		if session.RunID != run.ID {
+			continue
+		}
+		switch session.Status {
+		case "PENDING", "STARTING", "RUNNING":
+			live = append(live, session)
+		}
+	}
+	if len(live) > 1 {
+		return nil, fmt.Errorf("run execution: multiple live Execution Sessions exist for Run %s", run.ID)
+	}
+	if len(live) == 0 {
+		return nil, nil
+	}
+	return &live[0], nil
 }
 
 func (p *Processor) Reconcile(ctx context.Context, claim *store.SchedulerAdmission) (store.SchedulerReconciliationOutcome, *string, error) {
@@ -321,6 +381,8 @@ func safeFailure(err error) string {
 
 var _ scheduler.Processor = (*Processor)(nil)
 var _ scheduler.Reconciler = (*Processor)(nil)
+var _ engine.ProcessLauncher = (*processLauncher)(nil)
+var _ engine.ProcessAttacher = (*processLauncher)(nil)
 
 type processLauncher struct {
 	sessions          SessionService
@@ -328,6 +390,7 @@ type processLauncher struct {
 	output            *evidence.OutputRecorder
 	safe              executioncontext.SafeContext
 	runtimeInstanceID string
+	attachSessionID   string
 	scope             evidence.RunScope
 }
 
@@ -353,6 +416,20 @@ func (l *processLauncher) Start(ctx context.Context, request engine.ProcessReque
 		return nil, err
 	}
 	return newCapturingProcess(ctx, process, l, request, started.ID), nil
+}
+
+func (l *processLauncher) Attach(ctx context.Context) (engine.Process, error) {
+	if l == nil || strings.TrimSpace(l.attachSessionID) == "" {
+		return nil, engine.ErrNotAttachable
+	}
+	process, err := l.sessions.Attach(ctx, l.scope.ProjectID, l.attachSessionID)
+	if err != nil {
+		return nil, err
+	}
+	if process == nil {
+		return nil, fmt.Errorf("run execution: attached Execution Session is unavailable")
+	}
+	return newCapturingProcess(ctx, process, l, engine.ProcessRequest{Kind: "tool", Name: "attached"}, ""), nil
 }
 
 func (l *processLauncher) record(ctx context.Context, eventType string, payload any, parent *string) (store.Event, error) {
@@ -399,6 +476,14 @@ func cloneMap(values map[string]string) map[string]string {
 		copyValues[key] = value
 	}
 	return copyValues
+}
+
+func optionalEventID(id string) *string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
+	return &id
 }
 
 type captureResult struct {
@@ -500,7 +585,7 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 		p.waitResult = engine.ProcessResult{ExitCode: result.ExitCode}
 		p.waitErr = errors.Join(waitErr, captureErr)
 		exitCode := result.ExitCode
-		parent := p.parentEventID
+		parent := optionalEventID(p.parentEventID)
 		terminalCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processCancellationCleanupTimeout)
 		defer cancel()
 		if p.waitErr != nil || result.ExitCode != 0 {
@@ -508,7 +593,7 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 			if cause == nil {
 				cause = fmt.Errorf("process exited with code %d", result.ExitCode)
 			}
-			if eventErr := p.launcher.recordFailure(terminalCtx, p.request, &parent, chunks, cause); eventErr != nil {
+			if eventErr := p.launcher.recordFailure(terminalCtx, p.request, parent, chunks, cause); eventErr != nil {
 				p.waitErr = errors.Join(p.waitErr, eventErr)
 			}
 			return
@@ -518,7 +603,7 @@ func (p *capturingProcess) Wait(ctx context.Context) (engine.ProcessResult, erro
 		if p.request.Kind == "test" {
 			eventType = "test.completed"
 		}
-		if _, eventErr := p.launcher.record(terminalCtx, eventType, payload, &parent); eventErr != nil {
+		if _, eventErr := p.launcher.record(terminalCtx, eventType, payload, parent); eventErr != nil {
 			p.waitErr = eventErr
 		}
 	})

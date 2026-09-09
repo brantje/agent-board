@@ -41,7 +41,7 @@ func (s *ExecutionSessionService) ReconcileAllWithReporter(ctx context.Context, 
 			continue
 		}
 		for _, session := range sessions {
-			process, err := s.Reconcile(ctx, session.ProjectID, session.ID)
+			_, err := s.Reconcile(ctx, session.ProjectID, session.ID)
 			if err != nil {
 				wrapped := fmt.Errorf("reconcile Execution Session %s: %w", session.ID, err)
 				if report != nil {
@@ -49,13 +49,6 @@ func (s *ExecutionSessionService) ReconcileAllWithReporter(ctx context.Context, 
 				} else {
 					errs = append(errs, wrapped)
 				}
-				continue
-			}
-			if process != nil {
-				// #11 has no evidence sink yet. Drain recovered streams so an
-				// orphaned live process cannot deadlock on output backpressure;
-				// #13 replaces these drains with durable output/evidence sinks.
-				drainExecutionOutput(process.Stdout(), process.Stderr())
 			}
 		}
 	}

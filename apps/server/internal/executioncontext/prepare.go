@@ -8,8 +8,9 @@ import (
 )
 
 type SecretRequest struct {
-	ProviderCredentialEnv string
-	RuntimeSecretRefs     map[string]string
+	ProviderCredentialEnv   string
+	RuntimeSecretRefs       map[string]string
+	RedactAuthorizedSecrets bool
 }
 
 type Prepared struct {
@@ -67,7 +68,11 @@ func (p *Preparer) Prepare(ctx context.Context, projectID, runID string, request
 	if err != nil {
 		return Prepared{}, err
 	}
-	material, err := ResolveSecretMaterial(ctx, p.secretResolver, projectID, resolved, providerEnv != "", requestedRefs)
+	if request.RedactAuthorizedSecrets {
+		requestedRefs = append(requestedRefs, resolved.AllowedSecretRefs...)
+	}
+	includeProvider := providerEnv != "" || (request.RedactAuthorizedSecrets && resolved.ProviderCredentialRef != nil && strings.TrimSpace(*resolved.ProviderCredentialRef) != "")
+	material, err := ResolveSecretMaterial(ctx, p.secretResolver, projectID, resolved, includeProvider, requestedRefs)
 	if err != nil {
 		return Prepared{}, err
 	}

@@ -21,11 +21,12 @@ import (
 )
 
 type processTestStore struct {
-	provenance json.RawMessage
-	events     []store.Event
-	artifacts  []store.Artifact
-	chunks     []store.RawOutputChunk
-	sessions   []store.ExecutionSession
+	provenance      json.RawMessage
+	events          []store.Event
+	artifacts       []store.Artifact
+	chunks          []store.RawOutputChunk
+	sessions        []store.ExecutionSession
+	listSessionsErr error
 }
 
 func (s *processTestStore) PutRunProvenance(_ context.Context, _, _ string, value json.RawMessage) error {
@@ -42,6 +43,9 @@ func (s *processTestStore) GetRunProvenance(context.Context, string, string) (js
 	return append(json.RawMessage(nil), s.provenance...), nil
 }
 func (s *processTestStore) ListExecutionSessions(context.Context, string, []string) ([]store.ExecutionSession, error) {
+	if s.listSessionsErr != nil {
+		return nil, s.listSessionsErr
+	}
 	return append([]store.ExecutionSession(nil), s.sessions...), nil
 }
 func (s *processTestStore) AppendEvent(_ context.Context, event store.Event) (store.Event, error) {
@@ -106,6 +110,9 @@ type processTestSessions struct{}
 
 func (processTestSessions) Start(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error) {
 	return nil, errors.New("unexpected process launch")
+}
+func (processTestSessions) Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error) {
+	return nil, errors.New("unexpected process attach")
 }
 func (processTestSessions) ReconcileAll(context.Context) error { return nil }
 
@@ -210,6 +217,119 @@ func TestProcessorProcessPersistsEvidenceAndCleansRuntime(t *testing.T) {
 	}
 }
 
+func TestProcessorProcessAttachesLiveSessionWithoutRestarting(t *testing.T) {
+	workspace := initProcessTestRepository(t)
+	safe := processTestSafeContext(workspace)
+	evidenceStore := &processTestStore{
+		sessions: []store.ExecutionSession{{
+			ID: "session-live", ProjectID: safe.Project.ID, RunID: safe.Run.ID,
+			RuntimeInstanceID: "existing-runtime", Status: "RUNNING",
+		}},
+	}
+	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := evidence.NewRecorder(evidenceStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := evidence.NewOutputRecorder(evidenceStore, blobs, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), evidenceStore, blobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := engine.NewRegistry(processTestEngine{workspace: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtimes := &processTestRuntime{}
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"}
+	result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Job: store.SchedulerJob{Kind: "START"}, Run: run}, processTestLifecycle{run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RunStatus != "READY_FOR_REVIEW" {
+		t.Fatalf("result=%+v", result)
+	}
+	if runtimes.created != 0 {
+		t.Fatalf("attach must not create Runtime Instance, created=%d", runtimes.created)
+	}
+	if runtimes.started != 1 || runtimes.stopped != 1 || runtimes.destroyed != 1 {
+		t.Fatalf("runtime lifecycle create/start/stop/destroy=%d/%d/%d/%d", runtimes.created, runtimes.started, runtimes.stopped, runtimes.destroyed)
+	}
+	if hasProcessTestEvent(evidenceStore.events, "run.started") {
+		t.Fatalf("attach must not record run.started: %+v", evidenceStore.events)
+	}
+	if hasProcessTestEvent(evidenceStore.events, "runtime.provisioning") {
+		t.Fatalf("attach must not record runtime.provisioning: %+v", evidenceStore.events)
+	}
+	if !hasProcessTestEvent(evidenceStore.events, "run.resumed") {
+		t.Fatalf("missing run.resumed in %+v", evidenceStore.events)
+	}
+	var resumed store.Event
+	for _, event := range evidenceStore.events {
+		if event.Type == "run.resumed" {
+			resumed = event
+			break
+		}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(resumed.Payload, &payload); err != nil {
+		t.Fatalf("decode run.resumed: %v", err)
+	}
+	if payload["reason"] != "lease_reconciliation" {
+		t.Fatalf("run.resumed payload=%s", resumed.Payload)
+	}
+}
+
+func TestProcessorProcessFailsWhenMultipleLiveSessionsExist(t *testing.T) {
+	workspace := initProcessTestRepository(t)
+	safe := processTestSafeContext(workspace)
+	evidenceStore := &processTestStore{
+		sessions: []store.ExecutionSession{
+			{ID: "session-a", ProjectID: safe.Project.ID, RunID: safe.Run.ID, RuntimeInstanceID: "runtime-a", Status: "RUNNING"},
+			{ID: "session-b", ProjectID: safe.Project.ID, RunID: safe.Run.ID, RuntimeInstanceID: "runtime-a", Status: "STARTING"},
+		},
+	}
+	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := evidence.NewRecorder(evidenceStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := evidence.NewOutputRecorder(evidenceStore, blobs, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), evidenceStore, blobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := engine.NewRegistry(processTestEngine{workspace: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, &processTestRuntime{}, processTestSessions{}, registry, recorder, output, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"}
+	result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run}, processTestLifecycle{run: run})
+	if err != nil || result.RunStatus != "FAILED" || result.FailureReason == nil || !strings.Contains(*result.FailureReason, "multiple live Execution Sessions") {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+}
+
 func TestProcessorProcessReturnsFailedResultForResolverAndRuntimeErrors(t *testing.T) {
 	workspace := initProcessTestRepository(t)
 	safe := processTestSafeContext(workspace)
@@ -260,6 +380,70 @@ func TestProcessorProcessReturnsFailedResultForResolverAndRuntimeErrors(t *testi
 			t.Fatalf("result=%+v destroyed=%d err=%v", result, runtimes.destroyed, err)
 		}
 	})
+}
+
+func TestProcessorProcessAttachFailureBoundaries(t *testing.T) {
+	workspace := initProcessTestRepository(t)
+	safe := processTestSafeContext(workspace)
+	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"}
+	live := []store.ExecutionSession{{
+		ID: "session-live", ProjectID: safe.Project.ID, RunID: safe.Run.ID,
+		RuntimeInstanceID: "existing-runtime", Status: "RUNNING",
+	}}
+
+	t.Run("list sessions", func(t *testing.T) {
+		evidenceStore := &processTestStore{listSessionsErr: errors.New("session list failed")}
+		processor := newProcessorWithStore(t, workspace, safe, evidenceStore, &processTestRuntime{})
+		result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run}, processTestLifecycle{run: run})
+		if err != nil || result.RunStatus != "FAILED" || result.FailureReason == nil || !strings.Contains(*result.FailureReason, "session list failed") {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+	})
+
+	t.Run("runtime start", func(t *testing.T) {
+		evidenceStore := &processTestStore{sessions: live}
+		runtimes := &processTestRuntime{startErr: errors.New("runtime start failed")}
+		processor := newProcessorWithStore(t, workspace, safe, evidenceStore, runtimes)
+		result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run}, processTestLifecycle{run: run})
+		if err != nil || result.RunStatus != "FAILED" || result.FailureReason == nil || !strings.Contains(*result.FailureReason, "runtime start failed") {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+		if runtimes.created != 0 || runtimes.destroyed != 0 {
+			t.Fatalf("attach must not create or destroy Runtime Instance, created=%d destroyed=%d", runtimes.created, runtimes.destroyed)
+		}
+		if hasProcessTestEvent(evidenceStore.events, "run.started") {
+			t.Fatalf("attach must not record run.started: %+v", evidenceStore.events)
+		}
+	})
+}
+
+func newProcessorWithStore(t *testing.T, workspace string, safe executioncontext.SafeContext, evidenceStore *processTestStore, runtimes *processTestRuntime) *Processor {
+	t.Helper()
+	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := evidence.NewRecorder(evidenceStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := evidence.NewOutputRecorder(evidenceStore, blobs, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), evidenceStore, blobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := engine.NewRegistry(processTestEngine{workspace: workspace})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return processor
 }
 
 func TestProcessorHelpersCoverFailureAndPayloadShapes(t *testing.T) {

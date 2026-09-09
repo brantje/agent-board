@@ -49,7 +49,96 @@ func TestNewValidatesCoordinatorConfig(t *testing.T) {
 	}
 }
 
-func TestCoordinatorReconcilesBeforeNewAdmission(t *testing.T) {
+func TestCoordinatorProcessesActiveReconciliation(t *testing.T) {
+	reconcileClaim := fakeAdmission("active-job")
+	fs := &fakeSchedulerStore{
+		reconciliationClaims: []*store.SchedulerAdmission{reconcileClaim},
+		transitioned:         make(chan store.SchedulerTransition, 2),
+	}
+	processed := make(chan string, 1)
+	processor := processorFunc(func(_ context.Context, got *store.SchedulerAdmission, _ Lifecycle) (Result, error) {
+		processed <- got.Job.ID
+		return Result{RunStatus: "READY_FOR_REVIEW"}, nil
+	})
+	c, err := New(fs, processor, reconcilerFunc(func(context.Context, *store.SchedulerAdmission) (store.SchedulerReconciliationOutcome, *string, error) {
+		return store.SchedulerReconciliationActive, nil, nil
+	}), testConfig())
+	if err != nil {
+		t.Fatalf("new coordinator: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- c.Run(ctx) }()
+
+	select {
+	case id := <-processed:
+		if id != reconcileClaim.Job.ID {
+			t.Fatalf("processed job=%s want %s", id, reconcileClaim.Job.ID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ACTIVE reconciliation did not invoke processor")
+	}
+
+	var sawFinal bool
+	deadline := time.After(time.Second)
+	for !sawFinal {
+		select {
+		case transition := <-fs.transitioned:
+			if transition.JobID == reconcileClaim.Job.ID && transition.RunStatus == "READY_FOR_REVIEW" {
+				sawFinal = true
+			}
+		case <-deadline:
+			t.Fatal("ACTIVE reconciliation did not persist processor result")
+		}
+	}
+
+	events := fs.eventsSnapshot()
+	if indexOf(events, "resolve-reconciliation") == -1 {
+		t.Fatalf("expected resolve-reconciliation before process: %v", events)
+	}
+	if indexOf(events, "admit") != -1 && indexOf(events, "admit") < indexOf(events, "resolve-reconciliation") {
+		t.Fatalf("ACTIVE handoff must not go through admission: %v", events)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("run coordinator: %v", err)
+	}
+}
+
+func TestCoordinatorDoesNotProcessUnknownReconciliation(t *testing.T) {
+	fs := &fakeSchedulerStore{
+		reconciliationClaims: []*store.SchedulerAdmission{fakeAdmission("unknown-job")},
+	}
+	processed := make(chan string, 1)
+	processor := processorFunc(func(_ context.Context, got *store.SchedulerAdmission, _ Lifecycle) (Result, error) {
+		processed <- got.Job.ID
+		return Result{RunStatus: "COMPLETED"}, nil
+	})
+	c, err := New(fs, processor, reconcilerFunc(func(context.Context, *store.SchedulerAdmission) (store.SchedulerReconciliationOutcome, *string, error) {
+		return store.SchedulerReconciliationUnknown, nil, nil
+	}), testConfig())
+	if err != nil {
+		t.Fatalf("new coordinator: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := c.Run(ctx); err != nil {
+		t.Fatalf("run coordinator: %v", err)
+	}
+	select {
+	case id := <-processed:
+		t.Fatalf("UNKNOWN reconciliation invoked processor for %s", id)
+	default:
+	}
+	if len(fs.transitionsSnapshot()) != 0 {
+		t.Fatalf("UNKNOWN reconciliation must not transition via processor: %+v", fs.transitionsSnapshot())
+	}
+}
+
+func TestCoordinatorRetryReconciliationGoesThroughAdmission(t *testing.T) {
 	reconcileClaim := fakeAdmission("reconcile-job")
 	queuedClaim := fakeAdmission("queued-job")
 	fs := &fakeSchedulerStore{
@@ -92,6 +181,9 @@ func TestCoordinatorReconcilesBeforeNewAdmission(t *testing.T) {
 	}
 	if indexOf(events, "resolve-reconciliation") > indexOf(events, "admit") {
 		t.Fatalf("reconciliation must precede admission: %v", events)
+	}
+	if queued := indexOf(events, "admit"); queued == -1 {
+		t.Fatal("RETRY reconciliation must admit the queued job")
 	}
 }
 
