@@ -54,8 +54,8 @@ describe('RunUsageCard', () => {
 
     expect(wrapper.text()).toContain('12K / —')
     expect(wrapper.find('progress').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Avg. waiting —')
-    expect(wrapper.text()).toContain('Tokens/sec —')
+    expect(wrapper.text()).toContain('Avg. waiting—')
+    expect(wrapper.text()).toContain('Tokens/sec—')
   })
 
   it('renders an explicit empty state before the first model usage sample', () => {
