@@ -59,4 +59,20 @@ describe('ActivityTimeline run feed', () => {
     expect(wrapper.text()).toContain('result: func Create()')
     expect(wrapper.findAll('li')).toHaveLength(2)
   })
+
+  it('renders failed status and reason even when a result preview exists', () => {
+    const wrapper = mount(ActivityTimeline, {
+      props: {
+        events: [
+          event({ id: 'start', type: 'tool.started', sequence: 1, payload: { toolCallId: 'call', name: 'edit', input: { path: 'issue.go' } } }),
+          event({ id: 'failed', type: 'tool.failed', sequence: 2, payload: { toolCallId: 'call', name: 'edit', resultPreview: 'partial update', reason: 'write failed' } })
+        ]
+      },
+      global: { stubs: uiStubs }
+    })
+    const tool = wrapper.get('[data-tool-status="failed"]')
+    expect(tool.text()).toContain('failed')
+    expect(tool.text()).toContain('result: partial update')
+    expect(tool.text()).toContain('error: write failed')
+  })
 })
