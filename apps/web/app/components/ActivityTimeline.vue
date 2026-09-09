@@ -102,7 +102,7 @@ function toolExpandable(item: ToolActivityItem) {
           </div>
         </div>
 
-        <div v-else class="py-1" :data-activity-kind="item.unknown ? 'unknown' : 'event'">
+        <div v-else-if="item.kind === 'event'" class="py-1" :data-activity-kind="item.unknown ? 'unknown' : 'event'">
           <template v-if="item.unknown">
             <strong class="font-medium">{{ item.title }}</strong>
             <p v-if="item.description" class="mt-1 text-muted">{{ item.description }}</p>
