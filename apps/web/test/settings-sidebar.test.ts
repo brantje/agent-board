@@ -106,15 +106,24 @@ describe('settings route wiring', () => {
             ConfigManager: {
               props: ['kind', 'projectId', 'resourceId'],
               template: '<div :data-kind="kind" :data-project="projectId" :data-resource="resourceId" />'
+            },
+            ProjectSettings: {
+              props: ['projectId'],
+              template: '<div data-project-settings :data-project="projectId" />'
             }
           }
         }
       })
       expect(wrapper.find('[data-settings-shell]').exists()).toBe(true)
       if (path.endsWith('/settings/index.vue') && !path.includes('[projectID]')) continue
+      if (path.endsWith('/projects/[projectID]/settings/index.vue')) {
+        expect(wrapper.get('[data-project-settings]').attributes('data-project')).toBe('project-a')
+        expect(wrapper.find('[data-kind]').exists()).toBe(false)
+        continue
+      }
       const manager = wrapper.get('[data-kind]')
       if (path.includes('[projectID]')) {
-        expect(manager.attributes(path.endsWith('/settings/index.vue') ? 'data-resource' : 'data-project')).toBe('project-a')
+        expect(manager.attributes('data-project')).toBe('project-a')
       } else {
         expect(manager.attributes('data-project')).toBeUndefined()
       }

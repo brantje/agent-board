@@ -70,3 +70,41 @@ export function formatElapsed(startedAt: string | null, completedAt: string | nu
 export function commandLabel(command: unknown) {
   return Array.isArray(command) ? command.map(String).join(' ') : ''
 }
+
+export interface RunAgentInfo {
+  name?: string
+  engine?: string
+  model?: string
+  provider?: string
+  runtime?: string
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  return value as Record<string, unknown>
+}
+
+function textValue(value: unknown) {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed || undefined
+}
+
+export function runAgentInfo(provenance: Record<string, unknown> | null | undefined): RunAgentInfo | null {
+  const root = recordValue(provenance)
+  if (!root) return null
+  const context = recordValue(root.context) ?? root
+  const agent = recordValue(context.agent)
+  const model = recordValue(context.model)
+  const provider = recordValue(context.provider)
+  const runtime = recordValue(context.runtime)
+  const info: RunAgentInfo = {
+    name: textValue(agent?.name),
+    engine: textValue(agent?.engine),
+    model: textValue(model?.model) || textValue(model?.name),
+    provider: textValue(provider?.name) || textValue(provider?.kind),
+    runtime: textValue(runtime?.name) || textValue(runtime?.kind)
+  }
+  if (!info.name && !info.engine && !info.model && !info.provider && !info.runtime) return null
+  return info
+}

@@ -10,6 +10,36 @@ import (
 	"strings"
 )
 
+type SessionMessage struct {
+	Info  json.RawMessage   `json:"info"`
+	Parts []json.RawMessage `json:"parts"`
+}
+
+func (c *Client) ListMessages(ctx context.Context, sessionID string) ([]SessionMessage, error) {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fmt.Errorf("opencode: session id is required")
+	}
+	path := "/session/" + url.PathEscape(sessionID) + "/message"
+	raw, err := c.getRawJSON(ctx, path)
+	if isNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var messages []SessionMessage
+	if err := json.Unmarshal(raw, &messages); err == nil {
+		return messages, nil
+	}
+	var wrapped struct {
+		Data []SessionMessage `json:"data"`
+	}
+	if err := json.Unmarshal(raw, &wrapped); err != nil {
+		return nil, fmt.Errorf("opencode: decode session messages: %w", err)
+	}
+	return wrapped.Data, nil
+}
+
 // LatestAssistantError checks the newest native session message for a durable
 // assistant failure. OpenCode can persist a provider/API error on the assistant
 // message even when the corresponding session.error SSE event is missed.

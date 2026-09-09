@@ -1,47 +1,61 @@
 :root,
 html[data-theme='dark'] {
-  --color-bg: #212121;
-  --color-surface: #2a2a2a;
-  --color-text: #f3f3f3;
-  --color-accent: #5f8fcf;
-  --color-on-accent: #181818;
-  --color-divider: #303030;
-  --color-danger: #d85b66;
-  --color-on-danger: #181818;
-  --color-success: #5cb882;
-  --danger-100: #3a2226;
-  --danger-700: #e9858e;
-  --success-100: #1d2e24;
-  --success-700: #8fd4a8;
+  /* Main hierarchy */
+  --color-bg: #1b1d1f;
+  --color-surface: #292c30;
+  --color-text: #f1f3f5;
+  --color-divider: #393d42;
 
-  --neutral-100: #181818;
-  --neutral-200: #212121;
-  --neutral-300: #2a2a2a;
-  --neutral-400: #303030;
-  --neutral-500: #3c3c3c;
-  --neutral-600: #5a5a5a;
-  --neutral-700: #949494;
-  --neutral-800: #afafaf;
-  --neutral-900: #e7e7e7;
+  /* Brand / states */
+  --color-accent: #72a7e8;
+  --color-on-accent: #111418;
 
-  --accent-100: #1d2733;
-  --accent-200: #233445;
-  --accent-300: #2d4358;
-  --accent-400: #3b5b76;
-  --accent-500: #4b73a0;
-  --accent-600: #5f8fcf;
-  --accent-700: #79a7df;
-  --accent-800: #9bbfe9;
-  --accent-900: #c0d8f2;
+  --color-danger: #e66a75;
+  --color-on-danger: #151719;
+  --color-success: #67c58a;
 
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 28%);
-  --shadow-md: 0 6px 18px rgb(0 0 0 / 34%);
-  --shadow-lg: 0 16px 40px rgb(0 0 0 / 42%);
+  --danger-100: #352326;
+  --danger-700: #f08a93;
 
-  --board-column-backlog: #262626;
-  --board-column-todo: #252628;
-  --board-column-in-progress: #2a2820;
-  --board-column-blocked: #2c2425;
-  --board-column-done: #242830;
-  --board-column-review: #232a26;
+  --success-100: #1e3026;
+  --success-700: #93d8aa;
+
+  /* Neutral hierarchy */
+  --neutral-100: #151719;
+  --neutral-200: #1b1d1f;
+  --neutral-300: #292c30;
+  --neutral-400: #393d42;
+  --neutral-500: #4b5057;
+  --neutral-600: #69717a;
+  --neutral-700: #979fa8;
+  --neutral-800: #bec4ca;
+  --neutral-900: #eceff1;
+
+  /* Accent scale */
+  --accent-100: #1d2936;
+  --accent-200: #23374b;
+  --accent-300: #2d4965;
+  --accent-400: #3f6387;
+  --accent-500: #5684b5;
+  --accent-600: #72a7e8;
+  --accent-700: #8db9ec;
+  --accent-800: #accdf2;
+  --accent-900: #d0e3f8;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 32%);
+  --shadow-md: 0 6px 18px rgb(0 0 0 / 38%);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 46%);
+
+  /* Board columns: restrained tint, cards stay visually dominant */
+  --board-column-backlog: #202225;
+  --board-column-todo: #202329;
+  --board-column-in-progress: #28251d;
+  --board-column-blocked: #2a2022;
+  --board-column-review: #1f2924;
+  --board-column-done: #202631;
+
+  --activity-stream-bg: #1e2a38;
+  --activity-stream-border: #2d3f54;
+
+  --activity-todo-bg: #25282c;
 }

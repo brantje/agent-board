@@ -2,6 +2,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ProjectList from '../app/components/ProjectList.vue'
 import ProjectEditor from '../app/components/ProjectEditor.vue'
+import ProjectSettings from '../app/components/ProjectSettings.vue'
 import { event, MockEventSource, project } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
@@ -224,6 +225,51 @@ describe('ProjectList', () => {
     expect(navigateTo).not.toHaveBeenCalled()
     expect(wrapper.find('[role=dialog]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Edit project')
+    wrapper.unmount()
+  })
+})
+
+describe('ProjectSettings', () => {
+  it('loads the Project editor inside project settings', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(project))))
+    const wrapper = mount(ProjectSettings, { props: { projectId: project.id }, global })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Project')
+    expect(wrapper.text()).toContain('backend-managed repository context')
+    expect((wrapper.get('[data-field=name] input').element as HTMLInputElement).value).toBe('Workspace')
+    expect((wrapper.get('[data-field=issuePrefix] input').element as HTMLInputElement).disabled).toBe(true)
+    expect(wrapper.find('[data-kind]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('saves edits and discards unsaved changes on cancel', async () => {
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      if (options.method === 'PATCH') return new Response(JSON.stringify({ ...project, name: 'Renamed' }))
+      return new Response(JSON.stringify(project))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectSettings, { props: { projectId: project.id }, global })
+    await flushPromises()
+
+    await wrapper.get('[data-field=name] input').setValue('Renamed')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(fetch.mock.calls.some(([, options]) => options.method === 'PATCH')).toBe(true)
+    expect(wrapper.text()).toContain('Saved')
+
+    await wrapper.get('[data-field=name] input').setValue('Unsaved')
+    await button(wrapper, 'Cancel').trigger('click')
+    expect((wrapper.get('[data-field=name] input').element as HTMLInputElement).value).toBe('Renamed')
+    wrapper.unmount()
+  })
+
+  it('shows load errors without rendering the editor', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('missing', { status: 404 })))
+    const wrapper = mount(ProjectSettings, { props: { projectId: project.id }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('This resource is unavailable or belongs to another project.')
+    expect(wrapper.find('form').exists()).toBe(false)
     wrapper.unmount()
   })
 })

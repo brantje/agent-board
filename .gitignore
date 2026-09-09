@@ -13,5 +13,6 @@ apps/server/tmp/
 .DS_Store
 .idea/
 .vscode/
+repositories/
 workspaces/
 evidence/

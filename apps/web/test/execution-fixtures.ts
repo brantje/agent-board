@@ -49,7 +49,15 @@ export function event(partial: Partial<EventEvidence> & Pick<EventEvidence, 'id'
 export function evidence(overrides: Partial<RunEvidence> = {}): RunEvidence {
   return {
     run,
-    provenance: { schemaVersion: 1, context: { runtime: { id: 'runtime-1', name: 'Docker' } } },
+    provenance: {
+      schemaVersion: 1,
+      context: {
+        agent: { id: 'agent-1', name: 'Coder', engine: 'opencode', roleInstructions: 'Ship maintainable code.' },
+        model: { id: 'model-1', name: 'gpt-test', model: 'openai/gpt-test' },
+        provider: { id: 'provider-1', name: 'OpenRouter', kind: 'openrouter' },
+        runtime: { id: 'runtime-1', name: 'Docker', kind: 'docker' }
+      }
+    },
     runtimeInstances: [{
       id: 'instance-1',
       runtimeId: 'runtime-1',
@@ -75,6 +83,7 @@ export function evidence(overrides: Partial<RunEvidence> = {}): RunEvidence {
     events: [],
     tests: [],
     fileChanges: [],
+    usage: null,
     rawOutput: [{
       id: 'chunk-1',
       stream: 'STDOUT',

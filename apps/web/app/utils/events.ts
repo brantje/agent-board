@@ -21,6 +21,11 @@ export type AgentTextActivityItem = {
   message: string
 }
 
+export type TodoActivityItem = {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+}
+
 export type ToolActivityItem = {
   kind: 'tool'
   id: string
@@ -35,6 +40,7 @@ export type ToolActivityItem = {
   summary?: string
   resultPreview?: string
   reason?: string
+  todos?: TodoActivityItem[]
 }
 
 export type QuestionActivityItem = {
@@ -98,6 +104,7 @@ const hiddenRunActivityTypes = new Set([
   'engine.question_binding_resolved',
   'engine.file_created',
   'file.created',
+  'model.usage',
 ])
 
 const boardActivityFamilies = new Set(['issue', 'run', 'question', 'review', 'decision', 'project'])
@@ -181,7 +188,9 @@ const toolLabels: Record<string, string> = {
   write: 'Write',
   bash: 'Bash',
   grep: 'Search',
-  glob: 'Search'
+  glob: 'Search',
+  todowrite: 'Todo',
+  todo_write: 'Todo'
 }
 
 export function toolActivityLabel(name: string) {
@@ -197,7 +206,9 @@ const toolIcons: Record<string, string> = {
   write: 'i-lucide-file-plus',
   bash: 'i-lucide-square-terminal',
   grep: 'i-lucide-search',
-  glob: 'i-lucide-search'
+  glob: 'i-lucide-search',
+  todowrite: 'i-lucide-list-todo',
+  todo_write: 'i-lucide-list-todo'
 }
 
 export function toolActivityIcon(name: string) {
@@ -307,6 +318,19 @@ function questionAnswer(value: unknown, options: QuestionActivityItem['options']
   return labels.length ? labels.join(', ') : undefined
 }
 
+function relatedQuestion(items: RunActivityItem[], questionIndexes: Map<string, number>, questionId: string | undefined) {
+  if (!questionId) return undefined
+  const existingIndex = questionIndexes.get(questionId)
+  if (existingIndex == null) return undefined
+  const existing = items[existingIndex]
+  return existing?.kind === 'question' ? existing : undefined
+}
+
+function decisionRecordedDescription(question: QuestionActivityItem | undefined) {
+  if (!question) return ''
+  return question.answer ? `${question.prompt} — ${question.answer}` : question.prompt
+}
+
 function toolInput(payload: Record<string, unknown>) {
   if (payload.input && typeof payload.input === 'object' && !Array.isArray(payload.input)) {
     return payload.input as Record<string, unknown>
@@ -335,6 +359,115 @@ function toolReason(payload: Record<string, unknown>) {
 
 function toolTarget(payload: Record<string, unknown>, input: Record<string, unknown> | undefined) {
   return toolActivityTarget(input) || toolActivityTarget(payload) || stringValue(payload.summary) || ''
+}
+
+function isTodoToolName(name: string) {
+  const normalized = name.trim().toLowerCase()
+  return normalized === 'todowrite' || normalized === 'todo_write'
+}
+
+function normalizeTodoStatus(value: unknown): TodoActivityItem['status'] {
+  const raw = typeof value === 'string' ? value.trim().toLowerCase().replaceAll(' ', '_').replaceAll('-', '_') : ''
+  if (raw === 'in_progress' || raw === 'inprogress' || raw === 'running' || raw === 'active') return 'in_progress'
+  if (raw === 'completed' || raw === 'complete' || raw === 'done') return 'completed'
+  if (raw === 'cancelled' || raw === 'canceled') return 'cancelled'
+  return 'pending'
+}
+
+function parseTodoItems(value: unknown): TodoActivityItem[] | undefined {
+  if (Array.isArray(value)) {
+    const items = value.flatMap((entry) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return []
+      const record = entry as Record<string, unknown>
+      const content = stringValue(record.content) || stringValue(record.text) || stringValue(record.title)
+      if (!content) return []
+      const status = record.status ?? record.state
+      return [{ content, status: normalizeTodoStatus(status) }]
+    })
+    return items.length ? items : undefined
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Record<string, unknown>
+  return parseTodoItems(record.todos ?? record.result ?? record.items)
+}
+
+function parseTodoPreview(resultPreview: string | undefined) {
+  if (!resultPreview) return undefined
+  try {
+    return parseTodoItems(JSON.parse(resultPreview))
+  } catch {
+    return undefined
+  }
+}
+
+function parseToolTodos(input: Record<string, unknown> | undefined, resultPreview: string | undefined) {
+  const fromPreview = parseTodoPreview(resultPreview)
+  if (fromPreview) return fromPreview
+  return input ? parseTodoItems(input.todos) : undefined
+}
+
+function mergeTodoStatuses(current: TodoActivityItem[], latest: TodoActivityItem[]) {
+  const latestByContent = new Map(latest.map(todo => [todo.content, todo.status]))
+  const shared = current.some(todo => latestByContent.has(todo.content))
+  if (!shared) return current
+  const merged = current.map(todo => ({
+    ...todo,
+    status: latestByContent.get(todo.content) ?? todo.status
+  }))
+  for (const todo of latest) {
+    if (!merged.some(item => item.content === todo.content)) merged.push(todo)
+  }
+  return merged
+}
+
+function applyLatestTodoSnapshots(items: RunActivityItem[]) {
+  const indexes = items.flatMap((item, index) => (
+    item.kind === 'tool' && isTodoToolName(item.name) && item.todos?.length ? [index] : []
+  ))
+  const latestIndex = indexes.at(-1)
+  if (latestIndex == null || indexes.length < 2) return items
+  const latestItem = items[latestIndex]
+  if (latestItem?.kind !== 'tool' || !latestItem.todos?.length) return items
+  const latest = latestItem.todos
+  const next = [...items]
+  for (const priorIndex of indexes.slice(0, -1)) {
+    const prior = next[priorIndex]
+    if (prior?.kind !== 'tool' || !prior.todos?.length) continue
+    const todos = mergeTodoStatuses(prior.todos, latest)
+    next[priorIndex] = { ...prior, todos, target: todoProgressSummary(todos) }
+  }
+  return next
+}
+
+export function todoProgressSummary(todos: TodoActivityItem[]) {
+  const completed = todos.filter(item => item.status === 'completed').length
+  return `${completed}/${todos.length}`
+}
+
+function finalizeToolPresentation(
+  name: string,
+  fields: Record<string, unknown>,
+  input: Record<string, unknown> | undefined,
+  resultPreview: string | undefined,
+  summary: string | undefined,
+  existing?: ToolActivityItem
+) {
+  const mergedInput = input || existing?.input
+  const mergedPreview = resultPreview || existing?.resultPreview
+  const todos = isTodoToolName(name)
+    ? parseToolTodos(mergedInput, mergedPreview) || existing?.todos
+    : undefined
+  const target = todos?.length
+    ? todoProgressSummary(todos)
+    : toolTarget(fields, input) || existing?.target || ''
+  return {
+    label: toolActivityLabel(name),
+    target,
+    todos,
+    input: mergedInput,
+    summary: summary || existing?.summary,
+    resultPreview: mergedPreview
+  }
 }
 
 function isAgentTextActivity(item: RunActivityItem | undefined): item is AgentTextActivityItem {
@@ -425,15 +558,20 @@ export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
       if (existingIndex != null) {
         const existing = items[existingIndex]
         if (existing?.kind === 'tool') {
+          const resolvedName = stringValue(fields.name) || existing.name
+          const presentation = finalizeToolPresentation(
+            resolvedName,
+            fields,
+            input,
+            stringValue(fields.resultPreview),
+            stringValue(fields.summary),
+            existing
+          )
           items[existingIndex] = {
             ...existing,
-            name: stringValue(fields.name) || existing.name,
-            label: toolActivityLabel(stringValue(fields.name) || existing.name),
-            target: toolTarget(fields, input) || existing.target,
+            name: resolvedName,
+            ...presentation,
             status,
-            input: input || existing.input,
-            summary: stringValue(fields.summary) || existing.summary,
-            resultPreview: stringValue(fields.resultPreview) || existing.resultPreview,
             reason: status === 'stopped' ? undefined : reason || existing.reason
           }
           continue
@@ -447,6 +585,13 @@ export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
         pending.push(items.length)
         pendingByName.set(name, pending)
       }
+      const presentation = finalizeToolPresentation(
+        name,
+        fields,
+        input,
+        stringValue(fields.resultPreview),
+        stringValue(fields.summary)
+      )
       items.push({
         kind: 'tool',
         id: event.id,
@@ -454,12 +599,8 @@ export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
         sequence: event.sequence,
         toolCallId,
         name,
-        label: toolActivityLabel(name),
-        target: toolTarget(fields, input),
+        ...presentation,
         status,
-        input,
-        summary: stringValue(fields.summary),
-        resultPreview: stringValue(fields.resultPreview),
         reason: status === 'stopped' ? undefined : reason
       })
       continue
@@ -471,12 +612,14 @@ export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
       occurredAt: event.occurredAt,
       sequence: event.sequence,
       title: eventTitle(event),
-      description: eventDescription(event),
+      description: event.type === 'decision.recorded'
+        ? decisionRecordedDescription(relatedQuestion(items, questionIndexes, stringValue(payload.questionId)))
+        : eventDescription(event),
       event,
       unknown: isUnknownEvent(event)
     })
   }
-  return reorderThoughtsBeforeTools(items)
+  return applyLatestTodoSnapshots(reorderThoughtsBeforeTools(items))
 }
 
 export function parseEventMessage(data: string): EventEvidence | undefined {

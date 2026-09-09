@@ -27,13 +27,23 @@ it('binds configuration routes to the correct scope and resource',()=>{
           ConfigManager: {
             props: ['kind', 'projectId', 'resourceId'],
             template: '<div :data-kind="kind" :data-project="projectId" :data-resource="resourceId" />'
+          },
+          ProjectSettings: {
+            props: ['projectId'],
+            template: '<div data-project-settings :data-project="projectId" />'
           }
         }
       }
     })
     if(path.endsWith('/settings/index.vue') && !path.includes('[projectID]')) { expect(wrapper.find('[data-settings-shell]').exists()).toBe(true);continue }
+    if(path.endsWith('/projects/[projectID]/settings/index.vue')) {
+      expect(wrapper.find('[data-settings-shell]').exists()).toBe(true)
+      expect(wrapper.get('[data-project-settings]').attributes('data-project')).toBe('project-a')
+      expect(wrapper.find('[data-kind]').exists()).toBe(false)
+      continue
+    }
     const manager=wrapper.get('[data-kind]')
-    if(path.includes('[projectID]')) expect(manager.attributes(path.endsWith('/settings/index.vue') ? 'data-resource' : 'data-project')).toBe('project-a')
+    if(path.includes('[projectID]')) expect(manager.attributes('data-project')).toBe('project-a')
     else expect(manager.attributes('data-project')).toBeUndefined()
     expect(manager.attributes('data-kind')).toBeTruthy()
   }

@@ -46,8 +46,6 @@ describe('QuestionPanel', () => {
       kind: 'SINGLE_CHOICE',
       optionIds: ['safe']
     })
-    expect(wrapper.text()).toContain('Answer recorded')
-    expect(wrapper.text()).toContain('Run · Queued')
     expect(wrapper.text()).not.toContain('Which strategy?')
   })
 

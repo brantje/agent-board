@@ -23,6 +23,7 @@ type RunEvidenceDTO struct {
 	Events           []EventEvidenceDTO            `json:"events"`
 	Tests            []EventEvidenceDTO            `json:"tests"`
 	FileChanges      []EventEvidenceDTO            `json:"fileChanges"`
+	Usage            *RunUsageEvidenceDTO          `json:"usage"`
 	RawOutput        []RawOutputChunkEvidenceDTO   `json:"rawOutput"`
 	Artifacts        []ArtifactEvidenceDTO         `json:"artifacts"`
 }
@@ -96,6 +97,7 @@ func (a *api) registerRunEvidenceRoutes(r chi.Router) {
 		return
 	}
 	r.Get("/projects/{projectID}/runs/{runID}/evidence", a.getRunEvidence)
+	r.Get("/projects/{projectID}/runs/{runID}/usage", a.getRunUsage)
 	r.Get("/projects/{projectID}/runs/{runID}/raw-output/{chunkID}", a.getRawOutputChunk)
 	r.Get("/projects/{projectID}/runs/{runID}/artifacts/{artifactID}", a.getRunArtifact)
 	if a.eventHub != nil {
@@ -197,6 +199,7 @@ func runEvidenceDTO(value app.RunEvidence, issueKeys map[string]string) RunEvide
 		Events:           make([]EventEvidenceDTO, 0, len(value.Events)),
 		Tests:            make([]EventEvidenceDTO, 0),
 		FileChanges:      make([]EventEvidenceDTO, 0),
+		Usage:            runUsageEvidenceDTO(value.Usage),
 		RawOutput:        make([]RawOutputChunkEvidenceDTO, 0, len(value.RawOutput)),
 		Artifacts:        make([]ArtifactEvidenceDTO, 0, len(value.Artifacts)),
 	}

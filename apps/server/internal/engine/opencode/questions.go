@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
+	"github.com/brantje/agent-board/apps/server/internal/modelusage"
 )
 
 const acceptedReplyResolveFailureLimit = 3
@@ -30,25 +32,43 @@ type runState struct {
 	sessionID                    string
 	questions                    engine.InteractiveQuestioner
 	activity                     engine.ActivitySink
+	usage                        engine.UsageSink
 	nativeQuestions              map[string]*nativeQuestionState
 	seenTextParts                map[string]struct{}
 	seenToolStates               map[string]struct{}
+	seenUsageSamples             map[string]struct{}
+	recordedUsageSamples         map[string]modelusage.Sample
+	messageFirstSampleID         map[string]string
 	pendingMessages              map[string]pendingMessage
 	pendingMessageOrder          []string
 	acceptedReplyResolveFailures map[string][]error
+	activeModelStep              *modelStepState
+	assistantStartedAt           map[string]*time.Time
+	usageSampleMessages          map[string]struct{}
+	providerID                   string
+	modelID                      string
+	contextLimitTokens           *int64
 	lastVisibleMessage           string
+	now                          func() time.Time
 }
 
 func newRunState(sessionID string, questions engine.InteractiveQuestioner, activity engine.ActivitySink) *runState {
+	usage, _ := activity.(engine.UsageSink)
 	return &runState{
 		sessionID:                    sessionID,
 		questions:                    questions,
 		activity:                     activity,
+		usage:                        usage,
 		nativeQuestions:              make(map[string]*nativeQuestionState),
 		seenTextParts:                make(map[string]struct{}),
 		seenToolStates:               make(map[string]struct{}),
+		seenUsageSamples:             make(map[string]struct{}),
+		recordedUsageSamples:         make(map[string]modelusage.Sample),
+		messageFirstSampleID:         make(map[string]string),
 		pendingMessages:              make(map[string]pendingMessage),
 		acceptedReplyResolveFailures: make(map[string][]error),
+		assistantStartedAt:           make(map[string]*time.Time),
+		usageSampleMessages:          make(map[string]struct{}),
 	}
 }
 
@@ -113,6 +133,9 @@ func (s *runState) handleQuestion(ctx context.Context, native *client.Client, re
 		}
 		state.bindings = bindings
 	}
+	if err := s.backfillUsageFromHistory(ctx, native); err != nil {
+		return err
+	}
 	if len(state.bindings) != len(request.Questions) {
 		return fmt.Errorf("opencode engine: native Question %s changed shape during reconciliation", request.ID)
 	}
@@ -132,6 +155,9 @@ func (s *runState) handleQuestion(ctx context.Context, native *client.Client, re
 	state.answered = true
 
 	if err := replyNativeQuestion(ctx, native, s.sessionID, request.ID, answers); err != nil {
+		return err
+	}
+	if err := s.backfillUsageFromHistory(ctx, native); err != nil {
 		return err
 	}
 	if tracker, ok := s.questions.(engine.InteractiveQuestionReplyTracker); ok {

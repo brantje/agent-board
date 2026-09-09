@@ -1,5 +1,5 @@
 import { onBeforeUnmount, onMounted, ref, shallowRef, toValue, watch, type MaybeRefOrGetter } from 'vue'
-import type { EventEvidence, Issue, Question, Review, Run, RunEvidence } from '../types/api'
+import type { EventEvidence, Issue, Question, Review, Run, RunEvidence, RunUsageEvidence } from '../types/api'
 import { apiPath, apiQuery, apiRequest, type ApiError } from '../utils/api'
 import { maxSequence, mergeEvents, parseEventMessage, refetchTargets, applyCurrentBranchToRun } from '../utils/events'
 
@@ -16,6 +16,7 @@ export function useRunEvents(projectId: MaybeRefOrGetter<string>, runId: MaybeRe
   const pending = ref(true)
   const error = shallowRef<ApiError>()
   let generation = 0
+  let usageRequest = 0
   let source: EventSource | undefined
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
   let controller: AbortController | undefined
@@ -36,6 +37,13 @@ export function useRunEvents(projectId: MaybeRefOrGetter<string>, runId: MaybeRe
   async function refetchFor(type: string, ids: { projectId: string; runId: string }) {
     const targets = refetchTargets(type)
     try {
+      if (type === 'model.usage') {
+        const currentUsageRequest = ++usageRequest
+        const usage = await apiRequest<RunUsageEvidence | null>(`${apiPath('runs', ids.projectId, ids.runId)}/usage`, { signal: controller?.signal })
+        if (currentUsageRequest === usageRequest && evidence.value) {
+          evidence.value = { ...evidence.value, usage }
+        }
+      }
       if (targets.run) {
         const run = await apiRequest<Run>(apiPath('runs', ids.projectId, ids.runId), { signal: controller?.signal })
         if (evidence.value) evidence.value = { ...evidence.value, run }
@@ -88,6 +96,7 @@ export function useRunEvents(projectId: MaybeRefOrGetter<string>, runId: MaybeRe
 
   async function refresh() {
     const current = ++generation
+    usageRequest++
     const ids = currentIds()
     closeSource()
     controller?.abort()
@@ -128,6 +137,7 @@ export function useRunEvents(projectId: MaybeRefOrGetter<string>, runId: MaybeRe
   })
   onBeforeUnmount(() => {
     generation++
+    usageRequest++
     closeSource()
     controller?.abort()
     connection.value = 'disconnected'

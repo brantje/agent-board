@@ -1,6 +1,7 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import RunList from '../app/components/RunList.vue'
+import RunAgentCard from '../app/components/RunAgentCard.vue'
 import RunDetail from '../app/components/RunDetail.vue'
 import RunStatus from '../app/components/RunStatus.vue'
 import QuestionPanel from '../app/components/QuestionPanel.vue'
@@ -13,9 +14,10 @@ const global = {
     ...uiStubs,
     NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' },
     QuestionPanel: { props: ['projectId', 'runId', 'issueId'], template: '<section>Questions for {{runId || issueId}}</section>' },
-    ActivityTimeline: { props: ['events'], template: '<ol><li v-for="item in events" :key="item.id">{{item.type}} {{item.payload?.kind}} {{item.payload?.message}}</li></ol>' }
+    ActivityTimeline: { props: ['events'], template: '<ol><li v-for="item in events" :key="item.id">{{item.type}} {{item.payload?.kind}} {{item.payload?.message}}</li></ol>' },
+    RunUsageCard: { props: ['usage'], template: '<section data-run-usage>Usage</section>' }
   },
-  components: { RunStatus }
+  components: { RunStatus, RunAgentCard }
 }
 
 afterEach(() => {
@@ -181,6 +183,13 @@ describe('RunDetail', () => {
     expect(wrapper.find('.detail-grid').exists()).toBe(true)
     expect(wrapper.find('details aside').exists()).toBe(false)
     const sidebar = wrapper.get('.detail-grid > aside')
+    expect(sidebar.get('[data-run-agent]').text()).toContain('Coder')
+    expect(sidebar.get('[data-run-agent]').text()).toContain('opencode')
+    expect(sidebar.get('[data-run-agent]').text()).toContain('openai/gpt-test')
+    expect(sidebar.get('[data-run-agent]').text()).toContain('OpenRouter')
+    expect(sidebar.get('[data-run-agent]').text()).toContain('Docker')
+    expect(sidebar.text().indexOf('Coder')).toBeLessThan(sidebar.text().indexOf('Usage'))
+    expect(sidebar.text().indexOf('Usage')).toBeLessThan(sidebar.text().indexOf('Properties'))
     expect(sidebar.text()).toContain('Properties')
     expect(sidebar.text()).toContain('Runtime instances')
     expect(sidebar.text()).toContain('Provenance')
@@ -269,7 +278,7 @@ describe('RunDetail', () => {
           ...global.stubs,
           QuestionPanel: false
         },
-        components: { QuestionPanel, RunStatus }
+        components: { QuestionPanel, RunStatus, RunAgentCard }
       }
     })
     await flushPromises()
