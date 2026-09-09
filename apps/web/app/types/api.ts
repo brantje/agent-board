@@ -172,6 +172,16 @@ export interface ArtifactEvidence {
   createdAt: string
 }
 
+export interface RunUsageEvidence {
+  contextTokens: number
+  contextLimitTokens: number | null
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  averageWaitMs: number | null
+  tokensPerSecond: number | null
+}
+
 export interface RunEvidence {
   run: Run
   provenance: Record<string, unknown> | null
@@ -180,6 +190,7 @@ export interface RunEvidence {
   events: EventEvidence[]
   tests: EventEvidence[]
   fileChanges: EventEvidence[]
+  usage: RunUsageEvidence | null
   rawOutput: RawOutputChunkEvidence[]
   artifacts: ArtifactEvidence[]
 }

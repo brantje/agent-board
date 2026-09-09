@@ -98,6 +98,7 @@ const hiddenRunActivityTypes = new Set([
   'engine.question_binding_resolved',
   'engine.file_created',
   'file.created',
+  'model.usage',
 ])
 
 const boardActivityFamilies = new Set(['issue', 'run', 'question', 'review', 'decision', 'project'])
