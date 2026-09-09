@@ -18,6 +18,7 @@ Project:
   - repositoryPath
   - defaultBranch
   - workflowSettings
+  - allowInternalRunner
   - createdAt
   - updatedAt
   properties:
@@ -27,6 +28,7 @@ Project:
     repositoryPath: {type: string}
     defaultBranch: {type: string}
     workflowSettings: {$ref: '#/JSONMap'}
+    allowInternalRunner: {type: boolean}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
 ProjectCreate:
@@ -47,6 +49,7 @@ ProjectUpdate:
     repositoryPath: {type: string}
     defaultBranch: {type: string}
     workflowSettings: {$ref: '#/JSONMap'}
+    allowInternalRunner: {type: boolean}
 RepositorySettings:
   type: object
   additionalProperties: false

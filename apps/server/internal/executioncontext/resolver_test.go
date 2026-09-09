@@ -55,40 +55,27 @@ func TestResolveBuildsSafeImmutableContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Safe.Agent.RoleInstructions != "Implement" || got.Safe.Agent.Engine != "opencode" || got.Safe.Runtime.Image != "runtime:test" {
+	if got.Safe.Agent.RoleInstructions != "Implement" || got.Safe.Agent.Engine != "opencode" {
 		t.Fatalf("resolved = %+v", got.Safe)
 	}
 	if got.ProviderCredentialRef == nil || *got.ProviderCredentialRef != "provider-token" {
 		t.Fatalf("credential ref = %v", got.ProviderCredentialRef)
 	}
-	values.runtime.AllowedSecretRefs[0] = "changed"
-	if got.AllowedSecretRefs[0] != "runtime-token" {
-		t.Fatal("resolved secret refs alias mutable store data")
+	if len(got.AllowedSecretRefs) != 0 {
+		t.Fatalf("allowed secret refs = %v", got.AllowedSecretRefs)
 	}
 }
 
 func TestResolveRejectsForeignScopedConfiguration(t *testing.T) {
 	values := validStore()
 	foreign := "other"
-	values.runtime.ProjectID = &foreign
+	values.provider.ProjectID = &foreign
 	resolver, err := NewResolver(values)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = resolver.Resolve(context.Background(), "p1", "r1")
 	apiErr, ok := AsError(err)
-	if !ok || apiErr.Code != "execution_runtime_unavailable" {
-		t.Fatalf("err = %#v", err)
-	}
-
-	values = validStore()
-	values.provider.ProjectID = &foreign
-	resolver, err = NewResolver(values)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = resolver.Resolve(context.Background(), "p1", "r1")
-	apiErr, ok = AsError(err)
 	if !ok || apiErr.Code != "execution_provider_unavailable" {
 		t.Fatalf("err = %#v", err)
 	}

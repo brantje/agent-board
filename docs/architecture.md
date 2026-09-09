@@ -93,10 +93,10 @@ Large stdout/stderr, protocol output and Artifacts use durable opaque blob/outpu
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Agent
+Engine + Model Profile -> Agent
 ```
 
-Runtime is a reusable configured execution environment and owns the complete execution policy. Agents select Runtime directly.
+Runners are deployment-global capacity selected by the scheduler. Runtime remains a reusable configured execution environment for legacy internal managed compute only; Agents do not select Runtime directly.
 
 ## Runtime model
 

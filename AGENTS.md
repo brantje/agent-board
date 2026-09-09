@@ -198,7 +198,7 @@ In short: do not repeat yourself, and do not build things until the product actu
 
 ## Database
 
-`packages/database/schema.sql` is the one canonical pre-release schema. Agents persist `runtime_id` directly. Recreate development databases when incompatible schema changes require it.
+`packages/database/schema.sql` is the one canonical pre-release schema. Agents select Engine and Model Profile; the scheduler selects eligible Runners. Recreate development databases when incompatible schema changes require it.
 
 ## Source control / Workspace
 

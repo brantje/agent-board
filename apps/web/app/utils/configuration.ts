@@ -130,7 +130,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   runtimes: {
     title: 'Runtimes',
     singular: 'Runtime',
-    emptyDescription: 'Define a Runtime image and execution policy so Agents can start agent-runner.',
+    emptyDescription: 'Define a Runtime image and execution policy for legacy internal managed compute.',
     fields: [
       name,
       { key: 'kind', label: 'Kind', type: 'select', options: ['docker'], initial: 'docker' },

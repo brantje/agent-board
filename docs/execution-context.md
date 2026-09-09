@@ -12,16 +12,15 @@ Run
       -> Engine
       -> Model Profile
           -> Provider
-      -> Runtime
   -> Workspace identity/repository metadata
   -> explicit Question/Review/resume context
 ```
 
-Agents select Runtime directly.
+Agents select Engine and Model Profile. The scheduler selects an eligible connected Runner for execution; Agents do not select Runtime directly.
 
 The resolved non-secret context is immutable for the execution attempt and suitable for safe provenance capture.
 
-Model identifier/generation settings come from Model Profile. Provider connection metadata comes from Provider. Runtime kind/image/resources/network/Workspace/secret/tooling/capability policy comes directly from Runtime.
+Model identifier/generation settings come from Model Profile. Provider connection metadata comes from Provider. Runner hosts own the executable environment for external execution; legacy Runtime policy remains available only on the internal managed-compute path.
 
 ## Secret separation
 
@@ -95,4 +94,4 @@ Errors never include plaintext secrets, ciphertext, full environments or sensiti
 
 ## Provenance
 
-The safe resolved context is the source for immutable Run provenance. It captures the direct Runtime selected by Agent. Historical Run inspection never reconstructs execution truth from mutable current Agent/Model/Provider/Runtime records.
+The safe resolved context is the source for immutable Run provenance. Historical Run inspection never reconstructs execution truth from mutable current Agent/Model/Provider/Runner records.

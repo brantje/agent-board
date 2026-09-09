@@ -1,15 +1,32 @@
 # Agent Runner
 
-`agent-runner` is the small execution-plane binary that runs inside an Agent Board Runtime Instance. It provides a stable, Runtime-neutral process/session boundary between the trusted Go control plane and coding Engine processes such as OpenCode.
+`agent-runner` is the Engine-neutral execution-plane binary between the trusted Go control plane and coding Engine processes such as OpenCode.
+
+Production v0.1 prefers **external persistent runner hosts**: a user-managed Linux machine runs `agent-runner` as a systemd service and connects outbound to Agent Board over protocol v2. The server-managed internal runner uses the same protocol and workspace-transfer path; it is not a second execution topology.
 
 The runner is part of the v0.1 execution architecture. It is not an Agent, Run, Runtime, Runtime Instance or future Worker.
 
+Install and operate external hosts with `apps/agent-runner/README.md` and `apps/agent-runner/deploy/agent-runner.service`.
+
 ## Execution model
+
+Preferred external path:
+
+```text
+Issue
+ -> Run
+ -> scheduler
+ -> selected connected Runner
+ -> Execution Session
+ -> Engine adapter
+ -> coding CLI on runner host
+```
+
+Legacy internal managed-compute path may still provision a Runtime Instance, but Agents do not select Runtimes directly and external execution does not create placeholder Runtime Instances.
 
 ```text
 Agent Board server
- -> Runtime implementation
- -> Runtime Instance
+ -> selected Runner (external or internal)
  -> agent-runner
  -> Execution Session
  -> Engine process

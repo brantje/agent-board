@@ -24,6 +24,8 @@ paths:
     $ref: ./paths/projects.yaml#/path1
   /api/projects/{projectID}:
     $ref: ./paths/projects.yaml#/path2
+  /api/projects/{projectID}/runners:
+    $ref: ./paths/project-runners.yaml
   /api/secrets:
     $ref: ./paths/secrets.yaml#/path1
   /api/providers:

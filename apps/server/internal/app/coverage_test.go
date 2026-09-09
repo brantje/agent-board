@@ -285,21 +285,17 @@ func (*missingRuntimeStore) GetRuntime(context.Context, *string, string) (store.
 	return store.Runtime{}, store.ErrNotFound
 }
 
-func TestCreateAndUpdateAgentRequireScopedModelAndRuntime(t *testing.T) {
+func TestCreateAndUpdateAgentRequireScopedModelProfile(t *testing.T) {
 	ctx := context.Background()
 	pid := coverageProjectID()
 	scope := &pid
 	agent := coverageAgent()
-	for _, svc := range []*Service{
-		New(&missingModelProfileStore{fakeStore: &fakeStore{project: store.Project{ID: pid}}}),
-		New(&missingRuntimeStore{fakeStore: &fakeStore{project: store.Project{ID: pid}}}),
-	} {
-		if _, err := svc.CreateAgent(ctx, agent); err == nil {
-			t.Fatal("expected create to reject missing model profile or runtime")
-		}
-		if _, err := svc.UpdateAgent(ctx, scope, agent); err == nil {
-			t.Fatal("expected update to reject missing model profile or runtime")
-		}
+	svc := New(&missingModelProfileStore{fakeStore: &fakeStore{project: store.Project{ID: pid}}})
+	if _, err := svc.CreateAgent(ctx, agent); err == nil {
+		t.Fatal("expected create to reject missing model profile")
+	}
+	if _, err := svc.UpdateAgent(ctx, scope, agent); err == nil {
+		t.Fatal("expected update to reject missing model profile")
 	}
 	if _, err := New(&missingProjectStore{}).ListAgents(ctx, scope); err == nil {
 		t.Fatal("expected list agents to require a visible project")

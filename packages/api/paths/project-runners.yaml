@@ -1,0 +1,40 @@
+projectRunnersResponse:
+  description: External runner allowlist for a Project. An empty list allows any connected external runner.
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [runnerIds]
+        properties:
+          runnerIds:
+            type: array
+            items: {type: string, format: uuid}
+projectRunnersRequest:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [runnerIds]
+        properties:
+          runnerIds:
+            type: array
+            items: {type: string, format: uuid}
+get:
+  operationId: getProjectRunners
+  responses:
+    '200':
+      $ref: '#/projectRunnersResponse'
+    default:
+      $ref: ../components/api-components.yaml#/responses/Error
+put:
+  operationId: setProjectRunners
+  requestBody:
+    $ref: '#/projectRunnersRequest'
+  responses:
+    '200':
+      $ref: '#/projectRunnersResponse'
+    default:
+      $ref: ../components/api-components.yaml#/responses/Error

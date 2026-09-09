@@ -1,0 +1,23 @@
+[Unit]
+Description=Agent Board external agent-runner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/agent-board/agent-runner.env
+ExecStart=/usr/local/bin/agent-runner
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=15
+
+# Hardening defaults; adjust only when your host policy requires it.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agent-runner
+
+[Install]
+WantedBy=multi-user.target

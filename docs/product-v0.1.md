@@ -170,7 +170,7 @@ Runtime
 
 Operational fields such as concurrency limit may live under Advanced. Engine settings are an optional JSON object on the Agent.
 
-Agents select Runtime directly. Draft, disabled or archived Agents cannot be assigned as runnable Agents. Agent concurrency is enforced by the scheduler.
+Agents select Engine and Model Profile. The scheduler selects eligible connected Runners for execution. Draft, disabled or archived Agents cannot be assigned as runnable Agents. Agent concurrency is enforced by the scheduler.
 
 Built-in Engine settings use the Agent Board Nuxt/Nuxt UI frontend. Plugin-provided Engine settings belong to the later sandboxed Plugin boundary.
 
