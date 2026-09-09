@@ -34,9 +34,10 @@ func (s *Store) UpdateProject(ctx context.Context, input store.Project) (store.P
 
 func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT `+issueSelectColumns+`
+		SELECT `+issueSelectColumns+`, `+lastEventSelectColumns+`
 		FROM issues AS i
 		JOIN projects AS p ON p.id = i.project_id
+		`+lastEventLateralJoin+`
 		WHERE i.project_id=$1
 		ORDER BY i.created_at, i.id
 	`, projectID)
@@ -46,7 +47,7 @@ func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue
 	defer rows.Close()
 	var out []store.Issue
 	for rows.Next() {
-		value, err := scanIssueJoined(rows)
+		value, err := scanIssueJoinedWithLastEvent(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -62,13 +63,13 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var issueID string
+	var issueID, previousStatus string
 	if err := tx.QueryRow(ctx, `
-		SELECT id::text
+		SELECT id::text, status
 		FROM issues
 		WHERE project_id=$1 AND id=$2
 		FOR UPDATE
-	`, input.ProjectID, input.ID).Scan(&issueID); err != nil {
+	`, input.ProjectID, input.ID).Scan(&issueID, &previousStatus); err != nil {
 		return store.Issue{}, notFound(err)
 	}
 
@@ -107,6 +108,7 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 	if err := tx.Commit(ctx); err != nil {
 		return store.Issue{}, err
 	}
+	updated.PreviousStatus = previousStatus
 	return updated, nil
 }
 

@@ -349,6 +349,7 @@ func openRunEventStream(t *testing.T, server *httptest.Server, after string) (*h
 }
 
 type sseFrame struct {
+	Name  string
 	ID    string
 	Event EventEvidenceDTO
 	Raw   string
@@ -390,6 +391,8 @@ func parseSSEFrame(block string) (sseFrame, bool) {
 		switch {
 		case strings.HasPrefix(line, "id:"):
 			frame.ID = strings.TrimSpace(strings.TrimPrefix(line, "id:"))
+		case strings.HasPrefix(line, "event:"):
+			frame.Name = strings.TrimSpace(strings.TrimPrefix(line, "event:"))
 		case strings.HasPrefix(line, "data:"):
 			if data.Len() > 0 {
 				data.WriteByte('\n')
@@ -401,6 +404,10 @@ func parseSSEFrame(block string) (sseFrame, bool) {
 	}
 	if data.Len() == 0 {
 		return sseFrame{}, false
+	}
+	if frame.Name == "resync" {
+		frame.Raw = block
+		return frame, true
 	}
 	if err := json.Unmarshal([]byte(data.String()), &frame.Event); err != nil {
 		return sseFrame{}, false

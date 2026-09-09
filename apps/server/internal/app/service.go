@@ -13,6 +13,11 @@ import (
 type Service struct {
 	store               store.ControlPlaneStore
 	projectRepositories repository.ProjectRepositoryProvisioner
+	events              issueEventRecorder
+}
+
+type issueEventRecorder interface {
+	Record(context.Context, store.Event) (store.Event, error)
 }
 
 func New(controlPlaneStore store.ControlPlaneStore) *Service {
@@ -23,6 +28,13 @@ func (s *Service) SetProjectRepositoryProvisioner(provisioner repository.Project
 	if s != nil {
 		s.projectRepositories = provisioner
 	}
+}
+
+func (s *Service) SetEventRecorder(recorder issueEventRecorder) {
+	if s == nil {
+		return
+	}
+	s.events = recorder
 }
 
 func (s *Service) ListProjects(ctx context.Context) ([]store.Project, error) {
@@ -240,7 +252,14 @@ func (s *Service) CreateIssue(ctx context.Context, input store.Issue) (store.Iss
 		return store.Issue{}, err
 	}
 	value, err := s.store.CreateIssue(ctx, input)
-	return value, translateStoreError(err, "issue")
+	if err != nil {
+		return store.Issue{}, translateStoreError(err, "issue")
+	}
+	event, err := s.recordIssueEvent(ctx, "issue.created", value, issueMutationPayload(value))
+	if err != nil {
+		return store.Issue{}, err
+	}
+	return attachIssueEvent(value, event), nil
 }
 func (s *Service) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue, error) {
 	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
@@ -249,8 +268,29 @@ func (s *Service) UpdateIssue(ctx context.Context, input store.Issue) (store.Iss
 	if err := validateIssue(input); err != nil {
 		return store.Issue{}, err
 	}
+	current, err := s.GetIssue(ctx, input.ProjectID, input.ID)
+	if err != nil {
+		return store.Issue{}, err
+	}
 	value, err := s.store.UpdateIssue(ctx, input)
-	return value, translateStoreError(err, "issue")
+	if err != nil {
+		return store.Issue{}, translateStoreError(err, "issue")
+	}
+	eventType := "issue.updated"
+	payload := issueMutationPayload(value)
+	previousStatus := value.PreviousStatus
+	if previousStatus == "" {
+		previousStatus = current.Status
+	}
+	if previousStatus != value.Status {
+		eventType = "issue.status_changed"
+		payload["previousStatus"] = previousStatus
+	}
+	event, err := s.recordIssueEvent(ctx, eventType, value, payload)
+	if err != nil {
+		return store.Issue{}, err
+	}
+	return attachIssueEvent(value, event), nil
 }
 func (s *Service) ListRuns(ctx context.Context, projectID string) ([]store.Run, error) {
 	if _, err := s.GetProject(ctx, projectID); err != nil {
@@ -264,6 +304,50 @@ func (s *Service) GetRun(ctx context.Context, projectID, runID string) (store.Ru
 	}
 	value, err := s.store.GetRun(ctx, projectID, runID)
 	return value, translateStoreError(err, "run")
+}
+
+var projectEventPageSize = 500
+var projectEventMaxPages = 20
+
+func SetProjectEventReplayLimitsForTest(pageSize, maxPages int) func() {
+	previousSize, previousMax := projectEventPageSize, projectEventMaxPages
+	projectEventPageSize, projectEventMaxPages = pageSize, maxPages
+	return func() {
+		projectEventPageSize, projectEventMaxPages = previousSize, previousMax
+	}
+}
+
+func (s *Service) ListProjectEventsAfter(ctx context.Context, projectID, afterID string) ([]store.Event, error) {
+	if _, err := s.GetProject(ctx, projectID); err != nil {
+		return nil, err
+	}
+	if afterID == "" {
+		return nil, nil
+	}
+	events := make([]store.Event, 0)
+	cursor := afterID
+	for page := 0; page < projectEventMaxPages; page++ {
+		batch, err := s.store.ListProjectEventsAfter(ctx, projectID, cursor, projectEventPageSize)
+		if err != nil {
+			return nil, translateStoreError(err, "event")
+		}
+		if len(batch) == 0 {
+			return events, nil
+		}
+		events = append(events, batch...)
+		cursor = batch[len(batch)-1].ID
+		if len(batch) < projectEventPageSize {
+			return events, nil
+		}
+	}
+	more, err := s.store.ListProjectEventsAfter(ctx, projectID, cursor, 1)
+	if err != nil {
+		return nil, translateStoreError(err, "event")
+	}
+	if len(more) == 0 {
+		return events, nil
+	}
+	return nil, NewError("replay_truncated", "project event replay exceeds the catch-up window; reload persisted state", nil)
 }
 
 func translateStoreError(err error, resource string) error {

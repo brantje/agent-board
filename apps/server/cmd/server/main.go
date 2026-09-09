@@ -268,6 +268,9 @@ func configureExecutionScheduler(services *app.Services) error {
 	}
 	services.EventHub = hub
 	services.Events = events
+	if services.ControlPlane != nil {
+		services.ControlPlane.SetEventRecorder(events)
+	}
 	if services.Questions != nil {
 		services.Questions.SetPersistedEventPublisher(events)
 	}

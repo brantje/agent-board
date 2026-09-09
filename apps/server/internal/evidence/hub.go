@@ -9,43 +9,61 @@ import (
 
 const hubSubscriberBuffer = 32
 
-// Hub is an in-process, per-Run EventPublisher. v0.1 is single-process; live
-// delivery is best-effort and must never block durable persistence.
+// Hub is an in-process EventPublisher. v0.1 is single-process; live delivery
+// is best-effort and must never block durable persistence.
 type Hub struct {
-	mu      sync.Mutex
-	nextID  uint64
-	byRunID map[string]map[uint64]*hubSubscriber
+	mu          sync.Mutex
+	nextID      uint64
+	byRunID     map[string]map[uint64]*hubSubscriber
+	byProjectID map[string]map[uint64]*hubSubscriber
 }
 
 type hubSubscriber struct {
-	id    uint64
-	runID string
-	ch    chan store.Event
+	id        uint64
+	runID     string
+	projectID string
+	ch        chan store.Event
 }
 
 func NewHub() *Hub {
-	return &Hub{byRunID: make(map[string]map[uint64]*hubSubscriber)}
+	return &Hub{
+		byRunID:     make(map[string]map[uint64]*hubSubscriber),
+		byProjectID: make(map[string]map[uint64]*hubSubscriber),
+	}
 }
 
 func (h *Hub) Subscribe(ctx context.Context, runID string) (<-chan store.Event, func()) {
-	if h == nil || runID == "" {
+	return h.subscribe(ctx, &hubSubscriber{runID: runID, ch: make(chan store.Event, hubSubscriberBuffer)})
+}
+
+func (h *Hub) SubscribeProject(ctx context.Context, projectID string) (<-chan store.Event, func()) {
+	return h.subscribe(ctx, &hubSubscriber{projectID: projectID, ch: make(chan store.Event, hubSubscriberBuffer)})
+}
+
+func (h *Hub) subscribe(ctx context.Context, sub *hubSubscriber) (<-chan store.Event, func()) {
+	if h == nil || (sub.runID == "" && sub.projectID == "") {
 		idle := make(chan store.Event)
 		return idle, func() {}
-	}
-	sub := &hubSubscriber{
-		runID: runID,
-		ch:    make(chan store.Event, hubSubscriberBuffer),
 	}
 
 	h.mu.Lock()
 	h.nextID++
 	sub.id = h.nextID
-	subs := h.byRunID[runID]
-	if subs == nil {
-		subs = make(map[uint64]*hubSubscriber)
-		h.byRunID[runID] = subs
+	if sub.runID != "" {
+		subs := h.byRunID[sub.runID]
+		if subs == nil {
+			subs = make(map[uint64]*hubSubscriber)
+			h.byRunID[sub.runID] = subs
+		}
+		subs[sub.id] = sub
+	} else {
+		subs := h.byProjectID[sub.projectID]
+		if subs == nil {
+			subs = make(map[uint64]*hubSubscriber)
+			h.byProjectID[sub.projectID] = subs
+		}
+		subs[sub.id] = sub
 	}
-	subs[sub.id] = sub
 	h.mu.Unlock()
 
 	var once sync.Once
@@ -60,14 +78,20 @@ func (h *Hub) Subscribe(ctx context.Context, runID string) (<-chan store.Event, 
 }
 
 func (h *Hub) Publish(_ context.Context, event store.Event) error {
-	if h == nil || event.RunID == nil || *event.RunID == "" {
+	if h == nil {
 		return nil
 	}
 	h.mu.Lock()
-	subs := h.byRunID[*event.RunID]
-	snapshot := make([]*hubSubscriber, 0, len(subs))
-	for _, sub := range subs {
-		snapshot = append(snapshot, sub)
+	snapshot := make([]*hubSubscriber, 0)
+	if event.RunID != nil && *event.RunID != "" {
+		for _, sub := range h.byRunID[*event.RunID] {
+			snapshot = append(snapshot, sub)
+		}
+	}
+	if event.ProjectID != "" {
+		for _, sub := range h.byProjectID[event.ProjectID] {
+			snapshot = append(snapshot, sub)
+		}
 	}
 	h.mu.Unlock()
 
@@ -83,13 +107,24 @@ func (h *Hub) remove(sub *hubSubscriber) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	subs := h.byRunID[sub.runID]
+	if sub.runID != "" {
+		subs := h.byRunID[sub.runID]
+		if subs == nil {
+			return
+		}
+		delete(subs, sub.id)
+		if len(subs) == 0 {
+			delete(h.byRunID, sub.runID)
+		}
+		return
+	}
+	subs := h.byProjectID[sub.projectID]
 	if subs == nil {
 		return
 	}
 	delete(subs, sub.id)
 	if len(subs) == 0 {
-		delete(h.byRunID, sub.runID)
+		delete(h.byProjectID, sub.projectID)
 	}
 }
 

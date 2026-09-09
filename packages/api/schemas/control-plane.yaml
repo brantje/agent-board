@@ -206,7 +206,7 @@ AgentInput:
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}
 Issue:
   type: object
-  required: [id, projectId, number, title, description, status, priority, assignedAgentId, createdAt, updatedAt]
+  required: [id, projectId, number, title, description, status, priority, assignedAgentId, createdAt, updatedAt, lastEvent]
   properties:
     id: {$ref: '#/IssueKey'}
     projectId: {type: string, format: uuid}
@@ -222,6 +222,11 @@ Issue:
     assignedAgentId: {type: [string, 'null'], format: uuid}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
+    lastEvent:
+      description: Latest Issue, Run, Question, Review, or Decision Event for this Issue. Tool and agent.message chatter is excluded.
+      oneOf:
+        - $ref: ./execution-evidence.yaml#/EventEvidence
+        - type: 'null'
 IssueCreate:
   type: object
   additionalProperties: false

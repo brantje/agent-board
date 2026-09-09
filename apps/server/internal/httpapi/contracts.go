@@ -26,16 +26,17 @@ type ProjectDTO struct {
 }
 
 type IssueDTO struct {
-	ID              string    `json:"id"`
-	ProjectID       string    `json:"projectId"`
-	Number          int       `json:"number"`
-	Title           string    `json:"title"`
-	Description     string    `json:"description"`
-	Status          string    `json:"status"`
-	Priority        int       `json:"priority"`
-	AssignedAgentID *string   `json:"assignedAgentId"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID              string            `json:"id"`
+	ProjectID       string            `json:"projectId"`
+	Number          int               `json:"number"`
+	Title           string            `json:"title"`
+	Description     string            `json:"description"`
+	Status          string            `json:"status"`
+	Priority        int               `json:"priority"`
+	AssignedAgentID *string           `json:"assignedAgentId"`
+	CreatedAt       time.Time         `json:"createdAt"`
+	UpdatedAt       time.Time         `json:"updatedAt"`
+	LastEvent       *EventEvidenceDTO `json:"lastEvent"`
 }
 
 type IssueRelationshipDTO struct {
@@ -182,7 +183,7 @@ type UpdateProviderRequest struct {
 	Name          *string          `json:"name"`
 	Kind          *string          `json:"kind"`
 	BaseURL       *string          `json:"baseUrl"`
-	CredentialRef *string         `json:"credentialRef"`
+	CredentialRef *string          `json:"credentialRef"`
 	Enabled       *bool            `json:"enabled"`
 	SafeMetadata  *json.RawMessage `json:"safeMetadata"`
 }

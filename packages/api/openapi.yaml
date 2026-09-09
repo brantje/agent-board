@@ -50,6 +50,8 @@ paths:
     $ref: ./paths/agents.yaml#/path3
   /api/projects/{projectID}/agents/{resourceID}:
     $ref: ./paths/agents.yaml#/path4
+  /api/projects/{projectID}/events:
+    $ref: ./paths/project-events.yaml#/path1
   /api/projects/{projectID}/issues:
     $ref: ./paths/issues-runs.yaml#/path1
   /api/projects/{projectID}/issues/{issueID}:

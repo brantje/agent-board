@@ -139,6 +139,48 @@ func (s *Store) ListRunEvents(ctx context.Context, projectID, runID string, afte
 	return values, rows.Err()
 }
 
+func (s *Store) ListProjectEventsAfter(ctx context.Context, projectID, afterID string, limit int) ([]store.Event, error) {
+	if afterID == "" {
+		return nil, nil
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM events WHERE project_id = $1 AND id = $2)
+	`, projectID, afterID).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, store.ErrNotFound
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, schema_version, type, occurred_at, project_id::text, issue_id::text,
+		       run_id::text, agent_id::text, workspace_id::text, runtime_instance_id::text,
+		       correlation_id::text, parent_event_id::text, sequence, actor, payload, created_at
+		FROM events
+		WHERE project_id = $1
+		  AND (created_at, id) > (SELECT created_at, id FROM events WHERE project_id = $1 AND id = $2)
+		ORDER BY created_at, id
+		LIMIT $3
+	`, projectID, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	values := make([]store.Event, 0)
+	for rows.Next() {
+		value, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (s *Store) CreateRawOutputChunk(ctx context.Context, input store.RawOutputChunk) (store.RawOutputChunk, error) {
 	return scanRawOutputChunk(s.pool.QueryRow(ctx, `
 		INSERT INTO raw_output_chunks (project_id, issue_id, run_id, stream, sequence, storage_ref, size_bytes, digest)
