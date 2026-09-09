@@ -14,6 +14,13 @@ type ProcessLauncher interface {
 	Start(context.Context, ProcessRequest) (Process, error)
 }
 
+// ProcessAttacher is an optional launcher capability for reconciling a live
+// Execution Session after control-plane restart. Adapters must not Start a
+// second process when Attach succeeds.
+type ProcessAttacher interface {
+	Attach(context.Context) (Process, error)
+}
+
 type ProcessRequest struct {
 	Command               []string
 	CWD                   string

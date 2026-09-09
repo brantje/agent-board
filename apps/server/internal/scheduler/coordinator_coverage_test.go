@@ -85,9 +85,9 @@ func TestCoordinatorReconcilerErrorFallsBackToUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
-	reconciled, err := c.reconcileOne(context.Background())
-	if err != nil || !reconciled {
-		t.Fatalf("reconcile one reconciled=%v err=%v", reconciled, err)
+	active, reconciled, err := c.reconcileOne(context.Background())
+	if err != nil || !reconciled || active != nil {
+		t.Fatalf("reconcile one active=%v reconciled=%v err=%v", active, reconciled, err)
 	}
 	if capture.resolved.Outcome != store.SchedulerReconciliationUnknown {
 		t.Fatalf("outcome=%s want UNKNOWN", capture.resolved.Outcome)
@@ -108,9 +108,9 @@ func TestCoordinatorEmptyReconcilerOutcomeDefaultsToUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new coordinator: %v", err)
 	}
-	reconciled, err := c.reconcileOne(context.Background())
-	if err != nil || !reconciled {
-		t.Fatalf("reconcile one reconciled=%v err=%v", reconciled, err)
+	active, reconciled, err := c.reconcileOne(context.Background())
+	if err != nil || !reconciled || active != nil {
+		t.Fatalf("reconcile one active=%v reconciled=%v err=%v", active, reconciled, err)
 	}
 	if capture.resolved.Outcome != store.SchedulerReconciliationUnknown {
 		t.Fatalf("outcome=%s want UNKNOWN", capture.resolved.Outcome)

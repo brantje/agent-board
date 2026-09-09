@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -14,7 +15,7 @@ func TestClientNativeSessionAndQuestionRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
-			Model ModelRef `json:"model"`
+			Model    ModelRef `json:"model"`
 			Location struct {
 				Directory string `json:"directory"`
 			} `json:"location"`
@@ -107,6 +108,79 @@ func TestClientNativeSessionAndQuestionRoutes(t *testing.T) {
 	if err := client.InterruptSession(context.Background(), session.ID); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestClientListSessions(t *testing.T) {
+	t.Run("raw array", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusOK, []any{map[string]any{"id": "ses_array"}})
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+		client, err := New(server.Client(), server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions, err := client.ListSessions(context.Background())
+		if err != nil || len(sessions) != 1 || sessions[0].ID != "ses_array" {
+			t.Fatalf("sessions=%+v err=%v", sessions, err)
+		}
+	})
+
+	t.Run("wrapped data", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{map[string]any{"id": "ses_wrapped"}}})
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+		client, err := New(server.Client(), server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions, err := client.ListSessions(context.Background())
+		if err != nil || len(sessions) != 1 || sessions[0].ID != "ses_wrapped" {
+			t.Fatalf("sessions=%+v err=%v", sessions, err)
+		}
+	})
+
+	t.Run("legacy api fallback", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /session", func(w http.ResponseWriter, r *http.Request) {
+			http.NotFound(w, r)
+		})
+		mux.HandleFunc("GET /api/session", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusOK, map[string]any{"data": []any{map[string]any{"id": "ses_legacy"}}})
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+		client, err := New(server.Client(), server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions, err := client.ListSessions(context.Background())
+		if err != nil || len(sessions) != 1 || sessions[0].ID != "ses_legacy" {
+			t.Fatalf("sessions=%+v err=%v", sessions, err)
+		}
+	})
+
+	t.Run("invalid payload", func(t *testing.T) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(t, w, http.StatusOK, "oops")
+		})
+		server := httptest.NewServer(mux)
+		defer server.Close()
+		client, err := New(server.Client(), server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = client.ListSessions(context.Background())
+		if err == nil || !strings.Contains(err.Error(), "decode session list") {
+			t.Fatalf("err=%v", err)
+		}
+	})
 }
 
 func TestClientHealthFallsBackToLegacyRoute(t *testing.T) {

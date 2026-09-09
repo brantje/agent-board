@@ -97,7 +97,7 @@ func (c *Coordinator) Run(ctx context.Context) error {
 			return nil
 		}
 
-		reconciled, err := c.reconcileOne(ctx)
+		active, handled, err := c.reconcileOne(ctx)
 		if err != nil {
 			c.config.ReportError(err)
 			if !waitFor(ctx, c.config.PollInterval) {
@@ -105,16 +105,19 @@ func (c *Coordinator) Run(ctx context.Context) error {
 			}
 			continue
 		}
-		if reconciled {
+		if active != nil {
+			if !c.startWorker(ctx, &workers, slots, active) {
+				return nil
+			}
+			continue
+		}
+		if handled {
 			continue
 		}
 
-		select {
-		case slots <- struct{}{}:
-		case <-ctx.Done():
+		if !c.reserveSlot(ctx, slots) {
 			return nil
 		}
-
 		admission, err := c.store.AdmitNextJob(ctx, c.config.OwnerID, c.config.LeaseDuration, c.config.CapacityBackoff)
 		if err != nil {
 			<-slots
@@ -131,20 +134,40 @@ func (c *Coordinator) Run(ctx context.Context) error {
 			}
 			continue
 		}
-
-		workers.Add(1)
-		go func(claim *store.SchedulerAdmission) {
-			defer workers.Done()
-			defer func() { <-slots }()
-			c.process(ctx, claim)
-		}(admission)
+		c.launchWorker(ctx, &workers, slots, admission)
 	}
 }
 
-func (c *Coordinator) reconcileOne(ctx context.Context) (bool, error) {
+func (c *Coordinator) startWorker(ctx context.Context, workers *sync.WaitGroup, slots chan struct{}, claim *store.SchedulerAdmission) bool {
+	if !c.reserveSlot(ctx, slots) {
+		return false
+	}
+	c.launchWorker(ctx, workers, slots, claim)
+	return true
+}
+
+func (c *Coordinator) reserveSlot(ctx context.Context, slots chan struct{}) bool {
+	select {
+	case slots <- struct{}{}:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+func (c *Coordinator) launchWorker(ctx context.Context, workers *sync.WaitGroup, slots chan struct{}, claim *store.SchedulerAdmission) {
+	workers.Add(1)
+	go func(claim *store.SchedulerAdmission) {
+		defer workers.Done()
+		defer func() { <-slots }()
+		c.process(ctx, claim)
+	}(claim)
+}
+
+func (c *Coordinator) reconcileOne(ctx context.Context) (*store.SchedulerAdmission, bool, error) {
 	claim, err := c.store.ClaimExpiredJobForReconciliation(ctx, c.config.OwnerID, c.config.LeaseDuration)
 	if err != nil || claim == nil {
-		return false, err
+		return nil, false, err
 	}
 
 	outcome, failureReason, reconcileErr := c.reconciler.Reconcile(ctx, claim)
@@ -165,7 +188,10 @@ func (c *Coordinator) reconcileOne(ctx context.Context) (bool, error) {
 		Outcome:       outcome,
 		FailureReason: failureReason,
 	})
-	return true, err
+	if err != nil || outcome != store.SchedulerReconciliationActive {
+		return nil, true, err
+	}
+	return claim, true, nil
 }
 
 func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmission) {

@@ -89,6 +89,51 @@ func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID
 	return authorized, nil
 }
 
+func (s *AuthorizedExecutionSessionService) Attach(ctx context.Context, projectID, sessionID string) (*AuthorizedExecutionProcess, error) {
+	if s == nil || s.sessions == nil {
+		return nil, NewError("execution_session_unavailable", "Execution Session service is unavailable", store.ErrInvalidArgument)
+	}
+	session, err := s.sessions.store.GetExecutionSession(ctx, projectID, sessionID)
+	if err != nil {
+		return nil, translateStoreError(err, "execution_session")
+	}
+	prepared, err := s.preparer.Prepare(ctx, projectID, session.RunID, executioncontext.SecretRequest{})
+	if err != nil {
+		return nil, translateExecutionPreparationError(err)
+	}
+	releaseRedaction := prepared.ReleaseRedaction
+	releaseTransferred := false
+	defer func() {
+		if !releaseTransferred && releaseRedaction != nil {
+			releaseRedaction()
+		}
+	}()
+
+	instance, err := s.sessions.store.GetRuntimeInstance(ctx, projectID, session.RuntimeInstanceID)
+	if err != nil {
+		return nil, translateStoreError(err, "runtime_instance")
+	}
+	if instance.RuntimeID != prepared.RuntimeID {
+		return nil, NewError("runtime_configuration_mismatch", "Runtime Instance does not match the resolved execution Runtime", store.ErrInvalidArgument)
+	}
+
+	process, err := s.sessions.Reconcile(ctx, projectID, sessionID)
+	if err != nil {
+		return nil, redaction.WrapError(err, prepared.RedactionValues)
+	}
+	if process == nil {
+		return nil, NewError("execution_session_not_running", "Execution Session is not running", store.ErrConflict)
+	}
+
+	processRelease := releaseRedaction
+	if s.retainRunRedaction(session.RunID, releaseRedaction) {
+		processRelease = nil
+	}
+	authorized := newAuthorizedExecutionProcess(process, prepared.RedactionValues, processRelease)
+	releaseTransferred = true
+	return authorized, nil
+}
+
 func (s *AuthorizedExecutionSessionService) retainRunRedaction(runID string, release func()) bool {
 	if s == nil || runID == "" || release == nil {
 		return false
