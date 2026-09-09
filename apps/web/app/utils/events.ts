@@ -217,14 +217,16 @@ export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
     }
     if ((event.type === 'question.answered' || event.type === 'question.cancelled') && questionId) {
       const existingIndex = questionIndexes.get(questionId)
-      const existing = existingIndex == null ? undefined : items[existingIndex]
-      if (existing?.kind === 'question') {
-        items[existingIndex!] = {
-          ...existing,
-          status: event.type === 'question.answered' ? 'answered' : 'cancelled',
-          answer: event.type === 'question.answered' ? questionAnswer(payload.answer, existing.options) : existing.answer
+      if (existingIndex != null) {
+        const existing = items[existingIndex]
+        if (existing?.kind === 'question') {
+          items[existingIndex] = {
+            ...existing,
+            status: event.type === 'question.answered' ? 'answered' : 'cancelled',
+            answer: event.type === 'question.answered' ? questionAnswer(payload.answer, existing.options) : existing.answer
+          }
+          continue
         }
-        continue
       }
     }
 
