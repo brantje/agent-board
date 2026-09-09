@@ -2,7 +2,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import InboxView from '../app/components/InboxView.vue'
 import { composeInbox } from '../app/utils/inbox'
-import { project, question, review, run } from './execution-fixtures'
+import { event, MockEventSource, project, question, review, run } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
 const global = { stubs: { ...uiStubs, NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' } } }
@@ -10,6 +10,7 @@ const global = { stubs: { ...uiStubs, NuxtLink: { props: ['to'], template: '<a :
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.useRealTimers()
+  MockEventSource.reset()
 })
 
 describe('inbox composition', () => {
@@ -76,6 +77,30 @@ describe('InboxView', () => {
     const wrapper = mount(InboxView, { global })
     await flushPromises()
     expect(wrapper.text()).toContain('unavailable or belongs to another project')
+    wrapper.unmount()
+  })
+
+  it('refreshes composed inbox from Project SSE without a loading skeleton', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    let questions: ReturnType<typeof question>[] = []
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/projects') return new Response(JSON.stringify([project]))
+      if (path.includes('/questions')) return new Response(JSON.stringify(questions))
+      return new Response('[]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(InboxView, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Nothing needs attention')
+    expect(MockEventSource.instances[0]?.url).toBe('/api/projects/project-a/events')
+
+    questions = [question()]
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-q', type: 'question.created', sequence: null }))
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Loading')
+    expect(wrapper.text()).not.toContain('Nothing needs attention')
+    expect(wrapper.get('a[href="/projects/project-a/issues/AB-1"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Which strategy?')
     wrapper.unmount()
   })
 })
