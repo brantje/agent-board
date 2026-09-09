@@ -186,6 +186,19 @@ describe('run activity projection', () => {
     expect(items[3]).toMatchObject({ kind: 'tool', target: 'games.json', status: 'completed' })
   })
 
+  it('moves only the adjacent thought before a tool when multiple thoughts follow it', () => {
+    const items = projectRunActivity([
+      event({ id: 'write-css', type: 'tool.started', sequence: 1, payload: { toolCallId: 'css', name: 'write', input: { path: '/workspace/styles.css' } } }),
+      event({ id: 'done-css', type: 'tool.completed', sequence: 2, payload: { toolCallId: 'css', name: 'write', summary: 'styles.css' } }),
+      event({ id: 'thought-css', type: 'agent.message', sequence: 3, payload: { kind: 'reasoning', message: 'Now let me create the CSS file for styling.' } }),
+      event({ id: 'thought-json', type: 'agent.message', sequence: 4, payload: { kind: 'reasoning', message: 'Next I will create games.json.' } })
+    ])
+    expect(items.map(item => item.kind)).toEqual(['thought', 'tool', 'thought'])
+    expect(items[0]).toMatchObject({ message: 'Now let me create the CSS file for styling.' })
+    expect(items[1]).toMatchObject({ kind: 'tool', target: 'styles.css', status: 'completed' })
+    expect(items[2]).toMatchObject({ message: 'Next I will create games.json.' })
+  })
+
   it('keeps thoughts that already precede their tool', () => {
     const items = projectRunActivity([
       event({ id: 'thought', type: 'agent.message', sequence: 1, payload: { kind: 'reasoning', message: 'Inspect the handler first.' } }),

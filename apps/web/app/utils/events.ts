@@ -349,6 +349,7 @@ function reorderThoughtsBeforeTools(items: RunActivityItem[]) {
     if (current?.kind === 'tool' && isAgentTextActivity(next)) {
       reordered[index] = next
       reordered[index + 1] = current
+      index++
     }
   }
   return reordered

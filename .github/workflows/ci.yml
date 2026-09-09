@@ -42,7 +42,7 @@ jobs:
           go-version-file: apps/server/go.mod
           cache-dependency-path: apps/server/go.sum
       - name: Configure test database URL
-        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports[5432] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
+        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
       - name: Test and enforce coverage
         working-directory: apps/server
         run: |
@@ -86,7 +86,7 @@ jobs:
           go-version-file: apps/server/go.mod
           cache-dependency-path: apps/server/go.sum
       - name: Configure test database URL
-        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports[5432] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
+        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
       - name: Build lifecycle fixture image
         run: docker build --file apps/server/internal/runtime/docker/testdata/Dockerfile --tag agent-board-runtime-lifecycle-test:ci apps/server/internal/runtime/docker/testdata
       - name: Build real runner image

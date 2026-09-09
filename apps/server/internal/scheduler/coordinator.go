@@ -116,11 +116,12 @@ func (c *Coordinator) CancelRun(projectID, runID string) bool {
 	key := activeRunKey(projectID, runID)
 	c.activeMu.Lock()
 	registration, ok := c.active[key]
-	c.activeMu.Unlock()
 	if !ok || registration.cancel == nil {
+		c.activeMu.Unlock()
 		return false
 	}
 	registration.cancel(ErrRunCancellation)
+	c.activeMu.Unlock()
 	return true
 }
 

@@ -49,6 +49,31 @@ func TestHandleReasoningPartPersistsFinalVisibleReasoningOnce(t *testing.T) {
 	}
 }
 
+func TestFlushPendingMessagesPreservesArrivalOrder(t *testing.T) {
+	sink := &recordingActivitySink{}
+	state := newRunState("ses_1", nil, sink)
+	first := mustJSON(t, map[string]any{"id": "msg_a", "sessionID": "ses_1", "text": "First buffered message", "time": map[string]any{"start": 1}})
+	second := mustJSON(t, map[string]any{"id": "reason_b", "sessionID": "ses_1", "text": "Second buffered reasoning", "time": map[string]any{"start": 2}})
+	if err := state.handleTextPart(context.Background(), first); err != nil {
+		t.Fatalf("buffer first message error=%v", err)
+	}
+	if err := state.handleReasoningPart(context.Background(), second); err != nil {
+		t.Fatalf("buffer second reasoning error=%v", err)
+	}
+	if err := state.flushPendingMessages(context.Background()); err != nil {
+		t.Fatalf("flush pending messages error=%v", err)
+	}
+	if len(sink.events) != 2 {
+		t.Fatalf("events=%+v", sink.events)
+	}
+	if sink.events[0].Payload["kind"] != "message" || sink.events[0].Payload["message"] != "First buffered message" {
+		t.Fatalf("first flushed event=%+v", sink.events[0])
+	}
+	if sink.events[1].Payload["kind"] != "reasoning" || sink.events[1].Payload["message"] != "Second buffered reasoning" {
+		t.Fatalf("second flushed event=%+v", sink.events[1])
+	}
+}
+
 func TestPendingReasoningFlushesBeforeToolAndIdle(t *testing.T) {
 	sink := &recordingActivitySink{}
 	state := newRunState("ses_1", nil, sink)

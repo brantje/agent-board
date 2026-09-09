@@ -34,6 +34,7 @@ type runState struct {
 	seenTextParts                map[string]struct{}
 	seenToolStates               map[string]struct{}
 	pendingMessages              map[string]pendingMessage
+	pendingMessageOrder          []string
 	acceptedReplyResolveFailures map[string][]error
 	lastVisibleMessage           string
 }

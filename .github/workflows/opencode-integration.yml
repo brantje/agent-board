@@ -61,7 +61,7 @@ jobs:
           go-version-file: apps/server/go.mod
           cache-dependency-path: apps/server/go.sum
       - name: Configure test database URL
-        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports[5432] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
+        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
       - name: Select allowlisted OpenRouter model
         shell: bash
         run: |
@@ -119,14 +119,14 @@ jobs:
 
           echo '--- OpenCode Run diagnostics (durable, redacted state only) ---'
           PGPASSWORD=agent_board psql \
-            -h 127.0.0.1 -p '${{ job.services.postgres.ports[5432] }}' -U agent_board -d agent_board_test -x \
+            -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
             -c 'SELECT id, status, failure_reason FROM runs ORDER BY created_at DESC LIMIT 1' || true
           echo '--- Execution Sessions ---'
           PGPASSWORD=agent_board psql \
-            -h 127.0.0.1 -p '${{ job.services.postgres.ports[5432] }}' -U agent_board -d agent_board_test -x \
+            -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
             -c 'SELECT status, cwd, command_argv, exit_code FROM execution_sessions ORDER BY created_at' || true
           echo '--- Run Events ---'
           PGPASSWORD=agent_board psql \
-            -h 127.0.0.1 -p '${{ job.services.postgres.ports[5432] }}' -U agent_board -d agent_board_test -x \
+            -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
             -c 'SELECT sequence, type, payload FROM events ORDER BY sequence' || true
           exit 1

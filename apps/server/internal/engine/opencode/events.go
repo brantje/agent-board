@@ -157,20 +157,24 @@ func (s *runState) bufferOrPersistMessage(ctx context.Context, key, kind string,
 	if complete {
 		return s.persistAgentMessage(ctx, key, kind, part.Text)
 	}
+	if _, exists := s.pendingMessages[key]; !exists {
+		s.pendingMessageOrder = append(s.pendingMessageOrder, key)
+	}
 	s.pendingMessages[key] = pendingMessage{key: key, kind: kind, text: part.Text}
 	return nil
 }
 
 func (s *runState) flushPendingMessages(ctx context.Context) error {
-	pending := make([]pendingMessage, 0, len(s.pendingMessages))
-	for _, message := range s.pendingMessages {
-		pending = append(pending, message)
-	}
-	for _, message := range pending {
+	for _, key := range s.pendingMessageOrder {
+		message, ok := s.pendingMessages[key]
+		if !ok {
+			continue
+		}
 		if err := s.persistAgentMessage(ctx, message.key, message.kind, message.text); err != nil {
 			return err
 		}
 	}
+	s.pendingMessageOrder = nil
 	return nil
 }
 
