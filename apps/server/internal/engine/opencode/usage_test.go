@@ -368,6 +368,57 @@ func TestUsageTelemetryUsesLaterPartEndAndIgnoresToolDuration(t *testing.T) {
 	assertTimeMillis(t, sink.samples[1].CompletedAt, 11000)
 }
 
+func TestUsageEnrichesStartedAtAfterLateMessageUpdated(t *testing.T) {
+	sink := &recordingUsageSink{}
+	state := newRunState("ses_1", nil, sink)
+	state.seedModelUsage("openrouter", "model", nil)
+
+	finish := mustJSON(t, map[string]any{
+		"sessionID": "ses_1",
+		"part":      map[string]any{"id": "finish_1", "messageID": "msg_1", "type": "step-finish", "tokens": map[string]any{"input": 12, "output": 3, "reasoning": 0, "cache": map[string]any{"read": 0, "write": 0}}},
+	})
+	if err := state.handleEvent(t.Context(), nil, client.Event{Type: "message.part.updated", Properties: finish}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.samples) != 1 || sink.samples[0].StartedAt != nil {
+		t.Fatalf("expected unfinished sample without start: %+v", sink.samples)
+	}
+
+	late := mustJSON(t, map[string]any{
+		"info": map[string]any{
+			"id": "msg_1", "sessionID": "ses_1", "role": "assistant", "providerID": "openrouter", "modelID": "model",
+			"time": map[string]any{"created": 1000},
+		},
+	})
+	if err := state.handleEvent(t.Context(), nil, client.Event{Type: "message.updated", Properties: late}); err != nil {
+		t.Fatal(err)
+	}
+	if len(sink.samples) != 2 {
+		t.Fatalf("late start was not recorded: samples=%+v", sink.samples)
+	}
+	assertTimeMillis(t, sink.samples[1].StartedAt, 1000)
+	if sink.samples[1].SampleID != sink.samples[0].SampleID {
+		t.Fatalf("late start used a different sample: %+v", sink.samples)
+	}
+}
+
+func TestUsageBackfillIgnoresHistoryFetchErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "native unavailable", http.StatusInternalServerError)
+	}))
+	t.Cleanup(server.Close)
+	native, err := client.New(server.Client(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state := newRunState("ses_1", nil, &recordingUsageSink{})
+	state.seedModelUsage("openrouter", "model", nil)
+	if err := state.backfillUsageFromHistory(t.Context(), native); err != nil {
+		t.Fatalf("history fetch failure must not fail the run: %v", err)
+	}
+}
+
 func TestUsageHistoryBackfillSkipsEmptyNonAssistantAndInvalidMessages(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/session/ses_1/message" {
