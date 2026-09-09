@@ -46,22 +46,9 @@ func (s *runState) handleSessionError(properties json.RawMessage) error {
 		return nil
 	}
 
-	message := "native session failed"
-	if len(bytes.TrimSpace(update.Error)) != 0 && !bytes.Equal(bytes.TrimSpace(update.Error), []byte("null")) {
-		var nativeError struct {
-			Name string `json:"name"`
-			Data struct {
-				Message string `json:"message"`
-			} `json:"data"`
-		}
-		if err := json.Unmarshal(update.Error, &nativeError); err != nil {
-			return fmt.Errorf("opencode engine: decode native session error details: %w", err)
-		}
-		if value := strings.TrimSpace(nativeError.Data.Message); value != "" {
-			message = value
-		} else if value := strings.TrimSpace(nativeError.Name); value != "" {
-			message = value
-		}
+	message, err := client.DecodeNativeErrorMessage(update.Error)
+	if err != nil {
+		return fmt.Errorf("opencode engine: decode native session error details: %w", err)
 	}
 	return fmt.Errorf("opencode engine: native session error: %s", message)
 }
