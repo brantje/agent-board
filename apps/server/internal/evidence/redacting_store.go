@@ -19,6 +19,10 @@ type runtimeRunnerGenerationStore interface {
 	UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(context.Context, string, string, string, int64, string) (store.RuntimeInstance, error)
 }
 
+type runnerLookupStore interface {
+	GetRunner(context.Context, string) (store.Runner, error)
+}
+
 // RedactingStore keeps the full control-plane store contract while overriding
 // every current durable evidence write with a final server-side sanitizer.
 type RedactingStore struct {
@@ -141,7 +145,7 @@ func (s *RedactingStore) AcquireWorkspaceBootstrapLock(ctx context.Context, work
 }
 
 func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner, error) {
-	base, ok := s.ControlPlaneStore.(store.RunnerStore)
+	base, ok := s.ControlPlaneStore.(runnerLookupStore)
 	if !ok {
 		return store.Runner{}, fmt.Errorf("redacting store base does not support runners")
 	}

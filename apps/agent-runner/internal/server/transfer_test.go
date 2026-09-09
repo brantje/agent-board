@@ -222,6 +222,64 @@ func TestSequentialStartsOnSameSessionReuseWorkspace(t *testing.T) {
 	}
 }
 
+func TestWorkspaceTransferFailsOnInvalidBundle(t *testing.T) {
+	_, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+	defer conn.Close()
+
+	writer := &connectionWriter{conn: conn}
+	if err := writer.sendTransfer(context.Background(), "session-bad", "transfer-bad", "to_runner", []byte("not a git bundle")); err != nil {
+		t.Fatal(err)
+	}
+	msg := read(t, conn)
+	if msg.Type != protocol.TypeError {
+		t.Fatalf("expected transfer error, got %#v", msg)
+	}
+}
+
+func TestTransferHandlersRejectInvalidPayloadsAndFailedStart(t *testing.T) {
+	_, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+	defer conn.Close()
+
+	send(t, conn, protocol.TypeTransferBegin, "session-invalid", "nope")
+	assertProtocolError(t, read(t, conn), "invalid_transfer")
+	send(t, conn, protocol.TypeTransferChunk, "session-invalid", "nope")
+	assertProtocolError(t, read(t, conn), "invalid_transfer")
+	send(t, conn, protocol.TypeTransferEnd, "session-invalid", "nope")
+	assertProtocolError(t, read(t, conn), "invalid_transfer")
+
+	send(t, conn, protocol.TypeTransferBegin, "session-invalid", protocol.TransferBegin{TotalBytes: 1})
+	assertProtocolError(t, read(t, conn), "transfer_failed")
+
+	writer := &connectionWriter{conn: conn}
+	if err := writer.sendTransfer(context.Background(), "session-failed", "transfer-failed", "to_runner", []byte("not a git bundle")); err != nil {
+		t.Fatal(err)
+	}
+	assertProtocolError(t, read(t, conn), "transfer_failed")
+	send(t, conn, protocol.TypeStart, "session-failed", protocol.StartRequest{Command: []string{"true"}})
+	assertProtocolError(t, read(t, conn), "start_failed")
+}
+
+func TestSyncWorkspaceBackFailsWithoutUsableRepository(t *testing.T) {
+	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
+	writer := &recordingStreamWriter{}
+	runner.syncWorkspaceBack(writer, "../escape", "t1")
+	if len(writer.messageTypes) != 1 || writer.messageTypes[0] != protocol.TypeTransferFailed {
+		t.Fatalf("expected transfer failed for invalid session, got %#v", writer.messageTypes)
+	}
+
+	emptyID := "session-empty"
+	if err := os.MkdirAll(runner.manager.SessionWorkspacePath(emptyID), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	emptyWriter := &recordingStreamWriter{}
+	runner.syncWorkspaceBack(emptyWriter, emptyID, "")
+	if len(emptyWriter.messageTypes) != 1 || emptyWriter.messageTypes[0] != protocol.TypeTransferFailed {
+		t.Fatalf("expected transfer failed for non-repository, got %#v", emptyWriter.messageTypes)
+	}
+}
+
 func createGitBundlePayload(t *testing.T) []byte {
 	t.Helper()
 	source := t.TempDir()

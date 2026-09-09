@@ -108,6 +108,39 @@ func TestDetachRestartsReconnectWindow(t *testing.T) {
 	}
 }
 
+func TestSessionDeliverySendErrorAndTransfer(t *testing.T) {
+	writer := &connectionWriter{conn: &recordingWebSocketWriteConn{}}
+	delivery := newSessionDelivery(context.Background(), writer, time.Second)
+	delivery.sendError("transfer_failed", "workspace is not ready", "session-1")
+	if err := delivery.sendTransfer(context.Background(), "session-1", "t1", "to_runner", []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+
+	expired := newSessionDelivery(context.Background(), nil, time.Millisecond)
+	time.Sleep(20 * time.Millisecond)
+	expired.sendError("start_failed", "workspace is not ready", "session-2")
+	if err := expired.sendTransfer(context.Background(), "session-2", "t2", "to_runner", []byte("hello")); !errors.Is(err, errDeliveryExpired) {
+		t.Fatalf("expected expired delivery, got %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	waiting := newSessionDelivery(ctx, nil, time.Second)
+	done := make(chan error, 1)
+	go func() {
+		_, err := waiting.waitWriter()
+		done <- err
+	}()
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected canceled wait, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("waitWriter did not observe cancellation")
+	}
+}
+
 func currentDeliveryWriter(delivery *sessionDelivery) *connectionWriter {
 	delivery.mu.Lock()
 	defer delivery.mu.Unlock()

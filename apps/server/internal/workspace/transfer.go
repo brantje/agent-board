@@ -124,6 +124,9 @@ func (g *GitCLI) ApplyTransferBundle(ctx context.Context, repositoryPath string,
 		return fmt.Errorf("stage synced workspace changes: %w", err)
 	}
 	if _, err := g.run(ctx, "-C", repositoryPath, "-c", "user.name=Agent Board", "-c", "user.email=agent-board@localhost", "commit", "-m", "Synchronize workspace from runner"); err != nil {
+		if nothingToCommit(err) {
+			return nil
+		}
 		return fmt.Errorf("commit synced workspace changes: %w", err)
 	}
 	return nil
@@ -132,4 +135,11 @@ func (g *GitCLI) ApplyTransferBundle(ctx context.Context, repositoryPath string,
 func TransferChecksum(payload []byte) string {
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
+}
+
+func nothingToCommit(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "nothing to commit")
 }

@@ -17,6 +17,7 @@ import (
 
 type runnerSyncStore struct {
 	processTestStore
+	lockErr error
 }
 
 func (s *runnerSyncStore) GetRunner(_ context.Context, id string) (store.Runner, error) {
@@ -24,6 +25,9 @@ func (s *runnerSyncStore) GetRunner(_ context.Context, id string) (store.Runner,
 }
 
 func (s *runnerSyncStore) AcquireWorkspaceBootstrapLock(context.Context, string) (store.WorkspaceBootstrapLock, error) {
+	if s.lockErr != nil {
+		return nil, s.lockErr
+	}
 	return noopWorkspaceLock{}, nil
 }
 
@@ -62,7 +66,7 @@ func (c *recordingSyncClient) ReceiveTransfer(ctx context.Context, _ string, _ r
 	return "", nil, errors.New("checksum mismatch")
 }
 
-type recordingSyncConnector struct{ client *recordingSyncClient }
+type recordingSyncConnector struct{ client runnerClient }
 
 func (c recordingSyncConnector) Connect(context.Context, string, string) (runnerClient, error) {
 	return c.client, nil
@@ -233,5 +237,98 @@ func TestRunnerWaitingForInputSkipsWorkspaceSyncBack(t *testing.T) {
 		if direction == "from_runner" {
 			t.Fatalf("WAITING_FOR_INPUT requested snapshot while the process is still live: %v", client.directions)
 		}
+	}
+}
+
+type failingConnectConnector struct{ err error }
+
+func (c failingConnectConnector) Connect(context.Context, string, string) (runnerClient, error) {
+	return nil, c.err
+}
+
+type failingSendClient struct {
+	recordingSyncClient
+	sendErr error
+}
+
+func (c *failingSendClient) SendTransfer(context.Context, string, string, string, []byte, runner.TransferProgressFunc) error {
+	return c.sendErr
+}
+
+func processorForTransferTests(t *testing.T, store *runnerSyncStore, git workspace.Git, connector RunnerConnector) *Processor {
+	t.Helper()
+	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := evidence.NewRecorder(store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := evidence.NewOutputRecorder(store, blobs, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), store, blobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry, err := engine.NewRegistry(processTestEngine{workspace: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor, err := NewProcessor(store, processTestResolver{}, nil, &runnerSyncSessions{}, registry, recorder, output, candidate, git, connector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return processor
+}
+
+type stubGit struct{ workspace.Git }
+
+func TestTransferAndSyncWorkspaceRequireRunnerDependencies(t *testing.T) {
+	ctx := context.Background()
+	repo := initProcessTestRepository(t)
+	safe := processTestSafeContext(repo)
+	git, err := workspace.NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidenceStore := &runnerSyncStore{}
+	processor := processorForTransferTests(t, evidenceStore, git, nil)
+	processor.git = git
+	if err := processor.transferWorkspaceToRunner(ctx, safe, "runner-1", "session-1"); err == nil {
+		t.Fatal("nil connector accepted")
+	}
+	if err := processor.syncWorkspaceFromRunner(ctx, safe, "runner-1", ""); err == nil {
+		t.Fatal("blank session sync accepted")
+	}
+	processor.git = stubGit{}
+	processor.runners = recordingSyncConnector{client: &recordingSyncClient{}}
+	if err := processor.transferWorkspaceToRunner(ctx, safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "git transfer") {
+		t.Fatalf("expected git transfer error, got %v", err)
+	}
+	if err := processor.syncWorkspaceFromRunner(ctx, safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "git transfer") {
+		t.Fatalf("expected git transfer error, got %v", err)
+	}
+
+	locked := processorForTransferTests(t, &runnerSyncStore{lockErr: errors.New("lock busy")}, git, failingConnectConnector{err: errors.New("disconnected")})
+	if err := locked.transferWorkspaceToRunner(ctx, safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "lock busy") {
+		t.Fatalf("expected lock error, got %v", err)
+	}
+	if err := locked.syncWorkspaceFromRunner(ctx, safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "disconnected") {
+		t.Fatalf("expected connect error, got %v", err)
+	}
+
+	sendFail := processorForTransferTests(t, &runnerSyncStore{}, git, recordingSyncConnector{client: &failingSendClient{sendErr: errors.New("write failed")}})
+	if err := sendFail.transferWorkspaceToRunner(ctx, safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "write failed") {
+		t.Fatalf("expected send error, got %v", err)
+	}
+	if err := sendFail.syncWorkspaceFromRunner(ctx, safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "write failed") {
+		t.Fatalf("expected send error, got %v", err)
+	}
+	result, err := sendFail.finishWaitingForInputRunner(ctx, safe)
+	if err != nil || result.RunStatus != "FAILED" {
+		t.Fatalf("missing question store: %+v err=%v", result, err)
 	}
 }

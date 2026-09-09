@@ -166,10 +166,6 @@ func scanProject(row pgx.Row) (store.Project, error) {
 	return value, nil
 }
 
-func scanIssue(row pgx.Row) (store.Issue, error) {
-	return scanIssueJoined(row)
-}
-
 func scanIssueWithPriority(row pgx.Row) (store.Issue, error) {
 	var value store.Issue
 	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.AssignedAgentID, &value.Number, &value.CreatedAt, &value.UpdatedAt); err != nil {

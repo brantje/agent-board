@@ -31,6 +31,22 @@ func (m *runnerMemory) RotateRunnerCredential(_ context.Context, id string, hash
 	m.value.TokenHash = hash
 	return m.value, nil
 }
+func (m *runnerMemory) ListProjectRunnerIDs(context.Context, string) ([]string, error) {
+	if m.value.ID == "" {
+		return nil, nil
+	}
+	return []string{m.value.ID}, nil
+}
+
+func (m *runnerMemory) SetProjectRunnerIDs(context.Context, string, []string) error {
+	return nil
+}
+
+func (m *runnerMemory) RenameRunner(_ context.Context, _, name string) (store.Runner, error) {
+	m.value.Name = name
+	return m.value, nil
+}
+
 func (m *runnerMemory) RevokeRunner(_ context.Context, id string, deleted bool) (store.Runner, error) {
 	if id != m.value.ID {
 		return store.Runner{}, store.ErrNotFound
@@ -95,6 +111,38 @@ func TestRunnerCredentialsAreOneTimeHashedAndValidated(t *testing.T) {
 	memory.value.DeletedAt = &now
 	if _, err = s.Authenticate(ctx, r.ID, next); !errors.Is(err, ErrRunnerAuthentication) {
 		t.Fatal("deleted accepted")
+	}
+}
+
+func TestRunnerServiceListsRenamesAndScopesProjectRunners(t *testing.T) {
+	ctx := context.Background()
+	memory := &runnerMemory{}
+	s := NewRunnerService(memory)
+	created, _, err := s.Create(ctx, "Build host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := s.List(ctx)
+	if err != nil || len(listed) != 1 || listed[0].ID != created.ID {
+		t.Fatalf("list=%v err=%v", listed, err)
+	}
+	renamed, err := s.Rename(ctx, created.ID, "  CI host  ")
+	if err != nil || renamed.Name != "CI host" {
+		t.Fatalf("rename=%+v err=%v", renamed, err)
+	}
+	if _, err := s.Rename(ctx, created.ID, " "); err == nil {
+		t.Fatal("blank rename accepted")
+	}
+	if err := s.SetProjectRunners(ctx, "project-1", []string{created.ID}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.ProjectRunners(ctx, "project-1")
+	if err != nil || len(ids) != 1 || ids[0] != created.ID {
+		t.Fatalf("project runners=%v err=%v", ids, err)
+	}
+	got, err := s.Get(ctx, created.ID)
+	if err != nil || got.ID != created.ID {
+		t.Fatalf("get=%+v err=%v", got, err)
 	}
 }
 

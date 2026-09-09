@@ -24,4 +24,14 @@ func TestGetWorkspaceForRuntimeIsProjectScoped(t *testing.T) {
 	if _, err := s.GetWorkspace(ctx, "", fixture.workspace.ID); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("blank project GetWorkspace() error=%v", err)
 	}
+	if _, err := s.UpdateWorkspaceCurrentBranch(ctx, fixture.project.ID, fixture.workspace.ID, " "); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("blank branch error=%v", err)
+	}
+	updated, err := s.UpdateWorkspaceCurrentBranch(ctx, fixture.project.ID, fixture.workspace.ID, "agent/ab-1")
+	if err != nil || updated.CurrentBranch == nil || *updated.CurrentBranch != "agent/ab-1" {
+		t.Fatalf("UpdateWorkspaceCurrentBranch()=%+v err=%v", updated, err)
+	}
+	if _, err := s.UpdateWorkspaceCurrentBranch(ctx, other.project.ID, fixture.workspace.ID, "agent/ab-1"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-project UpdateWorkspaceCurrentBranch() error=%v", err)
+	}
 }

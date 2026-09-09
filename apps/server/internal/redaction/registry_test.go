@@ -120,3 +120,17 @@ func TestRegistryKeepsRunScopesSeparateAndWrapsErrors(t *testing.T) {
 		t.Fatalf("error without redaction values should be unchanged: %v", got)
 	}
 }
+
+func TestRegistryAllValuesIncludesRegisteredSecrets(t *testing.T) {
+	registry := NewRegistry()
+	if got := registry.AllValues(); len(got) != 0 {
+		t.Fatalf("empty registry AllValues=%v", got)
+	}
+	registry.Register("run-1", []string{"alpha-secret"})
+	registry.Register("run-2", []string{"beta-secret"})
+	got := registry.AllValues()
+	joined := strings.Join(got, " ")
+	if !strings.Contains(joined, "alpha-secret") || !strings.Contains(joined, "beta-secret") {
+		t.Fatalf("AllValues=%v", got)
+	}
+}

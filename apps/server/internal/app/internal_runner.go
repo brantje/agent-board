@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// ErrInternalRunnerUnavailable means the optional host binary is missing.
+// The control plane must keep serving; persistent external runners remain eligible.
+var ErrInternalRunnerUnavailable = errors.New("internal agent-runner binary is unavailable")
+
 func (s *RunnerService) prepareInternalRunner(ctx context.Context) (store.Runner, string, error) {
 	runners, err := s.store.ListRunners(ctx)
 	if err != nil {
@@ -40,7 +44,7 @@ func (s *RunnerService) prepareInternalRunner(ctx context.Context) (store.Runner
 func (s *RunnerService) SuperviseInternalRunner(ctx context.Context, binary, serverURL, workspaceRoot string) error {
 	executable, err := exec.LookPath(binary)
 	if err != nil {
-		return errors.New("internal agent-runner binary is unavailable")
+		return ErrInternalRunnerUnavailable
 	}
 	for ctx.Err() == nil {
 		r, token, err := s.prepareInternalRunner(ctx)

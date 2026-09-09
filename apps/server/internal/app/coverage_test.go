@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -285,5 +286,44 @@ func TestCreateAndUpdateAgentRequireScopedModelProfile(t *testing.T) {
 	}
 	if _, err := New(&missingProjectStore{}).ListAgents(ctx, scope); err == nil {
 		t.Fatal("expected list agents to require a visible project")
+	}
+}
+
+type terminalRunStore struct {
+	*fakeStore
+}
+
+func (s *terminalRunStore) GetRun(context.Context, string, string) (store.Run, error) {
+	run := coverageRun()
+	run.Status = "COMPLETED"
+	return run, nil
+}
+
+func TestCancelRunAndResolveIssueUUID(t *testing.T) {
+	ctx := context.Background()
+	if err := (*Services)(nil).CancelRun(ctx, "project", "run"); err == nil {
+		t.Fatal("nil services accepted cancellation")
+	}
+	control := New(&fakeStore{project: store.Project{ID: coverageProjectID(), Name: "Project", IssuePrefix: "AB"}})
+	if err := (&Services{ControlPlane: control}).CancelRun(ctx, coverageProjectID(), "run"); err == nil {
+		t.Fatal("missing scheduler accepted cancellation")
+	}
+	services := &Services{ControlPlane: control, Scheduler: &scheduler.Coordinator{}}
+	if err := services.CancelRun(ctx, " ", "run"); err == nil {
+		t.Fatal("blank project accepted")
+	}
+	if err := services.CancelRun(ctx, coverageProjectID(), "run"); err == nil {
+		t.Fatal("unowned queued run accepted cancellation")
+	}
+	terminal := New(&terminalRunStore{fakeStore: &fakeStore{project: store.Project{ID: coverageProjectID(), Name: "Project", IssuePrefix: "AB"}}})
+	if err := (&Services{ControlPlane: terminal, Scheduler: &scheduler.Coordinator{}}).CancelRun(ctx, coverageProjectID(), "run"); err == nil {
+		t.Fatal("terminal run accepted cancellation")
+	}
+	if _, err := control.ResolveIssueUUID(ctx, coverageProjectID(), "not-a-key"); err == nil {
+		t.Fatal("invalid issue key accepted")
+	}
+	id, err := control.ResolveIssueUUID(ctx, coverageProjectID(), "AB-1")
+	if err != nil || id != "issue" {
+		t.Fatalf("ResolveIssueUUID()=%q err=%v", id, err)
 	}
 }

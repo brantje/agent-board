@@ -99,7 +99,100 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 	if _, err := os.Stat(filepath.Join(destination, "ignored.txt")); !os.IsNotExist(err) {
 		t.Fatal("ignored file appeared after apply")
 	}
+	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.ApplyTransferBundle(ctx, destination, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.ApplyTransferBundle(ctx, destination, []byte("not a git bundle")); err == nil {
+		t.Fatal("invalid sync bundle accepted")
+	}
+	if TransferChecksum(payload) == TransferChecksum(nil) {
+		t.Fatal("checksum ignored payload")
+	}
 }
+
+func TestTransferChecksumIsStableForPayload(t *testing.T) {
+	if TransferChecksum([]byte("abc")) == TransferChecksum([]byte("abd")) {
+		t.Fatal("distinct payloads produced the same checksum")
+	}
+	if TransferChecksum([]byte("abc")) != TransferChecksum([]byte("abc")) {
+		t.Fatal("checksum was not stable")
+	}
+}
+
+func TestApplyTransferBundleNoopsWhenHEADMatches(t *testing.T) {
+	ctx := context.Background()
+	git, err := NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	runTransferGit(t, source, "init", "-q")
+	runTransferGit(t, source, "config", "user.email", "test@example.invalid")
+	runTransferGit(t, source, "config", "user.name", "Agent Board Test")
+	writeMode(t, filepath.Join(source, "README.md"), "same\n", 0o644)
+	runTransferGit(t, source, "add", ".")
+	runTransferGit(t, source, "commit", "-qm", "baseline")
+	destination := cloneTransferBundle(t, mustTransferSnapshot(t, git, source, "match-1"))
+	payload, err := git.TransferSnapshot(ctx, source, "match-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustTransferSnapshot(t *testing.T, git *GitCLI, source, id string) []byte {
+	t.Helper()
+	payload, err := git.TransferSnapshot(context.Background(), source, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+func TestTransferSnapshotRequiresID(t *testing.T) {
+	git, err := NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.TransferSnapshot(context.Background(), t.TempDir(), " "); err == nil {
+		t.Fatal("blank transfer id accepted")
+	}
+}
+
+func TestTransferOperationsSurfaceGitFailures(t *testing.T) {
+	failing := filepath.Join(t.TempDir(), "git")
+	if err := os.WriteFile(failing, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	git, err := NewGitCLI(failing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.TransferSnapshot(context.Background(), t.TempDir(), "xfer-fail"); err == nil {
+		t.Fatal("failed snapshot git accepted")
+	}
+	if err := git.ApplyTransferBundle(context.Background(), t.TempDir(), []byte("bundle")); err == nil {
+		t.Fatal("failed apply git accepted")
+	}
+	if nothingToCommit(nil) {
+		t.Fatal("nil commit error treated as nothing to commit")
+	}
+	if nothingToCommit(os.ErrExist) {
+		t.Fatal("unrelated error treated as nothing to commit")
+	}
+	if !nothingToCommit(errString("Nothing to commit")) {
+		t.Fatal("nothing to commit not detected")
+	}
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
 
 func cloneTransferBundle(t *testing.T, payload []byte) string {
 	t.Helper()

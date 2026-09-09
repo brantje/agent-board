@@ -90,29 +90,7 @@ func main() {
 	internalDone := make(chan struct{})
 	go func() {
 		defer close(internalDone)
-		application, ok := handler.(*applicationHandler)
-		if !ok || application.services == nil || application.services.ControlPlane.Runners == nil {
-			return
-		}
-		binary := os.Getenv("AGENT_BOARD_RUNNER_BINARY")
-		if binary == "" {
-			binary = "agent-runner"
-		}
-		host, port, err := net.SplitHostPort(configuredAddress())
-		if err != nil {
-			slog.Error("internal runner address is invalid")
-			stop()
-			return
-		}
-		if host == "" || host == "0.0.0.0" || host == "::" {
-			host = "127.0.0.1"
-		}
-		endpoint := "http://" + net.JoinHostPort(host, port)
-		root := filepath.Join(configuredWorkspaceRoot(), ".internal-runner")
-		if err := application.services.ControlPlane.Runners.SuperviseInternalRunner(ctx, binary, endpoint, root); err != nil && ctx.Err() == nil {
-			slog.Error("internal runner supervision failed", "error", err)
-			stop()
-		}
+		runInternalRunnerSupervisor(ctx, stop, handler)
 	}()
 	code := supervise(ctx, stop, func() int {
 		return exitCode(ctx, configuredAddress(), handler)
@@ -120,6 +98,38 @@ func main() {
 	<-internalDone
 	closeStore()
 	os.Exit(code)
+}
+
+func shouldStopControlPlaneForInternalRunner(err error) bool {
+	return err != nil && !errors.Is(err, app.ErrInternalRunnerUnavailable)
+}
+
+func runInternalRunnerSupervisor(ctx context.Context, stop context.CancelFunc, handler http.Handler) {
+	application, ok := handler.(*applicationHandler)
+	if !ok || application.services == nil || application.services.ControlPlane == nil || application.services.ControlPlane.Runners == nil {
+		return
+	}
+	binary := os.Getenv("AGENT_BOARD_RUNNER_BINARY")
+	if binary == "" {
+		binary = "agent-runner"
+	}
+	host, port, err := net.SplitHostPort(configuredAddress())
+	if err != nil {
+		slog.Error("internal runner address is invalid")
+		stop()
+		return
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	endpoint := "http://" + net.JoinHostPort(host, port)
+	root := filepath.Join(configuredWorkspaceRoot(), ".internal-runner")
+	if err := application.services.ControlPlane.Runners.SuperviseInternalRunner(ctx, binary, endpoint, root); err != nil && ctx.Err() == nil {
+		slog.Error("internal runner supervision failed", "error", err)
+		if shouldStopControlPlaneForInternalRunner(err) {
+			stop()
+		}
+	}
 }
 
 func supervise(ctx context.Context, cancel context.CancelFunc, serve func() int, schedulerDone <-chan error) int {

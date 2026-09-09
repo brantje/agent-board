@@ -15,11 +15,18 @@ import (
 
 type runnerAPIStore struct {
 	fakeControlPlaneStore
-	value    store.Runner
-	attached []string
+	value      store.Runner
+	attached   []string
+	listErr    error
+	projectErr error
+	setErr     error
+	createErr  error
 }
 
 func (s *runnerAPIStore) CreateRunner(_ context.Context, r store.Runner) (store.Runner, error) {
+	if s.createErr != nil {
+		return store.Runner{}, s.createErr
+	}
 	r.ID = otherID
 	s.value = r
 	return r, nil
@@ -31,6 +38,9 @@ func (s *runnerAPIStore) GetRunner(_ context.Context, id string) (store.Runner, 
 	return s.value, nil
 }
 func (s *runnerAPIStore) ListRunners(context.Context) ([]store.Runner, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	if s.value.ID == "" || s.value.DeletedAt != nil {
 		return nil, nil
 	}
@@ -63,9 +73,15 @@ func (s *runnerAPIStore) RevokeRunner(_ context.Context, id string, deleted bool
 }
 func (s *runnerAPIStore) ObserveRunner(context.Context, string, json.RawMessage) error { return nil }
 func (s *runnerAPIStore) ListProjectRunnerIDs(context.Context, string) ([]string, error) {
+	if s.projectErr != nil {
+		return nil, s.projectErr
+	}
 	return s.attached, nil
 }
 func (s *runnerAPIStore) SetProjectRunnerIDs(_ context.Context, _ string, ids []string) error {
+	if s.setErr != nil {
+		return s.setErr
+	}
 	s.attached = append([]string(nil), ids...)
 	return nil
 }
@@ -155,5 +171,66 @@ func TestRunnerAPIOneTimeTokenAndPublicDTO(t *testing.T) {
 	router.ServeHTTP(missing, httptest.NewRequest("GET", "/api/runners/"+otherID, nil))
 	if missing.Code != 404 {
 		t.Fatalf("deleted runner still visible %d", missing.Code)
+	}
+}
+
+func TestRunnerAPIRejectsInvalidIDsAndStoreFailures(t *testing.T) {
+	memory := &runnerAPIStore{
+		listErr:    store.ErrNotFound,
+		projectErr: store.ErrNotFound,
+		setErr:     store.ErrNotFound,
+		createErr:  store.ErrNotFound,
+	}
+	router := NewRouter(app.New(memory))
+
+	for _, req := range []*http.Request{
+		httptest.NewRequest("GET", "/api/projects/not-a-uuid/runners", nil),
+		httptest.NewRequest("PUT", "/api/projects/not-a-uuid/runners", strings.NewReader(`{"runnerIds":[]}`)),
+		httptest.NewRequest("GET", "/api/runners/not-a-uuid", nil),
+		httptest.NewRequest("PATCH", "/api/runners/not-a-uuid", strings.NewReader(`{"name":"Host"}`)),
+		httptest.NewRequest("POST", "/api/runners/not-a-uuid/rotate-token", nil),
+		httptest.NewRequest("POST", "/api/runners/not-a-uuid/revoke", nil),
+		httptest.NewRequest(http.MethodDelete, "/api/runners/not-a-uuid", nil),
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		if response.Code != 400 {
+			t.Fatalf("%s %s -> %d", req.Method, req.URL.Path, response.Code)
+		}
+	}
+
+	for _, req := range []*http.Request{
+		httptest.NewRequest("PUT", "/api/projects/"+projectID+"/runners", strings.NewReader(`{`)),
+		httptest.NewRequest("PATCH", "/api/runners/"+otherID, strings.NewReader(`{`)),
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		if response.Code != 400 {
+			t.Fatalf("invalid json %s -> %d", req.URL.Path, response.Code)
+		}
+	}
+
+	for _, req := range []*http.Request{
+		httptest.NewRequest("GET", "/api/projects/"+projectID+"/runners", nil),
+		httptest.NewRequest("PUT", "/api/projects/"+projectID+"/runners", strings.NewReader(`{"runnerIds":[]}`)),
+		httptest.NewRequest("GET", "/api/runners", nil),
+		httptest.NewRequest("POST", "/api/runners", strings.NewReader(`{"name":"Host"}`)),
+		httptest.NewRequest("PATCH", "/api/runners/"+otherID, strings.NewReader(`{"name":"Host"}`)),
+		httptest.NewRequest("POST", "/api/runners/"+otherID+"/rotate-token", nil),
+		httptest.NewRequest("POST", "/api/runners/"+otherID+"/revoke", nil),
+	} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		if response.Code < 400 {
+			t.Fatalf("store failure %s %s -> %d", req.Method, req.URL.Path, response.Code)
+		}
+	}
+
+	okStore := &runnerAPIStore{}
+	okRouter := NewRouter(app.New(okStore))
+	cleared := httptest.NewRecorder()
+	okRouter.ServeHTTP(cleared, httptest.NewRequest("PUT", "/api/projects/"+projectID+"/runners", strings.NewReader(`{}`)))
+	if cleared.Code != 200 || !strings.Contains(cleared.Body.String(), `"runnerIds":[]`) {
+		t.Fatalf("null allowlist %d %s", cleared.Code, cleared.Body.String())
 	}
 }

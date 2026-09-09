@@ -91,6 +91,21 @@ func TestSnapshotBundleIncludesUntrackedFileAndRequiresTransferID(t *testing.T) 
 	}
 }
 
+func TestMaterializeBundleRejectsInvalidPayload(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "invalid")
+	if err := MaterializeBundle(context.Background(), destination, []byte("not a git bundle")); err == nil {
+		t.Fatal("invalid bundle accepted")
+	}
+	if _, err := SnapshotBundle(context.Background(), t.TempDir(), "sync-missing"); err == nil {
+		t.Fatal("snapshot of non-repository accepted")
+	}
+	emptyRepo := t.TempDir()
+	runGitCLI(t, "-C", emptyRepo, "init")
+	if _, err := SnapshotBundle(context.Background(), emptyRepo, "sync-empty"); err == nil {
+		t.Fatal("snapshot of empty repository accepted")
+	}
+}
+
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)

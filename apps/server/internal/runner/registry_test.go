@@ -141,3 +141,46 @@ func TestRegistryCandidatesRequireLiveEngineMatch(t *testing.T) {
 		t.Fatalf("disconnected runner remained eligible=%v", got)
 	}
 }
+
+func TestRegistryDisconnectAndReconcile(t *testing.T) {
+	registry := NewRegistry(registryIdentity{}, registryIdentity{})
+	defer registry.Close()
+	if _, _, err := registry.Reconcile(context.Background(), "project", "runner", "session-1"); !errors.Is(err, ErrDisconnected) {
+		t.Fatalf("reconcile disconnected: %v", err)
+	}
+	registry.Disconnect("missing")
+
+	server := httptest.NewServer(registry)
+	defer server.Close()
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), http.Header{"Authorization": []string{"Bearer secret"}, protocol.RunnerIDHeader: []string{"runner"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var msg protocol.Message
+	if err = conn.ReadJSON(&msg); err != nil {
+		t.Fatal(err)
+	}
+	hello, _ := protocol.NewMessage(protocol.Version2, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version2, Capabilities: protocol.Capabilities{RunnerVersion: "test", OS: "linux", Architecture: "amd64", MaxActiveSessions: 1, Engines: []string{"opencode"}, Features: []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"}}})
+	if err = conn.WriteJSON(hello); err != nil {
+		t.Fatal(err)
+	}
+	health, _ := protocol.NewMessage(protocol.Version2, protocol.TypeHealth, "", protocol.Health{Status: "ok"})
+	if err = conn.WriteJSON(health); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for !registry.Connected("runner") && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !registry.Connected("runner") {
+		t.Fatal("authenticated runner not live")
+	}
+	if _, _, err := registry.Reconcile(context.Background(), "project", "runner", ""); err == nil {
+		t.Fatal("reconcile accepted a blank session")
+	}
+	registry.Disconnect("runner")
+	if registry.Connected("runner") {
+		t.Fatal("disconnect left runner live")
+	}
+}

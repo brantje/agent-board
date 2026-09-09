@@ -125,14 +125,6 @@ func decodeVisibleTextPart(data json.RawMessage) (completedTextPart, bool, bool,
 	return completedTextPart{ID: part.ID, Text: part.Text}, true, complete, nil
 }
 
-func decodeCompletedTextPart(data json.RawMessage) (completedTextPart, bool, error) {
-	part, visible, complete, err := decodeVisibleTextPart(data)
-	if err != nil || !visible || !complete {
-		return completedTextPart{}, false, err
-	}
-	return part, true, nil
-}
-
 func (s *runState) persistAgentMessage(ctx context.Context, key, kind, text string) error {
 	if _, duplicate := s.seenTextParts[key]; duplicate {
 		delete(s.pendingMessages, key)

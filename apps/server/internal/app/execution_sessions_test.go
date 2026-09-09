@@ -342,3 +342,13 @@ func TestStartPreparedOnRunnerRejectsRunningSession(t *testing.T) {
 		t.Fatal("duplicate start on running session accepted")
 	}
 }
+
+func TestNoopRunnerRegistryRejectsConnectAndReconcile(t *testing.T) {
+	var registry noopRunnerRegistry
+	if _, err := registry.Connect(context.Background(), "project", "runner"); err == nil {
+		t.Fatal("noop connect succeeded")
+	}
+	if _, _, err := registry.Reconcile(context.Background(), "project", "runner", "session"); err == nil {
+		t.Fatal("noop reconcile succeeded")
+	}
+}

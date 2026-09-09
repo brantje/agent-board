@@ -230,7 +230,7 @@ func runEvidenceDTO(value app.RunEvidence, issueKeys map[string]string) RunEvide
 
 func runtimeInstanceEvidenceDTO(value store.RuntimeInstance) RuntimeInstanceEvidenceDTO {
 	return RuntimeInstanceEvidenceDTO{
-		ID: value.ID, Status: value.Status, RunnerStatus: value.RunnerStatus,
+		ID: value.ID, RuntimeID: value.RuntimeID, Status: value.Status, RunnerStatus: value.RunnerStatus,
 		CreatedAt: value.CreatedAt, StartedAt: value.StartedAt, StoppedAt: value.StoppedAt, UpdatedAt: value.UpdatedAt,
 	}
 }

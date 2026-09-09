@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"crypto/sha256"
-	"github.com/brantje/agent-board/apps/server/internal/store"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 func (m *runnerMemory) ListRunners(context.Context) ([]store.Runner, error) {
@@ -57,8 +59,8 @@ func TestInternalSupervisionRestartsAndStopsWithoutControlPlaneSecrets(t *testin
 	case <-time.After(time.Second):
 		t.Fatal("supervisor did not stop")
 	}
-	if err := service.SuperviseInternalRunner(context.Background(), filepath.Join(root, "missing"), "http://server", root); err == nil {
-		t.Fatal("missing child accepted")
+	if err := service.SuperviseInternalRunner(context.Background(), filepath.Join(root, "missing"), "http://server", root); !errors.Is(err, ErrInternalRunnerUnavailable) {
+		t.Fatalf("missing child: %v", err)
 	}
 }
 func TestInternalCredentialIsGeneratedRotatedAndNotPublic(t *testing.T) {

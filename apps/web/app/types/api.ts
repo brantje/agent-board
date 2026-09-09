@@ -128,6 +128,7 @@ export interface EventEvidence {
 
 export interface RuntimeInstanceEvidence {
   id: string
+  runtimeId: string
   status: string
   runnerStatus: string
   createdAt: string

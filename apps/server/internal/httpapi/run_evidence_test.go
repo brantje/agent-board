@@ -20,6 +20,7 @@ const (
 	evidenceArtifactID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 	evidenceRuntimeID  = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 	evidenceSessionID  = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	evidenceRuntimeCfg = "ffffffff-ffff-4fff-8fff-ffffffffffff"
 )
 
 type httpRunEvidenceStore struct {
@@ -51,7 +52,7 @@ func (s *httpRunEvidenceStore) GetRuntimeInstance(_ context.Context, pid, id str
 	if pid != projectID || id != evidenceRuntimeID {
 		return store.RuntimeInstance{}, store.ErrNotFound
 	}
-	return store.RuntimeInstance{ID: id, ProjectID: pid, Status: "DESTROYED", RunnerStatus: "UNAVAILABLE"}, nil
+	return store.RuntimeInstance{ID: id, ProjectID: pid, RuntimeID: evidenceRuntimeCfg, Status: "DESTROYED", RunnerStatus: "UNAVAILABLE"}, nil
 }
 
 func (s *httpRunEvidenceStore) ListRunEvents(_ context.Context, pid, id string, after int64, _ int) ([]store.Event, error) {
@@ -111,7 +112,7 @@ func TestRunEvidenceRoutesExposeScopedMetadataAndContent(t *testing.T) {
 			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 		}
 		body := rec.Body.String()
-		for _, want := range []string{"\"tests\"", "\"fileChanges\"", "\"contentPath\"", evidenceChunkID, evidenceArtifactID} {
+		for _, want := range []string{"\"tests\"", "\"fileChanges\"", "\"contentPath\"", "\"runtimeId\"", evidenceChunkID, evidenceArtifactID, evidenceRuntimeCfg} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("response missing %s: %s", want, body)
 			}

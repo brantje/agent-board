@@ -19,6 +19,10 @@ func TestSessionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if s.ID() != "session-1" {
+		t.Fatalf("session id=%q", s.ID())
+	}
+
 	if _, err := io.WriteString(s.Stdin(), "hello\n"); err != nil {
 		t.Fatal(err)
 	}
