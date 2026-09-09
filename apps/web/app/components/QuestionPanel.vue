@@ -3,7 +3,6 @@ import { computed, reactive, ref } from 'vue'
 import type { Question, QuestionAnswer, QuestionAnswerResponse } from '../types/api'
 import { apiPath, apiQuery, apiRequest } from '../utils/api'
 import { refetchTargets } from '../utils/events'
-import { runStatusLabel } from '../utils/runs'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
 
@@ -16,7 +15,6 @@ const path = computed(() => apiQuery(apiPath('questions', props.projectId), {
 const { data, pending, error, refresh } = useResource<Question[]>(path)
 const answering = ref('')
 const answerError = ref<Error>()
-const lastResponse = ref<QuestionAnswerResponse>()
 const drafts = reactive<Record<string, { optionId: string; optionIds: string[]; text: string; custom: boolean }>>({})
 
 function draftFor(question: Question) {
@@ -75,7 +73,6 @@ async function answer(question: Question) {
       method: 'POST',
       body
     })
-    lastResponse.value = result
     data.value = (data.value || []).map(item => item.id === result.question.id ? result.question : item)
   } catch (failure) {
     answerError.value = failure as Error
@@ -92,13 +89,6 @@ defineExpose({ refresh })
     <h2 class="section-label mb-3">Questions</h2>
     <AsyncState :pending="pending" :error="error" @retry="refresh">
       <UAlert v-if="answerError" title="Unable to answer" :description="answerError.message" color="error" class="mb-4" />
-      <UAlert
-        v-if="lastResponse"
-        title="Answer recorded"
-        :description="`${runStatusLabel(lastResponse.run.status)}. Continuation is server-owned and does not assume the Runtime Instance continues.`"
-        color="success"
-        class="mb-4"
-      />
       <AsyncState :empty="!openQuestions.length" empty-title="No open questions" empty-description="When a Run needs a human decision, the Agent's question will appear here.">
       <div class="space-y-4">
         <UCard v-for="question in openQuestions" :key="question.id">

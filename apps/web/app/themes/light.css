@@ -43,4 +43,9 @@ html[data-theme='light'] {
   --board-column-blocked: #faf1f2;
   --board-column-done: #f1f4fd;
   --board-column-review: #f2f9f2;
+
+  --activity-stream-bg: #e8f1f9;
+  --activity-stream-border: #c5d9ec;
+
+  --activity-todo-bg: #eceff1;
 }

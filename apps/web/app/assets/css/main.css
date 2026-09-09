@@ -147,6 +147,15 @@ pre {
 .board-column-review { --board-column-bg: var(--board-column-review); }
 .board-column-done { --board-column-bg: var(--board-column-done); }
 
+.run-activity-stream {
+  background-color: var(--activity-stream-bg);
+  border: 1px solid var(--activity-stream-border);
+}
+
+.run-activity-todo-list {
+  background-color: var(--activity-todo-bg);
+}
+
 .detail-grid {
   display: grid;
   gap: 1rem;

@@ -159,6 +159,40 @@ describe('run activity projection', () => {
     })
   })
 
+  it('attaches the question and selected answers to Decision Recorded', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'question',
+        type: 'question.created',
+        sequence: 1,
+        payload: {
+          questionId: 'q1',
+          prompt: 'Which markers should I write?',
+          kind: 'MULTI_CHOICE',
+          options: [{ id: 'alpha', label: 'alpha' }, { id: 'beta', label: 'beta' }, { id: 'gamma', label: 'gamma' }]
+        }
+      }),
+      event({
+        id: 'answer',
+        type: 'question.answered',
+        sequence: 2,
+        payload: { questionId: 'q1', answer: { kind: 'MULTI_CHOICE', optionIds: ['beta', 'gamma'] } }
+      }),
+      event({
+        id: 'decision',
+        type: 'decision.recorded',
+        sequence: 3,
+        payload: { decisionId: 'd1', questionId: 'q1', kind: 'QUESTION_ANSWER', outcome: '["beta","gamma"]' }
+      })
+    ])
+    expect(items).toHaveLength(2)
+    expect(items[1]).toMatchObject({
+      kind: 'event',
+      title: 'Decision Recorded',
+      description: 'Which markers should I write? — beta, gamma'
+    })
+  })
+
   it('formats known and unknown tools and targets without dumping arbitrary input', () => {
     expect(toolActivityLabel('grep')).toBe('Search')
     expect(toolActivityLabel('custom_tool')).toBe('Custom tool')
@@ -239,6 +273,157 @@ describe('run activity projection', () => {
     ])
     expect(items).toHaveLength(1)
     expect(items[0]).toMatchObject({ kind: 'event', event: { type: 'file.modified' }, description: 'styles.css' })
+  })
+
+  it('projects Todowrite input.todos into structured todos with Todo label and count', () => {
+    const todos = [
+      { content: 'Create project structure', status: 'in progress', priority: 'high' },
+      { content: 'Build core habit tracking', status: 'pending', priority: 'high' },
+      { content: 'Polish UI/UX', status: 'completed', priority: 'medium' }
+    ]
+    const items = projectRunActivity([
+      event({
+        id: 'start',
+        type: 'tool.started',
+        sequence: 1,
+        payload: { toolCallId: 'todo-1', name: 'Todowrite', input: { todos } }
+      }),
+      event({
+        id: 'done',
+        type: 'tool.completed',
+        sequence: 2,
+        payload: { toolCallId: 'todo-1', name: 'Todowrite', summary: '6 todos' }
+      })
+    ])
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      kind: 'tool',
+      label: 'Todo',
+      target: '1/3',
+      status: 'completed',
+      todos: [
+        { content: 'Create project structure', status: 'in_progress' },
+        { content: 'Build core habit tracking', status: 'pending' },
+        { content: 'Polish UI/UX', status: 'completed' }
+      ]
+    })
+  })
+
+  it('prefers resultPreview todos over stale started input on completion', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'start',
+        type: 'tool.started',
+        sequence: 1,
+        payload: {
+          toolCallId: 'todo-1',
+          name: 'Todowrite',
+          input: { todos: [{ content: 'Create project structure', status: 'in progress' }] }
+        }
+      }),
+      event({
+        id: 'done',
+        type: 'tool.completed',
+        sequence: 2,
+        payload: {
+          toolCallId: 'todo-1',
+          name: 'Todowrite',
+          resultPreview: JSON.stringify([{ content: 'Create project structure', status: 'completed' }])
+        }
+      })
+    ])
+    expect(items[0]).toMatchObject({
+      kind: 'tool',
+      target: '1/1',
+      todos: [{ content: 'Create project structure', status: 'completed' }]
+    })
+  })
+
+  it('updates earlier Todowrite rows when a later call changes todo statuses', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'start-1',
+        type: 'tool.started',
+        sequence: 1,
+        payload: {
+          toolCallId: 'todo-a',
+          name: 'Todowrite',
+          input: { todos: [{ content: 'Ship feature', status: 'in progress' }] }
+        }
+      }),
+      event({ id: 'done-1', type: 'tool.completed', sequence: 2, payload: { toolCallId: 'todo-a', name: 'Todowrite' } }),
+      event({
+        id: 'start-2',
+        type: 'tool.started',
+        sequence: 3,
+        payload: {
+          toolCallId: 'todo-b',
+          name: 'Todowrite',
+          input: { todos: [{ content: 'Ship feature', status: 'completed' }, { content: 'Add tests', status: 'in progress' }] }
+        }
+      }),
+      event({ id: 'done-2', type: 'tool.completed', sequence: 4, payload: { toolCallId: 'todo-b', name: 'Todowrite' } })
+    ])
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({
+      kind: 'tool',
+      target: '1/2',
+      todos: [
+        { content: 'Ship feature', status: 'completed' },
+        { content: 'Add tests', status: 'in_progress' }
+      ]
+    })
+    expect(items[1]).toMatchObject({
+      kind: 'tool',
+      target: '1/2',
+      todos: [
+        { content: 'Ship feature', status: 'completed' },
+        { content: 'Add tests', status: 'in_progress' }
+      ]
+    })
+  })
+
+  it('parses todos from resultPreview when input is missing', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'done',
+        type: 'tool.completed',
+        sequence: 1,
+        payload: {
+          toolCallId: 'todo-2',
+          name: 'todo_write',
+          resultPreview: JSON.stringify([{ content: 'Ship feature', status: 'completed' }])
+        }
+      })
+    ])
+    expect(items[0]).toMatchObject({
+      kind: 'tool',
+      label: 'Todo',
+      target: '1/1',
+      todos: [{ content: 'Ship feature', status: 'completed' }]
+    })
+  })
+
+  it('keeps two sequential Todowrite calls as separate rows', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'start-1',
+        type: 'tool.started',
+        sequence: 1,
+        payload: { toolCallId: 'todo-a', name: 'Todowrite', input: { todos: [{ content: 'First list', status: 'pending' }] } }
+      }),
+      event({ id: 'done-1', type: 'tool.completed', sequence: 2, payload: { toolCallId: 'todo-a', name: 'Todowrite' } }),
+      event({
+        id: 'start-2',
+        type: 'tool.started',
+        sequence: 3,
+        payload: { toolCallId: 'todo-b', name: 'Todowrite', input: { todos: [{ content: 'Second list', status: 'pending' }] } }
+      }),
+      event({ id: 'done-2', type: 'tool.completed', sequence: 4, payload: { toolCallId: 'todo-b', name: 'Todowrite' } })
+    ])
+    expect(items).toHaveLength(2)
+    expect(items[0]).toMatchObject({ kind: 'tool', todos: [{ content: 'First list', status: 'pending' }] })
+    expect(items[1]).toMatchObject({ kind: 'tool', todos: [{ content: 'Second list', status: 'pending' }] })
   })
 })
 
@@ -423,5 +608,116 @@ describe('ActivityTimeline run feed', () => {
     expect(question.text()).toContain('Game library/browser')
     expect(question.text()).toContain('Arcade cabinet UI')
     expect(question.text()).toContain('waiting for answer')
+  })
+
+  it('renders Todowrite as a Cursor-style checklist without JSON result', () => {
+    const todos = [
+      { content: 'Create project structure', status: 'in progress', priority: 'high' },
+      { content: 'Build core habit tracking', status: 'pending', priority: 'high' },
+      { content: 'Polish UI/UX', status: 'completed', priority: 'medium' }
+    ]
+    const items = projectRunActivity([
+      event({
+        id: 'start',
+        type: 'tool.started',
+        sequence: 1,
+        payload: { toolCallId: 'todo-1', name: 'Todowrite', input: { todos } }
+      }),
+      event({
+        id: 'done',
+        type: 'tool.completed',
+        sequence: 2,
+        payload: { toolCallId: 'todo-1', name: 'Todowrite', summary: '6 todos' }
+      })
+    ])
+    const wrapper = mount(ActivityTimeline, {
+      props: { items },
+      global: { stubs: uiStubs }
+    })
+    const tool = wrapper.get('[data-tool-kind="todo"]')
+    expect(tool.text()).toContain('Todo')
+    expect(tool.text()).toContain('1/3')
+    expect(tool.text()).toContain('Create project structure')
+    expect(tool.text()).toContain('Build core habit tracking')
+    expect(tool.text()).toContain('Polish UI/UX')
+    expect(tool.text()).not.toContain('result:')
+    expect(tool.text()).not.toContain('Todowrite')
+    expect(tool.text()).not.toContain('priority')
+    expect(tool.find('[data-icon="i-lucide-list-todo"]').exists()).toBe(true)
+    expect(tool.find('[data-todo-status="in_progress"] [data-icon="i-lucide-loader-circle"]').exists()).toBe(true)
+    expect(tool.find('[data-todo-status="completed"] .line-through').exists()).toBe(true)
+    expect(tool.find('[data-todo-status="in_progress"] .animate-spin').exists()).toBe(true)
+    expect(tool.find('button').exists()).toBe(false)
+    expect(tool.find('.run-activity-todo-list').exists()).toBe(true)
+  })
+
+  it('renders two Todowrite rows independently', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'start-1',
+        type: 'tool.started',
+        sequence: 1,
+        payload: { toolCallId: 'todo-a', name: 'Todowrite', input: { todos: [{ content: 'First list', status: 'pending' }] } }
+      }),
+      event({ id: 'done-1', type: 'tool.completed', sequence: 2, payload: { toolCallId: 'todo-a', name: 'Todowrite' } }),
+      event({
+        id: 'start-2',
+        type: 'tool.started',
+        sequence: 3,
+        payload: { toolCallId: 'todo-b', name: 'Todowrite', input: { todos: [{ content: 'Second list', status: 'pending' }] } }
+      }),
+      event({ id: 'done-2', type: 'tool.completed', sequence: 4, payload: { toolCallId: 'todo-b', name: 'Todowrite' } })
+    ])
+    const wrapper = mount(ActivityTimeline, {
+      props: { items },
+      global: { stubs: uiStubs }
+    })
+    const tools = wrapper.findAll('[data-tool-kind="todo"]')
+    expect(tools).toHaveLength(2)
+    expect(tools[0]?.text()).toContain('First list')
+    expect(tools[1]?.text()).toContain('Second list')
+  })
+
+  it('renders Decision Recorded with the question and answers on one muted line', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'question',
+        type: 'question.created',
+        sequence: 1,
+        payload: {
+          questionId: 'q1',
+          prompt: 'Which marker should I write?',
+          kind: 'SINGLE_CHOICE',
+          options: [{ id: 'alpha', label: 'alpha' }, { id: 'beta', label: 'beta' }]
+        }
+      }),
+      event({
+        id: 'answer',
+        type: 'question.answered',
+        sequence: 2,
+        payload: { questionId: 'q1', answer: { kind: 'SINGLE_CHOICE', optionIds: ['beta'] } }
+      }),
+      event({
+        id: 'decision',
+        type: 'decision.recorded',
+        sequence: 3,
+        payload: { decisionId: 'd1', questionId: 'q1', kind: 'QUESTION_ANSWER' }
+      })
+    ])
+    const wrapper = mount(ActivityTimeline, {
+      props: { items },
+      global: { stubs: uiStubs }
+    })
+    const decision = wrapper.findAll('[data-activity-kind="event"]').find(row => row.text().includes('Decision Recorded'))
+    expect(decision).toBeTruthy()
+    const line = decision!.get('.flex')
+    expect(line.text()).toContain('Decision Recorded')
+    expect(line.text()).toContain('Which marker should I write?')
+    expect(line.text()).toContain('beta')
+    const detail = line.findAll('span').find(span => span.text().includes('Which marker should I write?'))
+    expect(detail?.classes()).toContain('text-muted')
+    expect(detail?.classes()).toContain('truncate')
+    expect(detail?.classes()).not.toContain('font-mono')
+    expect(detail?.element.tagName).toBe('SPAN')
   })
 })
