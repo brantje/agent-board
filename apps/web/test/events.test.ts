@@ -276,10 +276,12 @@ describe('useProjectEvents', () => {
   it('drops afterId and refreshes on a resync control frame', async () => {
     vi.useFakeTimers()
     vi.stubGlobal('EventSource', MockEventSource)
-    const received: string[] = []
+    const received: Array<{ type: string; projectId: string; issueId: string | null; runId: string | null }> = []
     const wrapper = mount(defineComponent({
       setup() {
-        useProjectEvents('project-a', event => { received.push(event.type) })
+        useProjectEvents('project-a', event => {
+          received.push({ type: event.type, projectId: event.projectId, issueId: event.issueId, runId: event.runId })
+        })
         return () => h('div')
       }
     }))
@@ -288,7 +290,10 @@ describe('useProjectEvents', () => {
     await flushPromises()
     MockEventSource.instances[0]?.emitNamed('resync')
     await flushPromises()
-    expect(received).toEqual(['issue.created', 'project.resync'])
+    expect(received).toEqual([
+      { type: 'issue.created', projectId: 'project-a', issueId: null, runId: null },
+      { type: 'project.resync', projectId: 'project-a', issueId: null, runId: null }
+    ])
 
     MockEventSource.instances[0]?.fail()
     await vi.advanceTimersByTimeAsync(2000)
