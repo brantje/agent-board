@@ -13,10 +13,10 @@ func (s *Store) CreateProvider(ctx context.Context, input store.Provider) (store
 		health = "UNKNOWN"
 	}
 	return scanProvider(s.pool.QueryRow(ctx, `
-		INSERT INTO providers (name, kind, base_url, credential_ref, enabled, health_status, safe_metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id::text, name, kind, base_url, credential_ref, enabled, health_status, safe_metadata, created_at, updated_at
-	`, input.Name, input.Kind, input.BaseURL, input.CredentialRef, input.Enabled, health, objectJSON(input.SafeMetadata)))
+		INSERT INTO providers (project_id, name, kind, base_url, credential_ref, enabled, health_status, safe_metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id::text, project_id::text, name, kind, base_url, credential_ref, enabled, health_status, safe_metadata, created_at, updated_at
+	`, input.ProjectID, input.Name, input.Kind, input.BaseURL, input.CredentialRef, input.Enabled, health, objectJSON(input.SafeMetadata)))
 }
 
 func (s *Store) CreateModelProfile(ctx context.Context, input store.ModelProfile) (store.ModelProfile, error) {
@@ -73,7 +73,7 @@ func (s *Store) GetAgent(ctx context.Context, projectID, agentID string) (store.
 
 func scanProvider(row pgx.Row) (store.Provider, error) {
 	var value store.Provider
-	if err := row.Scan(&value.ID, &value.Name, &value.Kind, &value.BaseURL, &value.CredentialRef, &value.Enabled, &value.HealthStatus, &value.SafeMetadata, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Kind, &value.BaseURL, &value.CredentialRef, &value.Enabled, &value.HealthStatus, &value.SafeMetadata, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Provider{}, notFound(err)
 	}
 	return value, nil

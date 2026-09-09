@@ -73,9 +73,10 @@ SecretMetadata:
 Provider:
   type: object
   description: Credential references are write-only and are never returned.
-  required: [id, name, kind, baseUrl, enabled, healthStatus, safeMetadata, createdAt, updatedAt]
+  required: [id, projectId, name, kind, baseUrl, enabled, healthStatus, safeMetadata, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
+    projectId: {type: [string, 'null'], format: uuid}
     name: {type: string}
     kind: {type: string}
     baseUrl: {type: [string, 'null']}

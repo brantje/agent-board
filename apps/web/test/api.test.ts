@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiRequest, ApiError, apiPath, apiQuery, apiText } from '../app/utils/api'
+import { apiRequest, ApiError, apiPath, apiQuery, apiText, providerModelsPath } from '../app/utils/api'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -7,6 +7,9 @@ describe('Go API transport', () => {
   it('encodes scoped paths and refuses unsafe path segments', () => {
     expect(apiPath('issues', 'project-1', 'AB-1')).toBe('/api/projects/project-1/issues/AB-1')
     expect(apiPath('providers')).toBe('/api/providers')
+    expect(apiPath('providers', 'project-1')).toBe('/api/projects/project-1/providers')
+    expect(providerModelsPath('provider-1')).toBe('/api/providers/provider-1/models')
+    expect(providerModelsPath('provider-1', 'project-1')).toBe('/api/projects/project-1/providers/provider-1/models')
     expect(() => apiPath('../secrets')).toThrow()
   })
 

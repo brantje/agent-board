@@ -50,6 +50,7 @@ type IssueRelationshipDTO struct {
 
 type ProviderDTO struct {
 	ID           string          `json:"id"`
+	ProjectID    *string         `json:"projectId"`
 	Name         string          `json:"name"`
 	Kind         string          `json:"kind"`
 	BaseURL      *string         `json:"baseUrl"`

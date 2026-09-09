@@ -52,6 +52,8 @@ services:
           export AGENT_BOARD_SECRET_WRITE_TOKEN="$$(cat /run/agent-board/secret-write-token)"
         fi
         exec air -c .air.toml
+    env_file:
+      - .env
     volumes:
       - ./apps/server:/src/apps/server
       - ./packages/redact:/src/packages/redact

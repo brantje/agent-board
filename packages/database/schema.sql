@@ -37,6 +37,7 @@ CREATE UNIQUE INDEX secrets_project_ref_uq ON secrets (project_id, ref) WHERE pr
 
 CREATE TABLE providers (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
     name text NOT NULL CHECK (btrim(name) <> ''),
     kind text NOT NULL CHECK (btrim(kind) <> ''),
     base_url text,
@@ -45,10 +46,12 @@ CREATE TABLE providers (
     health_status text NOT NULL DEFAULT 'UNKNOWN' CHECK (health_status IN ('UNKNOWN', 'HEALTHY', 'UNHEALTHY')),
     safe_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(safe_metadata) = 'object'),
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, id)
 );
 
-CREATE UNIQUE INDEX providers_name_uq ON providers (lower(name));
+CREATE UNIQUE INDEX providers_global_name_uq ON providers (lower(name)) WHERE project_id IS NULL;
+CREATE UNIQUE INDEX providers_project_name_uq ON providers (project_id, lower(name)) WHERE project_id IS NOT NULL;
 
 CREATE TABLE model_profiles (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

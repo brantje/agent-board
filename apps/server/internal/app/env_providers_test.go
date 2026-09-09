@@ -26,7 +26,7 @@ type envProviderStore struct {
 	nextModelProfileID int
 }
 
-func (s *envProviderStore) ListProviders(_ context.Context) ([]store.Provider, error) {
+func (s *envProviderStore) ListProviders(_ context.Context, _ *string) ([]store.Provider, error) {
 	s.listCalls++
 	if s.deferProvidersUntilRelist && s.listCalls == 1 {
 		return nil, nil
@@ -47,7 +47,7 @@ func (s *envProviderStore) ListProviders(_ context.Context) ([]store.Provider, e
 	return out, nil
 }
 
-func (s *envProviderStore) GetProvider(_ context.Context, id string) (store.Provider, error) {
+func (s *envProviderStore) GetProvider(_ context.Context, _ *string, id string) (store.Provider, error) {
 	for _, provider := range s.providers {
 		if provider.ID == id {
 			return provider, nil
@@ -72,7 +72,7 @@ func (s *envProviderStore) CreateProvider(_ context.Context, p store.Provider) (
 	return p, nil
 }
 
-func (s *envProviderStore) UpdateProvider(_ context.Context, p store.Provider) (store.Provider, error) {
+func (s *envProviderStore) UpdateProvider(_ context.Context, _ *string, p store.Provider) (store.Provider, error) {
 	if s.updateErr != nil {
 		return store.Provider{}, s.updateErr
 	}

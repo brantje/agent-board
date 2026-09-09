@@ -46,3 +46,56 @@ path3:
         $ref: ../components/api-components.yaml#/responses/ProviderModelList
       default:
         $ref: ../components/api-components.yaml#/responses/Error
+path4:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listProjectProviders
+    description: Returns Project-owned Providers plus visible shared Providers.
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ProviderList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createProjectProvider
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ProviderInput
+    responses:
+      '201':
+        $ref: ../components/api-components.yaml#/responses/Provider
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path5:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getProjectProvider
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Provider
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  put:
+    operationId: updateProjectProvider
+    description: Mutates Project-owned Providers only; shared Providers are read-only in Project scope. Omitted credential preserves the stored API key.
+    requestBody:
+      $ref: ../components/api-components.yaml#/requestBodies/ProviderInput
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Provider
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+path6:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: listProjectProviderModels
+    description: Discover models from the Provider API using stored credentials. Results are not persisted.
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/ProviderModelList
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

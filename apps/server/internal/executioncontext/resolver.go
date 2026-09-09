@@ -16,7 +16,7 @@ type Store interface {
 	GetWorkspace(context.Context, string, string) (store.Workspace, error)
 	GetAgentInScope(context.Context, *string, string) (store.Agent, error)
 	GetModelProfile(context.Context, *string, string) (store.ModelProfile, error)
-	GetProvider(context.Context, string) (store.Provider, error)
+	GetProvider(context.Context, *string, string) (store.Provider, error)
 	GetRuntime(context.Context, *string, string) (store.Runtime, error)
 }
 
@@ -87,11 +87,11 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 	if !model.Enabled || !scopeAllows(model.ProjectID, projectID) {
 		return Resolved{}, fail("execution_model_unavailable", "Model Profile is not available for execution", nil)
 	}
-	provider, err := r.store.GetProvider(ctx, model.ProviderID)
+	provider, err := r.store.GetProvider(ctx, scope, model.ProviderID)
 	if err != nil {
 		return Resolved{}, fail("execution_provider_unavailable", "Provider configuration is unavailable", err)
 	}
-	if !provider.Enabled {
+	if !provider.Enabled || !scopeAllows(provider.ProjectID, projectID) {
 		return Resolved{}, fail("execution_provider_unavailable", "Provider is not available for execution", nil)
 	}
 	runtime, err := r.store.GetRuntime(ctx, scope, agent.RuntimeID)

@@ -3,7 +3,7 @@ import { apiRequest, providerModelsPath, type ApiError, type ProviderModel } fro
 
 type ProviderModelList = { models: ProviderModel[] }
 
-export function useProviderModels(providerId: MaybeRefOrGetter<string>) {
+export function useProviderModels(providerId: MaybeRefOrGetter<string>, projectId?: MaybeRefOrGetter<string | undefined>) {
   const models = shallowRef<ProviderModel[]>([])
   const error = shallowRef<ApiError>()
   const pending = ref(false)
@@ -12,6 +12,7 @@ export function useProviderModels(providerId: MaybeRefOrGetter<string>) {
 
   async function refresh() {
     const id = String(toValue(providerId) ?? '').trim()
+    const scope = toValue(projectId)
     const current = ++generation
     controller?.abort()
     controller = new AbortController()
@@ -23,7 +24,7 @@ export function useProviderModels(providerId: MaybeRefOrGetter<string>) {
     }
     pending.value = models.value.length === 0
     try {
-      const result = await apiRequest<ProviderModelList>(providerModelsPath(id), { signal: controller.signal })
+      const result = await apiRequest<ProviderModelList>(providerModelsPath(id, scope), { signal: controller.signal })
       if (current === generation) models.value = result.models ?? []
     } catch (failure) {
       if (current === generation) {
@@ -35,8 +36,8 @@ export function useProviderModels(providerId: MaybeRefOrGetter<string>) {
     }
   }
 
-  watch(() => toValue(providerId), (next, previous) => {
-    if (previous !== undefined && String(next ?? '') !== String(previous ?? '')) {
+  watch(() => [toValue(providerId), toValue(projectId)] as const, (next, previous) => {
+    if (previous !== undefined && (String(next[0] ?? '') !== String(previous[0] ?? '') || String(next[1] ?? '') !== String(previous[1] ?? ''))) {
       models.value = []
       error.value = undefined
     }

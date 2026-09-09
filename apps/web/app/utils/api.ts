@@ -1,7 +1,7 @@
 export type ProviderModel = { id: string; name?: string | null }
 
-export function providerModelsPath(providerId: string) {
-  return `/api/providers/${providerId}/models`
+export function providerModelsPath(providerId: string, projectId?: string) {
+  return `${apiPath('providers', projectId, providerId)}/models`
 }
 
 export class ApiError extends Error {
