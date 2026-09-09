@@ -152,6 +152,7 @@ function provenanceText() {
           </details>
         </section>
         <aside class="space-y-4">
+          <RunAgentCard :provenance="evidence?.provenance" />
           <RunUsageCard :usage="evidence?.usage" />
           <UCard>
             <h2 class="section-label mb-3">Properties</h2>
@@ -165,10 +166,6 @@ function provenanceText() {
                 <dd>
                   <NuxtLink :to="`/projects/${projectId}/issues/${run.issueId}`" class="font-mono break-all hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{ run.issueId }}</NuxtLink>
                 </dd>
-              </div>
-              <div>
-                <dt class="text-muted">Agent</dt>
-                <dd class="font-mono break-all">{{ run.agentId || 'Unassigned' }}</dd>
               </div>
               <div>
                 <dt class="text-muted">Branch</dt>
