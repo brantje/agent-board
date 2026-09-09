@@ -26,7 +26,7 @@ func (s *Service) ListProviderModels(ctx context.Context, scope *string, provide
 		if !secretResolverConfigured(resolver) {
 			return nil, NewError("provider_credential_unavailable", "Provider credential is unavailable for model discovery.", nil)
 		}
-		apiKey, err = resolver.Resolve(ctx, secrets.Scope{ProjectID: scope}, strings.TrimSpace(*provider.CredentialRef))
+		apiKey, err = resolver.Resolve(ctx, secrets.Scope{ProjectID: provider.ProjectID}, strings.TrimSpace(*provider.CredentialRef))
 		if err != nil {
 			return nil, NewError("provider_credential_unavailable", "Provider credential is unavailable for model discovery.", err)
 		}
