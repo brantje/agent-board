@@ -56,10 +56,6 @@ func TestConfigurationStoreAllowsGlobalButRejectsForeignProjectReferences(t *tes
 	if err != nil {
 		t.Fatalf("create project model: %v", err)
 	}
-	runtimeA, err := s.CreateRuntime(ctx, store.Runtime{ProjectID: &projectA.ID, Name: "runtime-a", Kind: "docker", Image: "agent-board/runtime:test", NetworkPolicy: "restricted", Enabled: true})
-	if err != nil {
-		t.Fatalf("create project runtime: %v", err)
-	}
 	if _, err := s.CreateAgent(ctx, store.Agent{ProjectID: &projectB.ID, Name: "bad", Engine: "scripted", ModelProfileID: modelA.ID}); err == nil {
 		t.Fatal("expected foreign project configuration reference to fail")
 	}
@@ -67,10 +63,6 @@ func TestConfigurationStoreAllowsGlobalButRejectsForeignProjectReferences(t *tes
 	globalModel, err := s.CreateModelProfile(ctx, store.ModelProfile{ProviderID: provider.ID, Name: "global-model", Model: "test", Enabled: true})
 	if err != nil {
 		t.Fatalf("create global model: %v", err)
-	}
-	globalRuntime, err := s.CreateRuntime(ctx, store.Runtime{Name: "global-runtime", Kind: "docker", Image: "agent-board/runtime:test", NetworkPolicy: "restricted", Enabled: true})
-	if err != nil {
-		t.Fatalf("create global runtime: %v", err)
 	}
 	agent, err := s.CreateAgent(ctx, store.Agent{Name: "global-agent", Engine: "scripted", ModelProfileID: globalModel.ID, ConcurrencyLimit: 2})
 	if err != nil {

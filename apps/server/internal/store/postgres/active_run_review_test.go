@@ -28,17 +28,6 @@ func TestAssignIssueTreatsReadyForReviewRunAsActive(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create model profile: %v", err)
 	}
-	runtime, err := s.CreateRuntime(ctx, store.Runtime{
-		ProjectID:     &project.ID,
-		Name:          "ready-review",
-		Kind:          "docker",
-		Image:         "agent-board:test",
-		NetworkPolicy: "none",
-		Enabled:       true,
-	})
-	if err != nil {
-		t.Fatalf("create runtime: %v", err)
-	}
 	agent, err := s.CreateAgent(ctx, store.Agent{
 		ProjectID:        &project.ID,
 		Name:             "ready-review",

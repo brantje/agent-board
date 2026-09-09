@@ -252,18 +252,10 @@ func (s *disabledProviderStore) GetProvider(context.Context, *string, string) (s
 	return p, nil
 }
 
-type disabledRuntimeStore struct{ *fakeStore }
-
-func (s *disabledRuntimeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) {
-	r := coverageRuntime()
-	r.Enabled = false
-	return r, nil
-}
-
 func TestAssignmentRejectsUnavailableConfiguration(t *testing.T) {
 	pid := coverageProjectID()
 	makeBase := func() *fakeStore { return &fakeStore{project: store.Project{ID: pid}, agent: coverageAgent()} }
-	cases := []*Service{New(&disabledAgentStore{fakeStore: makeBase()}), New(&disabledModelStore{fakeStore: makeBase()}), New(&disabledProviderStore{fakeStore: makeBase()}), New(&disabledRuntimeStore{fakeStore: makeBase()})}
+	cases := []*Service{New(&disabledAgentStore{fakeStore: makeBase()}), New(&disabledModelStore{fakeStore: makeBase()}), New(&disabledProviderStore{fakeStore: makeBase()})}
 	for _, svc := range cases {
 		_, _, err := svc.AssignIssue(context.Background(), pid, "issue", "agent")
 		ae, ok := AsError(err)
@@ -277,12 +269,6 @@ type missingModelProfileStore struct{ *fakeStore }
 
 func (*missingModelProfileStore) GetModelProfile(context.Context, *string, string) (store.ModelProfile, error) {
 	return store.ModelProfile{}, store.ErrNotFound
-}
-
-type missingRuntimeStore struct{ *fakeStore }
-
-func (*missingRuntimeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) {
-	return store.Runtime{}, store.ErrNotFound
 }
 
 func TestCreateAndUpdateAgentRequireScopedModelProfile(t *testing.T) {

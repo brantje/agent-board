@@ -354,7 +354,7 @@ func TestRuntimeInstanceReconcileFailureAndStateBranches(t *testing.T) {
 	}
 
 	externalID := "container-1"
-	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, Status: string(runtimepkg.StateDestroyed)}
+	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, RuntimeID: base.runtime.ID, Status: string(runtimepkg.StateDestroyed)}
 	rs := &reconcileStore{runtimeServiceStore: base, workspace: workspace}
 	service.store = rs
 	instance, err := service.Reconcile(context.Background(), workspace.ProjectID, base.instance.ID)
@@ -362,12 +362,12 @@ func TestRuntimeInstanceReconcileFailureAndStateBranches(t *testing.T) {
 		t.Fatalf("destroyed Reconcile() instance=%+v err=%v", instance, err)
 	}
 
-	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, Status: string(runtimepkg.StateProvisioning)}
+	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, RuntimeID: base.runtime.ID, Status: string(runtimepkg.StateProvisioning)}
 	if _, err := service.Reconcile(context.Background(), workspace.ProjectID, base.instance.ID); !errors.Is(err, runtimepkg.ErrUnsupportedPolicy) {
 		t.Fatalf("missing identity Reconcile() error=%v", err)
 	}
 
-	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, Status: string(runtimepkg.StateRunning), ExternalID: &externalID, SafeHandleMetadata: json.RawMessage(`{"safe":true}`)}
+	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, RuntimeID: base.runtime.ID, Status: string(runtimepkg.StateRunning), ExternalID: &externalID, SafeHandleMetadata: json.RawMessage(`{"safe":true}`)}
 	inspectRuntime := &inspectErrorRuntime{fakeRuntimeImplementation: implementation, err: runtimepkg.ErrNotFound}
 	service.implementations["docker"] = inspectRuntime
 	instance, err = service.Reconcile(context.Background(), workspace.ProjectID, base.instance.ID)
@@ -375,7 +375,7 @@ func TestRuntimeInstanceReconcileFailureAndStateBranches(t *testing.T) {
 		t.Fatalf("not-found Reconcile() instance=%+v persisted=%+v err=%v", instance, base.instance, err)
 	}
 
-	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, Status: string(runtimepkg.StateRunning), ExternalID: &externalID, SafeHandleMetadata: json.RawMessage(`{"safe":true}`)}
+	base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, RuntimeID: base.runtime.ID, Status: string(runtimepkg.StateRunning), ExternalID: &externalID, SafeHandleMetadata: json.RawMessage(`{"safe":true}`)}
 	implementation = &fakeRuntimeImplementation{inspectState: runtimepkg.StateDestroyed}
 	service.implementations["docker"] = implementation
 	if _, err := service.Reconcile(context.Background(), workspace.ProjectID, base.instance.ID); err == nil {
@@ -408,7 +408,7 @@ func TestRuntimeInstanceReconcileFailureAndStateBranches(t *testing.T) {
 		{runtimepkg.StateFailed, "UNAVAILABLE"},
 		{runtimepkg.StateStopped, "UNAVAILABLE"},
 	} {
-		base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, Status: string(runtimepkg.StateRunning)}
+		base.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, RuntimeID: base.runtime.ID, Status: string(runtimepkg.StateRunning)}
 		updated, err := service.reconcileState(context.Background(), base.instance, tc.state, &externalID, json.RawMessage(`{"safe":true}`))
 		if err != nil || updated.RunnerStatus != tc.runnerStatus {
 			t.Fatalf("reconcileState(%s)=%+v err=%v", tc.state, updated, err)

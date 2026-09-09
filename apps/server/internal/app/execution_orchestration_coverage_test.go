@@ -377,7 +377,7 @@ func runtimeRunnerService(t *testing.T, implementation runtimepkg.Implementation
 	externalID := "container-1"
 	statusStore.runtime = store.Runtime{ID: "runtime-1", ProjectID: &projectID, Kind: "docker", Image: "runner:test", Enabled: true}
 	statusStore.instance = store.RuntimeInstance{
-		ID: "instance-1", ProjectID: projectID, WorkspaceID: "workspace-1",
+		ID: "instance-1", ProjectID: projectID, WorkspaceID: "workspace-1", RuntimeID: "runtime-1",
 		Status: "RUNNING", RunnerStatus: "READY", ExternalID: &externalID, SafeHandleMetadata: store.EmptyObject,
 	}
 	service, err := NewRuntimeInstanceService(statusStore, &runtimeWorkspaceEnsurer{}, map[string]runtimepkg.Implementation{"docker": implementation})

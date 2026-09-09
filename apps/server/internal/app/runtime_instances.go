@@ -68,7 +68,8 @@ func (s *RuntimeInstanceService) Create(ctx context.Context, projectID, issueID,
 	instance, err := s.store.CreateRuntimeInstance(ctx, store.RuntimeInstance{
 		ProjectID:    projectID,
 		WorkspaceID:  workspace.ID,
-				Status:       string(runtimepkg.StateProvisioning),
+		RuntimeID:    runtimeConfig.ID,
+		Status:       string(runtimepkg.StateProvisioning),
 		RunnerStatus: "CONNECTING",
 	})
 	if err != nil {

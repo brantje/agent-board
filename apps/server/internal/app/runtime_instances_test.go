@@ -24,6 +24,9 @@ func (s *runtimeServiceStore) GetRuntime(_ context.Context, scope *string, id st
 }
 func (s *runtimeServiceStore) CreateRuntimeInstance(_ context.Context, input store.RuntimeInstance) (store.RuntimeInstance, error) {
 	input.ID = "instance-1"
+	if input.RuntimeID == "" {
+		input.RuntimeID = s.runtime.ID
+	}
 	if input.Status == "" {
 		input.Status = "PROVISIONING"
 	}
@@ -183,7 +186,7 @@ func TestRuntimeInstanceServiceRejectsInvalidConfigurationAndUnreconciledHandles
 		t.Fatal("expected disabled Runtime rejection")
 	}
 	runtimeStore.runtime.Enabled = true
-	runtimeStore.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, Status: "FAILED"}
+	runtimeStore.instance = store.RuntimeInstance{ID: "instance-1", ProjectID: workspace.ProjectID, WorkspaceID: workspace.ID, RuntimeID: runtimeStore.runtime.ID, Status: "FAILED"}
 	if _, err := service.Destroy(ctx, workspace.ProjectID, runtimeStore.instance.ID); !errors.Is(err, runtimepkg.ErrNotFound) {
 		t.Fatalf("Destroy unreconciled error=%v", err)
 	}
