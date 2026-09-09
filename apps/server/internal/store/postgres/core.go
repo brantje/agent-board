@@ -50,7 +50,7 @@ LEFT JOIN LATERAL (
 	WHERE project_id = i.project_id
 	  AND issue_id = i.id
 	  AND split_part(type, '.', 1) = ANY (ARRAY['issue','run','question','review','decision'])
-	ORDER BY created_at DESC, id DESC
+	ORDER BY created_at DESC, (cmin::text)::integer DESC, id DESC
 	LIMIT 1
 ) AS last_event ON true
 `
