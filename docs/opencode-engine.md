@@ -43,9 +43,13 @@ Duplicate/stale Agent Board answers are rejected by the durable Question state. 
 
 ## Evidence and reasoning boundary
 
-The adapter may persist explicitly emitted, user-visible OpenCode messages, plans, rationale, progress, discoveries, summaries, tool activity, files, tests, completion, and failure information when the native protocol exposes them reliably.
+The adapter may persist explicitly emitted OpenCode messages, plans, rationale, progress, discoveries, summaries, reasoning text, tool activity, files, tests, completion, and failure information when the native protocol exposes them reliably. A finalized native `reasoning` part is stored as canonical `agent.message` evidence with `kind: "reasoning"`; the Run UI presents that emitted trace as a Thought.
 
-It does not persist hidden chain-of-thought, infer private reasoning from tool calls, or make a second model request just to classify/summarize timeline activity. Unclassified visible messages fall back to the generic `agent.message` kind.
+This boundary does not authorize Agent Board to infer reasoning from tool calls, reconstruct reasoning that OpenCode did not emit, or make a second model request to classify or manufacture timeline activity. Unclassified visible messages continue to fall back to the generic `agent.message` kind.
+
+OpenCode tool lifecycle Events retain the native call identifier as `toolCallId` and may include sanitized `input`, `summary`, a bounded `resultPreview`, and `reason`. The UI uses `toolCallId` to collapse started/completed/failed lifecycle Events into one logical tool row. Large output remains raw/blob evidence rather than being copied into structured Events.
+
+All structured activity still passes through Agent Board's centralized Run-scoped redacting store before persistence. Reasoning text, tool inputs, summaries, result previews, and failure reasons therefore use the same secret-redaction boundary as other Event payloads.
 
 ## Credential-gated real verification
 

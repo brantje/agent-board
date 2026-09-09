@@ -138,7 +138,9 @@ agent.completed
 agent.failed
 ```
 
-Do not attempt to persist private hidden chain-of-thought. Store user-visible agent messages, structured summaries, plans where explicitly emitted, Decisions, tool activity, and other operationally relevant information.
+Store user-visible agent messages, structured summaries, plans, explicitly emitted reasoning/progress traces, Decisions, tool activity, and other operationally relevant information. An Engine may map reasoning text that its native user-observable protocol explicitly emits to `agent.message` with `kind: "reasoning"` so the Run UI can present it as a Thought.
+
+Do not infer reasoning from tool calls, reconstruct reasoning the Engine did not emit, or make another model request just to manufacture or classify timeline thoughts.
 
 ### Question
 
@@ -171,14 +173,19 @@ Typical payload metadata:
 
 - tool kind
 - command/tool name
-- sanitized arguments where safe
+- stable native `toolCallId` where available
+- sanitized input/arguments where safe
 - working directory
 - start/end/duration
 - exit code
 - output blob references
 - summary
+- bounded `resultPreview`
+- failure reason
 
-Large stdout/stderr belongs in blob storage rather than oversized Event payloads.
+A stable `toolCallId` lets viewers project lifecycle Events for one invocation into a single logical row without changing the authoritative Event history. Fields are additive: historical Events without a call identifier remain valid and must still render through the generic Event fallback.
+
+Large stdout/stderr or tool results belong in blob/raw-output storage rather than oversized Event payloads. A preview is presentation evidence, not a replacement for complete raw output.
 
 ### File
 
@@ -290,7 +297,7 @@ When possible, represent secret access as metadata:
 
 not the value.
 
-Runtime and Engine adapter output must pass through a centralized redaction layer before being persisted as raw or structured logs.
+Runtime and Engine adapter output must pass through a centralized redaction layer before being persisted as raw or structured logs. This includes reasoning messages and nested tool input/result metadata.
 
 ## Raw logs
 
