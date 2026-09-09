@@ -60,7 +60,7 @@ func start(id, workspaceRoot string, request Request, redactionValues []string) 
 		return nil, errors.New("command is required")
 	}
 
-	workingDir, err := resolveWorkingDir(workspaceRoot, request.Dir)
+	workingDir, err := resolveWorkingDir(workspaceRoot, normalizeWorkspaceDir(request.Dir))
 	if err != nil {
 		return nil, err
 	}
@@ -200,6 +200,17 @@ func (s *Session) complete(result Result, err error) {
 	s.err = err
 	close(s.done)
 	s.mu.Unlock()
+}
+
+func normalizeWorkspaceDir(requested string) string {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || requested == "/workspace" {
+		return ""
+	}
+	if strings.HasPrefix(requested, "/workspace/") {
+		return strings.TrimPrefix(requested, "/workspace/")
+	}
+	return requested
 }
 
 func resolveWorkingDir(workspaceRoot, requested string) (string, error) {

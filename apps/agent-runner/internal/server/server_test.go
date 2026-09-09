@@ -140,7 +140,7 @@ func TestDisconnectDoesNotCancelProcess(t *testing.T) {
 		t.Fatalf("unexpected %#v", msg)
 	}
 	_ = conn.Close()
-	statePath := filepath.Join(workspace, "state")
+	statePath := filepath.Join(workspace, "detached", "state")
 	waitFor(t, 2*time.Second, func() bool {
 		data, err := os.ReadFile(statePath)
 		return err == nil && string(data) == "done"

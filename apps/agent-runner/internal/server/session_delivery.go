@@ -98,6 +98,19 @@ func (d *sessionDelivery) sendError(code, message, sessionID string) {
 	_ = d.send(protocol.TypeError, sessionID, protocol.ErrorPayload{Code: code, Message: message})
 }
 
+func (d *sessionDelivery) sendTransfer(ctx context.Context, sessionID, transferID, direction string, payload []byte) error {
+	for {
+		writer, err := d.waitWriter()
+		if err != nil {
+			return err
+		}
+		if err := writer.sendTransfer(ctx, sessionID, transferID, direction, payload); err == nil {
+			return nil
+		}
+		d.detach(writer)
+	}
+}
+
 func (d *sessionDelivery) waitWriter() (*connectionWriter, error) {
 	for {
 		d.mu.Lock()

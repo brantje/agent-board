@@ -46,6 +46,19 @@ type pendingSessionMessages struct {
 	bytes    int
 }
 
+type transferResult struct {
+	transferID string
+	payload    []byte
+	err        error
+}
+
+type incomingTransferState struct {
+	transferID string
+	expected   int64
+	checksum   string
+	buffer     []byte
+}
+
 type Connection struct {
 	conn *websocket.Conn
 
@@ -54,6 +67,9 @@ type Connection struct {
 	sessions  map[string]*Session
 	pending   map[string]*pendingSessionMessages
 	connects  map[string]map[string]*sessionConn
+	transfers map[string]*incomingTransferState
+	transferWaiters map[string]chan transferResult
+	transferDone    map[string]transferResult
 	health    protocol.Health
 	caps      protocol.Capabilities
 	err       error
@@ -82,11 +98,14 @@ func dialWith(ctx context.Context, dialer *websocket.Dialer, endpoint string, he
 // acceptConnection binds the existing session transport to an upgraded socket.
 func acceptConnection(ctx context.Context, conn *websocket.Conn) (*Connection, error) {
 	c := &Connection{
-		conn:     conn,
-		sessions: make(map[string]*Session),
-		pending:  make(map[string]*pendingSessionMessages),
-		connects: make(map[string]map[string]*sessionConn),
-		done:     make(chan struct{}),
+		conn:            conn,
+		sessions:        make(map[string]*Session),
+		pending:         make(map[string]*pendingSessionMessages),
+		connects:        make(map[string]map[string]*sessionConn),
+		transfers:       make(map[string]*incomingTransferState),
+		transferWaiters: make(map[string]chan transferResult),
+		transferDone:    make(map[string]transferResult),
+		done:            make(chan struct{}),
 	}
 	conn.SetReadLimit(maxMessageSize)
 	if err := c.handshake(ctx); err != nil {
@@ -326,6 +345,9 @@ func (c *Connection) handleMessage(msg protocol.Message) error {
 	}
 	if msg.Type == protocol.TypeConnected || msg.Type == protocol.TypeConnectData || msg.Type == protocol.TypeConnectClose {
 		return c.handleConnectMessage(msg)
+	}
+	if msg.Type == protocol.TypeTransferBegin || msg.Type == protocol.TypeTransferChunk || msg.Type == protocol.TypeTransferEnd || msg.Type == protocol.TypeTransferFailed {
+		return c.handleTransferMessage(msg)
 	}
 
 	c.mu.Lock()

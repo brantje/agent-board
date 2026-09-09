@@ -42,7 +42,7 @@ func TestProcessLauncherPersistsTerminalEventAfterCancellation(t *testing.T) {
 		instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"},
 	}
 	client := newLauncherClient("", "", 1, errors.New("transport interrupted"))
-	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client}, nil)
+	transportSessions, err := newLauncherExecutionSessionService(sessionStore, client)
 	if err != nil {
 		t.Fatal(err)
 	}

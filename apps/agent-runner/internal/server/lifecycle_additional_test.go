@@ -2,8 +2,6 @@ package server
 
 import (
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func TestSequentialSessionsReuseWorkspaceOverOneConnection(t *testing.T) {
+func TestSequentialSessionsIsolateWorkspaceOverOneConnection(t *testing.T) {
 	workspace := t.TempDir()
 	runner := New(Config{WorkspaceRoot: workspace, MaxActiveSessions: 1})
 	httpServer := httptest.NewServer(runner)
@@ -24,7 +22,7 @@ func TestSequentialSessionsReuseWorkspaceOverOneConnection(t *testing.T) {
 	waitForExit(t, conn, "first")
 	waitFor(t, time.Second, func() bool { return runner.manager.ActiveCount() == 0 })
 
-	send(t, conn, protocol.TypeStart, "second", protocol.StartRequest{Command: []string{"cat", "state"}})
+	send(t, conn, protocol.TypeStart, "second", protocol.StartRequest{Command: []string{"sh", "-c", "cat state 2>/dev/null || true"}})
 	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
 		t.Fatalf("unexpected %#v", msg)
 	}
@@ -39,11 +37,8 @@ func TestSequentialSessionsReuseWorkspaceOverOneConnection(t *testing.T) {
 			}
 			output += string(stream.Data)
 		case protocol.TypeExit:
-			if output != "persisted" {
-				t.Fatalf("unexpected workspace output %q", output)
-			}
-			if data, err := os.ReadFile(filepath.Join(workspace, "state")); err != nil || string(data) != "persisted" {
-				t.Fatalf("workspace state mismatch data=%q err=%v", data, err)
+			if output != "" {
+				t.Fatalf("expected isolated workspace output, got %q", output)
 			}
 			return
 		}

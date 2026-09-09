@@ -60,7 +60,13 @@ type RunnerConnector interface {
 
 type runnerClient interface {
 	SendTransfer(context.Context, string, string, string, []byte) error
+	ReceiveTransfer(context.Context, string) (string, []byte, error)
 }
+
+type runnerSessionPreparer interface {
+	CreateRunnerSession(context.Context, string, string, string) (store.ExecutionSession, error)
+}
+
 
 type Processor struct {
 	store     ExecutionStore
@@ -88,7 +94,7 @@ func NewProcessor(
 	git workspace.Git,
 	runners RunnerConnector,
 ) (*Processor, error) {
-	if store == nil || resolver == nil || sessions == nil || engines == nil || events == nil || output == nil || candidate == nil || git == nil {
+	if store == nil || resolver == nil || sessions == nil || engines == nil || events == nil || output == nil || candidate == nil {
 		return nil, fmt.Errorf("run execution: all processor dependencies are required")
 	}
 	return &Processor{
@@ -123,10 +129,6 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 }
 
 func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext) (scheduler.Result, error) {
-	runnerID := strings.TrimSpace(claim.RunnerID)
-	if runnerID == "" {
-		return failed(fmt.Errorf("scheduler admission is missing runner id")), nil
-	}
 	runEventType := "run.started"
 	if claim.Job.Kind == "RESUME" {
 		runEventType = "run.resumed"
@@ -135,13 +137,49 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 		return scheduler.Result{}, err
 	}
 	p.branches.observeIfChanged(ctx, safe, nil)
-	if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
+
+	runnerID := strings.TrimSpace(claim.RunnerID)
+	if runnerID != "" {
+		if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
+			return failed(err), nil
+		}
+		preparer, ok := p.sessions.(runnerSessionPreparer)
+		if !ok {
+			return failed(fmt.Errorf("runner session preparer is unavailable")), nil
+		}
+		session, err := preparer.CreateRunnerSession(ctx, run.ProjectID, run.ID, runnerID)
+		if err != nil {
+			return failed(err), nil
+		}
+		if err := p.transferWorkspaceToRunner(ctx, safe, runnerID, session.ID); err != nil {
+			return failed(err), nil
+		}
+		return p.runEngineOnRunner(ctx, run, safe, runnerID, session.ID)
+	}
+	if p.runtimes == nil {
+		return failed(fmt.Errorf("scheduler admission is missing runner id")), nil
+	}
+	if err := p.record(ctx, safe, "runtime.provisioning", map[string]any{"runtimeId": safe.Runtime.ID}, nil, nil); err != nil {
+		return scheduler.Result{}, err
+	}
+	instance, err := p.acquireRuntime(ctx, run.ProjectID, run.IssueID, safe.Runtime.ID)
+	if err != nil {
 		return failed(err), nil
 	}
-	if err := p.transferWorkspaceToRunner(ctx, safe, runnerID); err != nil {
+	started, err := p.runtimes.Start(ctx, run.ProjectID, instance.ID)
+	if err != nil {
+		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
+		return failed(errors.Join(err, cleanupErr)), nil
+	}
+	instance, safe, err = p.materializeExecution(ctx, run, safe, started)
+	if err != nil {
 		return failed(err), nil
 	}
-	return p.runEngineOnRunner(ctx, run, safe, runnerID, "")
+	if err := p.record(ctx, safe, "runtime.started", map[string]any{"runtimeId": safe.Runtime.ID}, &instance.ID, nil); err != nil {
+		_ = p.cleanupRuntime(ctx, safe, instance)
+		return scheduler.Result{}, err
+	}
+	return p.runEngine(ctx, run, safe, instance, "")
 }
 
 func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, session store.ExecutionSession) (scheduler.Result, error) {
@@ -404,6 +442,7 @@ var _ engine.ProcessAttacher = (*processLauncher)(nil)
 
 type runnerSessionStarter interface {
 	StartOnRunner(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error)
+	StartPreparedOnRunner(context.Context, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error)
 	Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error)
 }
 
@@ -435,13 +474,18 @@ func (l *processLauncher) Start(ctx context.Context, request engine.ProcessReque
 		if !ok {
 			return nil, fmt.Errorf("run execution: runner session starter is unavailable")
 		}
-		process, err = starter.StartOnRunner(ctx, l.scope.ProjectID, l.scope.RunID, l.runnerID, app.AuthorizedExecutionRequest{
+		authorizedRequest := app.AuthorizedExecutionRequest{
 			Command:               append([]string(nil), request.Command...),
 			CWD:                   request.CWD,
 			Env:                   cloneMap(request.Env),
 			ProviderCredentialEnv: request.ProviderCredentialEnv,
 			RuntimeSecretRefs:     cloneMap(request.RuntimeSecretRefs),
-		})
+		}
+		if strings.TrimSpace(l.attachSessionID) != "" {
+			process, err = starter.StartPreparedOnRunner(ctx, l.scope.ProjectID, l.attachSessionID, authorizedRequest)
+		} else {
+			process, err = starter.StartOnRunner(ctx, l.scope.ProjectID, l.scope.RunID, l.runnerID, authorizedRequest)
+		}
 	} else {
 		process, err = l.sessions.Start(ctx, l.scope.ProjectID, l.scope.RunID, l.runtimeInstanceID, app.AuthorizedExecutionRequest{
 			Command:               append([]string(nil), request.Command...),
@@ -708,7 +752,7 @@ func chunkIDs(chunks []store.RawOutputChunk) []string {
 	return ids
 }
 
-func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID string) error {
+func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
 	if p.runners == nil {
 		return fmt.Errorf("runner connector is unavailable")
 	}
@@ -748,7 +792,7 @@ func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executio
 		}, nil, nil)
 		return err
 	}
-	if err := client.SendTransfer(ctx, safe.Run.ID, transferID, "to_runner", payload); err != nil {
+	if err := client.SendTransfer(ctx, sessionID, transferID, "to_runner", payload); err != nil {
 		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
 			"direction": "to_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
 		}, nil, nil)
@@ -776,8 +820,17 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 		return failed(err), nil
 	}
 	engineResult, engineErr := adapter.Execute(ctx, request)
+	syncErr := p.syncWorkspaceFromRunner(ctx, safe, runnerID, attachSessionID)
 	if errors.Is(engineErr, engine.ErrWaitingForInput) {
+		if syncErr != nil {
+			return failed(syncErr), nil
+		}
 		return p.finishWaitingForInputRunner(ctx, safe)
+	}
+	if syncErr != nil {
+		reason := safeFailure(syncErr)
+		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
+		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
 	}
 	snapshot, snapshotErr := p.candidate.Snapshot(ctx, launcher.scope, safe.Workspace.Path)
 	if snapshotErr == nil {
@@ -798,6 +851,61 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 		return scheduler.Result{}, err
 	}
 	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
+}
+
+func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
+	if sessionID == "" || p.runners == nil {
+		return fmt.Errorf("workspace sync requires a prepared runner execution session")
+	}
+	gitCLI, ok := p.git.(*workspace.GitCLI)
+	if !ok {
+		return fmt.Errorf("workspace git transfer is unavailable")
+	}
+	locker, ok := p.store.(workspaceLocker)
+	if !ok {
+		return fmt.Errorf("workspace lock store is unavailable")
+	}
+	transferID := fmt.Sprintf("%s-sync-%d", sessionID, time.Now().UnixNano())
+	if err := p.record(ctx, safe, "workspace.transfer.started", map[string]any{
+		"direction": "from_runner", "runnerId": runnerID, "transferId": transferID,
+	}, nil, nil); err != nil {
+		return err
+	}
+	client, err := p.runners.Connect(ctx, safe.Project.ID, runnerID)
+	if err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
+			"direction": "from_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
+		}, nil, nil)
+		return err
+	}
+	receivedID, payload, err := client.ReceiveTransfer(ctx, sessionID)
+	if err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
+			"direction": "from_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
+		}, nil, nil)
+		return err
+	}
+	if receivedID != "" {
+		transferID = receivedID
+	}
+	lock, err := locker.AcquireWorkspaceBootstrapLock(ctx, safe.Workspace.ID)
+	if err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
+			"direction": "from_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
+		}, nil, nil)
+		return err
+	}
+	defer func() { _ = lock.Release() }()
+	if err := gitCLI.ApplyTransferBundle(ctx, safe.Workspace.Path, payload); err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", map[string]any{
+			"direction": "from_runner", "runnerId": runnerID, "transferId": transferID, "reason": err.Error(),
+		}, nil, nil)
+		return err
+	}
+	return p.record(ctx, safe, "workspace.transfer.completed", map[string]any{
+		"direction": "from_runner", "runnerId": runnerID, "transferId": transferID,
+		"bytesTransferred": len(payload), "totalBytes": len(payload),
+	}, nil, nil)
 }
 
 func (p *Processor) finishWaitingForInputRunner(ctx context.Context, safe executioncontext.SafeContext) (scheduler.Result, error) {

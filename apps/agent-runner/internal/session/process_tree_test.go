@@ -22,7 +22,7 @@ func TestKillTerminatesDescendantProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pidPath := filepath.Join(workspace, "child.pid")
+	pidPath := filepath.Join(manager.SessionWorkspacePath("tree"), "child.pid")
 	var childPID int
 	waitFor(t, time.Second, func() bool {
 		data, readErr := os.ReadFile(pidPath)
@@ -60,7 +60,7 @@ func TestSessionWaitCleansRedirectedBackgroundProcessGroup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pidPath := filepath.Join(workspace, "child.pid")
+	pidPath := filepath.Join(manager.SessionWorkspacePath("background"), "child.pid")
 	var childPID int
 	waitFor(t, time.Second, func() bool {
 		data, readErr := os.ReadFile(pidPath)
@@ -100,7 +100,7 @@ func TestSessionWaitDoesNotWaitForInheritedChildStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	pidPath := filepath.Join(workspace, "child.pid")
+	pidPath := filepath.Join(manager.SessionWorkspacePath("inherited-streams"), "child.pid")
 	var childPID int
 	waitFor(t, time.Second, func() bool {
 		data, readErr := os.ReadFile(pidPath)

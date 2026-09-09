@@ -108,7 +108,7 @@ func TestCapturingProcessDialsThroughItsOwningExecutionSession(t *testing.T) {
 	local, remote := net.Pipe()
 	t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
 	client := &launcherDialClient{launcherClient: newLauncherClient("", "", 0, nil), conn: local}
-	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client}, nil)
+	transportSessions, err := newLauncherExecutionSessionService(sessionStore, client)
 	if err != nil {
 		t.Fatal(err)
 	}

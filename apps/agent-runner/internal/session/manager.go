@@ -3,6 +3,8 @@ package session
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"sync"
 )
@@ -52,6 +54,14 @@ func (m *Manager) ActiveCount() int {
 	return len(m.sessions)
 }
 
+func (m *Manager) WorkspaceRoot() string {
+	return m.workspaceRoot
+}
+
+func (m *Manager) SessionWorkspacePath(sessionID string) string {
+	return filepath.Join(m.workspaceRoot, sessionID)
+}
+
 func (m *Manager) ActiveIDs() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -89,7 +99,11 @@ func (m *Manager) Start(id string, request Request) (*Session, error) {
 		}
 	}
 
-	s, err := start(id, m.workspaceRoot, request, redactionValues)
+	sessionRoot := m.SessionWorkspacePath(id)
+	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("prepare session workspace: %w", err)
+	}
+	s, err := start(id, sessionRoot, request, redactionValues)
 	if err != nil {
 		return nil, err
 	}

@@ -140,6 +140,72 @@ func (s *ExecutionSessionService) Start(ctx context.Context, projectID, runID, r
 	return newExecutionProcess(s, session, transport), nil
 }
 
+func (s *ExecutionSessionService) CreateRunnerSession(ctx context.Context, projectID, runID, runnerID string) (store.ExecutionSession, error) {
+	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" || strings.TrimSpace(runnerID) == "" {
+		return store.ExecutionSession{}, NewError("invalid_argument", "projectId, runId and runnerId are required", store.ErrInvalidArgument)
+	}
+	if _, err := s.store.GetRun(ctx, projectID, runID); err != nil {
+		return store.ExecutionSession{}, translateStoreError(err, "run")
+	}
+	session, err := s.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: projectID, RunID: runID, RunnerID: runnerID,
+		Status: "PENDING", CWD: runtimepkg.WorkspaceTarget, CommandArgv: []byte("[]"),
+	})
+	if err != nil {
+		return store.ExecutionSession{}, translateStoreError(err, "execution_session")
+	}
+	return session, nil
+}
+
+func (s *ExecutionSessionService) StartPreparedOnRunner(ctx context.Context, projectID, sessionID string, request ExecutionRequest) (*ExecutionProcess, error) {
+	session, err := s.store.GetExecutionSession(ctx, projectID, sessionID)
+	if err != nil {
+		return nil, translateStoreError(err, "execution_session")
+	}
+	if session.RunnerID == "" {
+		return nil, NewError("invalid_argument", "execution session is not runner-owned", store.ErrInvalidArgument)
+	}
+	cwd, err := validateRunnerExecutionRequest(projectID, session.RunID, session.RunnerID, request)
+	if err != nil {
+		return nil, err
+	}
+	if session.Status != "PENDING" {
+		return nil, NewError("execution_session_invalid_state", "Execution Session is not pending workspace transfer", store.ErrInvalidArgument)
+	}
+	session, err = s.transition(ctx, session, []string{"PENDING"}, "STARTING", nil)
+	if err != nil {
+		return nil, err
+	}
+	client, err := s.registry.Connect(ctx, projectID, session.RunnerID)
+	if err != nil {
+		_, failErr := s.transition(ctx, session, []string{"STARTING"}, "FAILED", nil)
+		return nil, errors.Join(fmt.Errorf("connect runner: %w", err), failErr)
+	}
+	transport, err := client.Start(ctx, session.ID, runner.Request{
+		Command: append([]string(nil), request.Command...),
+		Dir:     cwd,
+		Env:     cloneMap(request.Env),
+		Secrets: cloneMap(request.Secrets),
+	})
+	if err != nil {
+		var protocolErr *runner.ProtocolError
+		if errors.As(err, &protocolErr) {
+			_, failErr := s.transition(ctx, session, []string{"STARTING"}, "FAILED", nil)
+			return nil, errors.Join(err, failErr)
+		}
+		if transport != nil {
+			s.retainExecutionProcess(session, transport)
+		}
+		return nil, NewError("execution_session_uncertain", "runner transport was interrupted while starting the Execution Session; reconciliation is required", err)
+	}
+	runningSession, transitionErr := s.transition(ctx, session, []string{"STARTING"}, "RUNNING", nil)
+	if transitionErr != nil {
+		s.retainExecutionProcess(session, transport)
+		return nil, NewError("execution_session_uncertain", "Execution Session started but durable RUNNING state could not be confirmed", transitionErr)
+	}
+	return newExecutionProcess(s, runningSession, transport), nil
+}
+
 func (s *ExecutionSessionService) StartOnRunner(ctx context.Context, projectID, runID, runnerID string, request ExecutionRequest) (*ExecutionProcess, error) {
 	cwd, err := validateRunnerExecutionRequest(projectID, runID, runnerID, request)
 	if err != nil {

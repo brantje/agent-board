@@ -44,6 +44,8 @@ type Server struct {
 	connectMu  sync.Mutex
 	connectors map[string]map[string]*sessionConnector
 
+	transfers *transferState
+
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
 	lifecycleMu    sync.Mutex
@@ -68,6 +70,7 @@ func New(config Config) *Server {
 		stdinPumps:     make(map[string]*stdinPump),
 		deliveries:     make(map[string]*sessionDelivery),
 		connectors:     make(map[string]map[string]*sessionConnector),
+		transfers:      newTransferState(),
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
 		connections:    make(map[*websocket.Conn]struct{}),
@@ -248,6 +251,12 @@ func (s *Server) handleMessage(writer *connectionWriter, msg protocol.Message) {
 		s.handleConnectClose(writer, msg)
 	case protocol.TypeHealth:
 		_ = writer.send(protocol.TypeHealth, "", s.health())
+	case protocol.TypeTransferBegin:
+		s.handleTransferBegin(writer, msg)
+	case protocol.TypeTransferChunk:
+		s.handleTransferChunk(writer, msg)
+	case protocol.TypeTransferEnd:
+		s.handleTransferEnd(writer, msg)
 	default:
 		writer.sendError("invalid_direction", "message type is not accepted from server", msg.SessionID)
 	}
@@ -285,7 +294,7 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 	go func() {
 		defer s.streamWG.Done()
 		defer s.removeDelivery(msg.SessionID, delivery)
-		streamExecution(s.shutdownCtx, delivery, execution)
+		streamExecution(s.shutdownCtx, s, delivery, execution)
 	}()
 }
 
@@ -393,7 +402,7 @@ func (s *Server) handleSignal(writer *connectionWriter, sessionID string, force 
 	}
 }
 
-func streamExecution(ctx context.Context, writer streamWriter, execution *session.Session) {
+func streamExecution(ctx context.Context, server *Server, writer streamWriter, execution *session.Session) {
 	var streams sync.WaitGroup
 	streams.Add(2)
 	go func() {
@@ -407,6 +416,7 @@ func streamExecution(ctx context.Context, writer streamWriter, execution *sessio
 
 	result, err := execution.Wait(ctx)
 	streams.Wait()
+	server.syncWorkspaceBack(writer, execution.ID())
 	if err != nil {
 		if ctx.Err() != nil {
 			return
@@ -420,6 +430,7 @@ func streamExecution(ctx context.Context, writer streamWriter, execution *sessio
 type streamWriter interface {
 	send(protocol.MessageType, string, any) error
 	sendError(string, string, string)
+	sendTransfer(context.Context, string, string, string, []byte) error
 }
 
 func pumpStream(writer streamWriter, typ protocol.MessageType, sessionID string, reader io.Reader) {

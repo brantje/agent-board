@@ -23,6 +23,10 @@ const (
 	TypeConnected      = runnerprotocol.TypeConnected
 	TypeConnectData    = runnerprotocol.TypeConnectData
 	TypeConnectClose   = runnerprotocol.TypeConnectClose
+	TypeTransferBegin  = runnerprotocol.TypeTransferBegin
+	TypeTransferChunk  = runnerprotocol.TypeTransferChunk
+	TypeTransferEnd    = runnerprotocol.TypeTransferEnd
+	TypeTransferFailed = runnerprotocol.TypeTransferFailed
 	TypeError          = runnerprotocol.TypeError
 )
 
@@ -44,6 +48,10 @@ type ConnectData = runnerprotocol.ConnectData
 type ConnectClose = runnerprotocol.ConnectClose
 type ExitResult = runnerprotocol.ExitResult
 type ErrorPayload = runnerprotocol.ErrorPayload
+type TransferBegin = runnerprotocol.TransferBegin
+type TransferChunk = runnerprotocol.TransferChunk
+type TransferEnd = runnerprotocol.TransferEnd
+type TransferFailed = runnerprotocol.TransferFailed
 
 func NewMessage(version int, typ MessageType, sessionID string, payload any) (Message, error) {
 	return runnerprotocol.NewMessage(version, typ, sessionID, payload)

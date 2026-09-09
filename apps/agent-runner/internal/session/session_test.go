@@ -76,11 +76,11 @@ func TestManagerCapacityAndSequentialSessions(t *testing.T) {
 
 func TestWorkspaceBoundary(t *testing.T) {
 	workspace := t.TempDir()
-	subdir := filepath.Join(workspace, "sub")
-	if err := os.Mkdir(subdir, 0o755); err != nil {
+	manager := NewManagerWithWorkspace(1, workspace)
+	subdir := filepath.Join(manager.SessionWorkspacePath("inside"), "sub")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := NewManagerWithWorkspace(1, workspace)
 
 	s, err := manager.Start("inside", Request{Command: []string{"pwd"}, Dir: "sub"})
 	if err != nil {
@@ -106,16 +106,20 @@ func TestWorkspaceBoundary(t *testing.T) {
 func TestWorkspaceBoundaryRejectsSymlinkEscape(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(workspace, "outside")); err != nil {
+	manager := NewManagerWithWorkspace(1, workspace)
+	sessionRoot := manager.SessionWorkspacePath("escape")
+	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := NewManagerWithWorkspace(1, workspace)
+	if err := os.Symlink(outside, filepath.Join(sessionRoot, "outside")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := manager.Start("escape", Request{Command: []string{"true"}, Dir: "outside"}); err == nil || !strings.Contains(err.Error(), "escapes workspace") {
 		t.Fatalf("expected symlink escape error, got %v", err)
 	}
 }
 
-func TestSequentialSessionsReuseWorkspaceWithoutEnvironmentLeak(t *testing.T) {
+func TestSequentialSessionsIsolateWorkspaceAndEnvironment(t *testing.T) {
 	workspace := t.TempDir()
 	manager := NewManagerWithWorkspace(1, workspace)
 	secretName := "AGENT_BOARD_TEST_SESSION_SECRET_9D5A"
@@ -132,7 +136,7 @@ func TestSequentialSessionsReuseWorkspaceWithoutEnvironmentLeak(t *testing.T) {
 	}
 	waitFor(t, time.Second, func() bool { return manager.ActiveCount() == 0 })
 
-	second, err := manager.Start("second", Request{Command: []string{"sh", "-c", "printf '%s|%s' \"$(cat state)\" \"${" + secretName + "-unset}\""}})
+	second, err := manager.Start("second", Request{Command: []string{"sh", "-c", "printf '%s|%s' \"$(cat state 2>/dev/null)\" \"${" + secretName + "-unset}\""}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +147,7 @@ func TestSequentialSessionsReuseWorkspaceWithoutEnvironmentLeak(t *testing.T) {
 	if _, err := second.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != "***|unset" {
+	if string(output) != "|unset" {
 		t.Fatalf("workspace/env isolation mismatch: %q", output)
 	}
 	if strings.Contains(string(output), "ephemeral") {
