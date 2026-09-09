@@ -1,0 +1,100 @@
+nameInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [name]
+        properties:
+          name: {type: string, minLength: 1}
+runnerResponse:
+  description: Runner identity and diagnostics. Connected state comes from the live registry.
+  content:
+    application/json:
+      schema:
+        $ref: ../schemas/runners.yaml#/Runner
+credentialResponse:
+  description: Plaintext credential returned once. It cannot be retrieved later.
+  headers:
+    Cache-Control:
+      schema: {type: string, const: no-store}
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [runner, token]
+        properties:
+          runner:
+            $ref: ../schemas/runners.yaml#/Runner
+          token: {type: string}
+collection:
+  get:
+    operationId: listRunners
+    responses:
+      '200':
+        description: Non-deleted runners, including the managed internal runner.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: ../schemas/runners.yaml#/Runner
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createRunner
+    requestBody:
+      $ref: "#/nameInput"
+    responses:
+      '201':
+        $ref: "#/credentialResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+resource:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getRunner
+    responses:
+      '200':
+        $ref: "#/runnerResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  patch:
+    operationId: renameRunner
+    requestBody:
+      $ref: "#/nameInput"
+    responses:
+      '200':
+        $ref: "#/runnerResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  delete:
+    operationId: deleteRunner
+    responses:
+      '204':
+        description: Permanently soft-deleted and revoked. Historical provenance is retained.
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+rotate:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  post:
+    operationId: rotateRunnerToken
+    responses:
+      '200':
+        $ref: "#/credentialResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+revoke:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  post:
+    operationId: revokeRunner
+    responses:
+      '200':
+        $ref: "#/runnerResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

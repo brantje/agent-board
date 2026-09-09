@@ -1,0 +1,16 @@
+Runner:
+  type: object
+  additionalProperties: false
+  required: [id, name, internal, managed, deletable, connected, revokedAt, lastSeenAt, capabilities, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    name: {type: string}
+    internal: {type: boolean}
+    managed: {type: boolean}
+    deletable: {type: boolean}
+    connected: {type: boolean}
+    revokedAt: {type: [string, 'null'], format: date-time}
+    lastSeenAt: {type: [string, 'null'], format: date-time}
+    capabilities: {type: object}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
