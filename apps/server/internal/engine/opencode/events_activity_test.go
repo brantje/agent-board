@@ -99,4 +99,26 @@ func TestHandleToolPartPersistsCallInputAndBoundedResult(t *testing.T) {
 	}
 }
 
+func TestHandleToolPartPreservesStructuredOutputAsPreview(t *testing.T) {
+	sink := &recordingActivitySink{}
+	state := newRunState("ses_1", nil, sink)
+	part := mustJSON(t, map[string]any{
+		"id": "part_structured", "callID": "call_structured", "tool": "search",
+		"state": map[string]any{
+			"status": "completed",
+			"output": map[string]any{"matches": []any{"a.go", "b.go"}, "count": 2},
+		},
+	})
+	if err := state.handleToolPart(context.Background(), part); err != nil {
+		t.Fatalf("handleToolPart() error=%v", err)
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("events=%+v", sink.events)
+	}
+	preview, _ := sink.events[0].Payload["resultPreview"].(string)
+	if preview != `{"count":2,"matches":["a.go","b.go"]}` {
+		t.Fatalf("structured preview=%q", preview)
+	}
+}
+
 var _ engine.ActivitySink = (*failFirstActivitySink)(nil)

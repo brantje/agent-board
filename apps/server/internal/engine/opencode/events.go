@@ -188,7 +188,7 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 		State  struct {
 			Status string         `json:"status"`
 			Input  map[string]any `json:"input,omitempty"`
-			Output string         `json:"output,omitempty"`
+			Output any            `json:"output,omitempty"`
 			Title  string         `json:"title,omitempty"`
 			Error  string         `json:"error,omitempty"`
 		} `json:"state"`
@@ -226,7 +226,7 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 		Summary:    evidence.BoundActivityPreview(part.State.Title),
 	}
 	if eventType == "tool.completed" {
-		payload.ResultPreview = evidence.BoundActivityPreview(part.State.Output)
+		payload.ResultPreview = toolResultPreview(part.State.Output)
 	}
 	if eventType == "tool.failed" {
 		payload.Reason = evidence.BoundActivityPreview(part.State.Error)
@@ -238,6 +238,20 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 	}
 	s.seenToolStates[key] = struct{}{}
 	return nil
+}
+
+func toolResultPreview(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return evidence.BoundActivityPreview(text)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return evidence.BoundActivityPreview(fmt.Sprint(value))
+	}
+	return evidence.BoundActivityPreview(string(encoded))
 }
 
 func toolPayloadMap(payload evidence.ToolPayload) map[string]any {
