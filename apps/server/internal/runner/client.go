@@ -76,6 +76,11 @@ func dialWith(ctx context.Context, dialer *websocket.Dialer, endpoint string, he
 		}
 		return nil, fmt.Errorf("dial runner: %w", err)
 	}
+	return acceptConnection(ctx, conn)
+}
+
+// acceptConnection binds the existing session transport to an upgraded socket.
+func acceptConnection(ctx context.Context, conn *websocket.Conn) (*Connection, error) {
 	c := &Connection{
 		conn:     conn,
 		sessions: make(map[string]*Session),
@@ -106,7 +111,7 @@ func (c *Connection) handshake(ctx context.Context) error {
 	}
 	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
 
-	if err := c.write(protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{protocol.Version1}}); err != nil {
+	if err := c.write(protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{protocol.Version2}}); err != nil {
 		return fmt.Errorf("send runner hello: %w", err)
 	}
 	msg, err := c.readProtocolMessage()
@@ -123,7 +128,7 @@ func (c *Connection) handshake(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: invalid runner hello: %v", ErrIncompatibleRunner, err)
 	}
-	if hello.Version != protocol.Version1 || hello.Capabilities.MaxActiveSessions < 1 {
+	if hello.Version != protocol.Version2 || hello.Capabilities.MaxActiveSessions < 1 {
 		return fmt.Errorf("%w: version=%d max_active_sessions=%d", ErrIncompatibleRunner, hello.Version, hello.Capabilities.MaxActiveSessions)
 	}
 	if err := validateFeatures(hello.Capabilities.Features); err != nil {
@@ -187,6 +192,7 @@ func (c *Connection) Capabilities() protocol.Capabilities {
 	defer c.mu.RUnlock()
 	caps := c.caps
 	caps.Features = append([]string(nil), caps.Features...)
+	caps.Engines = append([]string(nil), caps.Engines...)
 	return caps
 }
 
@@ -421,7 +427,7 @@ func (c *Connection) readProtocolMessage() (protocol.Message, error) {
 }
 
 func (c *Connection) write(typ protocol.MessageType, sessionID string, payload any) error {
-	msg, err := protocol.NewMessage(protocol.Version1, typ, sessionID, payload)
+	msg, err := protocol.NewMessage(protocol.Version2, typ, sessionID, payload)
 	if err != nil {
 		return err
 	}

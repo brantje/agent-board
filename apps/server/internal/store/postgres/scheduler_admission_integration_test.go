@@ -65,8 +65,8 @@ func TestSchedulerAdmissionEnforcesCombinedCapacityAtomically(t *testing.T) {
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_capacity_reservations WHERE job_id=$1`, admittedJobID).Scan(&reservations); err != nil {
 		t.Fatalf("count reservations: %v", err)
 	}
-	if reservations != 2 {
-		t.Fatalf("reservations=%d want 2", reservations)
+	if reservations != 3 {
+		t.Fatalf("reservations=%d want 3", reservations)
 	}
 
 	var queuedReason *string

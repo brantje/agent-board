@@ -6,11 +6,14 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/brantje/agent-board/apps/agent-runner/internal/protocol"
 	"github.com/brantje/agent-board/apps/agent-runner/internal/session"
+	shared "github.com/brantje/agent-board/packages/runnerprotocol"
 	"github.com/gorilla/websocket"
 )
 
@@ -95,6 +98,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	s.serveConnection(conn)
+}
+
+func (s *Server) serveConnection(conn *websocket.Conn) {
 	if !s.registerConnection(conn) {
 		_ = conn.Close()
 		return
@@ -200,14 +207,18 @@ func (s *Server) handshake(conn *websocket.Conn, writer *connectionWriter) bool 
 		return false
 	}
 	hello, err := protocol.DecodePayload[protocol.ServerHello](msg)
-	if err != nil || !containsVersion(hello.SupportedVersions, protocol.Version1) {
+	if err != nil || !containsVersion(hello.SupportedVersions, protocol.Version2) {
 		writer.sendError("unsupported_protocol_version", "protocol version is not supported", "")
 		return false
 	}
 
 	_ = writer.send(protocol.TypeRunnerHello, "", protocol.RunnerHello{
-		Version: protocol.Version1,
+		Version: protocol.Version2,
 		Capabilities: protocol.Capabilities{
+			RunnerVersion:     Version,
+			OS:                runtime.GOOS,
+			Architecture:      runtime.GOARCH,
+			Engines:           shared.DiscoverEngines(exec.LookPath),
 			MaxActiveSessions: s.manager.Capacity(),
 			Features:          []string{"stdin", "stdout", "stderr", "terminate", "kill", "health", "session_connect"},
 		},
@@ -452,7 +463,7 @@ type connectionWriter struct {
 }
 
 func (w *connectionWriter) send(typ protocol.MessageType, sessionID string, payload any) error {
-	msg, err := protocol.NewMessage(protocol.Version1, typ, sessionID, payload)
+	msg, err := protocol.NewMessage(protocol.Version2, typ, sessionID, payload)
 	if err != nil {
 		return err
 	}

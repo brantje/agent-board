@@ -24,7 +24,7 @@ func TestAttachReplaysTerminalDeliveryThatArrivedBeforeRegistration(t *testing.T
 			return
 		}
 		caps := protocol.Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"}}
-		if err := writeProtocol(conn, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version1, Capabilities: caps}); err != nil {
+		if err := writeProtocol(conn, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version2, Capabilities: caps}); err != nil {
 			t.Errorf("write runner_hello: %v", err)
 			return
 		}

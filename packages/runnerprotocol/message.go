@@ -8,7 +8,9 @@ import (
 	"io"
 )
 
-const Version1 = 1
+const Version2 = 2
+
+const RunnerIDHeader = "X-Agent-Board-Runner-Id"
 
 type MessageType string
 
@@ -54,6 +56,10 @@ type RunnerHello struct {
 }
 
 type Capabilities struct {
+	RunnerVersion     string   `json:"runner_version"`
+	OS                string   `json:"os"`
+	Architecture      string   `json:"architecture"`
+	Engines           []string `json:"engines"`
 	MaxActiveSessions int      `json:"max_active_sessions"`
 	Features          []string `json:"features"`
 }
@@ -127,7 +133,7 @@ func NewMessage(version int, typ MessageType, sessionID string, payload any) (Me
 }
 
 func (m Message) Validate() error {
-	if m.Version != Version1 {
+	if m.Version != Version2 {
 		return fmt.Errorf("%w: %d", ErrUnsupportedVersion, m.Version)
 	}
 	if !knownType(m.Type) {

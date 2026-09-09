@@ -5,24 +5,24 @@ import (
 	"errors"
 	"testing"
 	"time"
-
-	"github.com/brantje/agent-board/apps/agent-runner/internal/session"
 )
 
 func TestConfigFromEnv(t *testing.T) {
-	t.Setenv("AGENT_RUNNER_ADDR", "127.0.0.1:9876")
+	t.Setenv("AGENT_BOARD_URL", "http://127.0.0.1:9876")
+	t.Setenv("AGENT_RUNNER_ID", "runner")
+	t.Setenv("AGENT_RUNNER_TOKEN", "token")
 	t.Setenv("AGENT_RUNNER_WORKSPACE_ROOT", "/tmp/workspace")
 	config := configFromEnv()
-	if config.ListenAddr != "127.0.0.1:9876" || config.WorkspaceRoot != "/tmp/workspace" {
+	if config.ServerURL != "http://127.0.0.1:9876" || config.RunnerID != "runner" || config.Token != "token" || config.WorkspaceRoot != "/tmp/workspace" {
 		t.Fatalf("unexpected config %#v", config)
 	}
 }
 
 func TestConfigFromEnvDefaults(t *testing.T) {
-	t.Setenv("AGENT_RUNNER_ADDR", "")
+	t.Setenv("AGENT_BOARD_URL", "")
 	t.Setenv("AGENT_RUNNER_WORKSPACE_ROOT", "")
 	config := configFromEnv()
-	if config.ListenAddr != defaultListenAddr || config.WorkspaceRoot != session.DefaultWorkspaceRoot {
+	if config.ServerURL != "" || config.WorkspaceRoot != defaultWorkspaceRoot {
 		t.Fatalf("unexpected defaults %#v", config)
 	}
 }
@@ -31,7 +31,7 @@ func TestRunStopsOnContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	result := make(chan error, 1)
 	go func() {
-		result <- run(ctx, appConfig{ListenAddr: "127.0.0.1:0", WorkspaceRoot: t.TempDir()})
+		result <- run(ctx, appConfig{ServerURL: "http://127.0.0.1:1", RunnerID: "runner", Token: "token", WorkspaceRoot: t.TempDir()})
 	}()
 	time.Sleep(25 * time.Millisecond)
 	cancel()
@@ -45,10 +45,10 @@ func TestRunStopsOnContextCancellation(t *testing.T) {
 	}
 }
 
-func TestRunReportsListenFailure(t *testing.T) {
+func TestRunRejectsInvalidConnectionConfiguration(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := run(ctx, appConfig{ListenAddr: "invalid address", WorkspaceRoot: t.TempDir()}); err == nil {
+	if err := run(ctx, appConfig{ServerURL: "invalid address", WorkspaceRoot: t.TempDir()}); err == nil {
 		t.Fatal("expected listen error")
 	}
 }

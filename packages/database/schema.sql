@@ -15,12 +15,36 @@ CREATE TABLE projects (
     repository_path text NOT NULL CHECK (btrim(repository_path) <> ''),
     default_branch text NOT NULL DEFAULT 'main' CHECK (btrim(default_branch) <> ''),
     workflow_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(workflow_settings) = 'object'),
+    allow_internal_runner boolean NOT NULL DEFAULT true,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE UNIQUE INDEX projects_name_uq ON projects (lower(name));
 CREATE UNIQUE INDEX projects_issue_prefix_uq ON projects (issue_prefix);
+
+CREATE TABLE runners (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL CHECK (btrim(name) <> ''),
+    token_hash bytea NOT NULL CHECK (octet_length(token_hash) = 32),
+    internal boolean NOT NULL DEFAULT false,
+    revoked_at timestamptz,
+    deleted_at timestamptz,
+    last_seen_at timestamptz,
+    capabilities jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(capabilities) = 'object'),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (deleted_at IS NULL OR revoked_at IS NOT NULL),
+    CHECK (NOT internal OR (revoked_at IS NULL AND deleted_at IS NULL))
+);
+CREATE UNIQUE INDEX runners_active_name_uq ON runners (lower(name)) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX runners_internal_uq ON runners (internal) WHERE internal;
+
+CREATE TABLE project_runners (
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    runner_id uuid NOT NULL REFERENCES runners(id) ON DELETE RESTRICT,
+    PRIMARY KEY (project_id, runner_id)
+);
 
 CREATE TABLE secrets (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -234,7 +258,7 @@ CREATE TABLE scheduler_capacity_reservations (
     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     job_id uuid NOT NULL REFERENCES scheduler_jobs(id) ON DELETE CASCADE,
     run_id uuid NOT NULL,
-    resource_kind text NOT NULL CHECK (resource_kind IN ('AGENT', 'MODEL_PROFILE')),
+    resource_kind text NOT NULL CHECK (resource_kind IN ('AGENT', 'MODEL_PROFILE', 'RUNNER')),
     resource_id uuid NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT scheduler_capacity_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
@@ -242,6 +266,7 @@ CREATE TABLE scheduler_capacity_reservations (
 );
 
 CREATE INDEX scheduler_capacity_resource_idx ON scheduler_capacity_reservations (resource_kind, resource_id);
+CREATE UNIQUE INDEX scheduler_runner_capacity_uq ON scheduler_capacity_reservations (resource_id) WHERE resource_kind='RUNNER';
 CREATE INDEX scheduler_capacity_run_idx ON scheduler_capacity_reservations (run_id);
 
 CREATE TABLE runtime_instances (

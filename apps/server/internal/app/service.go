@@ -14,6 +14,7 @@ type Service struct {
 	store               store.ControlPlaneStore
 	projectRepositories repository.ProjectRepositoryProvisioner
 	events              issueEventRecorder
+	Runners             *RunnerService
 }
 
 type issueEventRecorder interface {
@@ -21,7 +22,11 @@ type issueEventRecorder interface {
 }
 
 func New(controlPlaneStore store.ControlPlaneStore) *Service {
-	return &Service{store: controlPlaneStore}
+	s := &Service{store: controlPlaneStore}
+	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
+		s.Runners = NewRunnerService(runners)
+	}
+	return s
 }
 
 func (s *Service) SetProjectRepositoryProvisioner(provisioner repository.ProjectRepositoryProvisioner) {

@@ -71,16 +71,16 @@ func (s *Store) CreateProject(ctx context.Context, input store.Project) (store.P
 		branch = "main"
 	}
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO projects (name, issue_prefix, repository_path, default_branch, workflow_settings)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, created_at, updated_at
-	`, input.Name, prefix, input.RepositoryPath, branch, objectJSON(input.WorkflowSettings))
+		INSERT INTO projects (name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner)
+		VALUES ($1, $2, $3, $4, $5, COALESCE($6,true))
+		RETURNING id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner, created_at, updated_at
+	`, input.Name, prefix, input.RepositoryPath, branch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner)
 	return scanProject(row)
 }
 
 func (s *Store) GetProject(ctx context.Context, projectID string) (store.Project, error) {
 	return scanProject(s.pool.QueryRow(ctx, `
-		SELECT id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, created_at, updated_at
+		SELECT id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner, created_at, updated_at
 		FROM projects WHERE id = $1
 	`, projectID))
 }
@@ -160,7 +160,7 @@ func (s *Store) GetIssueUUIDByKey(ctx context.Context, projectID, key string) (s
 
 func scanProject(row pgx.Row) (store.Project, error) {
 	var value store.Project
-	if err := row.Scan(&value.ID, &value.Name, &value.IssuePrefix, &value.RepositoryPath, &value.DefaultBranch, &value.WorkflowSettings, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.Name, &value.IssuePrefix, &value.RepositoryPath, &value.DefaultBranch, &value.WorkflowSettings, &value.AllowInternalRunner, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Project{}, notFound(err)
 	}
 	return value, nil

@@ -2,7 +2,7 @@ package protocol
 
 import runnerprotocol "github.com/brantje/agent-board/packages/runnerprotocol"
 
-const Version1 = runnerprotocol.Version1
+const Version2 = runnerprotocol.Version2
 
 type MessageType = runnerprotocol.MessageType
 

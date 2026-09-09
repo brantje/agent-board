@@ -26,6 +26,26 @@ type runFixture struct {
 
 func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	t.Helper()
+	if s.runnerCandidates == nil {
+		rows, err := s.pool.Query(context.Background(), `INSERT INTO runners(name,token_hash) SELECT 'fixture-'||gen_random_uuid()::text,decode(repeat('00',32),'hex') FROM generate_series(1,16) RETURNING id::text`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		s.SetRunnerCandidates(func(string) []string { return append([]string(nil), ids...) })
+	}
+
 	ctx := context.Background()
 	project, err := s.CreateProject(ctx, testProjectInput("project-"+suffix, "/repo/"+suffix, ""))
 	if err != nil {

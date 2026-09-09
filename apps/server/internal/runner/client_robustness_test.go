@@ -43,7 +43,7 @@ func TestDialBoundsApplicationHandshakeByContextDeadline(t *testing.T) {
 func TestPendingSessionBufferCapsDistinctSessionIDs(t *testing.T) {
 	conn := &Connection{pending: make(map[string]*pendingSessionMessages)}
 	for i := 0; i < maxPendingSessions; i++ {
-		msg, err := protocol.NewMessage(protocol.Version1, protocol.TypeStdout, fmt.Sprintf("session-%d", i), protocol.StreamData{Data: []byte("x")})
+		msg, err := protocol.NewMessage(protocol.Version2, protocol.TypeStdout, fmt.Sprintf("session-%d", i), protocol.StreamData{Data: []byte("x")})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -51,7 +51,7 @@ func TestPendingSessionBufferCapsDistinctSessionIDs(t *testing.T) {
 			t.Fatalf("buffer session %d: %v", i, err)
 		}
 	}
-	msg, err := protocol.NewMessage(protocol.Version1, protocol.TypeStdout, "session-over-limit", protocol.StreamData{Data: []byte("x")})
+	msg, err := protocol.NewMessage(protocol.Version2, protocol.TypeStdout, "session-over-limit", protocol.StreamData{Data: []byte("x")})
 	if err != nil {
 		t.Fatal(err)
 	}

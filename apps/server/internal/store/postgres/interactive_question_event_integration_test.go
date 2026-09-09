@@ -19,11 +19,11 @@ func TestInteractiveQuestionAnswerPersistsAuditEventsInOrder(t *testing.T) {
 	enqueueFixtureRun(t, s, f, f.run, "interactive-question-events-start")
 	admission := mustAdmit(t, s, "interactive-question-events-worker")
 	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
-		ProjectID: f.project.ID,
-		JobID: admission.Job.ID,
-		RunID: f.run.ID,
+		ProjectID:  f.project.ID,
+		JobID:      admission.Job.ID,
+		RunID:      f.run.ID,
 		LeaseToken: admission.Lease.LeaseToken,
-		RunStatus: "RUNNING",
+		RunStatus:  "RUNNING",
 	}); err != nil {
 		t.Fatalf("mark running: %v", err)
 	}
@@ -31,15 +31,15 @@ func TestInteractiveQuestionAnswerPersistsAuditEventsInOrder(t *testing.T) {
 	opened, err := s.OpenInteractiveQuestion(ctx, store.OpenInteractiveQuestionCommand{
 		Question: store.Question{
 			ProjectID: f.project.ID,
-			IssueID: f.issue.ID,
-			RunID: f.run.ID,
-			Prompt: "Choose the native path",
-			Kind: "SINGLE_CHOICE",
-			Options: json.RawMessage(`[{"id":"option-0","label":"A"},{"id":"option-1","label":"B"}]`),
-			Blocking: true,
-			Status: "OPEN",
+			IssueID:   f.issue.ID,
+			RunID:     f.run.ID,
+			Prompt:    "Choose the native path",
+			Kind:      "SINGLE_CHOICE",
+			Options:   json.RawMessage(`[{"id":"option-0","label":"A"},{"id":"option-1","label":"B"}]`),
+			Blocking:  true,
+			Status:    "OPEN",
 		},
-		Engine: "opencode",
+		Engine:         "opencode",
 		CorrelationKey: "session-events/request-events/0",
 	})
 	if err != nil {
@@ -47,10 +47,10 @@ func TestInteractiveQuestionAnswerPersistsAuditEventsInOrder(t *testing.T) {
 	}
 
 	answered, err := s.AnswerQuestion(ctx, store.AnswerQuestionCommand{
-		ProjectID: f.project.ID,
+		ProjectID:  f.project.ID,
 		QuestionID: opened.Question.ID,
-		Answer: store.QuestionAnswer{Kind: "SINGLE_CHOICE", OptionIDs: []string{"option-1"}},
-		ActorType: "HUMAN",
+		Answer:     store.QuestionAnswer{Kind: "SINGLE_CHOICE", OptionIDs: []string{"option-1"}},
+		ActorType:  "HUMAN",
 	})
 	if err != nil {
 		t.Fatalf("answer interactive question: %v", err)
@@ -73,8 +73,8 @@ func TestInteractiveQuestionAnswerPersistsAuditEventsInOrder(t *testing.T) {
 	}
 
 	var payload struct {
-		QuestionID string `json:"questionId"`
-		Answer store.QuestionAnswer `json:"answer"`
+		QuestionID string               `json:"questionId"`
+		Answer     store.QuestionAnswer `json:"answer"`
 	}
 	if err := json.Unmarshal(events[answeredIndex].Payload, &payload); err != nil {
 		t.Fatalf("decode answer event: %v", err)

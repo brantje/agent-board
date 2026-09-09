@@ -74,7 +74,7 @@ func TestRegistrationAndPendingBufferBranches(t *testing.T) {
 	session.fail(io.EOF)
 	conn.unregister("session-1", session)
 
-	valid, err := protocol.NewMessage(protocol.Version1, protocol.TypeStdout, "buffered", protocol.StreamData{Data: []byte("x")})
+	valid, err := protocol.NewMessage(protocol.Version2, protocol.TypeStdout, "buffered", protocol.StreamData{Data: []byte("x")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestRegistrationAndPendingBufferBranches(t *testing.T) {
 	if err := conn.bufferPendingLocked(missing); err == nil {
 		t.Fatal("accepted missing session id")
 	}
-	if err := conn.bufferPendingLocked(protocol.Message{Version: protocol.Version1, Type: protocol.TypeHealth}); err == nil {
+	if err := conn.bufferPendingLocked(protocol.Message{Version: protocol.Version2, Type: protocol.TypeHealth}); err == nil {
 		t.Fatal("accepted unexpected type")
 	}
 	conn.pending["full"] = &pendingSessionMessages{messages: make([]protocol.Message, maxPendingSessionMessages)}
@@ -107,7 +107,7 @@ func TestDeliverSessionMessageFailureBranches(t *testing.T) {
 	conn := &Connection{done: make(chan struct{})}
 
 	started := newSession("started", conn)
-	startedMsg, _ := protocol.NewMessage(protocol.Version1, protocol.TypeSessionStarted, "started", nil)
+	startedMsg, _ := protocol.NewMessage(protocol.Version2, protocol.TypeSessionStarted, "started", nil)
 	terminal, err := deliverSessionMessage(started, startedMsg)
 	if err != nil || terminal {
 		t.Fatalf("session_started terminal=%v err=%v", terminal, err)
@@ -115,7 +115,7 @@ func TestDeliverSessionMessageFailureBranches(t *testing.T) {
 	started.fail(io.EOF)
 
 	failed := newSession("failed", conn)
-	errorMsg, _ := protocol.NewMessage(protocol.Version1, protocol.TypeError, "failed", protocol.ErrorPayload{Code: "rejected", Message: "no"})
+	errorMsg, _ := protocol.NewMessage(protocol.Version2, protocol.TypeError, "failed", protocol.ErrorPayload{Code: "rejected", Message: "no"})
 	terminal, err = deliverSessionMessage(failed, errorMsg)
 	if err != nil || !terminal {
 		t.Fatalf("error terminal=%v err=%v", terminal, err)
@@ -126,7 +126,7 @@ func TestDeliverSessionMessageFailureBranches(t *testing.T) {
 
 	badStream := newSession("stream", conn)
 	terminal, err = deliverSessionMessage(badStream, protocol.Message{
-		Version: protocol.Version1, Type: protocol.TypeStdout, SessionID: "stream", Payload: json.RawMessage([]byte("{")),
+		Version: protocol.Version2, Type: protocol.TypeStdout, SessionID: "stream", Payload: json.RawMessage([]byte("{")),
 	})
 	if err == nil || terminal {
 		t.Fatalf("bad stdout terminal=%v err=%v", terminal, err)
@@ -135,7 +135,7 @@ func TestDeliverSessionMessageFailureBranches(t *testing.T) {
 
 	badExit := newSession("exit", conn)
 	terminal, err = deliverSessionMessage(badExit, protocol.Message{
-		Version: protocol.Version1, Type: protocol.TypeExit, SessionID: "exit", Payload: json.RawMessage([]byte("{\"exit_code\":\"bad\"}")),
+		Version: protocol.Version2, Type: protocol.TypeExit, SessionID: "exit", Payload: json.RawMessage([]byte("{\"exit_code\":\"bad\"}")),
 	})
 	if err == nil || !terminal {
 		t.Fatalf("bad exit terminal=%v err=%v", terminal, err)
@@ -143,13 +143,13 @@ func TestDeliverSessionMessageFailureBranches(t *testing.T) {
 	badExit.fail(io.EOF)
 
 	unexpected := newSession("unexpected", conn)
-	terminal, err = deliverSessionMessage(unexpected, protocol.Message{Version: protocol.Version1, Type: protocol.TypeStdin, SessionID: "unexpected"})
+	terminal, err = deliverSessionMessage(unexpected, protocol.Message{Version: protocol.Version2, Type: protocol.TypeStdin, SessionID: "unexpected"})
 	if err == nil || terminal {
 		t.Fatalf("unexpected terminal=%v err=%v", terminal, err)
 	}
 	unexpected.fail(io.EOF)
 
-	validError, _ := protocol.NewMessage(protocol.Version1, protocol.TypeError, "", protocol.ErrorPayload{Code: "bad", Message: "payload"})
+	validError, _ := protocol.NewMessage(protocol.Version2, protocol.TypeError, "", protocol.ErrorPayload{Code: "bad", Message: "payload"})
 	if err := protocolErrorFromMessage(validError); err == nil || !strings.Contains(err.Error(), "bad") {
 		t.Fatalf("protocolErrorFromMessage()=%v", err)
 	}
@@ -216,7 +216,7 @@ func TestKillAndClosedStdinBranches(t *testing.T) {
 
 func TestHandshakeRejectionBranches(t *testing.T) {
 	caps := requiredRunnerCapabilities()
-	goodHello := mustProtocolMessage(t, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version1, Capabilities: caps})
+	goodHello := mustProtocolMessage(t, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version2, Capabilities: caps})
 	goodHealth := mustProtocolMessage(t, protocol.TypeHealth, "", protocol.Health{Status: "ok"})
 	invalidHelloPayload := json.RawMessage([]byte("{\"version\":\"bad\"}"))
 	invalidHealthPayload := json.RawMessage([]byte("{\"active_sessions\":\"bad\"}"))
@@ -226,11 +226,11 @@ func TestHandshakeRejectionBranches(t *testing.T) {
 	}{
 		{"runner error", []protocol.Message{mustProtocolMessage(t, protocol.TypeError, "", protocol.ErrorPayload{Code: "nope"})}},
 		{"wrong hello type", []protocol.Message{goodHealth}},
-		{"invalid hello payload", []protocol.Message{{Version: protocol.Version1, Type: protocol.TypeRunnerHello, Payload: invalidHelloPayload}}},
+		{"invalid hello payload", []protocol.Message{{Version: protocol.Version2, Type: protocol.TypeRunnerHello, Payload: invalidHelloPayload}}},
 		{"unsupported hello version", []protocol.Message{mustProtocolMessage(t, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: 2, Capabilities: caps})}},
-		{"zero capacity", []protocol.Message{mustProtocolMessage(t, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version1, Capabilities: protocol.Capabilities{Features: caps.Features}})}},
+		{"zero capacity", []protocol.Message{mustProtocolMessage(t, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version2, Capabilities: protocol.Capabilities{Features: caps.Features}})}},
 		{"wrong health type", []protocol.Message{goodHello, goodHello}},
-		{"invalid health payload", []protocol.Message{goodHello, {Version: protocol.Version1, Type: protocol.TypeHealth, Payload: invalidHealthPayload}}},
+		{"invalid health payload", []protocol.Message{goodHello, {Version: protocol.Version2, Type: protocol.TypeHealth, Payload: invalidHealthPayload}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -245,7 +245,7 @@ func TestHandshakeRejectionBranches(t *testing.T) {
 
 func mustProtocolMessage(t *testing.T, typ protocol.MessageType, sessionID string, payload any) protocol.Message {
 	t.Helper()
-	msg, err := protocol.NewMessage(protocol.Version1, typ, sessionID, payload)
+	msg, err := protocol.NewMessage(protocol.Version2, typ, sessionID, payload)
 	if err != nil {
 		t.Fatal(err)
 	}

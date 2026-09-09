@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Store) ListProjects(ctx context.Context) ([]store.Project, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, created_at, updated_at FROM projects ORDER BY created_at, id`)
+	rows, err := s.pool.Query(ctx, `SELECT id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner, created_at, updated_at FROM projects ORDER BY created_at, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -26,10 +26,10 @@ func (s *Store) ListProjects(ctx context.Context) ([]store.Project, error) {
 
 func (s *Store) UpdateProject(ctx context.Context, input store.Project) (store.Project, error) {
 	return scanProject(s.pool.QueryRow(ctx, `
-		UPDATE projects SET name=$2, repository_path=$3, default_branch=$4, workflow_settings=$5, updated_at=now()
+		UPDATE projects SET name=$2, repository_path=$3, default_branch=$4, workflow_settings=$5, allow_internal_runner=COALESCE($6,allow_internal_runner), updated_at=now()
 		WHERE id=$1
-		RETURNING id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, created_at, updated_at
-	`, input.ID, input.Name, input.RepositoryPath, input.DefaultBranch, objectJSON(input.WorkflowSettings)))
+		RETURNING id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner, created_at, updated_at
+	`, input.ID, input.Name, input.RepositoryPath, input.DefaultBranch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner))
 }
 
 func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue, error) {

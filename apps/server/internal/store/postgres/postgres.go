@@ -12,8 +12,16 @@ import (
 )
 
 type Store struct {
-	pool     *pgxpool.Pool
-	lockPool *pgxpool.Pool
+	pool             *pgxpool.Pool
+	lockPool         *pgxpool.Pool
+	runnerCandidates func(string) []string
+}
+
+// SetRunnerCandidates supplies live authenticated Engine-matching candidates;
+// PostgreSQL still validates policy and reserves each selected runner atomically.
+// Configure it once before starting scheduler workers.
+func (s *Store) SetRunnerCandidates(candidates func(string) []string) {
+	s.runnerCandidates = candidates
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {

@@ -8,14 +8,15 @@ import (
 var EmptyObject = json.RawMessage(`{}`)
 
 type Project struct {
-	ID               string
-	Name             string
-	IssuePrefix      string
-	RepositoryPath   string
-	DefaultBranch    string
-	WorkflowSettings json.RawMessage
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	AllowInternalRunner *bool
+	ID                  string
+	Name                string
+	IssuePrefix         string
+	RepositoryPath      string
+	DefaultBranch       string
+	WorkflowSettings    json.RawMessage
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type Issue struct {
@@ -197,6 +198,7 @@ const (
 )
 
 type SchedulerAdmission struct {
+	RunnerID       string
 	Job            SchedulerJob
 	Lease          SchedulerLease
 	Run            Run

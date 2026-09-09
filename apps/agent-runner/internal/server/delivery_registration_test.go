@@ -42,7 +42,7 @@ func TestHandleStartRegistersDeliveryBeforeSessionStarted(t *testing.T) {
 		}
 	}
 
-	msg, err := protocol.NewMessage(protocol.Version1, protocol.TypeStart, "ordering", protocol.StartRequest{
+	msg, err := protocol.NewMessage(protocol.Version2, protocol.TypeStart, "ordering", protocol.StartRequest{
 		Command: []string{"true"},
 	})
 	if err != nil {

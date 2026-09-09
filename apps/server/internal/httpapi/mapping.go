@@ -3,7 +3,7 @@ package httpapi
 import "github.com/brantje/agent-board/apps/server/internal/store"
 
 func projectDTO(v store.Project) ProjectDTO {
-	return ProjectDTO{v.ID, v.Name, v.IssuePrefix, v.RepositoryPath, v.DefaultBranch, v.WorkflowSettings, v.CreatedAt, v.UpdatedAt}
+	return ProjectDTO{boolDefault(v.AllowInternalRunner, true), v.ID, v.Name, v.IssuePrefix, v.RepositoryPath, v.DefaultBranch, v.WorkflowSettings, v.CreatedAt, v.UpdatedAt}
 }
 
 func issueDTO(v store.Issue) IssueDTO {

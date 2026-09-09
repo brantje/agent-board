@@ -48,27 +48,27 @@ func TestSchedulerIdempotencyKeyCollisionReturnsConflict(t *testing.T) {
 	second := seedRunFixture(t, s, "idem-second")
 
 	if _, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: first.project.ID,
-		RunID: first.run.ID,
-		Kind: "START",
+		ProjectID:      first.project.ID,
+		RunID:          first.run.ID,
+		Kind:           "START",
 		IdempotencyKey: "shared-key",
 	}); err != nil {
 		t.Fatalf("enqueue first job: %v", err)
 	}
 
 	if _, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: second.project.ID,
-		RunID: second.run.ID,
-		Kind: "START",
+		ProjectID:      second.project.ID,
+		RunID:          second.run.ID,
+		Kind:           "START",
 		IdempotencyKey: "shared-key",
 	}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("cross-job collision error=%v, want ErrConflict", err)
 	}
 
 	if _, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: first.project.ID,
-		RunID: first.run.ID,
-		Kind: "RESUME",
+		ProjectID:      first.project.ID,
+		RunID:          first.run.ID,
+		Kind:           "RESUME",
 		IdempotencyKey: "shared-key",
 	}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("kind collision error=%v, want ErrConflict", err)

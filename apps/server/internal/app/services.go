@@ -60,6 +60,9 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	if err != nil {
 		return nil, err
 	}
+	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
+		services.ControlPlane.Runners = NewRunnerService(runners)
+	}
 	resolver, err := executioncontext.NewResolver(securedStore)
 	if err != nil {
 		return nil, err
@@ -110,6 +113,9 @@ func (s *Services) Close() error {
 		return nil
 	}
 	var closeErrors []error
+	if s.ControlPlane != nil && s.ControlPlane.Runners != nil {
+		closeErrors = append(closeErrors, s.ControlPlane.Runners.Connections.Close())
+	}
 	// Close transport first so no runner operation can race Runtime teardown.
 	if s.RunnerConnections != nil {
 		closeErrors = append(closeErrors, s.RunnerConnections.Close())

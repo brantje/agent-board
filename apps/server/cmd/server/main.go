@@ -87,9 +87,37 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
+	internalDone := make(chan struct{})
+	go func() {
+		defer close(internalDone)
+		application, ok := handler.(*applicationHandler)
+		if !ok || application.services == nil || application.services.ControlPlane.Runners == nil {
+			return
+		}
+		binary := os.Getenv("AGENT_BOARD_RUNNER_BINARY")
+		if binary == "" {
+			binary = "agent-runner"
+		}
+		host, port, err := net.SplitHostPort(configuredAddress())
+		if err != nil {
+			slog.Error("internal runner address is invalid")
+			stop()
+			return
+		}
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		endpoint := "http://" + net.JoinHostPort(host, port)
+		root := filepath.Join(configuredWorkspaceRoot(), ".internal-runner")
+		if err := application.services.ControlPlane.Runners.SuperviseInternalRunner(ctx, binary, endpoint, root); err != nil && ctx.Err() == nil {
+			slog.Error("internal runner supervision failed", "error", err)
+			stop()
+		}
+	}()
 	code := supervise(ctx, stop, func() int {
 		return exitCode(ctx, configuredAddress(), handler)
 	}, schedulerDone)
+	<-internalDone
 	closeStore()
 	os.Exit(code)
 }

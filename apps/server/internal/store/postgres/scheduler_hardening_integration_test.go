@@ -99,7 +99,7 @@ func TestSchedulerFreshStoreReconcilesDurableAdmission(t *testing.T) {
 	if reconciled.Lease.LeaseToken == admission.Lease.LeaseToken {
 		t.Fatal("restart reconciliation must fence previous ownership")
 	}
-	assertSchedulerOwnershipCounts(t, restartedStore, admission.Job.ID, 1, 2)
+	assertSchedulerOwnershipCounts(t, restartedStore, admission.Job.ID, 1, 3)
 }
 
 func TestSchedulerCapacityWaitDoesNotBlockIssue(t *testing.T) {

@@ -139,6 +139,19 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 		}
 	}
 
+	runnerID, err := s.lockRunnerCandidate(ctx, tx, run.ProjectID, agentID)
+	if errors.Is(err, store.ErrNotFound) {
+		if err := deferQueuedJob(ctx, tx, job, "runner_capacity", backoffMicros); err != nil {
+			return nil, err
+		}
+		return nil, tx.Commit(ctx)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := insertCapacityReservation(ctx, tx, job, run, "RUNNER", runnerID); err != nil {
+		return nil, err
+	}
 	if err := insertCapacityReservation(ctx, tx, job, run, "AGENT", agentID); err != nil {
 		return nil, err
 	}
@@ -179,6 +192,7 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 		return nil, err
 	}
 	return &store.SchedulerAdmission{
+		RunnerID:       runnerID,
 		Job:            job,
 		Lease:          lease,
 		Run:            run,

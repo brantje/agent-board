@@ -54,7 +54,7 @@ func TestSchedulerExpiredLeaseIsReconciledBeforeReuse(t *testing.T) {
 	if reconciled.Run.Status != "RUNNING" || reconciled.Job.State != "CLAIMED" {
 		t.Fatalf("reconciled state run=%s job=%s", reconciled.Run.Status, reconciled.Job.State)
 	}
-	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 2)
+	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 3)
 }
 
 func TestSchedulerUnknownReconciliationKeepsCapacityReserved(t *testing.T) {
@@ -79,7 +79,7 @@ func TestSchedulerUnknownReconciliationKeepsCapacityReserved(t *testing.T) {
 	if run.Status != "STARTING" {
 		t.Fatalf("run status=%s want STARTING", run.Status)
 	}
-	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 2)
+	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 3)
 
 	var jobState string
 	if err := s.pool.QueryRow(ctx, `SELECT state FROM scheduler_jobs WHERE id=$1`, admission.Job.ID).Scan(&jobState); err != nil {
@@ -135,13 +135,13 @@ func TestSchedulerReconciliationTerminalOutcomes(t *testing.T) {
 	reason := "external execution failed"
 	blankReason := "   "
 	cases := []struct {
-		name              string
-		outcome           store.SchedulerReconciliationOutcome
-		failureReason     *string
-		wantRunStatus     string
-		wantJobState      string
-		wantError         error
-		wantLeaseCount    int
+		name                 string
+		outcome              store.SchedulerReconciliationOutcome
+		failureReason        *string
+		wantRunStatus        string
+		wantJobState         string
+		wantError            error
+		wantLeaseCount       int
 		wantReservationCount int
 	}{
 		{
@@ -177,7 +177,7 @@ func TestSchedulerReconciliationTerminalOutcomes(t *testing.T) {
 			wantJobState:         "CLAIMED",
 			wantError:            store.ErrInvalidArgument,
 			wantLeaseCount:       1,
-			wantReservationCount: 2,
+			wantReservationCount: 3,
 		},
 	}
 
