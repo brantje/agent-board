@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import type { ArtifactEvidence, EventEvidence } from '../types/api'
 import { apiPath, apiText } from '../utils/api'
-import { countRunToolCalls } from '../utils/events'
+import { projectRunActivity } from '../utils/events'
 import { commandLabel, formatElapsed, runActivityStatusLabel, runStatusLabel } from '../utils/runs'
 import { useRunEvents } from '../composables/useRunEvents'
 
@@ -13,7 +13,8 @@ const logError = ref<Error>()
 
 const run = computed(() => evidence.value?.run)
 const matchingReview = computed(() => evidence.value?.run.issueId && reviews.value.find(item => item.runId === props.runId)?.id)
-const toolCallCount = computed(() => countRunToolCalls(events.value))
+const activityItems = computed(() => projectRunActivity(events.value))
+const toolCallCount = computed(() => activityItems.value.filter(item => item.kind === 'tool').length)
 
 const commandItems = computed(() => (evidence.value?.commands || []).map(session => ({
   label: commandLabel(session.command) || session.id,
@@ -98,7 +99,7 @@ function provenanceText() {
           </div>
           <p v-if="run.queueReason" class="mb-3 text-sm text-muted">Queue reason: {{ run.queueReason }}</p>
           <p v-if="run.failureReason" class="mb-3 text-sm text-error">Execution failure: {{ run.failureReason }}</p>
-          <ActivityTimeline :events="events" />
+          <ActivityTimeline :items="activityItems" />
         </UCard>
 
         <QuestionPanel :project-id="projectId" :run-id="runId" />
