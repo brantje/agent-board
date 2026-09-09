@@ -46,8 +46,8 @@ func TestClientUsesStableHeadlessLifecycleAndQuestionRoutes(t *testing.T) {
 		writeJSON(t, w, http.StatusOK, true)
 	})
 
-	// Stable v1.18.29 routes above must win. Any accidental V2 control call is a
-	// deterministic regression because it reintroduces split execution state.
+	// The pinned Runtime's stable routes above must win. Any accidental V2 control
+	// call is a deterministic regression because it reintroduces split execution state.
 	mux.HandleFunc("GET /api/session/active", unexpectedStableFallback(t))
 	mux.HandleFunc("POST /api/session/ses_1/interrupt", unexpectedStableFallback(t))
 	mux.HandleFunc("GET /api/session/ses_1/question", unexpectedStableFallback(t))
