@@ -32,6 +32,37 @@ describe('run activity projection', () => {
     expect(items[1]).toMatchObject({ kind: 'tool', toolCallId: 'b', target: 'b.go', status: 'running' })
   })
 
+  it('pairs question lifecycle events and resolves selected option labels', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'question',
+        type: 'question.created',
+        sequence: 1,
+        payload: {
+          questionId: 'q1',
+          prompt: 'Which marker should I write?',
+          kind: 'SINGLE_CHOICE',
+          options: [{ id: 'alpha', label: 'alpha' }, { id: 'beta', label: 'beta' }]
+        }
+      }),
+      event({
+        id: 'answer',
+        type: 'question.answered',
+        sequence: 2,
+        payload: { questionId: 'q1', answer: { kind: 'SINGLE_CHOICE', optionIds: ['beta'] } }
+      })
+    ])
+    expect(items).toHaveLength(1)
+    expect(items[0]).toMatchObject({
+      kind: 'question',
+      questionId: 'q1',
+      prompt: 'Which marker should I write?',
+      status: 'answered',
+      answer: 'beta',
+      options: [{ id: 'alpha', label: 'alpha' }, { id: 'beta', label: 'beta' }]
+    })
+  })
+
   it('formats known and unknown tools and targets without dumping arbitrary input', () => {
     expect(toolActivityLabel('grep')).toBe('Search')
     expect(toolActivityLabel('custom_tool')).toBe('Custom tool')
@@ -72,5 +103,31 @@ describe('ActivityTimeline run feed', () => {
     expect(tool.text()).toContain('failed')
     expect(tool.text()).toContain('result: partial update')
     expect(tool.text()).toContain('error: write failed')
+  })
+
+  it('renders question options as expandable text and the given answer inline', () => {
+    const items = projectRunActivity([
+      event({
+        id: 'question',
+        type: 'question.created',
+        sequence: 1,
+        payload: {
+          questionId: 'q1',
+          prompt: 'Which marker should I write?',
+          options: [{ id: 'alpha', label: 'alpha' }, { id: 'beta', label: 'beta' }]
+        }
+      }),
+      event({ id: 'answer', type: 'question.answered', sequence: 2, payload: { questionId: 'q1', answer: { kind: 'SINGLE_CHOICE', optionIds: ['beta'] } } })
+    ])
+    const wrapper = mount(ActivityTimeline, {
+      props: { items },
+      global: { stubs: uiStubs }
+    })
+    const question = wrapper.get('[data-question-status="answered"]')
+    expect(question.text()).toContain('Which marker should I write?')
+    expect(question.text()).toContain('answer: beta')
+    expect(question.get('summary').text()).toBe('Possible answers')
+    expect(question.text()).toContain('alpha')
+    expect(question.text()).toContain('beta')
   })
 })
