@@ -59,6 +59,8 @@ services:
       - ./packages/redact:/src/packages/redact
       - ./packages/runnerprotocol:/src/packages/runnerprotocol
       - server-go-mod:/go/pkg/mod
+      # Dev stack supervises the internal runner; mount a host-built binary when absent from the image.
+      - ${AGENT_BOARD_RUNNER_BINARY_HOST:-/tmp/agent-runner-linux-amd64}:/usr/local/bin/agent-runner:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3001/healthz"]
       start_period: 120s

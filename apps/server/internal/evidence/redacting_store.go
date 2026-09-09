@@ -131,3 +131,11 @@ func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx
 	}
 	return base.UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx, projectID, instanceID, status, generation, expectedStatus)
 }
+
+func (s *RedactingStore) AcquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string) (store.WorkspaceBootstrapLock, error) {
+	base, ok := s.ControlPlaneStore.(store.WorkspaceBootstrapStore)
+	if !ok {
+		return nil, fmt.Errorf("redacting store base does not support workspace bootstrap locks")
+	}
+	return base.AcquireWorkspaceBootstrapLock(ctx, workspaceID)
+}
