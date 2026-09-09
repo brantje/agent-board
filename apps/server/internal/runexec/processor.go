@@ -420,7 +420,7 @@ func (l *processLauncher) Start(ctx context.Context, request engine.ProcessReque
 
 func (l *processLauncher) Attach(ctx context.Context) (engine.Process, error) {
 	if l == nil || strings.TrimSpace(l.attachSessionID) == "" {
-		return nil, fmt.Errorf("run execution: no Execution Session available to attach")
+		return nil, engine.ErrNotAttachable
 	}
 	process, err := l.sessions.Attach(ctx, l.scope.ProjectID, l.attachSessionID)
 	if err != nil {

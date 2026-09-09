@@ -409,7 +409,7 @@ func TestProcessLauncherAttachFailureBoundaries(t *testing.T) {
 			runtimeInstanceID: "runtime-instance",
 			scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
 		}
-		if _, err := launcher.Attach(t.Context()); err == nil || !strings.Contains(err.Error(), "no Execution Session available to attach") {
+		if _, err := launcher.Attach(t.Context()); !errors.Is(err, engine.ErrNotAttachable) {
 			t.Fatalf("Attach() error=%v", err)
 		}
 	})

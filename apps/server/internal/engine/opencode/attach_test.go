@@ -241,6 +241,23 @@ func TestEngineAttachUsesIdleNativeSessionWithoutPrompt(t *testing.T) {
 	}
 }
 
+func TestLaunchOpenCodeProcessStartsWhenAttachIsNotApplicable(t *testing.T) {
+	launcher := &notAttachableLauncher{fakeOpenCodeLauncher: fakeOpenCodeLauncher{process: newFakeOpenCodeProcess("127.0.0.1:1")}}
+	process, recovered, err := launchOpenCodeProcess(context.Background(), launcher, "127.0.0.1", "4096", nil)
+	if err != nil {
+		t.Fatalf("launchOpenCodeProcess() error=%v", err)
+	}
+	if recovered {
+		t.Fatal("fresh start must not be treated as recovered attach")
+	}
+	if launcher.starts != 1 {
+		t.Fatalf("starts=%d want 1", launcher.starts)
+	}
+	if process == nil {
+		t.Fatal("expected started process")
+	}
+}
+
 func TestEngineAttachReportsLauncherFailure(t *testing.T) {
 	adapter := newWithAddress("127.0.0.1:4096")
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -295,6 +312,14 @@ func TestEngineAttachFailsWhenNativeStatusFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "query native session") {
 		t.Fatalf("Execute() error=%v", err)
 	}
+}
+
+type notAttachableLauncher struct {
+	fakeOpenCodeLauncher
+}
+
+func (l *notAttachableLauncher) Attach(context.Context) (engine.Process, error) {
+	return nil, engine.ErrNotAttachable
 }
 
 type failingAttachLauncher struct{}

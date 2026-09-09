@@ -338,10 +338,12 @@ func serverEnvironment(safe executioncontext.SafeContext, providerID string) (ma
 func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string) (engine.Process, bool, error) {
 	if attacher, ok := launcher.(engine.ProcessAttacher); ok {
 		process, err := attacher.Attach(ctx)
-		if err != nil {
+		if err == nil {
+			return process, true, nil
+		}
+		if !errors.Is(err, engine.ErrNotAttachable) {
 			return nil, false, fmt.Errorf("opencode engine: attach existing server: %w", err)
 		}
-		return process, true, nil
 	}
 	process, err := launcher.Start(ctx, engine.ProcessRequest{
 		Command:               []string{"opencode", "serve", "--hostname", host, "--port", port},
