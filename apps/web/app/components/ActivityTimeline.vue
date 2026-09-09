@@ -34,6 +34,26 @@ defineProps<{ items: RunActivityItem[] }>()
         </details>
       </div>
 
+      <div v-else-if="item.kind === 'question'" class="py-1" :data-question-status="item.status">
+        <div class="flex items-start gap-2">
+          <span class="i-lucide-circle-help mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+          <div class="min-w-0 flex-1">
+            <p class="font-medium leading-5">{{ item.prompt }}</p>
+            <p v-if="item.answer" class="mt-1 text-xs text-muted">
+              <span class="font-medium text-default">answer:</span> {{ item.answer }}
+            </p>
+            <p v-else-if="item.status === 'cancelled'" class="mt-1 text-xs text-muted">cancelled</p>
+            <p v-else-if="item.status === 'open'" class="mt-1 text-xs text-muted">waiting for answer</p>
+            <details v-if="item.options.length" class="mt-1 text-xs text-muted">
+              <summary class="cursor-pointer select-none">Possible answers</summary>
+              <ul class="mt-1 list-disc space-y-1 pl-5">
+                <li v-for="option in item.options" :key="option.id">{{ option.label }}</li>
+              </ul>
+            </details>
+          </div>
+        </div>
+      </div>
+
       <div v-else class="py-1" :data-activity-kind="item.unknown ? 'unknown' : 'event'">
         <div class="flex flex-wrap items-baseline gap-x-2">
           <strong class="font-medium">{{ item.title }}</strong>
