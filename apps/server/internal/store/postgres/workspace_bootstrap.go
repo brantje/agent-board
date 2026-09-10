@@ -110,14 +110,8 @@ func (s *Store) fenceWorkspaceRunnerOwner(ctx context.Context, lock *workspaceBo
 			WHERE run.workspace_id = $1::uuid
 			  AND session.runner_id IS NOT NULL
 			  AND (
-				run.status = 'WAITING_FOR_INPUT'
-				OR EXISTS (
-					SELECT 1
-					FROM scheduler_jobs AS job
-					WHERE job.project_id = run.project_id
-					  AND job.run_id = run.id
-					  AND job.state IN ('QUEUED', 'CLAIMED')
-				)
+				session.status IN ('PENDING', 'STARTING', 'RUNNING')
+				OR run.status IN ('STARTING', 'RUNNING', 'WAITING_FOR_INPUT', 'PAUSED')
 			  )
 			ORDER BY session.created_at DESC
 			LIMIT 1
