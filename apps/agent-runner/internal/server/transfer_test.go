@@ -125,6 +125,25 @@ func TestWorkspaceTransferFailureBlocksStartAndAllowsRetry(t *testing.T) {
 	waitForExit(t, conn, "session-retry")
 }
 
+func TestWorkspaceSyncFailsWithoutMaterializedRepository(t *testing.T) {
+	_, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+	defer conn.Close()
+	writer := &connectionWriter{conn: conn}
+
+	if err := writer.sendTransfer(context.Background(), "missing-workspace", "sync-missing", "from_runner", nil); err != nil {
+		t.Fatal(err)
+	}
+	failed := read(t, conn)
+	if failed.Type != protocol.TypeTransferFailed {
+		t.Fatalf("missing workspace sync response=%+v", failed)
+	}
+	payload, err := protocol.DecodePayload[protocol.TransferFailed](failed)
+	if err != nil || payload.TransferID != "sync-missing" || payload.Code != "transfer_failed" {
+		t.Fatalf("missing workspace sync failure=%+v err=%v", payload, err)
+	}
+}
+
 func TestIncomingTransferRejectsCorruptPayload(t *testing.T) {
 	state := newTransferState()
 	if err := state.begin("session-1", protocol.TransferBegin{
