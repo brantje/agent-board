@@ -28,6 +28,7 @@ it('binds configuration routes to the correct scope and resource',()=>{
             props: ['kind', 'projectId', 'resourceId'],
             template: '<div :data-kind="kind" :data-project="projectId" :data-resource="resourceId" />'
           },
+          RunnerManager: { template: '<div data-runner-manager />' },
           ProjectSettings: {
             props: ['projectId'],
             template: '<div data-project-settings :data-project="projectId" />'
@@ -42,6 +43,12 @@ it('binds configuration routes to the correct scope and resource',()=>{
       expect(wrapper.find('[data-kind]').exists()).toBe(false)
       continue
     }
+    if(path.endsWith('/settings/runners.vue')) {
+      expect(wrapper.find('[data-settings-shell]').exists()).toBe(true)
+      expect(wrapper.get('[data-runner-manager]').exists()).toBe(true)
+      expect(wrapper.find('[data-kind]').exists()).toBe(false)
+      continue
+    }
     const manager=wrapper.get('[data-kind]')
     if(path.includes('[projectID]')) expect(manager.attributes('data-project')).toBe('project-a')
     else expect(manager.attributes('data-project')).toBeUndefined()
@@ -49,6 +56,7 @@ it('binds configuration routes to the correct scope and resource',()=>{
   }
   expect(Object.keys(pages).some(path => path.endsWith('/projects/[projectID]/settings/providers.vue'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/settings/agents.vue') && !path.includes('[projectID]'))).toBe(true)
+  expect(Object.keys(pages).some(path => path.endsWith('/settings/runners.vue') && !path.includes('[projectID]'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/pages/agents.vue'))).toBe(false)
 })
 
