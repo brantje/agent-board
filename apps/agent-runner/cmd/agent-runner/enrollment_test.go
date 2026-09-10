@@ -137,6 +137,43 @@ func TestRunnerStateRejectsIncompleteOrMalformedFiles(t *testing.T) {
 	}
 }
 
+func TestSaveRunnerStateFilesystemFailures(t *testing.T) {
+	state := runnerState{ServerURL: "https://agent-board.local", RunnerID: "runner-1", Token: "credential"}
+
+	t.Run("parent is a file", func(t *testing.T) {
+		parent := filepath.Join(t.TempDir(), "state")
+		if err := os.WriteFile(parent, []byte("not a directory"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := saveRunnerState(filepath.Join(parent, "runner.json"), state); err == nil {
+			t.Fatal("expected parent creation failure")
+		}
+	})
+
+	t.Run("temporary path is a directory", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "runner.json")
+		if err := os.Mkdir(path+".tmp", 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := saveRunnerState(path, state); err == nil {
+			t.Fatal("expected temporary write failure")
+		}
+	})
+
+	t.Run("destination is a directory", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "runner.json")
+		if err := os.Mkdir(path, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := saveRunnerState(path, state); err == nil {
+			t.Fatal("expected rename failure")
+		}
+		if _, err := os.Stat(path + ".tmp"); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("temporary credential file was not removed: %v", err)
+		}
+	})
+}
+
 func TestRegisterInteractiveUsesSystemHostname(t *testing.T) {
 	hostname, err := os.Hostname()
 	if err != nil {
