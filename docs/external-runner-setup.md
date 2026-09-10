@@ -55,9 +55,9 @@ Keep the installed OpenCode version aligned with `apps/agent-runner/opencode.env
 
 Do not put provider API keys in the systemd unit or Runner env file for the normal Agent Board OpenCode path. Agent Board resolves the configured Provider credential on the trusted server and supplies only the execution-scoped secret required by the session.
 
-## 3. Create a one-time registration token
+## 3. Create a pending Runner and one-time registration token
 
-In Agent Board, open **Settings > Runners** and choose **Create runner**. Creation does not ask for a name and does not create the Runner identity yet. It returns one registration token which is displayed once.
+In Agent Board, open **Settings > Runners** and choose **Create runner**. Creation does not ask for a name. It immediately creates the durable pending external Runner with its immutable Runner ID, but it does not create a permanent Runner credential yet. The one-time registration token is displayed once.
 
 The same operation is available through the API:
 
@@ -66,9 +66,18 @@ export AGENT_BOARD_URL='https://agent-board.example.com'
 curl -fsS -X POST "$AGENT_BOARD_URL/api/runners"
 ```
 
-The response contains only the one-time `token`. Agent Board stores only its hash. Copy the token directly to the host that will be enrolled; do not put it in source control, scripts, examples, or logs.
+The response is shaped like:
 
-A registration token creates exactly one Runner. The Runner identity and normal long-lived Runner credential are created only when the host successfully exchanges that token at `POST /api/runner/register`. Reusing the registration token is rejected.
+```json
+{
+  "runner": { "id": "..." },
+  "registrationToken": "..."
+}
+```
+
+Agent Board stores only the registration-token hash on that pending Runner. Copy the plaintext registration token directly to the host that will be enrolled; do not put it in source control, scripts, examples, or logs.
+
+Registration updates this same Runner identity. It does not create a second Runner. Reusing the registration token after successful enrollment is rejected.
 
 ## 4. Install and enroll the Runner
 
@@ -85,27 +94,45 @@ Agent Board URL:
 One-time registration token:
 ```
 
-The installer then:
+The registration token is read without terminal echo. The installer then:
 
 1. installs the already-built `apps/agent-runner/agent-runner` binary;
 2. creates the non-login `agent-runner` service account when needed;
-3. runs `agent-runner register` as that service account;
-4. installs the checked-in environment and systemd files; and
-5. enables and starts `agent-runner.service`.
+3. installs the checked-in systemd unit;
+4. invokes `agent-runner register` to enroll the already-created pending Runner; and
+5. enables and starts `agent-runner.service` only after enrollment succeeds.
 
-`agent-runner register` obtains the machine hostname with `os.Hostname()` and submits it as the initial Runner name. The server returns the immutable Runner ID and a normal long-lived Runner credential. The binary persists those values together with the Agent Board URL in:
+`agent-runner register` obtains the machine hostname with `os.Hostname()` and sends it with the one-time registration token. In one transaction the server consumes the registration token, sets that hostname as the initial display name, creates the permanent Runner credential, and marks the same Runner ID registered. The server returns:
 
-```text
-/var/lib/agent-runner/runner.json
+```json
+{
+  "runnerId": "...",
+  "runnerToken": "..."
+}
 ```
 
-The state file is written mode `0600` inside the private Runner state directory. The one-time registration token is not persisted. After successful registration it cannot be used again.
+The binary persists the normal runtime environment configuration in:
 
-The initial hostname is only the display name. An administrator can rename a registered external Runner later from **Settings > Runners** or with `PATCH /api/runners/{runnerID}`. Renaming does not change Runner identity or credentials.
+```text
+/etc/agent-board/agent-runner.env
+```
+
+The file contains:
+
+```text
+AGENT_BOARD_URL=...
+AGENT_RUNNER_ID=...
+AGENT_RUNNER_TOKEN=...
+AGENT_RUNNER_WORKSPACE_ROOT=...
+```
+
+`AGENT_RUNNER_TOKEN` always means the permanent post-registration Runner credential. The environment file is written mode `0600`. The one-time registration token is never persisted. If enrollment fails, the installer exits before enabling or starting the service.
+
+The initial hostname is only the display name. An administrator can rename a registered external Runner later from **Settings > Runners** or with `PATCH /api/runners/{runnerID}`. Renaming does not change Runner identity or credentials, and reconnecting does not overwrite the administrator's name.
 
 ### Manual installation
 
-If you do not use the Make target, install the binary and service account first:
+If you do not use the Make target, install the binary, service account, configuration directory and unit first:
 
 ```bash
 sudo install -o root -g root -m 0755 \
@@ -119,27 +146,29 @@ getent passwd agent-runner >/dev/null || \
     agent-runner
 
 sudo install -d -o agent-runner -g agent-runner -m 0750 /var/lib/agent-runner
-sudo -u agent-runner /usr/local/bin/agent-runner register
-```
-
-Enter the Agent Board URL and one-time registration token when prompted. Then install the environment file and unit:
-
-```bash
 sudo install -d -o root -g root -m 0755 /etc/agent-board
-sudo install -o root -g root -m 0644 \
-  apps/agent-runner/deploy/agent-runner.env.example \
-  /etc/agent-board/agent-runner.env
 sudo install -o root -g root -m 0644 \
   apps/agent-runner/deploy/agent-runner.service \
   /etc/systemd/system/agent-runner.service
+```
+
+Then enroll the pending Runner:
+
+```bash
+sudo /usr/local/bin/agent-runner register
+```
+
+Enter the Agent Board URL and one-time registration token when prompted. Direct terminal registration also disables echo while reading the registration token. After registration succeeds:
+
+```bash
 sudo systemctl daemon-reload
 sudo systemd-analyze verify /etc/systemd/system/agent-runner.service
 sudo systemctl enable --now agent-runner.service
 ```
 
-The environment file contains only optional runtime configuration such as `AGENT_RUNNER_WORKSPACE_ROOT`; enrolled identity credentials live in the Runner-owned state file instead.
+Normal startup is environment-only: `configFromEnv()` supplies `AGENT_BOARD_URL`, `AGENT_RUNNER_ID`, `AGENT_RUNNER_TOKEN` and the optional Workspace root to `Server.Connect()`. There is no second persisted Runner state/configuration model.
 
-For compatibility and the server-managed internal Runner, supplying all three values `AGENT_BOARD_URL`, `AGENT_RUNNER_ID`, and `AGENT_RUNNER_TOKEN` still overrides persisted enrollment state. External installations should normally use registration instead.
+The server-managed internal Runner supplies the same normal runtime environment variables directly and does not use the external registration-token flow.
 
 ## 5. Verify the connection
 
@@ -162,7 +191,7 @@ Then inspect **Settings > Runners** or query the API:
 curl -fsS "$AGENT_BOARD_URL/api/runners"
 ```
 
-A healthy external Runner should report `connected: true`. Its capabilities include the embedded Runner version and supported Engines.
+A healthy registered external Runner should report `connected: true`. Its capabilities include the embedded Runner version and supported Engines. Before enrollment, the pending Runner is visible with its immutable ID but has no display name or permanent credential and cannot authenticate the Runner WebSocket.
 
 If a Project has an explicit external Runner allowlist, add the registered Runner through `PUT /api/projects/{projectID}/runners`. An empty Project allowlist means any connected external Runner is eligible.
 
@@ -190,7 +219,7 @@ The Runner reconnects outbound after transient transport failures. The server-si
 
 ### Upgrade
 
-Stop the service, replace the binary atomically with a new versioned build, then start it again. Enrollment state survives binary upgrades:
+Stop the service, replace the binary atomically with a new versioned build, then start it again. The environment-based Runner identity and credential configuration survives binary upgrades:
 
 ```bash
 sudo systemctl stop agent-runner.service
@@ -209,7 +238,7 @@ The existing administrative endpoint remains:
 POST /api/runners/{runnerID}/rotate-token
 ```
 
-Its response contains the new plaintext long-lived credential once. An operator rotating an external Runner must securely replace the `token` value in `/var/lib/agent-runner/runner.json` while preserving ownership and mode `0600`, then restart the service. Rotation is separate from one-time registration; do not create or reuse a registration token for credential rotation.
+Its credential-bearing response contains `runnerToken`, the new plaintext permanent credential, once. Rotation is valid only for a registered external Runner. An operator must securely replace the `AGENT_RUNNER_TOKEN` value in `/etc/agent-board/agent-runner.env`, preserve mode `0600`, and restart the service. Rotation never creates a new registration token.
 
 ### Revoke or remove a Runner
 
@@ -219,7 +248,9 @@ To revoke without deleting its historical identity:
 POST /api/runners/{runnerID}/revoke
 ```
 
-Deleting the Runner through `DELETE /api/runners/{runnerID}` soft-deletes and revokes it while retaining historical provenance.
+For a pending Runner, revoke permanently invalidates the registration token. For a registered Runner, revoke invalidates its permanent credential and disconnects it.
+
+Deleting the Runner through `DELETE /api/runners/{runnerID}` soft-deletes and revokes it while retaining historical provenance. A deleted pending Runner can never enroll.
 
 To uninstall the service files installed by this repository:
 
@@ -227,11 +258,11 @@ To uninstall the service files installed by this repository:
 make uninstall-runner
 ```
 
-`make uninstall-runner` intentionally does not remove `/var/lib/agent-runner`. Remove the Runner state directory only after confirming no retained session Workspace or identity state is needed.
+`make uninstall-runner` removes the service and `/etc/agent-board/agent-runner.env` but intentionally does not remove `/var/lib/agent-runner`, which may contain retained session Workspaces.
 
 ## Troubleshooting
 
-If the service repeatedly restarts, inspect `journalctl`. Common setup problems are an invalid Agent Board URL, missing or invalid persisted Runner state, a revoked/rotated credential, a missing coding CLI on the service `PATH`, or permissions on the Runner state directory.
+If the service repeatedly restarts, inspect `journalctl`. Common setup problems are an invalid Agent Board URL, missing `AGENT_BOARD_URL`/`AGENT_RUNNER_ID`/`AGENT_RUNNER_TOKEN` configuration, a revoked/rotated credential, a missing coding CLI on the service `PATH`, or permissions on the Runner Workspace directory.
 
 Verify the exact execution environment with:
 
