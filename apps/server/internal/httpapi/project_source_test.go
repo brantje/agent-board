@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
@@ -73,6 +74,68 @@ func TestProjectSourceConfigurationIsReturnedByAPIReads(t *testing.T) {
 		}
 		assertProjectSourceDTO(t, got[0], cloneURL, ref)
 	})
+}
+
+func TestProjectSourcePatchSourceRefNullClearsReference(t *testing.T) {
+	cloneURL := "https://example.com/acme/widget.git"
+	ref := "release/v1"
+	project := store.Project{
+		ID:               projectID,
+		Name:             "Remote Project",
+		IssuePrefix:      "AB",
+		SourceType:       store.ProjectSourceGit,
+		CloneURL:         &cloneURL,
+		SourceRef:        &ref,
+		WorkflowSettings: store.EmptyObject,
+	}
+	router := NewRouter(app.New(&projectSourceStore{project: project}))
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/projects/"+projectID, strings.NewReader(`{"sourceRef":null}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var got ProjectDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode Project response: %v", err)
+	}
+	if got.SourceRef != nil {
+		t.Fatalf("sourceRef=%v want=nil", got.SourceRef)
+	}
+}
+
+func TestProjectSourcePatchOmittedSourceRefKeepsReference(t *testing.T) {
+	cloneURL := "https://example.com/acme/widget.git"
+	ref := "release/v1"
+	project := store.Project{
+		ID:               projectID,
+		Name:             "Remote Project",
+		IssuePrefix:      "AB",
+		SourceType:       store.ProjectSourceGit,
+		CloneURL:         &cloneURL,
+		SourceRef:        &ref,
+		WorkflowSettings: store.EmptyObject,
+	}
+	router := NewRouter(app.New(&projectSourceStore{project: project}))
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPatch, "/api/projects/"+projectID, strings.NewReader(`{"name":"Renamed"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var got ProjectDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode Project response: %v", err)
+	}
+	if got.SourceRef == nil || *got.SourceRef != ref {
+		t.Fatalf("sourceRef=%v want=%q", got.SourceRef, ref)
+	}
 }
 
 func assertProjectSourceDTO(t *testing.T, project ProjectDTO, cloneURL, ref string) {
