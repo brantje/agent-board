@@ -7,9 +7,9 @@ import (
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
-	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"strings"
 
+	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -52,21 +52,43 @@ func runnerCredential() (string, []byte, error) {
 	hash := sha256.Sum256([]byte(token))
 	return token, hash[:], nil
 }
-func (s *RunnerService) Create(ctx context.Context, name string) (store.Runner, string, error) {
+
+func (s *RunnerService) CreateRegistration(ctx context.Context) (string, error) {
+	token, hash, err := runnerCredential()
+	if err != nil {
+		return "", err
+	}
+	if err := s.store.CreateRunnerRegistration(ctx, hash); err != nil {
+		return "", translateStoreError(err, "runner_registration")
+	}
+	return token, nil
+}
+
+func (s *RunnerService) Register(ctx context.Context, registrationToken, name string) (store.Runner, string, error) {
+	registrationToken = strings.TrimSpace(registrationToken)
 	name = strings.TrimSpace(name)
+	if registrationToken == "" {
+		return store.Runner{}, "", invalid("runner registration token is required")
+	}
 	if name == "" {
 		return store.Runner{}, "", invalid("runner name is required")
 	}
-	token, hash, err := runnerCredential()
+
+	credential, credentialHash, err := runnerCredential()
 	if err != nil {
 		return store.Runner{}, "", err
 	}
-	r, err := s.store.CreateRunner(ctx, store.Runner{Name: name, TokenHash: hash})
+	registrationHash := sha256.Sum256([]byte(registrationToken))
+	r, err := s.store.RegisterRunner(ctx, registrationHash[:], store.Runner{Name: name, TokenHash: credentialHash})
+	if errors.Is(err, store.ErrNotFound) {
+		return store.Runner{}, "", invalid("runner registration token is invalid or has already been used")
+	}
 	if err != nil {
 		return store.Runner{}, "", translateStoreError(err, "runner")
 	}
-	return r, token, nil
+	return r, credential, nil
 }
+
 func (s *RunnerService) Get(ctx context.Context, id string) (store.Runner, error) {
 	r, err := s.store.GetRunner(ctx, id)
 	return r, translateStoreError(err, "runner")
