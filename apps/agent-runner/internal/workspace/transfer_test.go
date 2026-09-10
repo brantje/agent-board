@@ -14,10 +14,10 @@ func TestMaterializeAndSnapshotBundleRoundTrip(t *testing.T) {
 	source := t.TempDir()
 	runGitCLI(t, "-C", source, "init")
 	for path, content := range map[string]string{
-		".gitignore":   "ignored.txt\n",
-		"README.md":    "hello\n",
-		"staged.txt":   "before\n",
-		"deleted.txt":  "delete me\n",
+		".gitignore":  "ignored.txt\n",
+		"README.md":   "hello\n",
+		"staged.txt":  "before\n",
+		"deleted.txt": "delete me\n",
 	} {
 		if err := os.WriteFile(filepath.Join(source, path), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
@@ -76,6 +76,20 @@ func TestMaterializeAndSnapshotBundleRoundTrip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(roundTrip, "runner.txt")); err != nil {
 		t.Fatalf("runner change missing from round trip: %v", err)
+	}
+}
+
+func TestMaterializeBundleCreatesEmptyWorkspaceWithoutSnapshot(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "session", "workspace")
+	if err := MaterializeBundle(context.Background(), destination, nil); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(destination)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("empty Workspace was not created: info=%v err=%v", info, err)
+	}
+	if IsRepository(context.Background(), destination) {
+		t.Fatal("empty Workspace unexpectedly became a Git repository")
 	}
 }
 
