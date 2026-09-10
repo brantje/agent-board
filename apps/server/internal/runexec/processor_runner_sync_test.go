@@ -24,6 +24,10 @@ func (s *runnerSyncStore) AcquireWorkspaceExecutionLock(context.Context, string,
 	return noopWorkspaceLock{}, nil
 }
 
+func (s *runnerSyncStore) GetRunner(_ context.Context, id string) (store.Runner, error) {
+	return store.Runner{ID: id, Name: "External test runner"}, nil
+}
+
 type noopWorkspaceLock struct{}
 
 func (noopWorkspaceLock) Release() error { return nil }
@@ -49,21 +53,29 @@ func (c *failingSyncClient) ReceiveTransfer(context.Context, string, runner.Tran
 	return "", nil, errors.New("sync-back failed")
 }
 
-func (c *failingSyncClient) ConfirmTransferApplied(context.Context, string, string) error {
-	return nil
-}
+func (c *failingSyncClient) ConfirmTransferApplied(context.Context, string, string) error { return nil }
 
 type successfulSyncClient struct {
-	payload   []byte
-	confirmed bool
+	payload    []byte
+	confirmed  bool
+	directions []string
 }
 
-func (*successfulSyncClient) SendTransfer(context.Context, string, string, string, []byte, runner.TransferProgressFunc) error {
+func (c *successfulSyncClient) SendTransfer(_ context.Context, _, _, direction string, payload []byte, progress runner.TransferProgressFunc) error {
+	c.directions = append(c.directions, direction)
+	if progress != nil && len(payload) > 0 {
+		progress(runner.TransferProgress{BytesTransferred: int64(len(payload)), TotalBytes: int64(len(payload))})
+	}
 	return nil
 }
-func (c *successfulSyncClient) ReceiveTransfer(context.Context, string, runner.TransferProgressFunc) (string, []byte, error) {
+
+func (c *successfulSyncClient) ReceiveTransfer(_ context.Context, _ string, progress runner.TransferProgressFunc) (string, []byte, error) {
+	if progress != nil {
+		progress(runner.TransferProgress{BytesTransferred: int64(len(c.payload)), TotalBytes: int64(len(c.payload))})
+	}
 	return "returned-transfer", c.payload, nil
 }
+
 func (c *successfulSyncClient) ConfirmTransferApplied(context.Context, string, string) error {
 	c.confirmed = true
 	return nil
@@ -77,12 +89,16 @@ func (c runnerSyncConnector) Connect(context.Context, string, string) (runnerCli
 	return c.client, nil
 }
 
-func TestRunnerSyncBackFailureOverridesEngineSuccess(t *testing.T) {
-	repo := initProcessTestRepository(t)
-	safe := processTestSafeContext(repo)
-	safe.Runtime = executioncontext.RuntimeContext{}
-	storeFake := &runnerSyncStore{}
+type staticWorkspaceEnsurer struct {
+	workspace store.Workspace
+}
 
+func (e staticWorkspaceEnsurer) EnsureIssueWorkspace(context.Context, string, string) (store.Workspace, error) {
+	return e.workspace, nil
+}
+
+func newRunnerSyncProcessor(t *testing.T, repo string, safe executioncontext.SafeContext, storeFake *runnerSyncStore, client runnerClient) *Processor {
+	t.Helper()
 	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +123,6 @@ func TestRunnerSyncBackFailureOverridesEngineSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &failingSyncClient{}
 	processor, err := NewProcessor(
 		storeFake,
 		processTestResolver{resolved: executioncontext.Resolved{Safe: safe}},
@@ -123,6 +138,37 @@ func TestRunnerSyncBackFailureOverridesEngineSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return processor
+}
+
+func runnerTransferPayload(t *testing.T, authoritative string) []byte {
+	t.Helper()
+	runnerRepo := filepath.Join(t.TempDir(), "runner")
+	cmd := exec.Command("git", "clone", "-q", authoritative, runnerRepo)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v: %s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(runnerRepo, "returned.txt"), []byte("from runner\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git, err := workspace.NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := git.TransferSnapshot(t.Context(), runnerRepo, "returned-transfer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return payload
+}
+
+func TestRunnerSyncBackFailureOverridesEngineSuccess(t *testing.T) {
+	repo := initProcessTestRepository(t)
+	safe := processTestSafeContext(repo)
+	safe.Runtime = executioncontext.RuntimeContext{}
+	storeFake := &runnerSyncStore{}
+	client := &failingSyncClient{}
+	processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
 
 	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "STARTING"}
 	result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run, RunnerID: "runner-1"}, processTestLifecycle{run: run})
@@ -140,31 +186,53 @@ func TestRunnerSyncBackFailureOverridesEngineSuccess(t *testing.T) {
 	}
 }
 
-func TestRunnerSyncBackAppliesWorkspaceAndAcknowledgesTransfer(t *testing.T) {
-	authoritative := initProcessTestRepository(t)
-	runnerRepo := filepath.Join(t.TempDir(), "runner")
-	cmd := exec.Command("git", "clone", "-q", authoritative, runnerRepo)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("clone: %v: %s", err, output)
-	}
-	if err := os.WriteFile(filepath.Join(runnerRepo, "returned.txt"), []byte("from runner\n"), 0o644); err != nil {
+func TestRunnerExecutionCompletesWithWorkspaceSyncAndReviewEvidence(t *testing.T) {
+	repo := initProcessTestRepository(t)
+	safe := processTestSafeContext(repo)
+	safe.Runtime = executioncontext.RuntimeContext{}
+	storeFake := &runnerSyncStore{}
+	client := &successfulSyncClient{payload: runnerTransferPayload(t, repo)}
+	processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
+	processor.SetWorkspaceEnsurer(staticWorkspaceEnsurer{workspace: store.Workspace{
+		ID: safe.Workspace.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, Path: repo, WorkingBranch: safe.Workspace.WorkingBranch, BootstrapStatus: "READY",
+	}})
+
+	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "STARTING"}
+	result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run, RunnerID: "runner-1"}, processTestLifecycle{run: run})
+	if err != nil {
 		t.Fatal(err)
 	}
+	if result.RunStatus != "READY_FOR_REVIEW" {
+		t.Fatalf("result=%+v", result)
+	}
+	if body, err := os.ReadFile(filepath.Join(repo, "returned.txt")); err != nil || string(body) != "from runner\n" {
+		t.Fatalf("returned workspace file=%q err=%v", body, err)
+	}
+	if !client.confirmed || len(client.directions) != 2 || client.directions[0] != "to_runner" || client.directions[1] != "from_runner" {
+		t.Fatalf("confirmed=%v directions=%v", client.confirmed, client.directions)
+	}
+	for _, eventType := range []string{"workspace.transfer.started", "workspace.transfer.progress", "workspace.transfer.completed", "agent.message", "run.ready_for_review"} {
+		if !hasProcessTestEvent(storeFake.events, eventType) {
+			t.Fatalf("missing event %q in %+v", eventType, storeFake.events)
+		}
+	}
+	if event := processTestEvent(storeFake.events, "run.ready_for_review"); event.RuntimeInstanceID != nil {
+		t.Fatalf("runner-owned review evidence referenced Runtime Instance: %+v", event)
+	}
+}
+
+func TestRunnerSyncBackAppliesWorkspaceAndAcknowledgesTransfer(t *testing.T) {
+	authoritative := initProcessTestRepository(t)
 	git, err := workspace.NewGitCLI("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload, err := git.TransferSnapshot(t.Context(), runnerRepo, "returned-transfer")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	storeFake := &runnerSyncStore{}
 	recorder, err := evidence.NewRecorder(storeFake, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	client := &successfulSyncClient{payload: payload}
+	client := &successfulSyncClient{payload: runnerTransferPayload(t, authoritative)}
 	processor := &Processor{store: storeFake, events: recorder, git: git, runners: runnerSyncConnector{client: client}}
 	safe := processTestSafeContext(authoritative)
 	safe.Runtime = executioncontext.RuntimeContext{}
