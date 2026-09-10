@@ -85,7 +85,7 @@ func SnapshotBundle(ctx context.Context, repositoryPath, transferID, gitBinary s
 		return nil, fmt.Errorf("set workspace transfer bundle HEAD: %w", err)
 	}
 	bundlePath := filepath.Join(tempRoot, "workspace.bundle")
-	if _, err := runGit(ctx, binary, commandTimeout, nil, nil, "--git-dir", privateRepo, "bundle", "create", bundlePath, "refs/heads/main"); err != nil {
+	if _, err := runGit(ctx, binary, commandTimeout, nil, nil, "--git-dir", privateRepo, "bundle", "create", bundlePath, "HEAD"); err != nil {
 		return nil, fmt.Errorf("create workspace transfer bundle: %w", err)
 	}
 	payload, err := os.ReadFile(bundlePath)
