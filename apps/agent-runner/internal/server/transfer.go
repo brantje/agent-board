@@ -2,9 +2,7 @@ package server
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -75,20 +73,11 @@ func (s *transferState) chunk(sessionID string, chunk protocol.TransferChunk) er
 	if transfer.transferID != "" && chunk.TransferID != transfer.transferID {
 		return nil
 	}
-	data, err := base64.StdEncoding.DecodeString(chunk.Data)
+	buffer, err := protocol.AppendTransferChunk(transfer.buffer, transfer.expected, chunk)
 	if err != nil {
-		return fmt.Errorf("decode transfer chunk: %w", err)
+		return err
 	}
-	if transfer.expected == 0 && len(data) > 0 {
-		return errors.New("transfer payload exceeded declared size")
-	}
-	if int64(len(transfer.buffer)+len(data)) > protocol.MaxTransferBytes {
-		return errors.New("transfer payload exceeded declared size")
-	}
-	transfer.buffer = append(transfer.buffer, data...)
-	if transfer.expected > 0 && int64(len(transfer.buffer)) > transfer.expected {
-		return errors.New("transfer payload exceeded declared size")
-	}
+	transfer.buffer = buffer
 	return nil
 }
 
@@ -108,12 +97,8 @@ func (s *transferState) end(sessionID string, end protocol.TransferEnd) ([]byte,
 	delete(s.incoming, sessionID)
 	s.mu.Unlock()
 
-	sum := sha256.Sum256(payload)
-	if transfer.checksum != "" && hex.EncodeToString(sum[:]) != transfer.checksum {
-		return nil, "", errors.New("transfer checksum mismatch")
-	}
-	if transfer.expected > 0 && int64(len(payload)) != transfer.expected {
-		return nil, "", errors.New("transfer payload size mismatch")
+	if err := protocol.ValidateTransferPayload(payload, transfer.expected, transfer.checksum); err != nil {
+		return nil, "", err
 	}
 	return payload, direction, nil
 }
@@ -155,12 +140,6 @@ func (s *transferState) waitReady(sessionID string, timeout time.Duration) bool 
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-}
-
-func (s *transferState) isReady(sessionID string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ready[sessionID]
 }
 
 func (s *transferState) clearReady(sessionID string) {
@@ -264,12 +243,11 @@ func (s *Server) handleTransferApplied(writer *connectionWriter, msg protocol.Me
 }
 
 func (w *connectionWriter) sendTransfer(ctx context.Context, sessionID, transferID, direction string, payload []byte) error {
-	checksum := workspace.TransferChecksum(payload)
 	if err := w.send(protocol.TypeTransferBegin, sessionID, protocol.TransferBegin{
 		TransferID: transferID,
 		Direction:  direction,
 		TotalBytes: int64(len(payload)),
-		Checksum:   checksum,
+		Checksum:   protocol.TransferChecksum(payload),
 	}); err != nil {
 		return err
 	}
