@@ -25,19 +25,21 @@ type incomingTransfer struct {
 }
 
 type transferState struct {
-	mu       sync.Mutex
-	incoming map[string]*incomingTransfer
-	ready    map[string]bool
-	begun    map[string]bool
-	failed   map[string]bool
+	mu              sync.Mutex
+	incoming        map[string]*incomingTransfer
+	ready           map[string]bool
+	begun           map[string]bool
+	failed          map[string]bool
+	awaitingApplied map[string]string
 }
 
 func newTransferState() *transferState {
 	return &transferState{
-		incoming: make(map[string]*incomingTransfer),
-		ready:    make(map[string]bool),
-		begun:    make(map[string]bool),
-		failed:   make(map[string]bool),
+		incoming:        make(map[string]*incomingTransfer),
+		ready:           make(map[string]bool),
+		begun:           make(map[string]bool),
+		failed:          make(map[string]bool),
+		awaitingApplied: make(map[string]string),
 	}
 }
 
@@ -169,6 +171,26 @@ func (s *transferState) clearReady(sessionID string) {
 	s.mu.Unlock()
 }
 
+func (s *transferState) awaitApplied(sessionID, transferID string) {
+	s.mu.Lock()
+	s.awaitingApplied[sessionID] = transferID
+	s.mu.Unlock()
+}
+
+func (s *transferState) matchesApplied(sessionID, transferID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.awaitingApplied[sessionID] == transferID && transferID != ""
+}
+
+func (s *transferState) clearApplied(sessionID, transferID string) {
+	s.mu.Lock()
+	if s.awaitingApplied[sessionID] == transferID {
+		delete(s.awaitingApplied, sessionID)
+	}
+	s.mu.Unlock()
+}
+
 func (s *Server) handleTransferBegin(writer *connectionWriter, msg protocol.Message) {
 	begin, err := protocol.DecodePayload[protocol.TransferBegin](msg)
 	if err != nil {
@@ -221,6 +243,24 @@ func (s *Server) handleTransferEnd(writer *connectionWriter, msg protocol.Messag
 		return
 	}
 	s.transfers.markReady(msg.SessionID)
+}
+
+func (s *Server) handleTransferApplied(writer *connectionWriter, msg protocol.Message) {
+	applied, err := protocol.DecodePayload[protocol.TransferApplied](msg)
+	if err != nil || !s.transfers.matchesApplied(msg.SessionID, applied.TransferID) {
+		writer.sendError("invalid_transfer_ack", "workspace transfer acknowledgement is invalid", msg.SessionID)
+		return
+	}
+	repositoryPath := s.manager.SessionWorkspacePath(msg.SessionID)
+	if repositoryPath == "" {
+		writer.sendError("workspace_cleanup_failed", "session workspace path is unavailable", msg.SessionID)
+		return
+	}
+	if err := os.RemoveAll(repositoryPath); err != nil {
+		writer.sendError("workspace_cleanup_failed", "session workspace could not be removed", msg.SessionID)
+		return
+	}
+	s.transfers.clearApplied(msg.SessionID, applied.TransferID)
 }
 
 func (w *connectionWriter) sendTransfer(ctx context.Context, sessionID, transferID, direction string, payload []byte) error {
@@ -278,9 +318,9 @@ func (s *Server) syncWorkspaceBack(writer streamWriter, sessionID, transferID st
 		fail()
 		return
 	}
+	s.transfers.awaitApplied(sessionID, transferID)
 	if err := writer.sendTransfer(context.Background(), sessionID, transferID, "from_runner", payload); err != nil {
 		fail()
 		return
 	}
-	_ = os.RemoveAll(repositoryPath)
 }
