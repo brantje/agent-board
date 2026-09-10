@@ -84,6 +84,7 @@ func TestEnrollRunnerRejectsInvalidInputsAndResponses(t *testing.T) {
 		body   string
 	}{
 		{"server rejection", http.StatusBadRequest, `{"error":{"code":"invalid_argument"}}`},
+		{"server rejection without body", http.StatusUnauthorized, ""},
 		{"malformed response", http.StatusCreated, `{`},
 		{"missing runner id", http.StatusCreated, `{"runner":{},"token":"credential"}`},
 		{"missing credential", http.StatusCreated, `{"runner":{"id":"runner-1"}}`},
@@ -222,6 +223,50 @@ func TestRegisterInteractiveReturnsEnrollmentFailureWithoutState(t *testing.T) {
 	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("state unexpectedly written: %v", statErr)
 	}
+}
+
+func TestRegisterInteractivePropagatesInputAndStateFailures(t *testing.T) {
+	var output strings.Builder
+	if err := registerInteractive(context.Background(), http.DefaultClient, failingReader{}, &output, filepath.Join(t.TempDir(), "runner.json")); err == nil {
+		t.Fatal("expected URL input failure")
+	}
+
+	input := &secondReadFailReader{first: "https://agent-board.local\n"}
+	if err := registerInteractive(context.Background(), http.DefaultClient, input, &output, filepath.Join(t.TempDir(), "runner.json")); err == nil {
+		t.Fatal("expected token input failure")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"runner":{"id":"runner-3"},"token":"credential-3"}`))
+	}))
+	defer server.Close()
+	parent := filepath.Join(t.TempDir(), "state")
+	if err := os.WriteFile(parent, []byte("not a directory"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := registerInteractive(context.Background(), server.Client(), strings.NewReader(server.URL+"\ntoken\n"), &output, filepath.Join(parent, "runner.json")); err == nil || !strings.Contains(err.Error(), "save runner credentials") {
+		t.Fatalf("state persistence error=%v", err)
+	}
+}
+
+type failingReader struct{}
+
+func (failingReader) Read([]byte) (int, error) {
+	return 0, errors.New("read failed")
+}
+
+type secondReadFailReader struct {
+	first string
+	done  bool
+}
+
+func (r *secondReadFailReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, errors.New("read failed")
+	}
+	r.done = true
+	return copy(p, r.first), nil
 }
 
 func TestResolveConfigPrefersExplicitCredentialsThenState(t *testing.T) {
