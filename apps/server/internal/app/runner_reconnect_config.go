@@ -7,23 +7,6 @@ import (
 
 const DefaultRunnerReconnectTimeout = 5 * time.Minute
 
-type runnerReconnectTimeoutRegistry struct {
-	RunnerRegistry
-	timeout time.Duration
-}
-
-func (r *runnerReconnectTimeoutRegistry) DisconnectedSince(id string) (time.Time, bool) {
-	tracker, ok := r.RunnerRegistry.(runnerDisconnectTracker)
-	if !ok {
-		return time.Time{}, false
-	}
-	return tracker.DisconnectedSince(id)
-}
-
-func (r *runnerReconnectTimeoutRegistry) reconnectTimeout() time.Duration {
-	return r.timeout
-}
-
 func (s *ExecutionSessionService) SetRunnerReconnectTimeout(timeout time.Duration) error {
 	if s == nil {
 		return fmt.Errorf("execution session service is required")
@@ -31,19 +14,16 @@ func (s *ExecutionSessionService) SetRunnerReconnectTimeout(timeout time.Duratio
 	if timeout <= 0 {
 		return fmt.Errorf("runner reconnect timeout must be positive")
 	}
-	registry := s.registry
-	if configured, ok := registry.(*runnerReconnectTimeoutRegistry); ok {
-		registry = configured.RunnerRegistry
-	}
-	s.registry = &runnerReconnectTimeoutRegistry{RunnerRegistry: registry, timeout: timeout}
+	s.reconnectTimeoutNanos.Store(int64(timeout))
 	return nil
 }
 
 func (s *ExecutionSessionService) runnerReconnectTimeout() time.Duration {
-	if s != nil {
-		if configured, ok := s.registry.(interface{ reconnectTimeout() time.Duration }); ok {
-			return configured.reconnectTimeout()
-		}
+	if s == nil {
+		return DefaultRunnerReconnectTimeout
+	}
+	if timeout := time.Duration(s.reconnectTimeoutNanos.Load()); timeout > 0 {
+		return timeout
 	}
 	return DefaultRunnerReconnectTimeout
 }
