@@ -27,22 +27,22 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := execute(ctx, os.Args, &http.Client{Timeout: 30 * time.Second}, os.Stdin, os.Stdout, defaultStatePath); err != nil {
+	if err := execute(ctx, os.Args, &http.Client{Timeout: 30 * time.Second}, os.Stdin, os.Stdout, defaultConfigPath); err != nil {
 		slog.Error("agent-runner stopped", "error", err)
 		os.Exit(1)
 	}
 }
 
-func execute(ctx context.Context, args []string, client httpDoer, input io.Reader, output io.Writer, statePath string) error {
+func execute(ctx context.Context, args []string, client httpDoer, input io.Reader, output io.Writer, configPath string) error {
 	if len(args) > 1 {
 		if args[1] != "register" || len(args) != 2 {
 			return errors.New("usage: agent-runner [register]")
 		}
-		return registerInteractive(ctx, client, input, output, statePath)
+		return registerInteractive(ctx, client, input, output, configPath)
 	}
-	config, err := resolveConfig(configFromEnv(), statePath)
-	if err != nil {
-		return err
+	config := configFromEnv()
+	if config.ServerURL == "" || config.RunnerID == "" || config.Token == "" {
+		return errors.New("runner is not registered; run `agent-runner register`")
 	}
 	return run(ctx, config)
 }
@@ -53,20 +53,6 @@ func configFromEnv() appConfig {
 		root = defaultWorkspaceRoot
 	}
 	return appConfig{ServerURL: os.Getenv("AGENT_BOARD_URL"), RunnerID: os.Getenv("AGENT_RUNNER_ID"), Token: os.Getenv("AGENT_RUNNER_TOKEN"), WorkspaceRoot: root}
-}
-
-func resolveConfig(config appConfig, statePath string) (appConfig, error) {
-	if config.ServerURL != "" && config.RunnerID != "" && config.Token != "" {
-		return config, nil
-	}
-	state, err := loadRunnerState(statePath)
-	if err != nil {
-		return appConfig{}, errors.New("runner is not registered; run `agent-runner register`")
-	}
-	config.ServerURL = state.ServerURL
-	config.RunnerID = state.RunnerID
-	config.Token = state.Token
-	return config, nil
 }
 
 func run(ctx context.Context, config appConfig) error {
