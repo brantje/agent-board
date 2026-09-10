@@ -61,8 +61,9 @@ type ExecutionSessionService struct {
 	runners  RunnerConnectionManager
 	registry RunnerRegistry
 
-	liveMu sync.RWMutex
-	live   map[string]*ExecutionProcess
+	reconnectTimeoutNanos atomic.Int64
+	liveMu                sync.RWMutex
+	live                  map[string]*ExecutionProcess
 }
 
 func NewExecutionSessionService(sessionStore ExecutionSessionStore, runners RunnerConnectionManager, registry RunnerRegistry) (*ExecutionSessionService, error) {
