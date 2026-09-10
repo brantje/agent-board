@@ -28,21 +28,23 @@ const global = {
     },
     ConfigManager: {
       props: ['kind', 'projectId', 'resourceId'],
-      template: '<div data-kind="{{ kind }}" />'
-    }
+      template: '<div :data-kind="kind" />'
+    },
+    RunnerManager: { template: '<div data-runner-manager />' }
   }
 }
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('settings navigation helper', () => {
-  it('builds global settings links including Agents', () => {
+  it('builds global settings links including Agents and Runners', () => {
     const groups = settingsNavigation()
     const links = groups.flat().filter(item => item.to)
     expect(links.find(item => item.label === 'Overview')?.to).toBe('/settings')
     expect(links.find(item => item.label === 'Providers')?.to).toBe('/settings/providers')
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/settings/model-profiles')
     expect(links.find(item => item.label === 'Agents')?.to).toBe('/settings/agents')
+    expect(links.find(item => item.label === 'Runners')?.to).toBe('/settings/runners')
     expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
   })
 
@@ -54,6 +56,7 @@ describe('settings navigation helper', () => {
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/projects/p/settings/model-profiles')
     expect(links.find(item => item.label === 'Runtimes')?.to).toBe('/projects/p/settings/runtimes')
     expect(links.find(item => item.label === 'Agents')).toBeUndefined()
+    expect(links.find(item => item.label === 'Runners')).toBeUndefined()
     expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
   })
 })
@@ -107,6 +110,7 @@ describe('settings route wiring', () => {
               props: ['kind', 'projectId', 'resourceId'],
               template: '<div :data-kind="kind" :data-project="projectId" :data-resource="resourceId" />'
             },
+            RunnerManager: { template: '<div data-runner-manager />' },
             ProjectSettings: {
               props: ['projectId'],
               template: '<div data-project-settings :data-project="projectId" />'
@@ -116,6 +120,11 @@ describe('settings route wiring', () => {
       })
       expect(wrapper.find('[data-settings-shell]').exists()).toBe(true)
       if (path.endsWith('/settings/index.vue') && !path.includes('[projectID]')) continue
+      if (path.endsWith('/settings/runners.vue')) {
+        expect(wrapper.find('[data-runner-manager]').exists()).toBe(true)
+        expect(wrapper.find('[data-kind]').exists()).toBe(false)
+        continue
+      }
       if (path.endsWith('/projects/[projectID]/settings/index.vue')) {
         expect(wrapper.get('[data-project-settings]').attributes('data-project')).toBe('project-a')
         expect(wrapper.find('[data-kind]').exists()).toBe(false)
