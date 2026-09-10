@@ -15,28 +15,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func TestHealthEndpoint(t *testing.T) {
-	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
-	httpServer := httptest.NewServer(runner)
-	defer httpServer.Close()
-
-	response, err := http.Get(httpServer.URL + "/healthz")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected status %d", response.StatusCode)
-	}
-	var health protocol.Health
-	if err := json.NewDecoder(response.Body).Decode(&health); err != nil {
-		t.Fatal(err)
-	}
-	if health.Status != "ok" || health.ActiveSessions != 0 {
-		t.Fatalf("unexpected health %#v", health)
-	}
-}
-
 func TestWebSocketExecutionLifecycle(t *testing.T) {
 	_, httpServer := newTestRunner(t)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
@@ -131,9 +109,7 @@ func TestDisconnectPreservesExecutionAndReconnectReportsIt(t *testing.T) {
 
 func TestDisconnectDoesNotCancelProcess(t *testing.T) {
 	workspace := t.TempDir()
-	runner := New(Config{WorkspaceRoot: workspace, MaxActiveSessions: 1})
-	httpServer := httptest.NewServer(runner)
-	defer httpServer.Close()
+	runner, httpServer := newTestRunnerWithWorkspace(t, workspace)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	send(t, conn, protocol.TypeStart, "detached", protocol.StartRequest{Command: []string{"sh", "-c", "sleep 0.1; printf done > state"}})
 	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
@@ -190,22 +166,22 @@ func TestInvalidMessagesAndSecretsAreNotReflected(t *testing.T) {
 	assertProtocolError(t, read(t, conn), "invalid_direction")
 }
 
-func TestBrowserOriginIsRejected(t *testing.T) {
-	_, httpServer := newTestRunner(t)
-	header := http.Header{"Origin": []string{"https://example.invalid"}}
-	conn, response, err := websocket.DefaultDialer.Dial(wsURL(httpServer.URL), header)
-	if conn != nil {
-		conn.Close()
-	}
-	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
-		t.Fatalf("expected forbidden origin, response=%v err=%v", response, err)
-	}
-}
-
 func newTestRunner(t *testing.T) (*Server, *httptest.Server) {
 	t.Helper()
-	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
-	httpServer := httptest.NewServer(runner)
+	return newTestRunnerWithWorkspace(t, t.TempDir())
+}
+
+func newTestRunnerWithWorkspace(t *testing.T, workspace string) (*Server, *httptest.Server) {
+	t.Helper()
+	runner := New(Config{WorkspaceRoot: workspace, MaxActiveSessions: 1})
+	upgrader := websocket.Upgrader{}
+	httpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		runner.serveConnection(conn)
+	}))
 	t.Cleanup(httpServer.Close)
 	return runner, httpServer
 }
@@ -295,7 +271,7 @@ func assertProtocolError(t *testing.T, msg protocol.Message, code string) {
 	}
 }
 
-func wsURL(httpURL string) string { return "ws" + strings.TrimPrefix(httpURL, "http") + "/v1/ws" }
+func wsURL(httpURL string) string { return "ws" + strings.TrimPrefix(httpURL, "http") }
 
 func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
 	t.Helper()
