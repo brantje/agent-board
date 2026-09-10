@@ -35,11 +35,17 @@ Runner != agent-runner process != Execution Session != Run != Workspace
 
 ## Enrollment and credentials
 
-External Runner enrollment does not introduce a second durable Runner identity or credential type. An administrator creates a one-time registration token, whose hash is stored server-side until it is consumed. The Runner submits that token together with its system hostname. In one transaction the server consumes the registration token and creates the normal Runner identity with its normal long-lived credential.
+External Runner enrollment has exactly one durable Runner identity from creation onward. When an administrator chooses **Create runner**, Agent Board immediately creates the pending external Runner with its immutable `runner_id`. A pending Runner has no display name and no permanent Runner credential. Its one-time registration-token hash is stored on that Runner row and the plaintext `registrationToken` is returned once.
 
-The one-time registration token is never a Runner credential and cannot authenticate the WebSocket connection. It is not persisted by `agent-runner` and cannot be reused after successful enrollment. The binary persists only the Agent Board URL, returned Runner ID and returned long-lived credential in its private state file. Renaming a Runner later changes display metadata only.
+`agent-runner register` submits that registration token together with `os.Hostname()`. In one PostgreSQL transaction the server verifies that the same Runner is still pending/external/non-revoked/non-deleted, consumes the registration-token hash, sets the hostname as the initial display name, creates the normal permanent Runner credential, and marks the Runner registered. The returned `runnerId` is the same immutable ID created by the administrator; `runnerToken` is the new permanent credential.
 
-The server-managed internal Runner continues to use the same ordinary Runner identity/credential model without going through external enrollment.
+The one-time registration token is never a Runner credential and cannot authenticate `/api/runner/ws`. It is not persisted by `agent-runner` and cannot be reused after successful enrollment. The permanent Runner token is stored only as a hash server-side and is returned in plaintext only when first issued or rotated.
+
+External enrollment persists the normal runtime configuration in `/etc/agent-board/agent-runner.env` using `AGENT_BOARD_URL`, `AGENT_RUNNER_ID`, `AGENT_RUNNER_TOKEN` and `AGENT_RUNNER_WORKSPACE_ROOT`. `AGENT_RUNNER_TOKEN` always means the permanent post-registration Runner credential. Normal startup remains the existing `configFromEnv()` -> `Server.Connect()` path; there is no additional Runner state/configuration file.
+
+Hostname is only the initial display-name source. An administrator may rename a registered external Runner later. Reconnects and capability/health updates do not resend or overwrite that name, and the Runner process cannot rename itself.
+
+The server-managed internal Runner continues to use the same ordinary permanent Runner credential generation/hash/authentication path without going through external enrollment. It is immediately registered and server-managed.
 
 Required relationships:
 
