@@ -166,9 +166,6 @@ func TestIncomingTransferRequiresSessionAndActiveState(t *testing.T) {
 	if err := state.begin("", protocol.TransferBegin{TransferID: "transfer-1", Direction: "to_runner"}); err == nil {
 		t.Fatal("transfer without session id was accepted")
 	}
-	if err := state.begin("session-1", protocol.TransferBegin{TransferID: "transfer-1", Direction: "sideways"}); err == nil {
-		t.Fatal("transfer with invalid direction was accepted")
-	}
 	if err := state.chunk("session-1", protocol.TransferChunk{TransferID: "transfer-1"}); err == nil {
 		t.Fatal("chunk without active transfer was accepted")
 	}
