@@ -171,7 +171,7 @@ jobs:
           echo 'OpenCode integration provider: openrouter'
           printf 'OpenCode integration model: %s\n' "$AGENT_BOARD_TEST_OPENCODE_MODEL"
           if timeout --signal=TERM --kill-after=10s 780s \
-            go test -count=1 -failfast -run '^(TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)|TestOpenCode(RunnerNormalCodingRun|InternalRunnerNormalCodingRun))$' -v ./internal/runexec; then
+            go test -count=1 -failfast -run '^(TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)|TestOpenCode(RunnerNormalCodingRun|InternalRunnerNormalCodingRun|ConcurrentRunnerSessionsNormalAndQuestions))$' -v ./internal/runexec; then
             exit 0
           fi
 
