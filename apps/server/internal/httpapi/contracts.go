@@ -19,6 +19,9 @@ type ProjectDTO struct {
 	ID                  string          `json:"id"`
 	Name                string          `json:"name"`
 	IssuePrefix         string          `json:"issuePrefix"`
+	SourceType          string          `json:"sourceType"`
+	CloneURL            *string         `json:"cloneUrl"`
+	SourceRef           *string         `json:"sourceRef"`
 	RepositoryPath      string          `json:"repositoryPath"`
 	DefaultBranch       string          `json:"defaultBranch"`
 	WorkflowSettings    json.RawMessage `json:"workflowSettings"`
@@ -142,6 +145,9 @@ type CreateProjectRequest struct {
 	AllowInternalRunner *bool           `json:"allowInternalRunner,omitempty"`
 	Name                string          `json:"name"`
 	IssuePrefix         string          `json:"issuePrefix"`
+	SourceType          string          `json:"sourceType"`
+	CloneURL            *string         `json:"cloneUrl"`
+	SourceRef           *string         `json:"sourceRef"`
 	RepositoryPath      string          `json:"repositoryPath"`
 	DefaultBranch       string          `json:"defaultBranch"`
 	WorkflowSettings    json.RawMessage `json:"workflowSettings"`
@@ -150,6 +156,9 @@ type CreateProjectRequest struct {
 type UpdateProjectRequest struct {
 	AllowInternalRunner *bool            `json:"allowInternalRunner,omitempty"`
 	Name                *string          `json:"name"`
+	SourceType          *string          `json:"sourceType"`
+	CloneURL            *string          `json:"cloneUrl"`
+	SourceRef           *string          `json:"sourceRef"`
 	RepositoryPath      *string          `json:"repositoryPath"`
 	DefaultBranch       *string          `json:"defaultBranch"`
 	WorkflowSettings    *json.RawMessage `json:"workflowSettings"`
