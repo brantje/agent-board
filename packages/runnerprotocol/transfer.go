@@ -1,6 +1,11 @@
 package runnerprotocol
 
-import "fmt"
+import (
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
+)
 
 const (
 	TransferChunkSize = 64 << 10
@@ -14,6 +19,33 @@ func ValidateTransferBegin(begin TransferBegin) error {
 	}
 	if begin.TotalBytes < 0 || begin.TotalBytes > MaxTransferBytes {
 		return fmt.Errorf("transfer size is invalid")
+	}
+	return nil
+}
+
+func TransferChecksum(payload []byte) string {
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:])
+}
+
+func AppendTransferChunk(buffer []byte, expected int64, chunk TransferChunk) ([]byte, error) {
+	data, err := base64.StdEncoding.DecodeString(chunk.Data)
+	if err != nil {
+		return buffer, fmt.Errorf("decode transfer chunk: %w", err)
+	}
+	total := int64(len(buffer) + len(data))
+	if (expected == 0 && len(data) > 0) || total > MaxTransferBytes || (expected > 0 && total > expected) {
+		return buffer, fmt.Errorf("transfer payload exceeded declared size")
+	}
+	return append(buffer, data...), nil
+}
+
+func ValidateTransferPayload(payload []byte, expected int64, checksum string) error {
+	if checksum != "" && TransferChecksum(payload) != checksum {
+		return fmt.Errorf("transfer checksum mismatch")
+	}
+	if expected > 0 && int64(len(payload)) != expected {
+		return fmt.Errorf("transfer payload size mismatch")
 	}
 	return nil
 }
