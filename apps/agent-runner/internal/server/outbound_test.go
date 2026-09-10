@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brantje/agent-board/apps/agent-runner/internal/session"
 	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
 	"github.com/gorilla/websocket"
 )
@@ -101,12 +102,25 @@ func TestOutboundConnectionReturnsAuthenticationFailureWithoutRetry(t *testing.T
 	defer host.Close()
 
 	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
-	err := runner.Connect(t.Context(), host.URL, "runner", "revoked-token")
+	execution, err := runner.manager.Start("active", session.Request{Command: []string{"sh", "-c", "sleep 30"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = runner.Connect(t.Context(), host.URL, "runner", "revoked-token")
 	if !errors.Is(err, ErrAuthentication) {
 		t.Fatalf("Connect() error=%v, want ErrAuthentication", err)
 	}
 	if len(requests) != 1 {
 		t.Fatalf("authentication rejection retried %d times", len(requests))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result, err := execution.Wait(ctx)
+	if err != nil {
+		t.Fatalf("active session was not terminated after credential rejection: %v", err)
+	}
+	if !result.Signaled {
+		t.Fatalf("credential rejection did not kill active execution: %#v", result)
 	}
 }
 
@@ -174,5 +188,53 @@ func TestOutboundConnectionRetriesTransientFailure(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Connect() did not stop after cancellation")
+	}
+}
+
+func TestOutboundConnectionStopsRetryingOnRunnerShutdown(t *testing.T) {
+	requests := make(chan struct{}, 2)
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests <- struct{}{}
+		http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+	}))
+	defer host.Close()
+
+	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
+	result := make(chan error, 1)
+	go func() { result <- runner.Connect(context.Background(), host.URL, "runner", "token") }()
+	select {
+	case <-requests:
+	case <-time.After(time.Second):
+		t.Fatal("runner did not attempt connection")
+	}
+	if err := runner.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("Connect() after runner shutdown=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Connect() kept retrying after runner shutdown")
+	}
+}
+
+func TestOutboundConnectionRejectsInvalidConfiguration(t *testing.T) {
+	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
+	for _, test := range []struct {
+		name, serverURL, id, token string
+	}{
+		{name: "query", serverURL: "https://agent-board.example.com?token=leak", id: "runner", token: "token"},
+		{name: "userinfo", serverURL: "https://user@agent-board.example.com", id: "runner", token: "token"},
+		{name: "scheme", serverURL: "ws://agent-board.example.com", id: "runner", token: "token"},
+		{name: "missing id", serverURL: "https://agent-board.example.com", token: "token"},
+		{name: "missing token", serverURL: "https://agent-board.example.com", id: "runner"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := runner.Connect(t.Context(), test.serverURL, test.id, test.token); err == nil {
+				t.Fatal("invalid outbound configuration was accepted")
+			}
+		})
 	}
 }
