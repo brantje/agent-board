@@ -589,7 +589,7 @@ func (a *api) getAgent(w http.ResponseWriter, r *http.Request, scope *string) {
 	writeJSON(w, 200, agentDTO(v))
 }
 func (a *api) updateAgent(w http.ResponseWriter, r *http.Request, scope *string) {
-	id, ok := resourceID(w, r, "resourceID")
+	id, ok := resourceID(w, r)
 	if !ok {
 		return
 	}
