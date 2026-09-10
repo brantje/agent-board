@@ -63,6 +63,26 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 		}
 	})
 
+	t.Run("invalid returned workspace fails without acknowledgement", func(t *testing.T) {
+		repo := initProcessTestRepository(t)
+		safe := processTestSafeContext(repo)
+		storeFake := &runnerSyncStore{}
+		client := &successfulSyncClient{payload: []byte("not a git bundle")}
+		processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
+		run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID}
+
+		result, err := processor.runEngineOnRunner(t.Context(), run, safe, "runner-1", "session-1")
+		if err != nil || result.RunStatus != "FAILED" || result.FailureReason == nil {
+			t.Fatalf("result=%+v err=%v", result, err)
+		}
+		if client.confirmed {
+			t.Fatal("invalid returned workspace was acknowledged as applied")
+		}
+		if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || !hasProcessTestEvent(storeFake.events, "run.failed") || hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
+			t.Fatalf("terminal events=%+v", storeFake.events)
+		}
+	})
+
 	t.Run("parent cancellation syncs back before returning cancellation", func(t *testing.T) {
 		repo := initProcessTestRepository(t)
 		safe := processTestSafeContext(repo)
