@@ -2,9 +2,7 @@ package runner
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -16,12 +14,11 @@ func (c *Connection) SendTransfer(ctx context.Context, sessionID, transferID, di
 		return fmt.Errorf("runner transfer requires session and transfer ids")
 	}
 	total := int64(len(payload))
-	checksum := sha256.Sum256(payload)
 	if err := c.write(protocol.TypeTransferBegin, sessionID, protocol.TransferBegin{
 		TransferID: transferID,
 		Direction:  direction,
 		TotalBytes: total,
-		Checksum:   hex.EncodeToString(checksum[:]),
+		Checksum:   protocol.TransferChecksum(payload),
 	}); err != nil {
 		return err
 	}
@@ -125,26 +122,14 @@ func (c *Connection) handleTransferMessage(msg protocol.Message) error {
 			c.mu.Unlock()
 			return nil
 		}
-		data, err := base64.StdEncoding.DecodeString(chunk.Data)
+		buffer, err := protocol.AppendTransferChunk(transfer.buffer, transfer.expected, chunk)
 		if err != nil {
 			c.mu.Unlock()
-			return fmt.Errorf("decode transfer chunk: %w", err)
+			return c.completeTransfer(msg.SessionID, transferResult{err: err})
 		}
-		if transfer.expected == 0 && len(data) > 0 {
-			c.mu.Unlock()
-			return c.completeTransfer(msg.SessionID, transferResult{err: fmt.Errorf("transfer payload exceeded declared size")})
-		}
-		if int64(len(transfer.buffer)+len(data)) > protocol.MaxTransferBytes {
-			c.mu.Unlock()
-			return c.completeTransfer(msg.SessionID, transferResult{err: fmt.Errorf("transfer payload exceeded declared size")})
-		}
-		transfer.buffer = append(transfer.buffer, data...)
-		transferred := int64(len(transfer.buffer))
+		transfer.buffer = buffer
+		transferred := int64(len(buffer))
 		waiter := c.transferWaiters[msg.SessionID]
-		if transfer.expected > 0 && transferred > transfer.expected {
-			c.mu.Unlock()
-			return c.completeTransfer(msg.SessionID, transferResult{err: fmt.Errorf("transfer payload exceeded declared size")})
-		}
 		if waiter != nil {
 			emitTransferProgress(waiter.onProgress, transferred, transfer.expected, &transfer.progressState, time.Now(), DefaultTransferProgressInterval)
 		}
@@ -172,12 +157,8 @@ func (c *Connection) handleTransferMessage(msg protocol.Message) error {
 		delete(c.transfers, msg.SessionID)
 		c.mu.Unlock()
 
-		sum := sha256.Sum256(payload)
-		if checksum != "" && hex.EncodeToString(sum[:]) != checksum {
-			return c.completeTransfer(msg.SessionID, transferResult{err: fmt.Errorf("transfer checksum mismatch")})
-		}
-		if expected > 0 && int64(len(payload)) != expected {
-			return c.completeTransfer(msg.SessionID, transferResult{err: fmt.Errorf("transfer payload size mismatch")})
+		if err := protocol.ValidateTransferPayload(payload, expected, checksum); err != nil {
+			return c.completeTransfer(msg.SessionID, transferResult{err: err})
 		}
 		return c.completeTransfer(msg.SessionID, transferResult{transferID: transferID, payload: payload})
 	case protocol.TypeTransferFailed:
