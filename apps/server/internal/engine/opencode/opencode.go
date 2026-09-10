@@ -348,6 +348,7 @@ func serverEnvironment(safe executioncontext.SafeContext, providerID string) (ma
 		}
 	}
 	config := map[string]any{
+		"permission": "allow",
 		"provider": map[string]any{
 			providerID: providerConfig,
 		},
@@ -458,7 +459,7 @@ func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	if safe.ReviewFeedback != nil && strings.TrimSpace(safe.ReviewFeedback.Feedback) != "" {
 		sections = append(sections, "Review feedback:\n"+strings.TrimSpace(safe.ReviewFeedback.Feedback))
 	}
-	sections = append(sections, "Work directly in the current project directory and implement the requested issue. If human input is required, use OpenCode's native Question capability rather than guessing.")
+	sections = append(sections, "Work directly in the current project directory and implement the requested issue. Treat /workspace as the logical workspace root: use project-relative paths for workspace files rather than absolute /workspace paths. If human input is required, use OpenCode's native Question capability rather than guessing.")
 	return strings.Join(sections, "\n\n")
 }
 
