@@ -41,7 +41,7 @@ type RuntimeInstanceEvidenceDTO struct {
 
 type ExecutionSessionEvidenceDTO struct {
 	ID                string          `json:"id"`
-	RuntimeInstanceID string          `json:"runtimeInstanceId"`
+	RuntimeInstanceID *string         `json:"runtimeInstanceId"`
 	RunnerID          *string         `json:"runnerId"`
 	Status            string          `json:"status"`
 	CWD               string          `json:"cwd"`
@@ -238,7 +238,7 @@ func runtimeInstanceEvidenceDTO(value store.RuntimeInstance) RuntimeInstanceEvid
 
 func executionSessionEvidenceDTO(value store.ExecutionSession) ExecutionSessionEvidenceDTO {
 	return ExecutionSessionEvidenceDTO{
-		ID: value.ID, RuntimeInstanceID: value.RuntimeInstanceID, RunnerID: optionalEvidenceID(value.RunnerID), Status: value.Status, CWD: value.CWD,
+		ID: value.ID, RuntimeInstanceID: optionalEvidenceID(value.RuntimeInstanceID), RunnerID: optionalEvidenceID(value.RunnerID), Status: value.Status, CWD: value.CWD,
 		Command: append(json.RawMessage(nil), value.CommandArgv...), ExitCode: value.ExitCode, CreatedAt: value.CreatedAt,
 		StartedAt: value.StartedAt, CompletedAt: value.CompletedAt, UpdatedAt: value.UpdatedAt,
 	}
