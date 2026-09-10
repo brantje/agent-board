@@ -24,6 +24,19 @@ func (registryIdentity) Authenticate(_ context.Context, id, token string) (store
 }
 func (registryIdentity) ObserveRunner(context.Context, string, json.RawMessage) error { return nil }
 
+type registryConnectionReconciler struct {
+	calls int
+	old   protocol.Health
+	new   protocol.Health
+}
+
+func (r *registryConnectionReconciler) ReconcileRunnerConnection(_ context.Context, _ string, old, replacement protocol.Health) error {
+	r.calls++
+	r.old = old
+	r.new = replacement
+	return nil
+}
+
 func TestInboundRegistryAuthenticatesBeforeUpgrade(t *testing.T) {
 	registry := NewRegistry(registryIdentity{}, registryIdentity{})
 	defer registry.Close()
@@ -43,6 +56,8 @@ func TestInboundRegistryAuthenticatesBeforeUpgrade(t *testing.T) {
 
 func TestInboundRegistryNegotiatesLiveConnectionAndReplacement(t *testing.T) {
 	registry := NewRegistry(registryIdentity{}, registryIdentity{})
+	reconciler := &registryConnectionReconciler{}
+	registry.SetConnectionReconciler(reconciler)
 	defer registry.Close()
 	server := httptest.NewServer(registry)
 	defer server.Close()
@@ -88,6 +103,9 @@ func TestInboundRegistryNegotiatesLiveConnectionAndReplacement(t *testing.T) {
 	}
 	if !registry.Connected("runner") {
 		t.Fatal("replacement lost live state")
+	}
+	if reconciler.calls < 2 || reconciler.old.Status != "ok" || reconciler.new.Status != "ok" {
+		t.Fatalf("replacement reconciliation calls=%d old=%+v new=%+v", reconciler.calls, reconciler.old, reconciler.new)
 	}
 	if err = registry.Close(); err != nil {
 		t.Fatal(err)
@@ -179,8 +197,18 @@ func TestRegistryDisconnectAndReconcile(t *testing.T) {
 	if _, _, err := registry.Reconcile(context.Background(), "project", "runner", ""); err == nil {
 		t.Fatal("reconcile accepted a blank session")
 	}
+	if _, known := registry.DisconnectedSince("runner"); known {
+		t.Fatal("live runner reported disconnected")
+	}
 	registry.Disconnect("runner")
 	if registry.Connected("runner") {
 		t.Fatal("disconnect left runner live")
+	}
+	disconnectedAt, known := registry.DisconnectedSince("runner")
+	if !known || disconnectedAt.IsZero() {
+		t.Fatalf("disconnect timestamp known=%v at=%v", known, disconnectedAt)
+	}
+	if again, _ := registry.DisconnectedSince("runner"); !again.Equal(disconnectedAt) {
+		t.Fatalf("disconnect timestamp changed: first=%v second=%v", disconnectedAt, again)
 	}
 }
