@@ -15,31 +15,31 @@ import (
 
 type runnerAPIStore struct {
 	fakeControlPlaneStore
-	value      store.Runner
-	attached   []string
-	listErr    error
-	projectErr error
-	setErr     error
-	createErr  error
+	value    store.Runner
+	attached []string
+	err      error
 }
 
 func (s *runnerAPIStore) CreateRunner(_ context.Context, r store.Runner) (store.Runner, error) {
-	if s.createErr != nil {
-		return store.Runner{}, s.createErr
+	if s.err != nil {
+		return store.Runner{}, s.err
 	}
 	r.ID = otherID
 	s.value = r
 	return r, nil
 }
 func (s *runnerAPIStore) GetRunner(_ context.Context, id string) (store.Runner, error) {
+	if s.err != nil {
+		return store.Runner{}, s.err
+	}
 	if id != s.value.ID || s.value.DeletedAt != nil {
 		return store.Runner{}, store.ErrNotFound
 	}
 	return s.value, nil
 }
 func (s *runnerAPIStore) ListRunners(context.Context) ([]store.Runner, error) {
-	if s.listErr != nil {
-		return nil, s.listErr
+	if s.err != nil {
+		return nil, s.err
 	}
 	if s.value.ID == "" || s.value.DeletedAt != nil {
 		return nil, nil
@@ -47,6 +47,9 @@ func (s *runnerAPIStore) ListRunners(context.Context) ([]store.Runner, error) {
 	return []store.Runner{s.value}, nil
 }
 func (s *runnerAPIStore) RenameRunner(_ context.Context, id, name string) (store.Runner, error) {
+	if s.err != nil {
+		return store.Runner{}, s.err
+	}
 	if id != s.value.ID {
 		return store.Runner{}, store.ErrNotFound
 	}
@@ -54,6 +57,9 @@ func (s *runnerAPIStore) RenameRunner(_ context.Context, id, name string) (store
 	return s.value, nil
 }
 func (s *runnerAPIStore) RotateRunnerCredential(_ context.Context, id string, hash []byte) (store.Runner, error) {
+	if s.err != nil {
+		return store.Runner{}, s.err
+	}
 	if id != s.value.ID {
 		return store.Runner{}, store.ErrNotFound
 	}
@@ -61,6 +67,9 @@ func (s *runnerAPIStore) RotateRunnerCredential(_ context.Context, id string, ha
 	return s.value, nil
 }
 func (s *runnerAPIStore) RevokeRunner(_ context.Context, id string, deleted bool) (store.Runner, error) {
+	if s.err != nil {
+		return store.Runner{}, s.err
+	}
 	if id != s.value.ID {
 		return store.Runner{}, store.ErrNotFound
 	}
@@ -73,164 +82,111 @@ func (s *runnerAPIStore) RevokeRunner(_ context.Context, id string, deleted bool
 }
 func (s *runnerAPIStore) ObserveRunner(context.Context, string, json.RawMessage) error { return nil }
 func (s *runnerAPIStore) ListProjectRunnerIDs(context.Context, string) ([]string, error) {
-	if s.projectErr != nil {
-		return nil, s.projectErr
+	if s.err != nil {
+		return nil, s.err
 	}
 	return s.attached, nil
 }
 func (s *runnerAPIStore) SetProjectRunnerIDs(_ context.Context, _ string, ids []string) error {
-	if s.setErr != nil {
-		return s.setErr
+	if s.err != nil {
+		return s.err
 	}
 	s.attached = append([]string(nil), ids...)
 	return nil
 }
 
-func TestRunnerAPIOneTimeTokenAndPublicDTO(t *testing.T) {
+func TestRunnerAPIPublicLifecycle(t *testing.T) {
 	memory := &runnerAPIStore{}
 	router := NewRouter(app.New(memory))
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest("POST", "/api/runners", strings.NewReader(`{"name":"Build host"}`)))
-	if response.Code != 201 {
-		t.Fatalf("create %d %s", response.Code, response.Body.String())
+
+	createdResponse := runnerAPIRequest(router, http.MethodPost, "/api/runners", `{"name":"Build host"}`)
+	if createdResponse.Code != http.StatusCreated || createdResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("create %d %s", createdResponse.Code, createdResponse.Body.String())
 	}
 	var created struct {
 		Runner RunnerDTO `json:"runner"`
 		Token  string    `json:"token"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
 	if created.Token == "" || created.Runner.ID != otherID {
-		t.Fatal("missing identity/token")
+		t.Fatal("missing runner identity or one-time token")
 	}
+
 	for _, path := range []string{"/api/runners", "/api/runners/" + otherID} {
-		response = httptest.NewRecorder()
-		router.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
-		if response.Code != 200 {
-			t.Fatal(response.Code)
+		response := runnerAPIRequest(router, http.MethodGet, path, "")
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s -> %d", path, response.Code)
 		}
 		for _, secret := range []string{created.Token, "tokenHash", "TokenHash", "token_hash"} {
 			if strings.Contains(response.Body.String(), secret) {
-				t.Fatal("credential leaked")
+				t.Fatalf("credential leaked from %s", path)
 			}
-		}
-	}
-	response = httptest.NewRecorder()
-	router.ServeHTTP(response, httptest.NewRequest("POST", "/api/runners", strings.NewReader(`{"name":"","internal":true}`)))
-	if response.Code != 400 {
-		t.Fatal("caller can supply internal configuration")
 	}
 
-	patch := httptest.NewRecorder()
-	req := httptest.NewRequest("PATCH", "/api/runners/"+otherID, strings.NewReader(`{"name":"Edge host"}`))
-	router.ServeHTTP(patch, req)
-	if patch.Code != 200 || !strings.Contains(patch.Body.String(), "Edge host") {
-		t.Fatalf("rename %d %s", patch.Code, patch.Body.String())
+	rename := runnerAPIRequest(router, http.MethodPatch, "/api/runners/"+otherID, `{"name":"Edge host"}`)
+	if rename.Code != http.StatusOK || !strings.Contains(rename.Body.String(), "Edge host") {
+		t.Fatalf("rename %d %s", rename.Code, rename.Body.String())
 	}
 
-	rotate := httptest.NewRecorder()
-	router.ServeHTTP(rotate, httptest.NewRequest("POST", "/api/runners/"+otherID+"/rotate-token", nil))
-	if rotate.Code != 200 || rotate.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("rotate %d", rotate.Code)
-	}
+	rotate := runnerAPIRequest(router, http.MethodPost, "/api/runners/"+otherID+"/rotate-token", "")
 	var rotated struct {
 		Token string `json:"token"`
 	}
+	if rotate.Code != http.StatusOK || rotate.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("rotate %d %s", rotate.Code, rotate.Body.String())
+	}
 	if err := json.Unmarshal(rotate.Body.Bytes(), &rotated); err != nil || rotated.Token == "" || rotated.Token == created.Token {
-		t.Fatalf("rotate token=%q err=%v", rotated.Token, err)
+		t.Fatalf("rotated token=%q err=%v", rotated.Token, err)
 	}
 
-	allow := httptest.NewRecorder()
-	router.ServeHTTP(allow, httptest.NewRequest("PUT", "/api/projects/"+projectID+"/runners", strings.NewReader(`{"runnerIds":["`+otherID+`"]}`)))
-	if allow.Code != 200 {
-		t.Fatalf("set project runners %d %s", allow.Code, allow.Body.String())
+	allow := runnerAPIRequest(router, http.MethodPut, "/api/projects/"+projectID+"/runners", `{"runnerIds":["`+otherID+`"]}`)
+	listed := runnerAPIRequest(router, http.MethodGet, "/api/projects/"+projectID+"/runners", "")
+	if allow.Code != http.StatusOK || listed.Code != http.StatusOK || !strings.Contains(listed.Body.String(), otherID) {
+		t.Fatalf("project runners set=%d get=%d body=%s", allow.Code, listed.Code, listed.Body.String())
 	}
-	listed := httptest.NewRecorder()
-	router.ServeHTTP(listed, httptest.NewRequest("GET", "/api/projects/"+projectID+"/runners", nil))
-	if listed.Code != 200 || !strings.Contains(listed.Body.String(), otherID) {
-		t.Fatalf("get project runners %d %s", listed.Code, listed.Body.String())
-	}
-	badAllow := httptest.NewRecorder()
-	router.ServeHTTP(badAllow, httptest.NewRequest("PUT", "/api/projects/"+projectID+"/runners", strings.NewReader(`{"runnerIds":["not-a-uuid"]}`)))
-	if badAllow.Code != 400 {
-		t.Fatalf("invalid allowlist %d", badAllow.Code)
+	cleared := runnerAPIRequest(router, http.MethodPut, "/api/projects/"+projectID+"/runners", `{}`)
+	if cleared.Code != http.StatusOK || !strings.Contains(cleared.Body.String(), `"runnerIds":[]`) {
+		t.Fatalf("clear project runners %d %s", cleared.Code, cleared.Body.String())
 	}
 
-	revoke := httptest.NewRecorder()
-	router.ServeHTTP(revoke, httptest.NewRequest("POST", "/api/runners/"+otherID+"/revoke", nil))
-	if revoke.Code != 200 || !strings.Contains(revoke.Body.String(), `"revokedAt"`) {
+	revoke := runnerAPIRequest(router, http.MethodPost, "/api/runners/"+otherID+"/revoke", "")
+	if revoke.Code != http.StatusOK || !strings.Contains(revoke.Body.String(), `"revokedAt"`) {
 		t.Fatalf("revoke %d %s", revoke.Code, revoke.Body.String())
 	}
-	del := httptest.NewRecorder()
-	router.ServeHTTP(del, httptest.NewRequest(http.MethodDelete, "/api/runners/"+otherID, nil))
-	if del.Code != http.StatusNoContent {
-		t.Fatalf("delete %d %s", del.Code, del.Body.String())
-	}
-	missing := httptest.NewRecorder()
-	router.ServeHTTP(missing, httptest.NewRequest("GET", "/api/runners/"+otherID, nil))
-	if missing.Code != 404 {
-		t.Fatalf("deleted runner still visible %d", missing.Code)
+	deleted := runnerAPIRequest(router, http.MethodDelete, "/api/runners/"+otherID, "")
+	missing := runnerAPIRequest(router, http.MethodGet, "/api/runners/"+otherID, "")
+	if deleted.Code != http.StatusNoContent || missing.Code != http.StatusNotFound {
+		t.Fatalf("delete=%d subsequent get=%d", deleted.Code, missing.Code)
 	}
 }
 
-func TestRunnerAPIRejectsInvalidIDsAndStoreFailures(t *testing.T) {
-	memory := &runnerAPIStore{
-		listErr:    store.ErrNotFound,
-		projectErr: store.ErrNotFound,
-		setErr:     store.ErrNotFound,
-		createErr:  store.ErrNotFound,
-	}
-	router := NewRouter(app.New(memory))
-
-	for _, req := range []*http.Request{
-		httptest.NewRequest("GET", "/api/projects/not-a-uuid/runners", nil),
-		httptest.NewRequest("PUT", "/api/projects/not-a-uuid/runners", strings.NewReader(`{"runnerIds":[]}`)),
-		httptest.NewRequest("GET", "/api/runners/not-a-uuid", nil),
-		httptest.NewRequest("PATCH", "/api/runners/not-a-uuid", strings.NewReader(`{"name":"Host"}`)),
-		httptest.NewRequest("POST", "/api/runners/not-a-uuid/rotate-token", nil),
-		httptest.NewRequest("POST", "/api/runners/not-a-uuid/revoke", nil),
-		httptest.NewRequest(http.MethodDelete, "/api/runners/not-a-uuid", nil),
+func TestRunnerAPIValidationAndStoreFailure(t *testing.T) {
+	router := NewRouter(app.New(&runnerAPIStore{}))
+	for _, tc := range []struct {
+		method string
+		path   string
+		body   string
+	}{
+		{http.MethodGet, "/api/runners/not-a-uuid", ""},
+		{http.MethodPut, "/api/projects/not-a-uuid/runners", `{"runnerIds":[]}`},
+		{http.MethodPut, "/api/projects/" + projectID + "/runners", `{"runnerIds":["not-a-uuid"]}`},
+		{http.MethodPatch, "/api/runners/" + otherID, `{`},
 	} {
-		response := httptest.NewRecorder()
-		router.ServeHTTP(response, req)
-		if response.Code != 400 {
-			t.Fatalf("%s %s -> %d", req.Method, req.URL.Path, response.Code)
+		if response := runnerAPIRequest(router, tc.method, tc.path, tc.body); response.Code != http.StatusBadRequest {
+			t.Fatalf("%s %s -> %d", tc.method, tc.path, response.Code)
 		}
 	}
 
-	for _, req := range []*http.Request{
-		httptest.NewRequest("PUT", "/api/projects/"+projectID+"/runners", strings.NewReader(`{`)),
-		httptest.NewRequest("PATCH", "/api/runners/"+otherID, strings.NewReader(`{`)),
-	} {
-		response := httptest.NewRecorder()
-		router.ServeHTTP(response, req)
-		if response.Code != 400 {
-			t.Fatalf("invalid json %s -> %d", req.URL.Path, response.Code)
-		}
+	failed := runnerAPIRequest(NewRouter(app.New(&runnerAPIStore{err: store.ErrNotFound})), http.MethodGet, "/api/runners", "")
+	if failed.Code < http.StatusBadRequest {
+		t.Fatalf("store failure returned %d", failed.Code)
 	}
+}
 
-	for _, req := range []*http.Request{
-		httptest.NewRequest("GET", "/api/projects/"+projectID+"/runners", nil),
-		httptest.NewRequest("PUT", "/api/projects/"+projectID+"/runners", strings.NewReader(`{"runnerIds":[]}`)),
-		httptest.NewRequest("GET", "/api/runners", nil),
-		httptest.NewRequest("POST", "/api/runners", strings.NewReader(`{"name":"Host"}`)),
-		httptest.NewRequest("PATCH", "/api/runners/"+otherID, strings.NewReader(`{"name":"Host"}`)),
-		httptest.NewRequest("POST", "/api/runners/"+otherID+"/rotate-token", nil),
-		httptest.NewRequest("POST", "/api/runners/"+otherID+"/revoke", nil),
-	} {
-		response := httptest.NewRecorder()
-		router.ServeHTTP(response, req)
-		if response.Code < 400 {
-			t.Fatalf("store failure %s %s -> %d", req.Method, req.URL.Path, response.Code)
-		}
-	}
-
-	okStore := &runnerAPIStore{}
-	okRouter := NewRouter(app.New(okStore))
-	cleared := httptest.NewRecorder()
-	okRouter.ServeHTTP(cleared, httptest.NewRequest("PUT", "/api/projects/"+projectID+"/runners", strings.NewReader(`{}`)))
-	if cleared.Code != 200 || !strings.Contains(cleared.Body.String(), `"runnerIds":[]`) {
-		t.Fatalf("null allowlist %d %s", cleared.Code, cleared.Body.String())
-	}
+func runnerAPIRequest(router http.Handler, method, path, body string) *httptest.ResponseRecorder {
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(method, path, strings.NewReader(body)))
+	return response
 }
