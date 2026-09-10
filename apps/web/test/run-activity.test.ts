@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ActivityTimeline from '../app/components/ActivityTimeline.vue'
-import { projectRunActivity, eventActivityIcon, toolActivityIcon, toolActivityLabel, toolActivityTarget } from '../app/utils/events'
+import { projectRunActivity, eventActivityIcon, eventTitle, toolActivityIcon, toolActivityLabel, toolActivityTarget } from '../app/utils/events'
 import { event } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
@@ -60,6 +60,35 @@ describe('run activity projection', () => {
       target: 'opencode serve --hostname 127.0.0.1 --port 4096',
       status: 'running'
     })
+  })
+
+  it('projects workspace transfer lifecycle events with runner names and coalesces progress', () => {
+    const items = projectRunActivity([
+      event({ id: 'xfer-start', type: 'workspace.transfer.started', sequence: 1, payload: { direction: 'to_runner', runnerId: 'runner-1', runnerName: 'Internal runner', transferId: 'xfer-1' } }),
+      event({ id: 'xfer-progress', type: 'workspace.transfer.progress', sequence: 2, payload: { direction: 'to_runner', runnerName: 'Internal runner', transferId: 'xfer-1', bytesTransferred: 65536, totalBytes: 131072 } }),
+      event({ id: 'xfer-done', type: 'workspace.transfer.completed', sequence: 3, payload: { direction: 'to_runner', runnerName: 'Internal runner', transferId: 'xfer-1', bytesTransferred: 131072, totalBytes: 131072 } }),
+      event({ id: 'sync-fail', type: 'workspace.transfer.failed', sequence: 4, payload: { direction: 'from_runner', runnerName: 'Internal runner', transferId: 'xfer-2', reason: 'runner disconnected' } })
+    ])
+    expect(items).toHaveLength(2)
+    expect(items.map(item => item.kind === 'event' ? item.title : item.kind)).toEqual([
+      'Workspace transferred to Internal runner',
+      'Failed to synchronize changes from Internal runner'
+    ])
+    expect(items[0]).toMatchObject({ description: '128.0 KiB (100%)' })
+    expect(items[1]).toMatchObject({ description: 'runner disconnected' })
+    expect(eventTitle(event({
+      type: 'workspace.transfer.started',
+      payload: { direction: 'to_runner', runnerName: 'lab-host' }
+    }))).toBe('Preparing workspace')
+    expect(eventTitle(event({
+      type: 'workspace.transfer.progress',
+      payload: { direction: 'to_runner', runnerName: 'lab-host' }
+    }))).toBe('Transferring workspace to lab-host')
+    expect(eventTitle(event({
+      type: 'workspace.transfer.started',
+      payload: { direction: 'from_runner', runnerName: 'lab-host' }
+    }))).toBe('Synchronizing changes from lab-host')
+    expect(eventActivityIcon('workspace.transfer.started')).toBe('i-lucide-folder-sync')
   })
 
   it('projects an intentional process stop as stopped rather than failed', () => {
