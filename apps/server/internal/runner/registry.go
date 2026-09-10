@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
@@ -26,11 +27,12 @@ type Registry struct {
 	observer Observer
 	mu       sync.RWMutex
 	entries  map[string]*Connection
+	disconnected map[string]time.Time
 	closed   bool
 }
 
 func NewRegistry(auth Authenticator, observer Observer) *Registry {
-	return &Registry{auth: auth, observer: observer, entries: map[string]*Connection{}}
+	return &Registry{auth: auth, observer: observer, entries: map[string]*Connection{}, disconnected: map[string]time.Time{}}
 }
 
 func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -81,6 +83,7 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	old := r.entries[identity.ID]
 	r.entries[identity.ID] = client
+	delete(r.disconnected, identity.ID)
 	r.mu.Unlock()
 	if old != nil {
 		_ = old.Close()
@@ -90,6 +93,9 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		r.mu.Lock()
 		if r.entries[identity.ID] == client {
 			delete(r.entries, identity.ID)
+			if _, exists := r.disconnected[identity.ID]; !exists {
+				r.disconnected[identity.ID] = time.Now()
+			}
 		}
 		r.mu.Unlock()
 	}()
@@ -139,10 +145,35 @@ func (r *Registry) Reconcile(ctx context.Context, projectID, id, sessionID strin
 	process, err := c.Attach(sessionID)
 	return process, active, err
 }
+
+// DisconnectedSince returns when the current live transport for a runner was
+// lost. The timestamp is in-memory by design because connected state itself is
+// ephemeral. If a dead transport is observed before its cleanup goroutine runs,
+// this call records the first observed disconnect time rather than using the
+// age of any Execution Session.
+func (r *Registry) DisconnectedSince(id string) (time.Time, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.closed {
+		if c := r.entries[id]; c != nil && clientAlive(c) {
+			return time.Time{}, false
+		}
+	}
+	if disconnectedAt, ok := r.disconnected[id]; ok {
+		return disconnectedAt, true
+	}
+	disconnectedAt := time.Now()
+	r.disconnected[id] = disconnectedAt
+	return disconnectedAt, true
+}
+
 func (r *Registry) Disconnect(id string) {
 	r.mu.Lock()
 	c := r.entries[id]
 	delete(r.entries, id)
+	if _, exists := r.disconnected[id]; !exists {
+		r.disconnected[id] = time.Now()
+	}
 	r.mu.Unlock()
 	if c != nil {
 		for _, id := range c.Health().ActiveSessionIDs {
