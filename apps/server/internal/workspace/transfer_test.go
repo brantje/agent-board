@@ -21,6 +21,7 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 	runTransferGit(t, source, "config", "user.name", "Agent Board Test")
 	writeMode(t, filepath.Join(source, "tracked.go"), "package main\n", 0o644)
 	writeMode(t, filepath.Join(source, "deleted.go"), "package gone\n", 0o644)
+	writeMode(t, filepath.Join(source, "preexisting.txt"), "base\n", 0o644)
 	writeMode(t, filepath.Join(source, "exec.sh"), "#!/bin/sh\necho ok\n", 0o755)
 	if err := os.Symlink("tracked.go", filepath.Join(source, "link.go")); err != nil {
 		t.Fatal(err)
@@ -90,14 +91,36 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 		t.Fatalf("tracked modification missing: %s %v", body, err)
 	}
 
+	// Sync-back must not advance HEAD or disturb staging that already existed in
+	// the authoritative Workspace for an unrelated file.
+	writeMode(t, filepath.Join(destination, "preexisting.txt"), "staged locally\n", 0o644)
+	runTransferGit(t, destination, "add", "preexisting.txt")
+	destinationHead := gitOutput(t, destination, "rev-parse", "HEAD")
+	stagedBeforeApply := gitOutput(t, destination, "diff", "--cached", "--binary")
+
 	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
 		t.Fatal(err)
+	}
+	if got := gitOutput(t, destination, "rev-parse", "HEAD"); got != destinationHead {
+		t.Fatalf("sync-back advanced authoritative HEAD: before=%s after=%s", destinationHead, got)
+	}
+	if got := gitOutput(t, destination, "diff", "--cached", "--binary"); got != stagedBeforeApply {
+		t.Fatalf("sync-back changed authoritative staging state\nbefore=%s\nafter=%s", stagedBeforeApply, got)
+	}
+	status := gitOutput(t, destination, "status", "--porcelain=v1")
+	for _, want := range []string{" M tracked.go", " D deleted.go", "?? notes.md"} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("sync-back status missing %q: %s", want, status)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(destination, "notes.md")); err != nil {
 		t.Fatal("sync-back did not apply untracked file")
 	}
 	if _, err := os.Stat(filepath.Join(destination, "ignored.txt")); !os.IsNotExist(err) {
 		t.Fatal("ignored file appeared after apply")
+	}
+	if strings.Contains(gitOutput(t, destination, "log", "--oneline"), "Synchronize workspace from runner") {
+		t.Fatal("sync-back manufactured a visible commit")
 	}
 	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
 		t.Fatal(err)
@@ -179,20 +202,7 @@ func TestTransferOperationsSurfaceGitFailures(t *testing.T) {
 	if err := git.ApplyTransferBundle(context.Background(), t.TempDir(), []byte("bundle")); err == nil {
 		t.Fatal("failed apply git accepted")
 	}
-	if nothingToCommit(nil) {
-		t.Fatal("nil commit error treated as nothing to commit")
-	}
-	if nothingToCommit(os.ErrExist) {
-		t.Fatal("unrelated error treated as nothing to commit")
-	}
-	if !nothingToCommit(errString("Nothing to commit")) {
-		t.Fatal("nothing to commit not detected")
-	}
 }
-
-type errString string
-
-func (e errString) Error() string { return string(e) }
 
 func cloneTransferBundle(t *testing.T, payload []byte) string {
 	t.Helper()
