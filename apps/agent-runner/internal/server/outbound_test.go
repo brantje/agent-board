@@ -93,6 +93,62 @@ func TestOutboundConnectionAuthenticatesAndExecutes(t *testing.T) {
 	}
 }
 
+func TestOutboundHandshakeCompletesWhenPingPeriodIsAggressive(t *testing.T) {
+	done := make(chan error, 1)
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer token" || r.Header.Get(protocol.RunnerIDHeader) != "runner" {
+			http.Error(w, "auth", 401)
+			return
+		}
+		u := websocket.Upgrader{}
+		c, err := u.Upgrade(w, r, nil)
+		if err != nil {
+			done <- err
+			return
+		}
+		defer c.Close()
+		hello, _ := protocol.NewMessage(protocol.Version2, protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{protocol.Version2}})
+		if err = c.WriteJSON(hello); err != nil {
+			done <- err
+			return
+		}
+		var runnerHello, health protocol.Message
+		if err = c.ReadJSON(&runnerHello); err != nil {
+			done <- err
+			return
+		}
+		if runnerHello.Type != protocol.TypeRunnerHello {
+			done <- errors.New("expected runner_hello")
+			return
+		}
+		if err = c.ReadJSON(&health); err != nil {
+			done <- err
+			return
+		}
+		done <- nil
+		<-r.Context().Done()
+	}))
+	defer host.Close()
+	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
+	runner.pingPeriod = time.Millisecond
+	runner.pongWait = 50 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = runner.Connect(ctx, host.URL, "runner", "token") }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("handshake blocked while connection pings were armed")
+	}
+	cancel()
+	if err := runner.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOutboundConnectionReturnsAuthenticationFailureWithoutRetry(t *testing.T) {
 	requests := make(chan struct{}, 2)
 	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -43,6 +44,12 @@ func (s *Server) Connect(ctx context.Context, serverURL, id, token string) error
 		} else if response != nil && (response.StatusCode == 401 || response.StatusCode == 403) {
 			s.signalActiveSessions(true)
 			return ErrAuthentication
+		} else if err != nil {
+			status := 0
+			if response != nil {
+				status = response.StatusCode
+			}
+			slog.Warn("runner websocket dial failed", "host", endpoint.Host, "status", status, "error", err)
 		}
 		if ctx.Err() != nil {
 			return nil

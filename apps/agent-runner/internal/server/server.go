@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"os/exec"
 	"runtime"
 	"sync"
@@ -83,13 +84,17 @@ func (s *Server) serveConnection(conn *websocket.Conn) {
 	}
 	defer s.unregisterConnection(conn)
 	defer conn.Close()
-	conn.SetReadLimit(maxMessageSize)
-	if err := s.configureConnectionLiveness(conn); err != nil {
-		return
-	}
 	writer := &connectionWriter{conn: conn}
 	defer s.detachDeliveries(writer)
 	defer s.detachConnectors(writer)
+	if !s.handshake(conn, writer) {
+		return
+	}
+	conn.SetReadLimit(maxMessageSize)
+	if err := s.configureConnectionLiveness(conn); err != nil {
+		slog.Warn("runner connection liveness setup failed", "error", err)
+		return
+	}
 	pingStop := make(chan struct{})
 	pingDone := make(chan struct{})
 	go func() {
@@ -101,9 +106,6 @@ func (s *Server) serveConnection(conn *websocket.Conn) {
 		<-pingDone
 	}()
 
-	if !s.handshake(conn, writer) {
-		return
-	}
 	for {
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
@@ -160,9 +162,11 @@ func nextPingDeadline() time.Time {
 func (s *Server) handshake(conn *websocket.Conn, writer *connectionWriter) bool {
 	messageType, data, err := conn.ReadMessage()
 	if err != nil {
+		slog.Warn("runner handshake read failed", "error", err)
 		return false
 	}
 	if messageType != websocket.TextMessage {
+		slog.Warn("runner handshake expected text server hello", "message_type", messageType)
 		writer.sendError("invalid_handshake", "expected server hello", "")
 		return false
 	}
@@ -174,20 +178,23 @@ func (s *Server) handshake(conn *websocket.Conn, writer *connectionWriter) bool 
 			code = "unsupported_protocol_version"
 			message = "protocol version is not supported"
 		}
+		slog.Warn("runner handshake decode failed", "error", err)
 		writer.sendError(code, message, "")
 		return false
 	}
 	if msg.Type != protocol.TypeServerHello {
+		slog.Warn("runner handshake unexpected type", "type", string(msg.Type))
 		writer.sendError("invalid_handshake", "expected server hello", "")
 		return false
 	}
 	hello, err := protocol.DecodePayload[protocol.ServerHello](msg)
 	if err != nil || !containsVersion(hello.SupportedVersions, protocol.Version2) {
+		slog.Warn("runner handshake unsupported server hello", "error", err, "versions", hello.SupportedVersions)
 		writer.sendError("unsupported_protocol_version", "protocol version is not supported", "")
 		return false
 	}
 
-	_ = writer.send(protocol.TypeRunnerHello, "", protocol.RunnerHello{
+	err = writer.send(protocol.TypeRunnerHello, "", protocol.RunnerHello{
 		Version: protocol.Version2,
 		Capabilities: protocol.Capabilities{
 			RunnerVersion:     Version,
@@ -198,7 +205,14 @@ func (s *Server) handshake(conn *websocket.Conn, writer *connectionWriter) bool 
 			Features:          []string{"stdin", "stdout", "stderr", "terminate", "kill", "health", "session_connect"},
 		},
 	})
-	_ = writer.send(protocol.TypeHealth, "", s.health())
+	if err != nil {
+		slog.Warn("runner handshake hello send failed", "error", err)
+		return false
+	}
+	if err := writer.send(protocol.TypeHealth, "", s.health()); err != nil {
+		slog.Warn("runner handshake health send failed", "error", err)
+		return false
+	}
 	s.attachDeliveries(writer)
 	return true
 }
