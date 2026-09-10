@@ -2,7 +2,6 @@ package runexec
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 	"os"
 	"os/exec"
@@ -15,8 +14,6 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine/scripted"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
-	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
-	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
@@ -38,7 +35,7 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	}
 	resetRunexecIntegrationDatabase(t, databaseURL)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	database, err := postgres.Open(ctx, databaseURL)
 	if err != nil {
@@ -63,11 +60,7 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dockerRuntime, err := dockerruntime.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime})
+	services, err := app.NewServicesWithRuntimes(database, materializer, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +113,7 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- coordinator.Run(schedulerCtx) }()
 
-	terminal := waitForScriptedRun(t, ctx, database, project.ID, run.ID)
+	queued := waitForRunnerCapacityDeferral(t, ctx, database, project.ID, run.ID)
 	stopScheduler()
 	select {
 	case err := <-done:
@@ -130,77 +123,15 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("scheduler did not stop")
 	}
-	if terminal.Status != "READY_FOR_REVIEW" {
-		t.Fatalf("run status=%s failure=%v", terminal.Status, terminal.FailureReason)
+	if queued.Status != "QUEUED" || queued.QueueReason == nil || *queued.QueueReason != "runner_capacity" {
+		t.Fatalf("legacy docker Run was admitted without a live runner: status=%s queue=%v", queued.Status, queued.QueueReason)
 	}
-
-	workspaceRecord, err := database.GetWorkspace(ctx, project.ID, terminal.WorkspaceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{"staged.txt", "unstaged.txt", "new-scripted.txt", "renamed.txt"} {
-		if _, err := os.Stat(filepath.Join(workspaceRecord.Path, path)); err != nil {
-			t.Fatalf("workspace change %s did not survive Runtime destruction: %v", path, err)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(workspaceRecord.Path, "delete.txt")); !os.IsNotExist(err) {
-		t.Fatalf("delete.txt still exists after scripted execution: %v", err)
-	}
-
 	instances, err := database.ListRuntimeInstances(ctx, project.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(instances) != 1 || instances[0].Status != string(runtimepkg.StateDestroyed) {
-		t.Fatalf("runtime instances=%+v", instances)
-	}
-
-	inspection, err := app.NewRunEvidenceService(services.ExecutionStore, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runEvidence, err := inspection.Inspect(ctx, project.ID, run.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runEvidence.Provenance) == 0 || len(runEvidence.Sessions) < 8 || len(runEvidence.RawOutput) < 3 || len(runEvidence.Artifacts) == 0 {
-		t.Fatalf("incomplete run evidence: sessions=%d raw=%d artifacts=%d provenance=%d", len(runEvidence.Sessions), len(runEvidence.RawOutput), len(runEvidence.Artifacts), len(runEvidence.Provenance))
-	}
-	if !hasIntegrationEvent(runEvidence.Events, "test.completed") || !hasIntegrationEvent(runEvidence.Events, "file.renamed") || !hasIntegrationEvent(runEvidence.Events, "file.deleted") || !hasIntegrationEvent(runEvidence.Events, "file.created") {
-		t.Fatalf("missing normalized execution evidence: %+v", eventTypes(runEvidence.Events))
-	}
-	for _, event := range runEvidence.Events {
-		if len(event.Payload) > 8<<10 {
-			t.Fatalf("large process output was duplicated into Event %s (%d bytes)", event.Type, len(event.Payload))
-		}
-	}
-	for _, chunk := range runEvidence.RawOutput {
-		if chunk.SizeBytes > 64<<10 {
-			t.Fatalf("raw output chunk exceeded bound: %+v", chunk)
-		}
-	}
-
-	manifest := findIntegrationArtifact(t, runEvidence.Artifacts, "candidate_manifest", "candidate-manifest.json")
-	manifestReader, err := blobs.Open(ctx, manifest.StorageRef)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var captured evidence.Candidate
-	if err := json.NewDecoder(manifestReader).Decode(&captured); err != nil {
-		_ = manifestReader.Close()
-		t.Fatal(err)
-	}
-	_ = manifestReader.Close()
-	assertCandidateStatuses(t, captured)
-
-	newFileArtifact := findIntegrationArtifact(t, runEvidence.Artifacts, "candidate_file", "new-scripted.txt")
-	before := readIntegrationBlob(t, ctx, blobs, newFileArtifact.StorageRef)
-	if err := os.WriteFile(filepath.Join(workspaceRecord.Path, "new-scripted.txt"), []byte("later mutation\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	after := readIntegrationBlob(t, ctx, blobs, newFileArtifact.StorageRef)
-	if string(before) != "scripted new\n" || string(after) != string(before) {
-		t.Fatalf("prior attempt artifact changed: before=%q after=%q", before, after)
+	if len(instances) != 0 {
+		t.Fatalf("runtime instances were provisioned without a live runner: %+v", instances)
 	}
 }
 
@@ -289,6 +220,33 @@ func resetRunexecIntegrationDatabase(t *testing.T, databaseURL string) {
 	}
 	if _, err := pool.Exec(context.Background(), string(schema)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func waitForRunnerCapacityDeferral(t *testing.T, ctx context.Context, database *postgres.Store, projectID, runID string) store.Run {
+	t.Helper()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		run, err := database.GetRun(ctx, projectID, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status != "QUEUED" {
+			t.Fatalf("legacy docker Run left QUEUED without a live runner: status=%s", run.Status)
+		}
+		if run.QueueReason != nil && *run.QueueReason == "runner_capacity" {
+			return run
+		}
+		select {
+		case <-ctx.Done():
+			reason := ""
+			if run.QueueReason != nil {
+				reason = *run.QueueReason
+			}
+			t.Fatalf("timed out waiting for runner_capacity deferral: %v status=%s queue=%s", ctx.Err(), run.Status, reason)
+		case <-ticker.C:
+		}
 	}
 }
 
