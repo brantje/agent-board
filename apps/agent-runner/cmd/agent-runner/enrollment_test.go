@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,10 +19,12 @@ func TestEnrollRunnerAndPersistState(t *testing.T) {
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/api/runner/register" {
-			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+			return
 		}
 		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
-			t.Fatal(err)
+			t.Errorf("decode request: %v", err)
+			return
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
@@ -57,6 +60,83 @@ func TestEnrollRunnerAndPersistState(t *testing.T) {
 	}
 }
 
+func TestEnrollRunnerRejectsInvalidInputsAndResponses(t *testing.T) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name, serverURL, token, hostname string
+	}{
+		{"empty URL", "", "token", "host"},
+		{"relative URL", "agent-board.local", "token", "host"},
+		{"unsupported scheme", "ftp://agent-board.local", "token", "host"},
+		{"empty token", "https://agent-board.local", "", "host"},
+		{"empty hostname", "https://agent-board.local", "token", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := enrollRunner(ctx, http.DefaultClient, tc.serverURL, tc.token, tc.hostname); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"server rejection", http.StatusBadRequest, `{"error":{"code":"invalid_argument"}}`},
+		{"malformed response", http.StatusCreated, `{`},
+		{"missing runner id", http.StatusCreated, `{"runner":{},"token":"credential"}`},
+		{"missing credential", http.StatusCreated, `{"runner":{"id":"runner-1"}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			if _, err := enrollRunner(ctx, server.Client(), server.URL, "token", "host"); err == nil {
+				t.Fatal("expected response error")
+			}
+		})
+	}
+
+	if _, err := enrollRunner(ctx, failingHTTPClient{}, "https://agent-board.local", "token", "host"); err == nil {
+		t.Fatal("expected transport error")
+	}
+}
+
+type failingHTTPClient struct{}
+
+func (failingHTTPClient) Do(*http.Request) (*http.Response, error) {
+	return nil, errors.New("network unavailable")
+}
+
+func TestRunnerStateRejectsIncompleteOrMalformedFiles(t *testing.T) {
+	if err := saveRunnerState(filepath.Join(t.TempDir(), "runner.json"), runnerState{ServerURL: "https://agent-board.local"}); err == nil {
+		t.Fatal("saved incomplete runner state")
+	}
+
+	for _, tc := range []struct {
+		name, content string
+	}{
+		{"malformed", `{`},
+		{"incomplete", `{"serverUrl":"https://agent-board.local"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "runner.json")
+			if err := os.WriteFile(path, []byte(tc.content), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := loadRunnerState(path); err == nil {
+				t.Fatal("loaded invalid runner state")
+			}
+		})
+	}
+	if _, err := loadRunnerState(filepath.Join(t.TempDir(), "missing.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing state error=%v", err)
+	}
+}
+
 func TestRegisterInteractiveUsesSystemHostname(t *testing.T) {
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -68,10 +148,12 @@ func TestRegisterInteractiveUsesSystemHostname(t *testing.T) {
 			Name  string `json:"name"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-			t.Fatal(err)
+			t.Errorf("decode request: %v", err)
+			return
 		}
 		if request.Token != "one-time-token" || request.Name != hostname {
-			t.Fatalf("request=%#v hostname=%q", request, hostname)
+			t.Errorf("request=%#v hostname=%q", request, hostname)
+			return
 		}
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"runner":{"id":"runner-2"},"token":"credential-2"}`))
@@ -93,6 +175,18 @@ func TestRegisterInteractiveUsesSystemHostname(t *testing.T) {
 	}
 }
 
+func TestRegisterInteractiveReturnsEnrollmentFailureWithoutState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "runner.json")
+	var output strings.Builder
+	err := registerInteractive(context.Background(), http.DefaultClient, strings.NewReader("not-a-url\ntoken\n"), &output, path)
+	if err == nil {
+		t.Fatal("expected enrollment failure")
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("state unexpectedly written: %v", statErr)
+	}
+}
+
 func TestResolveConfigPrefersExplicitCredentialsThenState(t *testing.T) {
 	explicit := appConfig{ServerURL: "https://env.example", RunnerID: "env-id", Token: "env-token", WorkspaceRoot: "/work"}
 	resolved, err := resolveConfig(explicit, filepath.Join(t.TempDir(), "missing"))
@@ -111,5 +205,8 @@ func TestResolveConfigPrefersExplicitCredentialsThenState(t *testing.T) {
 	}
 	if resolved.ServerURL != state.ServerURL || resolved.RunnerID != state.RunnerID || resolved.Token != state.Token || resolved.WorkspaceRoot != "/workspace" {
 		t.Fatalf("resolved=%#v", resolved)
+	}
+	if _, err := resolveConfig(appConfig{}, filepath.Join(t.TempDir(), "missing")); err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("missing state error=%v", err)
 	}
 }
