@@ -818,15 +818,15 @@ func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executio
 	if !ok {
 		return fmt.Errorf("workspace git transfer is unavailable")
 	}
-	locker, ok := p.store.(workspaceLocker)
+	locker, ok := p.store.(store.WorkspaceExecutionLockStore)
 	if !ok {
-		return fmt.Errorf("workspace lock store is unavailable")
+		return fmt.Errorf("workspace execution lock store is unavailable")
 	}
 	transferID := fmt.Sprintf("%s-%d", safe.Run.ID, time.Now().UnixNano())
 	if err := p.record(ctx, safe, "workspace.transfer.started", p.transferEventPayload(ctx, runnerID, transferID, "to_runner", nil), nil, nil); err != nil {
 		return err
 	}
-	lock, err := locker.AcquireWorkspaceBootstrapLock(ctx, safe.Workspace.ID)
+	lock, err := locker.AcquireWorkspaceExecutionLock(ctx, safe.Workspace.ID, sessionID)
 	if err != nil {
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "to_runner", map[string]any{"reason": err.Error()}), nil, nil)
 		return err
@@ -922,9 +922,9 @@ func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executionc
 	if !ok {
 		return fmt.Errorf("workspace git transfer is unavailable")
 	}
-	locker, ok := p.store.(workspaceLocker)
+	locker, ok := p.store.(store.WorkspaceExecutionLockStore)
 	if !ok {
-		return fmt.Errorf("workspace lock store is unavailable")
+		return fmt.Errorf("workspace execution lock store is unavailable")
 	}
 	transferID := fmt.Sprintf("%s-sync-%d", sessionID, time.Now().UnixNano())
 	if err := p.record(ctx, safe, "workspace.transfer.started", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", nil), nil, nil); err != nil {
@@ -948,7 +948,7 @@ func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executionc
 	if receivedID != "" {
 		transferID = receivedID
 	}
-	lock, err := locker.AcquireWorkspaceBootstrapLock(ctx, safe.Workspace.ID)
+	lock, err := locker.AcquireWorkspaceExecutionLock(ctx, safe.Workspace.ID, sessionID)
 	if err != nil {
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{"reason": err.Error()}), nil, nil)
 		return err
@@ -1011,8 +1011,4 @@ func (p *Processor) transferEventPayload(ctx context.Context, runnerID, transfer
 		payload[key] = value
 	}
 	return payload
-}
-
-type workspaceLocker interface {
-	AcquireWorkspaceBootstrapLock(context.Context, string) (store.WorkspaceBootstrapLock, error)
 }
