@@ -4,6 +4,8 @@ This is the operator guide for running `agent-runner` as a persistent systemd se
 
 An external Runner makes one outbound connection to the Agent Board control plane. It does not need an inbound listening port, PostgreSQL credentials, server encryption keys, or SSH access from Agent Board. The host is a trusted execution environment: coding CLIs run with the permissions of the `agent-runner` service account.
 
+All repository-relative commands below assume the repository root as the current directory.
+
 ## Prerequisites
 
 The host needs:
@@ -11,6 +13,7 @@ The host needs:
 - Linux with systemd
 - outbound HTTPS/WSS access to the Agent Board server
 - Git
+- `curl` and `jq` for the registration examples below
 - the coding CLI required by the Engine, currently OpenCode for the v0.1 real Engine path
 - a standalone `agent-runner` binary built for the host architecture
 
@@ -21,11 +24,13 @@ The repository does not yet publish standalone Runner release artifacts. Until t
 From the repository root:
 
 ```bash
-cd apps/agent-runner
-VERSION=v0.1.0
-CGO_ENABLED=0 GOOS=linux go build -trimpath \
-  -ldflags="-s -w -X github.com/brantje/agent-board/apps/agent-runner/internal/server.Version=${VERSION}" \
-  -o agent-runner ./cmd/agent-runner
+(
+  cd apps/agent-runner
+  VERSION=v0.1.0
+  CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags="-s -w -X github.com/brantje/agent-board/apps/agent-runner/internal/server.Version=${VERSION}" \
+    -o agent-runner ./cmd/agent-runner
+)
 ```
 
 Use the real release version for `VERSION` in production. Development builds may use the built-in `dev` version.
@@ -33,7 +38,9 @@ Use the real release version for `VERSION` in production. Development builds may
 Install the binary root-owned and executable:
 
 ```bash
-sudo install -o root -g root -m 0755 agent-runner /usr/local/bin/agent-runner
+sudo install -o root -g root -m 0755 \
+  apps/agent-runner/agent-runner \
+  /usr/local/bin/agent-runner
 ```
 
 ## 2. Create the service account
@@ -106,7 +113,7 @@ Create the configuration directory and copy the checked-in example:
 ```bash
 sudo install -d -o root -g root -m 0755 /etc/agent-board
 sudo install -o root -g root -m 0600 \
-  deploy/agent-runner.env.example \
+  apps/agent-runner/deploy/agent-runner.env.example \
   /etc/agent-board/agent-runner.env
 ```
 
@@ -133,8 +140,6 @@ Keep `/etc/agent-board/agent-runner.env` root-owned and mode `0600`. The systemd
 ## 6. Install the systemd unit
 
 The repository contains the production example at `apps/agent-runner/deploy/agent-runner.service`.
-
-From the repository root:
 
 ```bash
 sudo install -o root -g root -m 0644 \
@@ -236,7 +241,9 @@ Stop the service, replace the binary atomically with a new versioned build, then
 
 ```bash
 sudo systemctl stop agent-runner.service
-sudo install -o root -g root -m 0755 ./agent-runner /usr/local/bin/agent-runner
+sudo install -o root -g root -m 0755 \
+  apps/agent-runner/agent-runner \
+  /usr/local/bin/agent-runner
 sudo systemctl start agent-runner.service
 sudo systemctl status agent-runner.service
 ```
