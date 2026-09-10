@@ -11,19 +11,7 @@ import (
 )
 
 func TestSessionConnectForwardsLoopbackTCP(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	go func() {
-		conn, acceptErr := listener.Accept()
-		if acceptErr != nil {
-			return
-		}
-		defer conn.Close()
-		_, _ = io.Copy(conn, conn)
-	}()
+	listener := newLoopbackEchoListener(t)
 
 	_, httpServer := newTestRunner(t)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
@@ -77,6 +65,51 @@ func TestSessionConnectForwardsLoopbackTCP(t *testing.T) {
 			return
 		}
 	}
+}
+
+func TestSessionEndClosesLoopbackConnection(t *testing.T) {
+	listener := newLoopbackEchoListener(t)
+	runner, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+	defer conn.Close()
+
+	send(t, conn, protocol.TypeStart, "connect-session-end", protocol.StartRequest{Command: []string{"sh", "-c", "sleep 30"}})
+	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
+		t.Fatalf("unexpected start response %#v", msg)
+	}
+	send(t, conn, protocol.TypeConnect, "connect-session-end", protocol.ConnectRequest{
+		ConnectionID: "tcp-session-end",
+		Network:      "tcp",
+		Address:      listener.Addr().String(),
+	})
+	if msg := read(t, conn); msg.Type != protocol.TypeConnected {
+		t.Fatalf("expected connected, got %#v", msg)
+	}
+
+	send(t, conn, protocol.TypeKill, "connect-session-end", nil)
+	seenClose := false
+	seenExit := false
+	for !seenClose || !seenExit {
+		msg := read(t, conn)
+		switch msg.Type {
+		case protocol.TypeConnectClose:
+			payload, err := protocol.DecodePayload[protocol.ConnectClose](msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if payload.ConnectionID != "tcp-session-end" || payload.Code != "session_ended" {
+				t.Fatalf("unexpected session-end close %#v", payload)
+			}
+			seenClose = true
+		case protocol.TypeExit:
+			seenExit = true
+		case protocol.TypeError:
+			t.Fatalf("unexpected protocol error %#v", msg)
+		}
+	}
+	waitFor(t, time.Second, func() bool {
+		return runner.connector("connect-session-end", "tcp-session-end") == nil && runner.manager.ActiveCount() == 0
+	})
 }
 
 func TestSessionConnectRejectsNonLoopbackDestination(t *testing.T) {
@@ -148,4 +181,22 @@ func TestValidateConnectDestination(t *testing.T) {
 	if err := validateConnectDestination("udp", "127.0.0.1:4096"); err == nil {
 		t.Fatal("udp destination unexpectedly allowed")
 	}
+}
+
+func newLoopbackEchoListener(t *testing.T) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.Copy(conn, conn)
+	}()
+	return listener
 }
