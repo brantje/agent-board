@@ -13,15 +13,33 @@ func TestMaterializeAndSnapshotBundleRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	source := t.TempDir()
 	runGitCLI(t, "-C", source, "init")
-	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("hello\n"), 0o644); err != nil {
-		t.Fatal(err)
+	for path, content := range map[string]string{
+		".gitignore":   "ignored.txt\n",
+		"README.md":    "hello\n",
+		"staged.txt":   "before\n",
+		"deleted.txt":  "delete me\n",
+	} {
+		if err := os.WriteFile(filepath.Join(source, path), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	runGitCLI(t, "-C", source, "add", "README.md")
+	runGitCLI(t, "-C", source, "add", ".")
 	runGitCLI(t, "-C", source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init")
+
 	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("changed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(source, "staged.txt"), []byte("staged change\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGitCLI(t, "-C", source, "add", "staged.txt")
+	if err := os.Remove(filepath.Join(source, "deleted.txt")); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(source, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "ignored.txt"), []byte("local only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	wantStatus := strings.TrimSpace(gitOutput(t, source, "status", "--porcelain=v1"))
@@ -36,6 +54,9 @@ func TestMaterializeAndSnapshotBundleRoundTrip(t *testing.T) {
 	}
 	if got := strings.TrimSpace(gitOutput(t, destination, "status", "--porcelain=v1")); got != wantStatus {
 		t.Fatalf("materialized status mismatch\nwant=%s\ngot=%s", wantStatus, got)
+	}
+	if _, err := os.Stat(filepath.Join(destination, "ignored.txt")); !os.IsNotExist(err) {
+		t.Fatalf("ignored file transferred to runner Workspace: %v", err)
 	}
 
 	if err := os.WriteFile(filepath.Join(destination, "runner.txt"), []byte("runner change\n"), 0o644); err != nil {
@@ -55,6 +76,27 @@ func TestMaterializeAndSnapshotBundleRoundTrip(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(roundTrip, "runner.txt")); err != nil {
 		t.Fatalf("runner change missing from round trip: %v", err)
+	}
+}
+
+func TestMaterializeBundleRejectsInvalidPayloadWithoutLeavingStaleWorkspace(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "session")
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(destination, "stale.txt"), []byte("must not survive\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := MaterializeBundle(context.Background(), destination, []byte("not a git bundle"))
+	if err == nil || !strings.Contains(err.Error(), "verify transfer bundle") {
+		t.Fatalf("MaterializeBundle() error=%v, want invalid bundle rejection", err)
+	}
+	if _, err := os.Stat(filepath.Join(destination, "stale.txt")); !os.IsNotExist(err) {
+		t.Fatalf("stale Workspace content survived invalid transfer: %v", err)
+	}
+	if IsRepository(context.Background(), destination) {
+		t.Fatal("invalid transfer left an executable Git Workspace")
 	}
 }
 
