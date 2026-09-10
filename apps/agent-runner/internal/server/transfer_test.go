@@ -161,6 +161,22 @@ func TestIncomingTransferRejectsCorruptPayload(t *testing.T) {
 	}
 }
 
+func TestIncomingTransferRequiresSessionAndActiveState(t *testing.T) {
+	state := newTransferState()
+	if err := state.begin("", protocol.TransferBegin{TransferID: "transfer-1", Direction: "to_runner"}); err == nil {
+		t.Fatal("transfer without session id was accepted")
+	}
+	if err := state.begin("session-1", protocol.TransferBegin{TransferID: "transfer-1", Direction: "sideways"}); err == nil {
+		t.Fatal("transfer with invalid direction was accepted")
+	}
+	if err := state.chunk("session-1", protocol.TransferChunk{TransferID: "transfer-1"}); err == nil {
+		t.Fatal("chunk without active transfer was accepted")
+	}
+	if _, _, err := state.end("session-1", protocol.TransferEnd{TransferID: "transfer-1"}); err == nil {
+		t.Fatal("end without active transfer was accepted")
+	}
+}
+
 func TestIncomingTransferIgnoresStaleTransferFrames(t *testing.T) {
 	state := newTransferState()
 	payload := []byte("current workspace")
