@@ -83,4 +83,39 @@ describe('RunnerManager', () => {
     expect(fetch).toHaveBeenCalledWith('/api/runners/runner-external', expect.objectContaining({ method: 'PATCH' }))
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
+
+  it('shows revoked pending runners and reports create failures', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      const method = init?.method ?? 'GET'
+      if (path === '/api/runners' && method === 'GET') {
+        return new Response(JSON.stringify([{
+          id: 'runner-pending', name: null, internal: false, managed: false, deletable: true,
+          connected: false, registeredAt: null, revokedAt: '2026-09-10T12:00:00Z', lastSeenAt: null,
+          capabilities: {}, createdAt: '', updatedAt: ''
+        }]))
+      }
+      if (path === '/api/runners' && method === 'POST') {
+        return new Response(JSON.stringify({ error: { code: 'conflict', message: 'create failed' } }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(RunnerManager, { global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Revoked')
+    expect(wrapper.text()).toContain('Pending registration')
+    expect(wrapper.findAll('button').filter(button => button.text() === 'Edit')).toHaveLength(0)
+
+    const createButton = wrapper.findAll('button').find(button => button.text() === 'Create runner')
+    expect(createButton).toBeDefined()
+    await createButton!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to create runner')
+    expect(wrapper.find('[data-testid="runner-registration-token"]').exists()).toBe(false)
+  })
 })
