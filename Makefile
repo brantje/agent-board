@@ -1,14 +1,17 @@
 .PHONY: install-runner uninstall-runner
 
 install-runner:
-	@printf "Runner registration key: " > /dev/tty; \
+	@printf "Agent Board URL: " > /dev/tty; \
+	IFS= read -r agent_board_url < /dev/tty; \
+	test -n "$$agent_board_url" || { echo "Agent Board URL is required." >&2; exit 1; }; \
+	printf "One-time registration token: " > /dev/tty; \
 	trap 'stty echo < /dev/tty' 0 1 2 15; \
 	stty -echo < /dev/tty; \
-	IFS= read -r registration_key < /dev/tty; \
+	IFS= read -r registration_token < /dev/tty; \
 	stty echo < /dev/tty; \
 	trap - 0 1 2 15; \
 	printf "\n" > /dev/tty; \
-	test -n "$$registration_key" || { echo "Runner registration key is required." >&2; exit 1; }; \
+	test -n "$$registration_token" || { echo "Runner registration token is required." >&2; exit 1; }; \
 	sudo install -o root -g root -m 0755 \
 		apps/agent-runner/agent-runner \
 		/usr/local/bin/agent-runner; \
@@ -17,11 +20,12 @@ install-runner:
 			--home-dir /var/lib/agent-runner \
 			--shell /usr/sbin/nologin \
 			agent-runner; \
+	sudo install -d -o agent-runner -g agent-runner -m 0750 /var/lib/agent-runner; \
+	printf '%s\n%s\n' "$$agent_board_url" "$$registration_token" | \
+		sudo -u agent-runner /usr/local/bin/agent-runner register; \
 	sudo install -d -o root -g root -m 0755 /etc/agent-board; \
-	sudo install -o root -g root -m 0600 \
+	sudo install -o root -g root -m 0644 \
 		apps/agent-runner/deploy/agent-runner.env.example \
-		/etc/agent-board/agent-runner.env; \
-	sudo sed -i "s|^AGENT_RUNNER_TOKEN=.*|AGENT_RUNNER_TOKEN=$$registration_key|" \
 		/etc/agent-board/agent-runner.env; \
 	sudo install -o root -g root -m 0644 \
 		apps/agent-runner/deploy/agent-runner.service \
