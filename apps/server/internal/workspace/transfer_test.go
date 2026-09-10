@@ -103,6 +103,8 @@ func cloneRepository(t *testing.T, source string) string {
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clone repository: %v\n%s", err, output)
 	}
+	runTransferGit(t, destination, "config", "user.email", "test@example.invalid")
+	runTransferGit(t, destination, "config", "user.name", "Agent Board Test")
 	return destination
 }
 
