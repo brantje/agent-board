@@ -181,6 +181,16 @@ admitted:
 	if _, err := os.Stat(filepath.Join(workspaceRecord.Path, "delete.txt")); !os.IsNotExist(err) {
 		t.Fatalf("delete.txt still exists after runner execution: %v", err)
 	}
+	if _, err := os.Stat(filepath.Join(workspaceRecord.Path, "rename.txt")); !os.IsNotExist(err) {
+		t.Fatalf("rename.txt still exists after runner execution: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRecord.Path, "ignored-scripted.txt")); !os.IsNotExist(err) {
+		t.Fatalf("ignored Runner file reached authoritative workspace: %v", err)
+	}
+	// The scripted Runner deliberately stages staged.txt and git-mv's rename.txt.
+	// Sync-back is filesystem-only, so none of that Runner staging may mutate the
+	// authoritative server index.
+	runIntegrationCommand(t, ctx, workspaceRecord.Path, "git", "diff", "--cached", "--exit-code")
 
 	sessions, err := database.ListExecutionSessionsByRunner(ctx, runner.ID, []string{"COMPLETED", "FAILED"})
 	if err != nil || len(sessions) != 1 || sessions[0].RunnerID != runner.ID || sessions[0].RuntimeInstanceID != "" {
@@ -206,9 +216,11 @@ admitted:
 	}
 	hasCandidateManifest := false
 	for _, artifact := range runEvidence.Artifacts {
+		if artifact.Name == "ignored-scripted.txt" {
+			t.Fatal("ignored Runner file became a candidate artifact")
+		}
 		if artifact.Kind == "candidate_manifest" {
 			hasCandidateManifest = true
-			break
 		}
 	}
 	if !hasCandidateManifest {
@@ -221,11 +233,12 @@ admitted:
 		staged    bool
 		unstaged  bool
 	}{
-		{eventType: "file.modified", path: "staged.txt", staged: true},
+		{eventType: "file.modified", path: "staged.txt", unstaged: true},
 		{eventType: "file.modified", path: "unstaged.txt", unstaged: true},
 		{eventType: "file.created", path: "new-scripted.txt", unstaged: true},
 		{eventType: "file.deleted", path: "delete.txt", unstaged: true},
-		{eventType: "file.renamed", path: "renamed.txt", oldPath: "rename.txt", staged: true},
+		{eventType: "file.deleted", path: "rename.txt", unstaged: true},
+		{eventType: "file.created", path: "renamed.txt", unstaged: true},
 	}
 	for _, expected := range expectedFileEvidence {
 		found := false
@@ -248,6 +261,18 @@ admitted:
 		}
 		if !found {
 			t.Fatalf("missing %s evidence for %s in events=%v", expected.eventType, expected.path, eventTypes(runEvidence.Events))
+		}
+	}
+	for _, event := range runEvidence.Events {
+		switch event.Type {
+		case "file.created", "file.modified", "file.deleted", "file.renamed":
+			var payload evidence.FilePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatalf("decode %s payload while checking ignored files: %v", event.Type, err)
+			}
+			if payload.Path == "ignored-scripted.txt" || payload.OldPath == "ignored-scripted.txt" {
+				t.Fatal("ignored Runner file appeared in candidate evidence")
+			}
 		}
 	}
 }
