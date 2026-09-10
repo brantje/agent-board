@@ -144,6 +144,14 @@ func (s *RedactingStore) AcquireWorkspaceBootstrapLock(ctx context.Context, work
 	return base.AcquireWorkspaceBootstrapLock(ctx, workspaceID)
 }
 
+func (s *RedactingStore) AcquireWorkspaceExecutionLock(ctx context.Context, workspaceID, executionSessionID string) (store.WorkspaceBootstrapLock, error) {
+	base, ok := s.ControlPlaneStore.(store.WorkspaceExecutionLockStore)
+	if !ok {
+		return nil, fmt.Errorf("redacting store base does not support workspace execution locks")
+	}
+	return base.AcquireWorkspaceExecutionLock(ctx, workspaceID, executionSessionID)
+}
+
 func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner, error) {
 	base, ok := s.ControlPlaneStore.(runnerLookupStore)
 	if !ok {
