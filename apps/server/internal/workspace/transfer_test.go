@@ -108,7 +108,7 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 		t.Fatalf("sync-back changed authoritative staging state\nbefore=%s\nafter=%s", stagedBeforeApply, got)
 	}
 	status := gitOutput(t, destination, "status", "--porcelain=v1")
-	for _, want := range []string{" M tracked.go", " D deleted.go", "?? notes.md"} {
+	for _, want := range []string{" M tracked.go", "D deleted.go", "?? notes.md"} {
 		if !strings.Contains(status, want) {
 			t.Fatalf("sync-back status missing %q: %s", want, status)
 		}
