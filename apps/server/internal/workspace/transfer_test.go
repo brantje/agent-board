@@ -20,6 +20,7 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 	runTransferGit(t, source, "config", "user.email", "test@example.invalid")
 	runTransferGit(t, source, "config", "user.name", "Agent Board Test")
 	writeMode(t, filepath.Join(source, "tracked.go"), "package main\n", 0o644)
+	writeMode(t, filepath.Join(source, "staged.go"), "package staged\n", 0o644)
 	writeMode(t, filepath.Join(source, "deleted.go"), "package gone\n", 0o644)
 	writeMode(t, filepath.Join(source, "preexisting.txt"), "base\n", 0o644)
 	writeMode(t, filepath.Join(source, "exec.sh"), "#!/bin/sh\necho ok\n", 0o755)
@@ -36,6 +37,17 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 		t.Fatalf("clone baseline: %v\n%s", err, out)
 	}
 
+	// This staging state existed before the Runner started and is therefore
+	// present on both sides of the transfer.
+	writeMode(t, filepath.Join(source, "preexisting.txt"), "staged before runner\n", 0o644)
+	runTransferGit(t, source, "add", "preexisting.txt")
+	writeMode(t, filepath.Join(destination, "preexisting.txt"), "staged before runner\n", 0o644)
+	runTransferGit(t, destination, "add", "preexisting.txt")
+
+	// Simulate Runner-owned changes spanning staged, unstaged, untracked and
+	// deleted files.
+	writeMode(t, filepath.Join(source, "staged.go"), "package staged\nfunc changed() {}\n", 0o644)
+	runTransferGit(t, source, "add", "staged.go")
 	writeMode(t, filepath.Join(source, "tracked.go"), "package main\nfunc changed() {}\n", 0o644)
 	if err := os.Remove(filepath.Join(source, "deleted.go")); err != nil {
 		t.Fatal(err)
@@ -47,6 +59,9 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 	}
 	writeMode(t, filepath.Join(source, "build", "out.bin"), "cache\n", 0o644)
 
+	sourceStaged := gitOutput(t, source, "diff", "--cached", "--binary")
+	sourceUnstaged := gitOutput(t, source, "diff", "--binary")
+	sourceStatus := gitOutput(t, source, "status", "--porcelain=v1")
 	payload, err := git.TransferSnapshot(ctx, source, "xfer-1")
 	if err != nil {
 		t.Fatal(err)
@@ -91,27 +106,21 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 		t.Fatalf("tracked modification missing: %s %v", body, err)
 	}
 
-	// Sync-back must not advance HEAD or disturb staging that already existed in
-	// the authoritative Workspace for an unrelated file.
-	writeMode(t, filepath.Join(destination, "preexisting.txt"), "staged locally\n", 0o644)
-	runTransferGit(t, destination, "add", "preexisting.txt")
 	destinationHead := gitOutput(t, destination, "rev-parse", "HEAD")
-	stagedBeforeApply := gitOutput(t, destination, "diff", "--cached", "--binary")
-
 	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
 		t.Fatal(err)
 	}
 	if got := gitOutput(t, destination, "rev-parse", "HEAD"); got != destinationHead {
 		t.Fatalf("sync-back advanced authoritative HEAD: before=%s after=%s", destinationHead, got)
 	}
-	if got := gitOutput(t, destination, "diff", "--cached", "--binary"); got != stagedBeforeApply {
-		t.Fatalf("sync-back changed authoritative staging state\nbefore=%s\nafter=%s", stagedBeforeApply, got)
+	if got := gitOutput(t, destination, "diff", "--cached", "--binary"); got != sourceStaged {
+		t.Fatalf("sync-back staged state mismatch\nwant=%s\ngot=%s", sourceStaged, got)
 	}
-	status := gitOutput(t, destination, "status", "--porcelain=v1")
-	for _, want := range []string{" M tracked.go", "D deleted.go", "?? notes.md"} {
-		if !strings.Contains(status, want) {
-			t.Fatalf("sync-back status missing %q: %s", want, status)
-		}
+	if got := gitOutput(t, destination, "diff", "--binary"); got != sourceUnstaged {
+		t.Fatalf("sync-back unstaged state mismatch\nwant=%s\ngot=%s", sourceUnstaged, got)
+	}
+	if got := gitOutput(t, destination, "status", "--porcelain=v1"); got != sourceStatus {
+		t.Fatalf("sync-back status mismatch\nwant=%s\ngot=%s", sourceStatus, got)
 	}
 	if _, err := os.Stat(filepath.Join(destination, "notes.md")); err != nil {
 		t.Fatal("sync-back did not apply untracked file")
@@ -119,8 +128,8 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 	if _, err := os.Stat(filepath.Join(destination, "ignored.txt")); !os.IsNotExist(err) {
 		t.Fatal("ignored file appeared after apply")
 	}
-	if strings.Contains(gitOutput(t, destination, "log", "--oneline"), "Synchronize workspace from runner") {
-		t.Fatal("sync-back manufactured a visible commit")
+	if strings.Contains(gitOutput(t, destination, "log", "--oneline"), "Agent Board workspace transfer") {
+		t.Fatal("sync-back exposed transport-only commits")
 	}
 	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
 		t.Fatal(err)
@@ -133,6 +142,39 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 	}
 	if TransferChecksum(payload) == TransferChecksum(nil) {
 		t.Fatal("checksum ignored payload")
+	}
+}
+
+func TestApplyTransferBundleRejectsDifferentAuthoritativeHEAD(t *testing.T) {
+	ctx := context.Background()
+	git, err := NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	runTransferGit(t, source, "init", "-q")
+	runTransferGit(t, source, "config", "user.email", "test@example.invalid")
+	runTransferGit(t, source, "config", "user.name", "Agent Board Test")
+	writeMode(t, filepath.Join(source, "README.md"), "base\n", 0o644)
+	runTransferGit(t, source, "add", ".")
+	runTransferGit(t, source, "commit", "-qm", "baseline")
+	payload, err := git.TransferSnapshot(ctx, source, "baseline-mismatch")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	destination := filepath.Join(t.TempDir(), "destination")
+	cmd := exec.Command("git", "clone", source, destination)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone baseline: %v\n%s", err, out)
+	}
+	runTransferGit(t, destination, "config", "user.email", "test@example.invalid")
+	runTransferGit(t, destination, "config", "user.name", "Agent Board Test")
+	writeMode(t, filepath.Join(destination, "server-only.txt"), "concurrent\n", 0o644)
+	runTransferGit(t, destination, "add", "server-only.txt")
+	runTransferGit(t, destination, "commit", "-qm", "concurrent server commit")
+	if err := git.ApplyTransferBundle(ctx, destination, payload); err == nil {
+		t.Fatal("sync-back accepted a transfer from a different authoritative HEAD")
 	}
 }
 
@@ -159,6 +201,14 @@ func TestApplyTransferBundleNoopsWhenHEADMatches(t *testing.T) {
 	runTransferGit(t, source, "add", ".")
 	runTransferGit(t, source, "commit", "-qm", "baseline")
 	destination := cloneTransferBundle(t, mustTransferSnapshot(t, git, source, "match-1"))
+	// cloneTransferBundle checks out the transport Worktree commit. Restore its
+	// repository shape before using it as an authoritative Workspace fixture.
+	state, err := sharedSnapshotStateForTest(ctx, destination, git)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runTransferGit(t, destination, "update-ref", "HEAD", state.Base)
+	runTransferGit(t, destination, "read-tree", state.Index+"^{tree}")
 	payload, err := git.TransferSnapshot(ctx, source, "match-2")
 	if err != nil {
 		t.Fatal(err)
@@ -175,6 +225,22 @@ func mustTransferSnapshot(t *testing.T, git *GitCLI, source, id string) []byte {
 		t.Fatal(err)
 	}
 	return payload
+}
+
+func sharedSnapshotStateForTest(ctx context.Context, repositoryPath string, git *GitCLI) (struct{ Base, Index, Worktree string }, error) {
+	worktree, err := git.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
+	if err != nil {
+		return struct{ Base, Index, Worktree string }{}, err
+	}
+	index, err := git.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", worktree+"^1")
+	if err != nil {
+		return struct{ Base, Index, Worktree string }{}, err
+	}
+	base, err := git.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", index+"^1")
+	if err != nil {
+		return struct{ Base, Index, Worktree string }{}, err
+	}
+	return struct{ Base, Index, Worktree string }{Base: base, Index: index, Worktree: worktree}, nil
 }
 
 func TestTransferSnapshotRequiresID(t *testing.T) {
