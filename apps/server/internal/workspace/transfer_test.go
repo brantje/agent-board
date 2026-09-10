@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	sharedworkspace "github.com/brantje/agent-board/packages/workspacegit"
 )
 
 func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) {
@@ -203,12 +205,9 @@ func TestApplyTransferBundleNoopsWhenHEADMatches(t *testing.T) {
 	destination := cloneTransferBundle(t, mustTransferSnapshot(t, git, source, "match-1"))
 	// cloneTransferBundle checks out the transport Worktree commit. Restore its
 	// repository shape before using it as an authoritative Workspace fixture.
-	state, err := sharedSnapshotStateForTest(ctx, destination, git)
-	if err != nil {
+	if _, err := sharedworkspace.RestoreCheckoutState(ctx, destination, "HEAD", git.binary, git.commandTimeout); err != nil {
 		t.Fatal(err)
 	}
-	runTransferGit(t, destination, "update-ref", "HEAD", state.Base)
-	runTransferGit(t, destination, "read-tree", state.Index+"^{tree}")
 	payload, err := git.TransferSnapshot(ctx, source, "match-2")
 	if err != nil {
 		t.Fatal(err)
@@ -225,22 +224,6 @@ func mustTransferSnapshot(t *testing.T, git *GitCLI, source, id string) []byte {
 		t.Fatal(err)
 	}
 	return payload
-}
-
-func sharedSnapshotStateForTest(ctx context.Context, repositoryPath string, git *GitCLI) (struct{ Base, Index, Worktree string }, error) {
-	worktree, err := git.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil {
-		return struct{ Base, Index, Worktree string }{}, err
-	}
-	index, err := git.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", worktree+"^1")
-	if err != nil {
-		return struct{ Base, Index, Worktree string }{}, err
-	}
-	base, err := git.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", index+"^1")
-	if err != nil {
-		return struct{ Base, Index, Worktree string }{}, err
-	}
-	return struct{ Base, Index, Worktree string }{Base: base, Index: index, Worktree: worktree}, nil
 }
 
 func TestTransferSnapshotRequiresID(t *testing.T) {
@@ -305,7 +288,6 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 }
 
 func writeMode(t *testing.T, path, contents string, mode os.FileMode) {
-	t.Helper()
 	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
 		t.Fatal(err)
 	}
