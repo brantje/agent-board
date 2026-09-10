@@ -18,7 +18,7 @@ git
 
 For `git`, the optional ref may name a branch, tag or commit. When it is omitted, the remote default branch is resolved at execution time.
 
-Saving a Git source stores configuration only. The server does not clone/fetch the remote merely to validate the Project, does not require credentials at save time, and does not apply GitHub/GitLab/Forgejo-specific URL validation. Any URL usable by normal Git remains eligible configuration. Runner-side clone/fetch/cache/worktree behavior belongs to the execution path defined separately from this Project-source model.
+Saving a Git source stores configuration only. The server does not clone/fetch the remote merely to validate the Project, does not require credentials at save time, and does not apply GitHub/GitLab/Forgejo-specific URL validation. Provider-neutral credential-free Git URLs are accepted, including normal SSH clone syntax. HTTP(S) clone URLs containing URL userinfo are rejected so embedded usernames, passwords or tokens are never persisted in `clone_url` or returned through Project APIs. Runner-side clone/fetch/cache/worktree behavior belongs to the execution path defined separately from this Project-source model.
 
 For `local`, the configured repository is a server-accessible Git repository. It is the bootstrap source for the Project Workspace; Agent Board does not treat it as the writable accepted checkout.
 
@@ -118,9 +118,9 @@ Durable Issue Workspace/Run metadata records the Project Workspace accepted revi
 
 ## Authenticated Source Connections
 
-Basic `git` Project sources do not require a Source Connection. A Project may store a clone URL/ref without provider identity or credentials.
+Basic `git` Project sources do not require a Source Connection. A Project may store a credential-free clone URL/ref without provider identity or credentials.
 
-Authenticated Source Connections are a later layer for repositories that need managed provider/server identity, credential brokering, health/validation state, or provider actions.
+Authenticated Source Connections are a later layer for repositories that need managed provider/server identity, credential brokering, health/validation state, or provider actions. Credentials belong in that trusted connection/secret boundary, never embedded in Project clone URLs.
 
 Planned Source Connection types include:
 
