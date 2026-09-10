@@ -183,6 +183,9 @@ func createScriptedFixtureRepository(t *testing.T, ctx context.Context) string {
 			t.Fatal(err)
 		}
 	}
+	if err := os.WriteFile(filepath.Join(repositoryPath, ".gitignore"), []byte("ignored-scripted.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	runIntegrationCommand(t, ctx, repositoryPath, "git", "add", ".")
 	runIntegrationCommand(t, ctx, repositoryPath, "git", "commit", "-qm", "baseline")
 	return repositoryPath
