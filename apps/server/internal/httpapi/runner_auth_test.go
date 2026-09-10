@@ -14,10 +14,11 @@ import (
 
 func TestRunnerWebSocketAcceptsOnlyPermanentRegisteredCredential(t *testing.T) {
 	memory := &runnerAPIStore{}
-	server := httptest.NewServer(NewRouter(app.New(memory)))
+	router := NewRouter(app.New(memory))
+	server := httptest.NewServer(router)
 	defer server.Close()
 
-	creation := runnerAPIRequest(NewRouter(app.New(memory)), http.MethodPost, "/api/runners", "")
+	creation := runnerAPIRequest(router, http.MethodPost, "/api/runners", "")
 	if creation.Code != http.StatusCreated {
 		t.Fatalf("create runner: %d %s", creation.Code, creation.Body.String())
 	}
@@ -35,7 +36,7 @@ func TestRunnerWebSocketAcceptsOnlyPermanentRegisteredCredential(t *testing.T) {
 	dial := func(token string, wantStatus int) *websocket.Conn {
 		t.Helper()
 		conn, response, err := websocket.DefaultDialer.Dial(wsURL, http.Header{
-			"Authorization":            []string{"Bearer " + token},
+			"Authorization":       []string{"Bearer " + token},
 			protocol.RunnerIDHeader: []string{created.Runner.ID},
 		})
 		if wantStatus == http.StatusSwitchingProtocols {
@@ -56,7 +57,7 @@ func TestRunnerWebSocketAcceptsOnlyPermanentRegisteredCredential(t *testing.T) {
 
 	dial(created.RegistrationToken, http.StatusUnauthorized)
 
-	registration := runnerAPIRequest(NewRouter(app.New(memory)), http.MethodPost, "/api/runner/register", `{"registrationToken":"`+created.RegistrationToken+`","hostname":"auth-host"}`)
+	registration := runnerAPIRequest(router, http.MethodPost, "/api/runner/register", `{"registrationToken":"`+created.RegistrationToken+`","hostname":"auth-host"}`)
 	if registration.Code != http.StatusCreated {
 		t.Fatalf("register runner: %d %s", registration.Code, registration.Body.String())
 	}
@@ -73,7 +74,7 @@ func TestRunnerWebSocketAcceptsOnlyPermanentRegisteredCredential(t *testing.T) {
 	second.Close()
 	dial(created.RegistrationToken, http.StatusUnauthorized)
 
-	rotation := runnerAPIRequest(NewRouter(app.New(memory)), http.MethodPost, "/api/runners/"+created.Runner.ID+"/rotate-token", "")
+	rotation := runnerAPIRequest(router, http.MethodPost, "/api/runners/"+created.Runner.ID+"/rotate-token", "")
 	if rotation.Code != http.StatusOK {
 		t.Fatalf("rotate runner: %d %s", rotation.Code, rotation.Body.String())
 	}
@@ -87,7 +88,7 @@ func TestRunnerWebSocketAcceptsOnlyPermanentRegisteredCredential(t *testing.T) {
 	third := dial(rotated.RunnerToken, http.StatusSwitchingProtocols)
 	third.Close()
 
-	revoke := runnerAPIRequest(NewRouter(app.New(memory)), http.MethodPost, "/api/runners/"+created.Runner.ID+"/revoke", "")
+	revoke := runnerAPIRequest(router, http.MethodPost, "/api/runners/"+created.Runner.ID+"/revoke", "")
 	if revoke.Code != http.StatusOK {
 		t.Fatalf("revoke runner: %d %s", revoke.Code, revoke.Body.String())
 	}
