@@ -143,7 +143,7 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 		}
 	}
 	if _, err := os.Stat(filepath.Join(destination, "notes.md")); err != nil {
-		t.Fatal("sync-back did not apply untracked file")
+		t.Fatal(err)
 	}
 	if _, err := os.Stat(filepath.Join(destination, "deleted.go")); !os.IsNotExist(err) {
 		t.Fatalf("sync-back did not preserve Runner deletion: %v", err)
@@ -312,7 +312,7 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	if err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSuffix(string(out), "\n")
 }
 
 func writeMode(t *testing.T, path, contents string, mode os.FileMode) {
