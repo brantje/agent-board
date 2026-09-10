@@ -22,6 +22,8 @@ type Runner struct {
 
 type RunnerStore interface {
 	CreateRunner(context.Context, Runner) (Runner, error)
+	CreateRunnerRegistration(context.Context, []byte) error
+	RegisterRunner(context.Context, []byte, Runner) (Runner, error)
 	GetRunner(context.Context, string) (Runner, error)
 	ListRunners(context.Context) ([]Runner, error)
 	RenameRunner(context.Context, string, string) (Runner, error)
