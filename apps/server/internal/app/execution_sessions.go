@@ -195,44 +195,7 @@ func (s *ExecutionSessionService) StartPreparedOnRunner(ctx context.Context, pro
 	if err != nil {
 		return nil, fmt.Errorf("encode execution command: %w", err)
 	}
-	previous := session
-	session, err = s.store.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
-		ProjectID: session.ProjectID, SessionID: session.ID, FromStatuses: fromStatus, Status: "STARTING", CommandArgv: argv,
-	})
-	if err != nil {
-		return nil, translateStoreError(err, "execution_session")
-	}
-	if session.RunID != previous.RunID || session.RuntimeInstanceID != previous.RuntimeInstanceID || session.RunnerID != previous.RunnerID {
-		return nil, fmt.Errorf("execution session immutable binding changed during transition")
-	}
-	client, err := s.registry.Connect(ctx, projectID, session.RunnerID)
-	if err != nil {
-		_, failErr := s.transition(ctx, session, []string{"STARTING"}, "FAILED", nil)
-		return nil, errors.Join(fmt.Errorf("connect runner: %w", err), failErr)
-	}
-	transport, err := client.Start(ctx, session.ID, runner.Request{
-		Command: append([]string(nil), request.Command...),
-		Dir:     cwd,
-		Env:     cloneMap(request.Env),
-		Secrets: cloneMap(request.Secrets),
-	})
-	if err != nil {
-		var protocolErr *runner.ProtocolError
-		if errors.As(err, &protocolErr) {
-			_, failErr := s.transition(ctx, session, []string{"STARTING"}, "FAILED", nil)
-			return nil, errors.Join(err, failErr)
-		}
-		if transport != nil {
-			s.retainExecutionProcess(session, transport)
-		}
-		return nil, NewError("execution_session_uncertain", "runner transport was interrupted while starting the Execution Session; reconciliation is required", err)
-	}
-	runningSession, transitionErr := s.transition(ctx, session, []string{"STARTING"}, "RUNNING", nil)
-	if transitionErr != nil {
-		s.retainExecutionProcess(session, transport)
-		return nil, NewError("execution_session_uncertain", "Execution Session started but durable RUNNING state could not be confirmed", transitionErr)
-	}
-	return newExecutionProcess(s, runningSession, transport), nil
+	return s.startRunnerSession(ctx, projectID, session, fromStatus, cwd, argv, request)
 }
 
 func (s *ExecutionSessionService) StartOnRunner(ctx context.Context, projectID, runID, runnerID string, request ExecutionRequest) (*ExecutionProcess, error) {
@@ -254,30 +217,46 @@ func (s *ExecutionSessionService) StartOnRunner(ctx context.Context, projectID, 
 	if err != nil {
 		return nil, translateStoreError(err, "execution_session")
 	}
-	session, err = s.transition(ctx, session, []string{"PENDING"}, "STARTING", nil)
+	return s.startRunnerSession(ctx, projectID, session, []string{"PENDING"}, cwd, argv, request)
+}
+
+func (s *ExecutionSessionService) startRunnerSession(ctx context.Context, projectID string, session store.ExecutionSession, fromStatus []string, cwd string, argv []byte, request ExecutionRequest) (*ExecutionProcess, error) {
+	previous := session
+	started, err := s.store.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
+		ProjectID: session.ProjectID, SessionID: session.ID, FromStatuses: fromStatus, Status: "STARTING", CommandArgv: argv,
+	})
 	if err != nil {
-		return nil, err
+		return nil, translateStoreError(err, "execution_session")
 	}
-	client, err := s.registry.Connect(ctx, projectID, runnerID)
+	if started.RunID != previous.RunID || started.RuntimeInstanceID != previous.RuntimeInstanceID || started.RunnerID != previous.RunnerID {
+		return nil, fmt.Errorf("execution session immutable binding changed during transition")
+	}
+
+	client, err := s.registry.Connect(ctx, projectID, started.RunnerID)
 	if err != nil {
-		_, failErr := s.transition(ctx, session, []string{"STARTING"}, "FAILED", nil)
+		_, failErr := s.transition(ctx, started, []string{"STARTING"}, "FAILED", nil)
 		return nil, errors.Join(fmt.Errorf("connect runner: %w", err), failErr)
 	}
-	transport, err := client.Start(ctx, session.ID, runner.Request{Command: append([]string(nil), request.Command...), Dir: cwd, Env: cloneMap(request.Env), Secrets: cloneMap(request.Secrets)})
+	transport, err := client.Start(ctx, started.ID, runner.Request{
+		Command: append([]string(nil), request.Command...),
+		Dir:     cwd,
+		Env:     cloneMap(request.Env),
+		Secrets: cloneMap(request.Secrets),
+	})
 	if err != nil {
 		var protocolErr *runner.ProtocolError
 		if errors.As(err, &protocolErr) {
-			_, failErr := s.transition(ctx, session, []string{"STARTING"}, "FAILED", nil)
+			_, failErr := s.transition(ctx, started, []string{"STARTING"}, "FAILED", nil)
 			return nil, errors.Join(err, failErr)
 		}
 		if transport != nil {
-			s.retainExecutionProcess(session, transport)
+			s.retainExecutionProcess(started, transport)
 		}
 		return nil, NewError("execution_session_uncertain", "runner transport was interrupted while starting the Execution Session; reconciliation is required", err)
 	}
-	runningSession, transitionErr := s.transition(ctx, session, []string{"STARTING"}, "RUNNING", nil)
+	runningSession, transitionErr := s.transition(ctx, started, []string{"STARTING"}, "RUNNING", nil)
 	if transitionErr != nil {
-		s.retainExecutionProcess(session, transport)
+		s.retainExecutionProcess(started, transport)
 		return nil, NewError("execution_session_uncertain", "Execution Session started but durable RUNNING state could not be confirmed", transitionErr)
 	}
 	return newExecutionProcess(s, runningSession, transport), nil
