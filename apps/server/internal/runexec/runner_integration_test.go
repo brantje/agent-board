@@ -2,6 +2,7 @@ package runexec
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -202,6 +203,52 @@ admitted:
 	}
 	if !hasIntegrationEvent(runEvidence.Events, "test.completed") {
 		t.Fatalf("missing scripted execution evidence: %+v", eventTypes(runEvidence.Events))
+	}
+	hasCandidateManifest := false
+	for _, artifact := range runEvidence.Artifacts {
+		if artifact.Kind == "candidate_manifest" {
+			hasCandidateManifest = true
+			break
+		}
+	}
+	if !hasCandidateManifest {
+		t.Fatalf("missing candidate manifest artifact: %+v", runEvidence.Artifacts)
+	}
+	expectedFileEvidence := []struct {
+		eventType string
+		path      string
+		oldPath   string
+		staged    bool
+		unstaged  bool
+	}{
+		{eventType: "file.modified", path: "staged.txt", staged: true},
+		{eventType: "file.modified", path: "unstaged.txt", unstaged: true},
+		{eventType: "file.created", path: "new-scripted.txt", unstaged: true},
+		{eventType: "file.deleted", path: "delete.txt", unstaged: true},
+		{eventType: "file.renamed", path: "renamed.txt", oldPath: "rename.txt", staged: true},
+	}
+	for _, expected := range expectedFileEvidence {
+		found := false
+		for _, event := range runEvidence.Events {
+			if event.Type != expected.eventType {
+				continue
+			}
+			var payload evidence.FilePayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				t.Fatalf("decode %s payload: %v", event.Type, err)
+			}
+			if payload.Path != expected.path {
+				continue
+			}
+			found = true
+			if payload.OldPath != expected.oldPath || payload.Staged != expected.staged || payload.Unstaged != expected.unstaged {
+				t.Fatalf("file evidence %s %s payload=%+v", expected.eventType, expected.path, payload)
+			}
+			break
+		}
+		if !found {
+			t.Fatalf("missing %s evidence for %s in events=%v", expected.eventType, expected.path, eventTypes(runEvidence.Events))
+		}
 	}
 }
 
