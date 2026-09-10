@@ -140,6 +140,7 @@ export interface RuntimeInstanceEvidence {
 export interface ExecutionSessionEvidence {
   id: string
   runtimeInstanceId: string
+  runnerId: string | null
   status: string
   cwd: string
   command: string[]
