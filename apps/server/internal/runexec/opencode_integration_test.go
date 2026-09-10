@@ -61,7 +61,7 @@ func TestOpenCodeDockerNormalCodingRun(t *testing.T) {
 	project, run := fixture.createRun(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Do not ask a Question unless the issue explicitly requires human input.",
 		title:            "Prove the normal OpenCode coding path",
-		description:      "Do not ask any Question. Create /workspace/opencode-result.txt containing exactly normal-run-ok with no trailing newline. Do not modify any other file. After writing that file, stop.",
+		description:      "Do not ask any Question. Create opencode-result.txt containing exactly normal-run-ok with no trailing newline. Do not modify any other file. After writing that file, stop.",
 	})
 	fixture.startScheduler(t)
 
@@ -126,7 +126,7 @@ func TestOpenCodeDockerInvalidCredentialsFailWithoutSecretLeak(t *testing.T) {
 		apiKey:           invalidOpenRouterIntegrationKey,
 		roleInstructions: "Follow the issue instructions exactly. Do not ask a Question.",
 		title:            "Prove OpenRouter authentication failure handling",
-		description:      "Respond to this task using the configured model. Do not ask a Question. If model access succeeds, create /workspace/should-not-exist.txt containing unexpected-success, then stop.",
+		description:      "Respond to this task using the configured model. Do not ask a Question. If model access succeeds, create should-not-exist.txt containing unexpected-success, then stop.",
 	})
 	fixture.startScheduler(t)
 
@@ -152,7 +152,7 @@ func TestOpenCodeDockerCancelWhileWaitingForQuestion(t *testing.T) {
 	project, run := fixture.createRun(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Use OpenCode's native Question tool for the requested human choice and wait for the answer before editing.",
 		title:            "Cancel a native OpenCode Question",
-		description:      "Before changing any files, use OpenCode's native Question tool to ask exactly one blocking single-choice Question: 'Which marker should I write?' with options 'alpha' and 'beta'. Wait for the human answer. Only after an answer, create /workspace/opencode-result.txt containing the selected marker. Do not ask another Question or modify another file.",
+		description:      "Before changing any files, use OpenCode's native Question tool to ask exactly one blocking single-choice Question: 'Which marker should I write?' with options 'alpha' and 'beta'. Wait for the human answer. Only after an answer, create opencode-result.txt containing the selected marker. Do not ask another Question or modify another file.",
 	})
 	fixture.startScheduler(t)
 
