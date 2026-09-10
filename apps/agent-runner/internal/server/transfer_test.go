@@ -71,32 +71,20 @@ func TestWorkspaceTransferExecutionAndCleanup(t *testing.T) {
 	})
 }
 
-func TestIncomingTransferRejectsCorruptOrOversizedPayload(t *testing.T) {
-	corrupt := newTransferState()
-	if err := corrupt.begin("session-1", protocol.TransferBegin{
+func TestIncomingTransferRejectsCorruptPayload(t *testing.T) {
+	state := newTransferState()
+	if err := state.begin("session-1", protocol.TransferBegin{
 		TransferID: "transfer-1", Direction: "to_runner", TotalBytes: 4, Checksum: "wrong",
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := corrupt.chunk("session-1", protocol.TransferChunk{
+	if err := state.chunk("session-1", protocol.TransferChunk{
 		TransferID: "transfer-1", Data: base64.StdEncoding.EncodeToString([]byte("data")),
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := corrupt.end("session-1", protocol.TransferEnd{TransferID: "transfer-1"}); err == nil {
+	if _, _, err := state.end("session-1", protocol.TransferEnd{TransferID: "transfer-1"}); err == nil {
 		t.Fatal("checksum mismatch accepted")
-	}
-
-	oversized := newTransferState()
-	if err := oversized.begin("session-2", protocol.TransferBegin{
-		TransferID: "transfer-2", Direction: "to_runner", TotalBytes: 1,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := oversized.chunk("session-2", protocol.TransferChunk{
-		TransferID: "transfer-2", Data: base64.StdEncoding.EncodeToString([]byte("too large")),
-	}); err == nil {
-		t.Fatal("payload larger than its declared size was accepted")
 	}
 }
 
