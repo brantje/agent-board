@@ -5,8 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +21,6 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
-	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
-	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/secrets"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -248,11 +251,7 @@ func newOpenCodeIntegrationFixture(t *testing.T) *openCodeIntegrationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dockerRuntime, err := dockerruntime.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime}, secretService)
+	services, err := app.NewServicesWithRuntimes(database, materializer, nil, secretService)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,10 +289,13 @@ func newOpenCodeIntegrationFixture(t *testing.T) *openCodeIntegrationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, nil, nil)
+	runnerConnector := NewRegistryConnector(services.ControlPlane.Runners.Connections)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, git, runnerConnector)
 	if err != nil {
 		t.Fatal(err)
 	}
+	processor.SetWorkspaceEnsurer(services.Workspaces)
+	startOutboundOpenCodeRunner(t, ctx, services, database, env.image)
 	config := scheduler.DefaultConfig("opencode-integration")
 	config.PollInterval = 20 * time.Millisecond
 	config.LeaseDuration = 5 * time.Second
@@ -321,11 +323,11 @@ func requireOpenCodeIntegrationEnv(t *testing.T) openCodeIntegrationEnv {
 		t.Skip("AGENT_BOARD_TEST_DOCKER=1 is required for the OpenCode Docker integration")
 	}
 	env := openCodeIntegrationEnv{
-		databaseURL: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_DATABASE_URL")),
-		apiKey: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_API_KEY")),
+		databaseURL:  strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_DATABASE_URL")),
+		apiKey:       strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_API_KEY")),
 		providerKind: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND")),
-		modelName: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_MODEL")),
-		image: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE")),
+		modelName:    strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_MODEL")),
+		image:        strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE")),
 	}
 	if env.databaseURL == "" || env.apiKey == "" || env.providerKind == "" || env.modelName == "" {
 		t.Skip("database URL, OpenCode API key, provider kind and model are required")
@@ -334,6 +336,65 @@ func requireOpenCodeIntegrationEnv(t *testing.T) openCodeIntegrationEnv {
 		env.image = "agent-board-opencode-runtime:manual"
 	}
 	return env
+}
+
+func startOutboundOpenCodeRunner(t *testing.T, ctx context.Context, services *app.Services, database *postgres.Store, image string) {
+	t.Helper()
+	created, token, err := createExternalRunnerCredential(ctx, services.ControlPlane)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/api/runner/ws", services.ControlPlane.Runners.Connections)
+	server := httptest.NewUnstartedServer(mux)
+	server.Listener = listener
+	server.Start()
+	t.Cleanup(server.Close)
+
+	workspaceDir := t.TempDir()
+	if err := os.Chmod(workspaceDir, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	dockerHost := os.Getenv("AGENT_BOARD_TEST_DOCKER_HOST")
+	if dockerHost == "" {
+		dockerHost = "host.docker.internal"
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	name := "agent-board-opencode-it-" + filepath.Base(t.TempDir())
+	cmd := exec.CommandContext(ctx, "docker", "run", "--rm", "--detach",
+		"--name", name,
+		"--add-host", "host.docker.internal:host-gateway",
+		"-e", "AGENT_BOARD_URL=http://"+net.JoinHostPort(dockerHost, strconv.Itoa(port)),
+		"-e", "AGENT_RUNNER_ID="+created.ID,
+		"-e", "AGENT_RUNNER_TOKEN="+token,
+		"-e", "AGENT_RUNNER_WORKSPACE_ROOT=/workspace",
+		"-v", workspaceDir+":/workspace",
+		image,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker run OpenCode runner: %v: %s", err, out)
+	}
+	t.Cleanup(func() {
+		_ = exec.Command("docker", "rm", "-f", name).Run()
+	})
+	waitForRunnerConnected(t, services.ControlPlane.Runners.Connections, created.ID)
+	database.SetRunnerCandidates(services.ControlPlane.Runners.Connections.Candidates)
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, id := range services.ControlPlane.Runners.Connections.Candidates(opencode.Name) {
+			if id == created.ID {
+				return
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	logs, _ := exec.Command("docker", "logs", name).CombinedOutput()
+	t.Fatalf("live registry did not advertise the OpenCode runner %s: %s", created.ID, logs)
 }
 
 func (f *openCodeIntegrationFixture) startScheduler(t *testing.T) {
@@ -349,7 +410,7 @@ func (f *openCodeIntegrationFixture) startScheduler(t *testing.T) {
 		stopScheduler()
 		select {
 		case err := <-done:
-			if err != nil {
+			if err != nil && err != context.Canceled {
 				t.Errorf("scheduler stopped with error: %v", err)
 			}
 		case <-time.After(5 * time.Second):
@@ -390,14 +451,6 @@ func (f *openCodeIntegrationFixture) createRun(t *testing.T, spec openCodeRunSpe
 	model, err := f.services.ControlPlane.CreateModelProfile(f.ctx, store.ModelProfile{
 		ProjectID: &scope, ProviderID: provider.ID, Name: "OpenCode integration model", Model: f.env.modelName,
 		GenerationSettings: store.EmptyObject, Enabled: true,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = f.services.ControlPlane.CreateRuntime(f.ctx, store.Runtime{
-		ProjectID: &scope, Name: "OpenCode integration runtime", Kind: "docker", Image: f.env.image,
-		NetworkPolicy: "outbound", WorkspacePolicy: "issue", Capabilities: store.EmptyObject,
-		Enabled: true, HealthStatus: "HEALTHY",
 	})
 	if err != nil {
 		t.Fatal(err)
