@@ -58,6 +58,7 @@ func (c *failingSyncClient) ConfirmTransferApplied(context.Context, string, stri
 type successfulSyncClient struct {
 	payload    []byte
 	confirmed  bool
+	confirmErr error
 	directions []string
 }
 
@@ -77,6 +78,9 @@ func (c *successfulSyncClient) ReceiveTransfer(_ context.Context, _ string, prog
 }
 
 func (c *successfulSyncClient) ConfirmTransferApplied(context.Context, string, string) error {
+	if c.confirmErr != nil {
+		return c.confirmErr
+	}
 	c.confirmed = true
 	return nil
 }
@@ -248,6 +252,33 @@ func TestRunnerLiveSessionResumesWithoutRetransferringWorkspace(t *testing.T) {
 	}
 	if !hasProcessTestEvent(storeFake.events, "run.resumed") || !hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
 		t.Fatalf("reconciled runner execution events=%+v", storeFake.events)
+	}
+}
+
+func TestRunnerSyncBackAcknowledgementFailureFailsRun(t *testing.T) {
+	repo := initProcessTestRepository(t)
+	safe := processTestSafeContext(repo)
+	safe.Runtime = executioncontext.RuntimeContext{}
+	storeFake := &runnerSyncStore{}
+	client := &successfulSyncClient{
+		payload:    runnerTransferPayload(t, repo),
+		confirmErr: errors.New("ack transport lost"),
+	}
+	processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
+
+	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "STARTING"}
+	result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run, RunnerID: "runner-1"}, processTestLifecycle{run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RunStatus != "FAILED" {
+		t.Fatalf("missing transfer-applied acknowledgement became success: %+v", result)
+	}
+	if client.confirmed || !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
+		t.Fatalf("acknowledgement failure state confirmed=%v events=%+v", client.confirmed, storeFake.events)
+	}
+	if body, err := os.ReadFile(filepath.Join(repo, "returned.txt")); err != nil || string(body) != "from runner\n" {
+		t.Fatalf("returned workspace must remain applied after lost acknowledgement: file=%q err=%v", body, err)
 	}
 }
 
