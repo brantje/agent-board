@@ -124,9 +124,12 @@ func (s *Store) CreateExecutionSession(ctx context.Context, input store.Executio
 		cwd = "/workspace"
 	}
 
-	// The live Execution Session is the durable writer-ownership record for an
-	// Issue Workspace. Serialize creation through the Workspace row so two Runs
-	// sharing one Issue cannot both acquire writer ownership concurrently.
+	// Execution Session admission participates in the same advisory-lock
+	// namespace as Workspace filesystem writers. Resolve the immutable Run ->
+	// Workspace binding first, then acquire the transaction-scoped advisory lock
+	// before taking the Workspace row lock. This prevents a new Runner writer
+	// from crossing an in-flight bootstrap/snapshot/apply operation without
+	// keeping a PostgreSQL connection checked out for the execution lifetime.
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return store.ExecutionSession{}, err
@@ -135,14 +138,26 @@ func (s *Store) CreateExecutionSession(ctx context.Context, input store.Executio
 
 	var workspaceID string
 	if err := tx.QueryRow(ctx, `
+		SELECT run.workspace_id::text
+		FROM runs AS run
+		WHERE run.project_id = $1 AND run.id = $2
+	`, input.ProjectID, input.RunID).Scan(&workspaceID); err != nil {
+		return store.ExecutionSession{}, notFound(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, workspaceBootstrapLockPrefix+workspaceID); err != nil {
+		return store.ExecutionSession{}, err
+	}
+	if err := tx.QueryRow(ctx, `
 		SELECT workspace.id::text
 		FROM runs AS run
 		JOIN workspaces AS workspace
 		  ON workspace.project_id = run.project_id
 		 AND workspace.id = run.workspace_id
-		WHERE run.project_id = $1 AND run.id = $2
+		WHERE run.project_id = $1
+		  AND run.id = $2
+		  AND workspace.id = $3::uuid
 		FOR UPDATE OF workspace
-	`, input.ProjectID, input.RunID).Scan(&workspaceID); err != nil {
+	`, input.ProjectID, input.RunID, workspaceID).Scan(&workspaceID); err != nil {
 		return store.ExecutionSession{}, notFound(err)
 	}
 
