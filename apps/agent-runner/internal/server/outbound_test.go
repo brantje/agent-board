@@ -2,12 +2,14 @@ package server
 
 import (
 	"context"
-	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
-	"github.com/gorilla/websocket"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
+	"github.com/gorilla/websocket"
 )
 
 func TestOutboundConnectionAuthenticatesAndExecutes(t *testing.T) {
@@ -86,5 +88,23 @@ func TestOutboundConnectionAuthenticatesAndExecutes(t *testing.T) {
 	cancel()
 	if err := runner.Shutdown(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOutboundConnectionReturnsAuthenticationFailureWithoutRetry(t *testing.T) {
+	requests := make(chan struct{}, 2)
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests <- struct{}{}
+		http.Error(w, "revoked", http.StatusUnauthorized)
+	}))
+	defer host.Close()
+
+	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
+	err := runner.Connect(t.Context(), host.URL, "runner", "revoked-token")
+	if !errors.Is(err, ErrAuthentication) {
+		t.Fatalf("Connect() error=%v, want ErrAuthentication", err)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("authentication rejection retried %d times", len(requests))
 	}
 }
