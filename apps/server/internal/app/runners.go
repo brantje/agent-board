@@ -53,40 +53,41 @@ func runnerCredential() (string, []byte, error) {
 	return token, hash[:], nil
 }
 
-func (s *RunnerService) CreateRegistration(ctx context.Context) (string, error) {
-	token, hash, err := runnerCredential()
+func (s *RunnerService) Create(ctx context.Context) (store.Runner, string, error) {
+	registrationToken, registrationHash, err := runnerCredential()
 	if err != nil {
-		return "", err
+		return store.Runner{}, "", err
 	}
-	if err := s.store.CreateRunnerRegistration(ctx, hash); err != nil {
-		return "", translateStoreError(err, "runner_registration")
+	r, err := s.store.CreateRunner(ctx, store.Runner{RegistrationTokenHash: registrationHash})
+	if err != nil {
+		return store.Runner{}, "", translateStoreError(err, "runner")
 	}
-	return token, nil
+	return r, registrationToken, nil
 }
 
-func (s *RunnerService) Register(ctx context.Context, registrationToken, name string) (store.Runner, string, error) {
+func (s *RunnerService) Register(ctx context.Context, registrationToken, hostname string) (store.Runner, string, error) {
 	registrationToken = strings.TrimSpace(registrationToken)
-	name = strings.TrimSpace(name)
+	hostname = strings.TrimSpace(hostname)
 	if registrationToken == "" {
 		return store.Runner{}, "", invalid("runner registration token is required")
 	}
-	if name == "" {
-		return store.Runner{}, "", invalid("runner name is required")
+	if hostname == "" {
+		return store.Runner{}, "", invalid("runner hostname is required")
 	}
 
-	credential, credentialHash, err := runnerCredential()
+	runnerToken, credentialHash, err := runnerCredential()
 	if err != nil {
 		return store.Runner{}, "", err
 	}
 	registrationHash := sha256.Sum256([]byte(registrationToken))
-	r, err := s.store.RegisterRunner(ctx, registrationHash[:], store.Runner{Name: name, TokenHash: credentialHash})
+	r, err := s.store.RegisterRunner(ctx, registrationHash[:], store.Runner{Name: hostname, TokenHash: credentialHash})
 	if errors.Is(err, store.ErrNotFound) {
 		return store.Runner{}, "", invalid("runner registration token is invalid or has already been used")
 	}
 	if err != nil {
 		return store.Runner{}, "", translateStoreError(err, "runner")
 	}
-	return r, credential, nil
+	return r, runnerToken, nil
 }
 
 func (s *RunnerService) Get(ctx context.Context, id string) (store.Runner, error) {
@@ -111,6 +112,9 @@ func (s *RunnerService) Rotate(ctx context.Context, id string) (store.Runner, st
 	}
 	if r.Internal {
 		return store.Runner{}, "", invalid("internal runner credentials are server managed")
+	}
+	if r.RegisteredAt == nil {
+		return store.Runner{}, "", invalid("runner is not registered")
 	}
 	token, hash, err := runnerCredential()
 	if err != nil {
@@ -141,7 +145,7 @@ func (s *RunnerService) Authenticate(ctx context.Context, id, token string) (sto
 		return store.Runner{}, err
 	}
 	hash := sha256.Sum256([]byte(token))
-	if token == "" || r.RevokedAt != nil || r.DeletedAt != nil || subtle.ConstantTimeCompare(hash[:], r.TokenHash) != 1 {
+	if token == "" || r.RegisteredAt == nil || r.RevokedAt != nil || r.DeletedAt != nil || subtle.ConstantTimeCompare(hash[:], r.TokenHash) != 1 {
 		return store.Runner{}, ErrRunnerAuthentication
 	}
 	return r, nil
