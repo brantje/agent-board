@@ -11,10 +11,24 @@ Top-level work, repository and policy boundary.
 Owns or scopes:
 
 - Board/Issues
-- local v0.1 repository configuration
-- later Source Connection binding
+- repository source configuration: local repository path/default branch or Git clone URL/optional ref
+- later authenticated Source Connection binding
 - workflow/delivery policy
 - Project-scoped Agents/configuration where supported
+
+A Project repository source is one of:
+
+```text
+local
+  -> repository path
+  -> default branch
+
+git
+  -> clone URL
+  -> optional ref
+```
+
+An omitted Git ref means the remote default branch is resolved at execution time. Basic Git source configuration is provider-neutral and does not imply a GitHub/GitLab/Forgejo connection or stored credentials.
 
 ### Issue
 
@@ -163,11 +177,16 @@ Workspace != Runtime Instance
 
 ## Repository invariants
 
-The first v0.1 source is a local Git repository accessible to the trusted backend and constrained to deployment-authorized roots.
+Project source configuration is explicit and mutually exclusive:
 
-Project repository configuration materializes the durable Issue Workspace automatically. Bootstrap failure never silently falls back to an unrelated empty repository.
+- `local` uses a trusted-backend-visible Git repository path constrained to deployment-authorized roots plus a default branch.
+- `git` stores a provider-neutral clone URL plus an optional branch/tag/commit ref. Saving this configuration does not clone, fetch or validate the remote and does not require credentials.
 
-Authenticated remote Source Connections are layered on later without replacing Workspace identity/lifecycle.
+Git-source configuration is durable input for Runner execution. Runner-managed clone/fetch/cache/worktree behavior is a separate execution concern and is not part of Project configuration.
+
+Project repository configuration materializes the durable Issue Workspace through the source-specific execution path. Bootstrap failure never silently falls back to an unrelated empty repository.
+
+Authenticated remote Source Connections may later supply provider-specific identity and credentials without replacing the Project source model or Workspace identity/lifecycle.
 
 ## Security invariants
 
