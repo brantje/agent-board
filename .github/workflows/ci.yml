@@ -152,9 +152,14 @@ jobs:
       - name: Test shared redaction
         working-directory: packages/redact
         run: go test ./... && go vet ./... && go build ./...
-      - name: Test
+      - name: Test and enforce coverage
         working-directory: apps/agent-runner
-        run: go test ./...
+        run: |
+          set -eu
+          go test -coverprofile=coverage.out ./...
+          go tool cover -func=coverage.out
+          total="$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
+          awk -v coverage="$total" 'BEGIN { printf "agent-runner coverage: %.1f%%\n", coverage; if (coverage + 0 < 85) exit 1 }'
       - name: Vet
         working-directory: apps/agent-runner
         run: go vet ./...
