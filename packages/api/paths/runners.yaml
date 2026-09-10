@@ -8,14 +8,38 @@ nameInput:
         required: [name]
         properties:
           name: {type: string, minLength: 1}
+registrationInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [token, name]
+        properties:
+          token: {type: string, minLength: 1}
+          name: {type: string, minLength: 1}
 runnerResponse:
   description: Runner identity and diagnostics. Connected state comes from the live registry.
   content:
     application/json:
       schema:
         $ref: ../schemas/runners.yaml#/Runner
+registrationResponse:
+  description: One-time registration token returned only when enrollment is created.
+  headers:
+    Cache-Control:
+      schema: {type: string, const: no-store}
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [token]
+        properties:
+          token: {type: string}
 credentialResponse:
-  description: Plaintext credential returned once. It cannot be retrieved later.
+  description: Plaintext runner credential returned once after successful enrollment. It cannot be retrieved later.
   headers:
     Cache-Control:
       schema: {type: string, const: no-store}
@@ -44,9 +68,17 @@ collection:
       default:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
-    operationId: createRunner
+    operationId: createRunnerRegistration
+    responses:
+      '201':
+        $ref: "#/registrationResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+register:
+  post:
+    operationId: registerRunner
     requestBody:
-      $ref: "#/nameInput"
+      $ref: "#/registrationInput"
     responses:
       '201':
         $ref: "#/credentialResponse"
