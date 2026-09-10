@@ -19,7 +19,7 @@ func scanRunner(row pgx.Row) (store.Runner, error) {
 func (s *Store) CreateRunner(ctx context.Context, v store.Runner) (store.Runner, error) {
 	return scanRunner(s.pool.QueryRow(ctx, `
 		INSERT INTO runners (name,token_hash,registration_token_hash,internal,registered_at)
-		VALUES (NULLIF($1,''),$2,$3,$4,CASE WHEN $2 IS NULL THEN NULL ELSE now() END)
+		VALUES (NULLIF($1,''),$2,$3,$4,CASE WHEN $2::bytea IS NULL THEN NULL ELSE now() END)
 		RETURNING `+runnerColumns, v.Name, v.TokenHash, v.RegistrationTokenHash, v.Internal))
 }
 
