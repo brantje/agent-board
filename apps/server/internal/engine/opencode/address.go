@@ -1,7 +1,6 @@
 package opencode
 
 import (
-	"fmt"
 	"hash/fnv"
 	"net"
 	"strconv"
@@ -16,10 +15,9 @@ const (
 )
 
 // nativeServerAddress gives each durable Run a stable loopback endpoint.
-// agent-runner is Linux-only for v0.1, where the entire 127/8 range is
-// loopback. Combining a run-scoped loopback address and high port keeps
-// concurrent OpenCode servers on the same host isolated while preserving the
-// exact endpoint across Runner reconnect/recovery.
+// Keeping the host on 127.0.0.1 avoids depending on support for arbitrary
+// 127/8 bind addresses while a run-scoped high port isolates concurrent
+// OpenCode servers on the same host and remains stable across reconnects.
 func (e *Engine) nativeServerAddress(safe executioncontext.SafeContext) string {
 	if address := strings.TrimSpace(e.address); address != "" {
 		return address
@@ -31,9 +29,6 @@ func (e *Engine) nativeServerAddress(safe executioncontext.SafeContext) string {
 
 	hasher := fnv.New64a()
 	_, _ = hasher.Write([]byte(runID))
-	sum := hasher.Sum64()
-	octet := func(shift uint) uint64 { return ((sum >> shift) % 254) + 1 }
-	host := fmt.Sprintf("127.%d.%d.%d", octet(40), octet(24), octet(8))
-	port := nativeServerPortBase + int(sum%nativeServerPortSpan)
-	return net.JoinHostPort(host, strconv.Itoa(port))
+	port := nativeServerPortBase + int(hasher.Sum64()%nativeServerPortSpan)
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
 }
