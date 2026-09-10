@@ -4,6 +4,26 @@
 
 External hosts are user-trusted execution environments. Agent Board does not provide or claim Docker isolation on those hosts.
 
+## External Linux installation
+
+The authoritative operator guide is [`docs/external-runner-setup.md`](../../docs/external-runner-setup.md). It covers:
+
+- building/installing the standalone binary
+- creating the non-root `agent-runner` service account
+- installing OpenCode or another required coding CLI on the service `PATH`
+- creating a Runner through `/api/runners` and safely storing its one-time token
+- configuring `/etc/agent-board/agent-runner.env`
+- installing the checked-in systemd unit
+- verifying connectivity and a real Run
+- upgrades, token rotation, revocation, decommissioning, and troubleshooting
+
+Deployment examples live in `deploy/`:
+
+```text
+deploy/agent-runner.service
+deploy/agent-runner.env.example
+```
+
 ## Build a versioned Linux binary
 
 Local development builds advertise `runner_version=dev`. A release/production build embeds its concrete version into the capability handshake:
@@ -17,68 +37,25 @@ CGO_ENABLED=0 GOOS=linux go build -trimpath \
 
 The Docker build accepts the same value through `--build-arg AGENT_RUNNER_VERSION=<version>`. The repository does not yet publish standalone release artifacts; the release pipeline that publishes them must supply a concrete version. This PR intentionally does not add a package repository or shell installer.
 
-## Install on Linux
+## Runtime configuration
 
-1. Build or download the versioned `agent-runner` binary for your architecture.
-2. Install it to `/usr/local/bin/agent-runner`.
-3. Create the workspace root and service user as needed:
+The standalone binary reads:
 
-```bash
-sudo install -d -m 0750 -o agent-runner -g agent-runner /var/lib/agent-runner/workspaces
+```text
+AGENT_BOARD_URL
+AGENT_RUNNER_ID
+AGENT_RUNNER_TOKEN
+AGENT_RUNNER_WORKSPACE_ROOT
 ```
 
-4. Create an external Runner in Agent Board. Creation returns the immutable Runner ID and a plaintext token once. Store the token immediately; it cannot be retrieved later.
-5. Create `/etc/agent-board/agent-runner.env`:
+`AGENT_RUNNER_WORKSPACE_ROOT` is optional and defaults to `/var/lib/agent-runner/workspaces`. `AGENT_BOARD_URL` is the control-plane base HTTP(S) URL; the Runner converts it to WebSocket and connects outbound to `/api/runner/ws`.
 
-```bash
-AGENT_BOARD_URL=https://agent-board.example.invalid
-AGENT_RUNNER_ID=<immutable-runner-id-from-agent-board>
-AGENT_RUNNER_TOKEN=<one-time-token-from-runner-creation>
-AGENT_RUNNER_WORKSPACE_ROOT=/var/lib/agent-runner/workspaces
-```
-
-6. Install a supported coding CLI on the host `$PATH` before the runner becomes eligible for that Engine. For OpenCode:
-
-```bash
-command -v opencode
-opencode --version
-```
-
-Authenticate the CLI with your provider on that host. Agent Board sends only execution-scoped secrets for a session; the runner host does not receive PostgreSQL credentials, encryption keys or other control-plane secrets.
-
-7. Install and enable the unit from `deploy/agent-runner.service`:
-
-```bash
-sudo install -m 0644 deploy/agent-runner.service /etc/systemd/system/agent-runner.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now agent-runner.service
-```
-
-## Operate
-
-```bash
-sudo systemctl start agent-runner.service
-sudo systemctl stop agent-runner.service
-sudo systemctl restart agent-runner.service
-sudo systemctl status agent-runner.service
-journalctl -u agent-runner.service -f
-```
-
-The runner connects outbound to `$AGENT_BOARD_URL/api/runner/ws`. Do not expose an inbound runner listen port; systemd hosts should not publish `/v1/ws`.
-
-## Upgrade
-
-1. `sudo systemctl stop agent-runner.service`
-2. Replace `/usr/local/bin/agent-runner` with the new versioned binary.
-3. `sudo systemctl start agent-runner.service`
-4. Confirm `systemctl status` and recent `journalctl` output.
-
-Rotating or revoking a runner on the server invalidates the previous token immediately. After rotation, update `AGENT_RUNNER_TOKEN` and restart the service.
+The Runner does not listen for Agent Board execution traffic on an inbound host port. SSH may be used by an operator to administer the host, but Agent Board does not use SSH as the execution transport.
 
 ## Requirements
 
 - outbound HTTPS/WSS access to the Agent Board server
-- Git and the selected Engine CLIs on `$PATH` (for example `opencode` or `sh` for scripted tests)
-- a writable workspace root for per-session directories
+- Git and the selected Engine CLIs on the service `$PATH`
+- a writable workspace/state root for per-session directories
 
-SSH may be used to administer the host, but Agent Board does not use SSH as an execution transport.
+For the current real OpenCode path, keep the host OpenCode version aligned with `opencode.env`. Provider credentials for Agent Board's OpenCode adapter remain server-managed and are supplied to the Runner only for the authorized Execution Session; do not store them in the systemd Runner environment file.
