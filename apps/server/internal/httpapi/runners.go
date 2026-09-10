@@ -11,11 +11,12 @@ import (
 
 type RunnerDTO struct {
 	ID           string          `json:"id"`
-	Name         string          `json:"name"`
+	Name         *string         `json:"name"`
 	Internal     bool            `json:"internal"`
 	Managed      bool            `json:"managed"`
 	Deletable    bool            `json:"deletable"`
 	Connected    bool            `json:"connected"`
+	RegisteredAt *time.Time      `json:"registeredAt"`
 	RevokedAt    *time.Time      `json:"revokedAt"`
 	LastSeenAt   *time.Time      `json:"lastSeenAt"`
 	Capabilities json.RawMessage `json:"capabilities"`
@@ -28,22 +29,35 @@ func (a *api) runnerDTO(v store.Runner) RunnerDTO {
 	if len(caps) == 0 {
 		caps = store.EmptyObject
 	}
-	return RunnerDTO{ID: v.ID, Name: v.Name, Internal: v.Internal, Managed: v.Internal, Deletable: !v.Internal, Connected: a.service.Runners.Connections.Connected(v.ID), RevokedAt: v.RevokedAt, LastSeenAt: v.LastSeenAt, Capabilities: caps, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	var name *string
+	if v.Name != "" {
+		value := v.Name
+		name = &value
+	}
+	return RunnerDTO{ID: v.ID, Name: name, Internal: v.Internal, Managed: v.Internal, Deletable: !v.Internal, Connected: a.service.Runners.Connections.Connected(v.ID), RegisteredAt: v.RegisteredAt, RevokedAt: v.RevokedAt, LastSeenAt: v.LastSeenAt, Capabilities: caps, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
 }
 
 type runnerNameRequest struct {
 	Name string `json:"name"`
 }
 type runnerRegistrationRequest struct {
-	Token string `json:"token"`
-	Name  string `json:"name"`
+	RegistrationToken string `json:"registrationToken"`
+	Hostname          string `json:"hostname"`
 }
-type runnerRegistrationResponse struct {
-	Token string `json:"token"`
+type runnerIdentityDTO struct {
+	ID string `json:"id"`
+}
+type runnerCreationResponse struct {
+	Runner            runnerIdentityDTO `json:"runner"`
+	RegistrationToken string            `json:"registrationToken"`
+}
+type runnerEnrollmentResponse struct {
+	RunnerID    string `json:"runnerId"`
+	RunnerToken string `json:"runnerToken"`
 }
 type runnerCredentialResponse struct {
-	Runner RunnerDTO `json:"runner"`
-	Token  string    `json:"token"`
+	Runner      RunnerDTO `json:"runner"`
+	RunnerToken string    `json:"runnerToken"`
 }
 
 func (a *api) registerRunnerRoutes(r chi.Router) {
@@ -52,7 +66,7 @@ func (a *api) registerRunnerRoutes(r chi.Router) {
 	r.Post("/runner/register", a.registerRunner)
 	r.Handle("/runner/ws", a.service.Runners.Connections)
 	r.Get("/runners", a.listRunners)
-	r.Post("/runners", a.createRunnerRegistration)
+	r.Post("/runners", a.createRunner)
 	r.Get("/runners/{resourceID}", a.getRunner)
 	r.Patch("/runners/{resourceID}", a.renameRunner)
 	r.Post("/runners/{resourceID}/rotate-token", a.rotateRunner)
@@ -112,27 +126,27 @@ func (a *api) listRunners(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, out)
 }
-func (a *api) createRunnerRegistration(w http.ResponseWriter, r *http.Request) {
-	token, err := a.service.Runners.CreateRegistration(r.Context())
+func (a *api) createRunner(w http.ResponseWriter, r *http.Request) {
+	v, registrationToken, err := a.service.Runners.Create(r.Context())
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusCreated, runnerRegistrationResponse{Token: token})
+	writeJSON(w, http.StatusCreated, runnerCreationResponse{Runner: runnerIdentityDTO{ID: v.ID}, RegistrationToken: registrationToken})
 }
 func (a *api) registerRunner(w http.ResponseWriter, r *http.Request) {
 	var req runnerRegistrationRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	v, token, err := a.service.Runners.Register(r.Context(), req.Token, req.Name)
+	v, runnerToken, err := a.service.Runners.Register(r.Context(), req.RegistrationToken, req.Hostname)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, http.StatusCreated, runnerCredentialResponse{Runner: a.runnerDTO(v), Token: token})
+	writeJSON(w, http.StatusCreated, runnerEnrollmentResponse{RunnerID: v.ID, RunnerToken: runnerToken})
 }
 func (a *api) getRunner(w http.ResponseWriter, r *http.Request) {
 	id, ok := resourceID(w, r)
@@ -167,13 +181,13 @@ func (a *api) rotateRunner(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	v, token, err := a.service.Runners.Rotate(r.Context(), id)
+	v, runnerToken, err := a.service.Runners.Rotate(r.Context(), id)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, runnerCredentialResponse{Runner: a.runnerDTO(v), Token: token})
+	writeJSON(w, 200, runnerCredentialResponse{Runner: a.runnerDTO(v), RunnerToken: runnerToken})
 }
 func (a *api) revokeRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, false) }
 func (a *api) deleteRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, true) }
