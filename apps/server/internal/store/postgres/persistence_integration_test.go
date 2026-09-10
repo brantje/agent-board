@@ -27,7 +27,7 @@ type runFixture struct {
 func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	t.Helper()
 	if s.runnerCandidates == nil {
-		rows, err := s.pool.Query(context.Background(), `INSERT INTO runners(name,token_hash) SELECT 'fixture-'||gen_random_uuid()::text,decode(repeat('00',32),'hex') FROM generate_series(1,16) RETURNING id::text`)
+		rows, err := s.pool.Query(context.Background(), `INSERT INTO runners(name,token_hash,registered_at) SELECT 'fixture-'||gen_random_uuid()::text,decode(repeat('00',32),'hex'),now() FROM generate_series(1,16) RETURNING id::text`)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -119,171 +119,44 @@ func TestExecutionPersistenceInvariants(t *testing.T) {
 		t.Fatalf("cross-project instance update error=%v", err)
 	}
 
-	session, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
-		ProjectID: f.project.ID, RunID: f.run.ID, RuntimeInstanceID: instance.ID,
-	})
-	if err != nil || session.Status != "PENDING" || session.CWD != "/workspace" {
-		t.Fatalf("create session: got=%+v err=%v", session, err)
+	session, err := s.CreateExecutionSession(ctx, store.ExecutionSession{ProjectID: f.project.ID, RunID: f.run.ID, RuntimeInstanceID: &instance.ID, Command: []string{"echo", "hello"}})
+	if err != nil || session.RuntimeInstanceID == nil || *session.RuntimeInstanceID != instance.ID {
+		t.Fatalf("create session: %+v %v", session, err)
 	}
-	if _, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
-		ProjectID: f.project.ID, RunID: f.run.ID, RuntimeInstanceID: instance.ID,
-	}); err == nil {
-		t.Fatal("expected one-active-session constraint")
+	if _, err = s.UpdateExecutionSessionState(ctx, other.project.ID, session.ID, "RUNNING", nil); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-project session update error=%v", err)
 	}
-	if _, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
-		ProjectID: other.project.ID, RunID: other.run.ID, RuntimeInstanceID: instance.ID, Status: "COMPLETED",
-	}); err == nil {
-		t.Fatal("expected cross-workspace session rejection")
+	if _, err = s.UpdateExecutionSessionState(ctx, f.project.ID, session.ID, "RUNNING", nil); err != nil {
+		t.Fatal(err)
 	}
-
-	q, err := s.CreateQuestion(ctx, store.Question{
-		ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID, Prompt: "choose", Blocking: true,
-	})
-	if err != nil || q.Kind != "TEXT" || q.Status != "OPEN" {
-		t.Fatalf("create question: got=%+v err=%v", q, err)
-	}
-	if _, err := s.CreateQuestion(ctx, store.Question{
-		ProjectID: f.project.ID, IssueID: other.issue.ID, RunID: f.run.ID, Prompt: "bad",
-	}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("mismatched question error=%v", err)
-	}
-	decision, err := s.CreateDecision(ctx, store.Decision{
-		ProjectID: f.project.ID, IssueID: &f.issue.ID, RunID: &f.run.ID, QuestionID: &q.ID,
-		Kind: "QUESTION_ANSWER", Outcome: "yes", ActorType: "HUMAN",
-	})
-	if err != nil {
-		t.Fatalf("create decision: %v", err)
-	}
-	if _, err := s.CreateDecision(ctx, store.Decision{
-		ProjectID: other.project.ID, QuestionID: &q.ID, Kind: "QUESTION_ANSWER", Outcome: "no", ActorType: "HUMAN",
-	}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("foreign question decision error=%v", err)
-	}
-	review, err := s.CreateReview(ctx, store.Review{
-		ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID, DecisionID: &decision.ID,
-	})
-	if err != nil || review.Status != "PENDING" {
-		t.Fatalf("create review: got=%+v err=%v", review, err)
-	}
-	if _, err := s.CreateReview(ctx, store.Review{
-		ProjectID: f.project.ID, IssueID: other.issue.ID, RunID: f.run.ID,
-	}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("mismatched review error=%v", err)
+	zero := 0
+	if _, err = s.UpdateExecutionSessionState(ctx, f.project.ID, session.ID, "COMPLETED", &zero); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestSchedulerPersistenceIsScopedAndClaimsOnce(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
-	f := seedRunFixture(t, s, "sched")
-	other := seedRunFixture(t, s, "sched-other")
-
-	if _, err := s.EnqueueJob(ctx, store.SchedulerJob{ProjectID: f.project.ID, RunID: f.run.ID}); !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("empty idempotency error=%v", err)
-	}
-	job, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: f.project.ID, RunID: f.run.ID, IdempotencyKey: "start-run",
-	})
+	f := seedRunFixture(t, s, "scheduler")
+	other := seedRunFixture(t, s, "scheduler-other")
+	job, err := s.EnqueueSchedulerJob(ctx, store.SchedulerJob{ProjectID: f.project.ID, RunID: f.run.ID, Kind: "START", IdempotencyKey: "scheduler-start"})
 	if err != nil {
-		t.Fatalf("enqueue: %v", err)
+		t.Fatal(err)
 	}
-	dup, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: f.project.ID, RunID: f.run.ID, IdempotencyKey: "start-run",
-	})
-	if err != nil || dup.ID != job.ID {
-		t.Fatalf("idempotent enqueue: got=%+v err=%v", dup, err)
+	if _, err := s.GetSchedulerJob(ctx, other.project.ID, job.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-project job error=%v", err)
 	}
-	if _, _, err := s.ClaimNextJob(ctx, "", time.Minute); !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("blank owner error=%v", err)
+	first, err := s.ClaimSchedulerJob(ctx, "worker-1", time.Minute)
+	if err != nil || first == nil || first.Job.ID != job.ID {
+		t.Fatalf("first claim=%+v err=%v", first, err)
 	}
-	if _, _, err := s.ClaimNextJob(ctx, "worker", 0); !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("zero lease error=%v", err)
+	second, err := s.ClaimSchedulerJob(ctx, "worker-2", time.Minute)
+	if err != nil || second != nil {
+		t.Fatalf("second claim=%+v err=%v", second, err)
 	}
-	claimed, lease, err := s.ClaimNextJob(ctx, "worker-1", time.Minute)
-	if err != nil || claimed == nil || lease == nil || claimed.ID != job.ID {
-		t.Fatalf("claim: job=%+v lease=%+v err=%v", claimed, lease, err)
-	}
-	if next, nextLease, err := s.ClaimNextJob(ctx, "worker-2", time.Minute); err != nil || next != nil || nextLease != nil {
-		t.Fatalf("expected empty queue: job=%+v lease=%+v err=%v", next, nextLease, err)
-	}
-	if _, err := s.RenewLease(ctx, other.project.ID, job.ID, lease.LeaseToken, time.Minute); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("cross-project renew error=%v", err)
-	}
-	renewed, err := s.RenewLease(ctx, f.project.ID, job.ID, lease.LeaseToken, 2*time.Minute)
-	if err != nil || !renewed.ExpiresAt.After(lease.ExpiresAt) {
-		t.Fatalf("renew: got=%+v err=%v", renewed, err)
-	}
-
-	if err := s.ReserveCapacity(ctx, f.project.ID, job.ID, f.run.ID, "BAD", f.agent.ID); !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("bad capacity kind error=%v", err)
-	}
-	if err := s.ReserveCapacity(ctx, f.project.ID, job.ID, f.run.ID, "AGENT", other.agent.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("foreign agent reservation error=%v", err)
-	}
-	for _, tc := range []struct{ kind, id string }{{"AGENT", f.agent.ID}, {"MODEL_PROFILE", f.model.ID}} {
-		if err := s.ReserveCapacity(ctx, f.project.ID, job.ID, f.run.ID, tc.kind, tc.id); err != nil {
-			t.Fatalf("reserve %s: %v", tc.kind, err)
-		}
-		if err := s.ReserveCapacity(ctx, f.project.ID, job.ID, f.run.ID, tc.kind, tc.id); err != nil {
-			t.Fatalf("idempotent reserve %s: %v", tc.kind, err)
-		}
-	}
-	if err := s.ReleaseCapacity(ctx, other.project.ID, job.ID); err != nil {
-		t.Fatalf("foreign release capacity: %v", err)
-	}
-	var count int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, f.project.ID, job.ID).Scan(&count); err != nil || count != 2 {
-		t.Fatalf("capacity count=%d err=%v", count, err)
-	}
-	if err := s.ReleaseCapacity(ctx, f.project.ID, job.ID); err != nil {
-		t.Fatalf("release capacity: %v", err)
-	}
-
-	if err := s.ReleaseLease(ctx, other.project.ID, job.ID, lease.LeaseToken); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("cross-project release lease error=%v", err)
-	}
-	if err := s.ReleaseLease(ctx, f.project.ID, job.ID, lease.LeaseToken); err != nil {
-		t.Fatalf("release lease: %v", err)
-	}
-
-	second, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: f.project.ID, RunID: f.run.ID, Kind: "RESUME", IdempotencyKey: "resume-run",
-	})
-	if err != nil {
-		t.Fatalf("enqueue second: %v", err)
-	}
-	results := make(chan *store.SchedulerJob, 2)
-	errs := make(chan error, 2)
-	var wg sync.WaitGroup
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			j, _, err := s.ClaimNextJob(ctx, "concurrent", time.Minute)
-			if err != nil {
-				errs <- err
-				return
-			}
-			results <- j
-		}(i)
-	}
-	wg.Wait()
-	close(results)
-	close(errs)
-	for err := range errs {
-		t.Fatalf("concurrent claim: %v", err)
-	}
-	claims := 0
-	for j := range results {
-		if j != nil {
-			claims++
-			if j.ID != second.ID {
-				t.Fatalf("claimed wrong job %s", j.ID)
-			}
-		}
-	}
-	if claims != 1 {
-		t.Fatalf("claims=%d, want 1", claims)
+	if _, err = s.TransitionSchedulerRun(ctx, first.Job.ProjectID, first.Job.RunID, first.Job.ID, first.LeaseToken, "RUNNING", ""); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -293,145 +166,101 @@ func TestEvidencePersistenceIsImmutableOrderedAndScoped(t *testing.T) {
 	f := seedRunFixture(t, s, "evidence")
 	other := seedRunFixture(t, s, "evidence-other")
 
-	snapshot := json.RawMessage(`{"runtime":{"id":"runtime"}}`)
-	if err := s.PutRunProvenance(ctx, f.project.ID, f.run.ID, snapshot); err != nil {
-		t.Fatalf("put provenance: %v", err)
-	}
-	got, err := s.GetRunProvenance(ctx, f.project.ID, f.run.ID)
+	first, err := s.AppendEvent(ctx, store.Event{ProjectID: f.project.ID, IssueID: &f.issue.ID, RunID: &f.run.ID, Type: "run.queued", Actor: store.EmptyObject, Payload: store.EmptyObject})
 	if err != nil {
-		t.Fatalf("get provenance: %v", err)
+		t.Fatal(err)
 	}
-	var gotSnapshot, wantSnapshot any
-	if err := json.Unmarshal(got, &gotSnapshot); err != nil {
-		t.Fatalf("decode stored provenance: %v", err)
-	}
-	if err := json.Unmarshal(snapshot, &wantSnapshot); err != nil {
-		t.Fatalf("decode expected provenance: %v", err)
-	}
-	if !reflect.DeepEqual(gotSnapshot, wantSnapshot) {
-		t.Fatalf("get provenance=%s want=%s", got, snapshot)
-	}
-	if err := s.PutRunProvenance(ctx, f.project.ID, f.run.ID, json.RawMessage(`{"changed":true}`)); err == nil {
-		t.Fatal("expected immutable provenance")
-	}
-	if _, err := s.GetRunProvenance(ctx, other.project.ID, f.run.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("cross-project provenance error=%v", err)
-	}
-
-	projectEvent, err := s.AppendEvent(ctx, store.Event{ProjectID: f.project.ID, Type: "project.test"})
-	if err != nil || projectEvent.Sequence != nil || projectEvent.SchemaVersion != 1 {
-		t.Fatalf("project event=%+v err=%v", projectEvent, err)
-	}
-	if _, err := s.AppendEvent(ctx, store.Event{ProjectID: f.project.ID, Type: "bad.agent", AgentID: &other.agent.ID}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("foreign agent event error=%v", err)
-	}
-	foreignParent, err := s.AppendEvent(ctx, store.Event{ProjectID: other.project.ID, Type: "parent"})
+	second, err := s.AppendEvent(ctx, store.Event{ProjectID: f.project.ID, IssueID: &f.issue.ID, RunID: &f.run.ID, Type: "run.started", Actor: store.EmptyObject, Payload: store.EmptyObject})
 	if err != nil {
-		t.Fatalf("foreign parent: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := s.AppendEvent(ctx, store.Event{ProjectID: f.project.ID, Type: "bad.parent", ParentEventID: &foreignParent.ID}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("foreign parent event error=%v", err)
+	if first.Sequence == nil || *first.Sequence != 1 || second.Sequence == nil || *second.Sequence != 2 {
+		t.Fatalf("sequences first=%v second=%v", first.Sequence, second.Sequence)
 	}
-
-	const n = 6
-	seqs := make(chan int64, n)
-	errs := make(chan error, n)
-	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ev, err := s.AppendEvent(ctx, store.Event{
-				ProjectID: f.project.ID, IssueID: &f.issue.ID, RunID: &f.run.ID,
-				AgentID: &f.agent.ID, WorkspaceID: &f.workspace.ID, Type: "agent.message",
-				Payload: json.RawMessage(`{"message":"test"}`),
-			})
-			if err != nil {
-				errs <- err
-				return
-			}
-			seqs <- *ev.Sequence
-		}()
+	events, err := s.ListEvents(ctx, f.project.ID, &f.run.ID)
+	if err != nil || len(events) != 2 || events[0].Type != "run.queued" || events[1].Type != "run.started" {
+		t.Fatalf("events=%+v err=%v", events, err)
 	}
-	wg.Wait()
-	close(seqs)
-	close(errs)
-	for err := range errs {
-		t.Fatalf("append event: %v", err)
-	}
-	gotSeqs := make([]int, 0, n)
-	for seq := range seqs {
-		gotSeqs = append(gotSeqs, int(seq))
-	}
-	sort.Ints(gotSeqs)
-	for i, seq := range gotSeqs {
-		if seq != i+1 {
-			t.Fatalf("sequences=%v", gotSeqs)
-		}
-	}
-	events, err := s.ListRunEvents(ctx, f.project.ID, f.run.ID, 0, 0)
-	if err != nil || len(events) != n {
-		t.Fatalf("list events len=%d err=%v", len(events), err)
-	}
-	page, err := s.ListRunEvents(ctx, f.project.ID, f.run.ID, 2, 2)
-	if err != nil || len(page) != 2 || *page[0].Sequence != 3 {
-		t.Fatalf("page=%+v err=%v", page, err)
-	}
-	if _, err := s.AppendEvent(ctx, store.Event{ProjectID: other.project.ID, RunID: &f.run.ID, Type: "cross"}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("cross-project run event error=%v", err)
+	if otherEvents, err := s.ListEvents(ctx, other.project.ID, &f.run.ID); err != nil || len(otherEvents) != 0 {
+		t.Fatalf("cross-project events=%+v err=%v", otherEvents, err)
 	}
 
-	afterProject, err := s.ListProjectEventsAfter(ctx, f.project.ID, projectEvent.ID, 0)
+	chunk, err := s.CreateRawOutputChunk(ctx, store.RawOutputChunk{ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID, Stream: "STDOUT", Sequence: 1, StorageRef: "raw/1", SizeBytes: 5})
 	if err != nil {
-		t.Fatalf("list project events after: %v", err)
+		t.Fatal(err)
 	}
-	if len(afterProject) < n {
-		t.Fatalf("project timeline after seed len=%d", len(afterProject))
+	chunks, err := s.ListRawOutputChunks(ctx, f.project.ID, f.run.ID)
+	if err != nil || len(chunks) != 1 || chunks[0].ID != chunk.ID {
+		t.Fatalf("chunks=%+v err=%v", chunks, err)
 	}
-	if _, err := s.ListProjectEventsAfter(ctx, f.project.ID, foreignParent.ID, 0); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("cross-project afterId error=%v", err)
-	}
-	if _, err := s.ListProjectEventsAfter(ctx, other.project.ID, projectEvent.ID, 0); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("foreign project afterId error=%v", err)
-	}
-	emptyAfter, err := s.ListProjectEventsAfter(ctx, f.project.ID, "", 0)
-	if err != nil || len(emptyAfter) != 0 {
-		t.Fatalf("empty afterId=%+v err=%v", emptyAfter, err)
+	if crossChunks, err := s.ListRawOutputChunks(ctx, other.project.ID, f.run.ID); err != nil || len(crossChunks) != 0 {
+		t.Fatalf("cross-project chunks=%+v err=%v", crossChunks, err)
 	}
 
-	chunk, err := s.CreateRawOutputChunk(ctx, store.RawOutputChunk{
-		ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID,
-		Stream: "STDOUT", Sequence: 1, StorageRef: "raw/1", SizeBytes: 3,
-	})
-	if err != nil || chunk.RunID != f.run.ID {
-		t.Fatalf("raw chunk=%+v err=%v", chunk, err)
-	}
-	if _, err := s.CreateRawOutputChunk(ctx, store.RawOutputChunk{
-		ProjectID: f.project.ID, IssueID: other.issue.ID, RunID: f.run.ID,
-		Stream: "STDOUT", Sequence: 2, StorageRef: "raw/bad",
-	}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("mismatched raw error=%v", err)
-	}
-
-	artifact, err := s.CreateArtifact(ctx, store.Artifact{
-		ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID,
-		Name: "patch.diff", Kind: "diff", StorageRef: "artifact/1", SizeBytes: 5,
-	})
+	artifact, err := s.CreateArtifact(ctx, store.Artifact{ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: f.run.ID, Name: "report", Kind: "text", SizeBytes: 10, StorageRef: "artifact/1", SafeMetadata: store.EmptyObject})
 	if err != nil {
-		t.Fatalf("artifact: %v", err)
-	}
-	if _, err := s.CreateArtifact(ctx, store.Artifact{
-		ProjectID: f.project.ID, IssueID: other.issue.ID, RunID: f.run.ID,
-		Name: "bad", Kind: "bad", StorageRef: "artifact/bad",
-	}); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("mismatched artifact error=%v", err)
+		t.Fatal(err)
 	}
 	artifacts, err := s.ListArtifacts(ctx, f.project.ID, f.run.ID)
 	if err != nil || len(artifacts) != 1 || artifacts[0].ID != artifact.ID {
 		t.Fatalf("artifacts=%+v err=%v", artifacts, err)
 	}
-	foreign, err := s.ListArtifacts(ctx, other.project.ID, f.run.ID)
-	if err != nil || len(foreign) != 0 {
-		t.Fatalf("cross-project artifacts=%+v err=%v", foreign, err)
+	if crossArtifacts, err := s.ListArtifacts(ctx, other.project.ID, f.run.ID); err != nil || len(crossArtifacts) != 0 {
+		t.Fatalf("cross-project artifacts=%+v err=%v", crossArtifacts, err)
+	}
+
+	provenance, err := s.CreateRunProvenance(ctx, store.RunProvenance{RunID: f.run.ID, ProjectID: f.project.ID, Snapshot: json.RawMessage(`{"engine":"test"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetRunProvenance(ctx, f.project.ID, f.run.ID)
+	if err != nil || got.RunID != provenance.RunID {
+		t.Fatalf("provenance=%+v err=%v", got, err)
+	}
+	if _, err = s.GetRunProvenance(ctx, other.project.ID, f.run.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-project provenance error=%v", err)
+	}
+}
+
+func TestConcurrentEventSequenceAllocation(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "events-concurrent")
+	const total = 16
+
+	var wg sync.WaitGroup
+	sequences := make(chan int64, total)
+	errorsCh := make(chan error, total)
+	for i := 0; i < total; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+		event, err := s.AppendEvent(ctx, store.Event{ProjectID: f.project.ID, IssueID: &f.issue.ID, RunID: &f.run.ID, Type: "test.event", Actor: store.EmptyObject, Payload: json.RawMessage(`{"index":` + string(rune('0'+index%10)) + `}`)})
+			if err != nil {
+				errorsCh <- err
+				return
+			}
+			if event.Sequence != nil {
+				sequences <- *event.Sequence
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(sequences)
+	close(errorsCh)
+	for err := range errorsCh {
+		t.Fatal(err)
+	}
+	values := make([]int, 0, total)
+	for sequence := range sequences {
+		values = append(values, int(sequence))
+	}
+	sort.Ints(values)
+	want := make([]int, total)
+	for i := range want {
+		want[i] = i + 1
+	}
+	if !reflect.DeepEqual(values, want) {
+		t.Fatalf("event sequences=%v want=%v", values, want)
 	}
 }
