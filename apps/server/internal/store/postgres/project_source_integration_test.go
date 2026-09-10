@@ -7,6 +7,34 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+func TestExistingProjectWithoutSourceFieldsReadsAsLocal(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+
+	var projectID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO projects (name, issue_prefix, repository_path, default_branch)
+		VALUES ('Existing Project', 'OLD', '/repo/existing', 'main')
+		RETURNING id::text
+	`).Scan(&projectID); err != nil {
+		t.Fatalf("insert existing Project: %v", err)
+	}
+
+	project, err := New(pool).GetProject(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetProject(existing): %v", err)
+	}
+	if project.SourceType != store.ProjectSourceLocal {
+		t.Fatalf("sourceType = %q, want %q", project.SourceType, store.ProjectSourceLocal)
+	}
+	if project.CloneURL != nil || project.SourceRef != nil {
+		t.Fatalf("existing local Project has Git source fields: cloneURL=%v sourceRef=%v", project.CloneURL, project.SourceRef)
+	}
+	if project.RepositoryPath != "/repo/existing" || project.DefaultBranch != "main" {
+		t.Fatalf("existing local fields = repositoryPath %q defaultBranch %q", project.RepositoryPath, project.DefaultBranch)
+	}
+}
+
 func TestProjectSourcesRoundTripThroughStore(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
