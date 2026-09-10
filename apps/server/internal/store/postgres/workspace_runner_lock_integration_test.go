@@ -13,6 +13,7 @@ func TestRunnerWorkspaceOwnershipFencesGenericWriters(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "runner-workspace-lock")
+	enqueueWorkspaceOwnerJob(t, s, f)
 	runner, err := s.CreateRunner(ctx, store.Runner{Name: "runner-workspace-lock", TokenHash: make([]byte, 32)})
 	if err != nil {
 		t.Fatalf("create runner: %v", err)
@@ -83,6 +84,7 @@ func TestWorkspaceWriterAdmissionCannotRaceGenericMutation(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "runner-workspace-admission")
+	enqueueWorkspaceOwnerJob(t, s, f)
 	runner, err := s.CreateRunner(ctx, store.Runner{Name: "runner-workspace-admission", TokenHash: make([]byte, 32)})
 	if err != nil {
 		t.Fatalf("create runner: %v", err)
@@ -119,5 +121,17 @@ func TestWorkspaceWriterAdmissionCannotRaceGenericMutation(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("runner ownership did not proceed after generic mutation released")
+	}
+}
+
+func enqueueWorkspaceOwnerJob(t *testing.T, s *Store, f runFixture) {
+	t.Helper()
+	if _, err := s.EnqueueJob(context.Background(), store.SchedulerJob{
+		ProjectID:      f.project.ID,
+		RunID:          f.run.ID,
+		Kind:           "START",
+		IdempotencyKey: "workspace-owner-" + f.run.ID,
+	}); err != nil {
+		t.Fatalf("enqueue workspace owner job: %v", err)
 	}
 }
