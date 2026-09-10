@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, watch } from 'vue'
-import type { RunActivityItem, ToolActivityItem } from '../utils/events'
+import type { GenericActivityItem, RunActivityItem, ToolActivityItem } from '../utils/events'
 import { eventActivityIcon, formatActivityTime, toolActivityIcon } from '../utils/events'
 import { useStickToBottom } from '../composables/useStickToBottom'
 
@@ -32,6 +32,23 @@ function todoStatusClass(status: string) {
   if (status === 'in_progress') return 'text-default'
   if (status === 'completed' || status === 'cancelled') return 'text-muted line-through'
   return 'text-muted'
+}
+
+function workspaceTransferPercent(item: GenericActivityItem) {
+  if (item.event.type !== 'workspace.transfer.progress') return undefined
+  const transferred = item.event.payload?.bytesTransferred
+  const total = item.event.payload?.totalBytes
+  if (typeof transferred !== 'number' || typeof total !== 'number' || !Number.isFinite(transferred) || !Number.isFinite(total) || total <= 0) {
+    return undefined
+  }
+  return Math.max(0, Math.min(100, Math.round((transferred / total) * 100)))
+}
+
+function workspaceTransferIcon(type: string) {
+  if (type === 'workspace.transfer.failed') return 'i-lucide-circle-x'
+  if (type === 'workspace.transfer.completed') return 'i-lucide-circle-check'
+  if (type === 'workspace.transfer.progress') return 'i-lucide-loader-circle'
+  return 'i-lucide-folder-sync'
 }
 </script>
 
@@ -148,6 +165,33 @@ function todoStatusClass(status: string) {
               </p>
               <p v-else-if="item.status === 'cancelled'" class="mt-2 text-xs text-muted">cancelled</p>
               <p v-else-if="item.status === 'open'" class="mt-2 text-xs text-muted">waiting for answer</p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-else-if="item.kind === 'event' && item.event.type.startsWith('workspace.transfer.')"
+          class="py-1"
+          :data-workspace-transfer-status="item.event.type.slice('workspace.transfer.'.length)"
+        >
+          <div class="flex min-w-0 items-start gap-2">
+            <UIcon
+              :name="workspaceTransferIcon(item.event.type)"
+              class="mt-0.5 size-3.5 shrink-0"
+              :class="item.event.type === 'workspace.transfer.progress' ? 'animate-spin text-primary' : item.event.type === 'workspace.transfer.failed' ? 'text-error' : 'text-muted'"
+              aria-hidden="true"
+            />
+            <div class="min-w-0 flex-1">
+              <div class="flex min-w-0 items-center gap-2 overflow-hidden">
+                <span class="min-w-0 truncate font-medium">{{ item.title }}</span>
+                <span v-if="item.description" class="min-w-0 truncate font-mono text-xs text-muted">{{ item.description }}</span>
+              </div>
+              <UProgress
+                v-if="workspaceTransferPercent(item) != null"
+                class="mt-1"
+                :model-value="workspaceTransferPercent(item)"
+                :max="100"
+              />
             </div>
           </div>
         </div>
