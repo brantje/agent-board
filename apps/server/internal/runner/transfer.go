@@ -47,6 +47,18 @@ func (c *Connection) SendTransfer(ctx context.Context, sessionID, transferID, di
 	return c.write(protocol.TypeTransferEnd, sessionID, protocol.TransferEnd{TransferID: transferID})
 }
 
+// AcknowledgeTransferApplied is sent only after the server has verified and
+// successfully applied a from_runner bundle. It is the Runner's cleanup boundary.
+func (c *Connection) AcknowledgeTransferApplied(ctx context.Context, sessionID, transferID string) error {
+	if c == nil || sessionID == "" || transferID == "" {
+		return fmt.Errorf("runner transfer acknowledgement requires session and transfer ids")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return c.write(protocol.TypeTransferApplied, sessionID, protocol.TransferApplied{TransferID: transferID})
+}
+
 func (c *Connection) ReceiveTransfer(ctx context.Context, sessionID string, onProgress TransferProgressFunc) (transferID string, payload []byte, err error) {
 	if c == nil || sessionID == "" {
 		return "", nil, fmt.Errorf("runner transfer requires session id")
