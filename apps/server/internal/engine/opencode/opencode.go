@@ -196,7 +196,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			cancelNativeSession(ctx, native, session.ID, state)
 			return engine.Result{}, ctx.Err()
 		case <-statePoll.C:
-			hadPending, err := reconcilePendingQuestions(ctx, native, session.ID, state)
+			hadPending, err := reconcilePendingQuestionsForPoll(ctx, native, session.ID, state)
 			if err != nil {
 				return engine.Result{}, err
 			}
@@ -205,8 +205,11 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				inactivePolls = 0
 				continue
 			}
-			active, err := native.SessionActive(ctx, session.ID)
+			active, err := queryNativeSessionActive(ctx, native, session.ID)
 			if err != nil {
+				if isTransientNativePollTimeout(ctx, err) {
+					continue
+				}
 				statePollFailures++
 				inactivePolls = 0
 				if statePollFailures >= nativeStatePollFailureLimit {
@@ -260,18 +263,20 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			}
 			if idle {
 				if !executionObserved {
-					active, err := native.SessionActive(ctx, session.ID)
+					active, err := queryNativeSessionActive(ctx, native, session.ID)
 					if err != nil {
-						return engine.Result{}, fmt.Errorf("opencode engine: query native session activity before idle handling: %w", err)
-					}
-					if !active {
+						if !isTransientNativePollTimeout(ctx, err) {
+							return engine.Result{}, fmt.Errorf("opencode engine: query native session activity before idle handling: %w", err)
+						}
+					} else if !active {
 						return engine.Result{}, fmt.Errorf("opencode engine: native session became idle before execution started")
+					} else {
+						executionObserved = true
+						promptStallPolls = 0
+						inactivePolls = 0
 					}
-					executionObserved = true
-					promptStallPolls = 0
-					inactivePolls = 0
 				}
-				hadPending, err := reconcilePendingQuestions(ctx, native, session.ID, state)
+				hadPending, err := reconcilePendingQuestionsForPoll(ctx, native, session.ID, state)
 				if err != nil {
 					return engine.Result{}, err
 				}
@@ -502,6 +507,30 @@ func reconnectEvents(ctx context.Context, native *client.Client) (*client.EventS
 	return nil, fmt.Errorf("opencode engine: reconnect native event stream: %w", lastErr)
 }
 
+func nativeStatePollContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, nativeStatePollInterval)
+}
+
+func isTransientNativePollTimeout(parent context.Context, err error) bool {
+	return err != nil && parent.Err() == nil && errors.Is(err, context.DeadlineExceeded)
+}
+
+func queryNativeSessionActive(ctx context.Context, native *client.Client, sessionID string) (bool, error) {
+	pollCtx, cancel := nativeStatePollContext(ctx)
+	defer cancel()
+	return native.SessionActive(pollCtx, sessionID)
+}
+
+func reconcilePendingQuestionsForPoll(ctx context.Context, native *client.Client, sessionID string, state *runState) (bool, error) {
+	pollCtx, cancel := nativeStatePollContext(ctx)
+	defer cancel()
+	hadPending, err := reconcilePendingQuestions(pollCtx, native, sessionID, state)
+	if isTransientNativePollTimeout(ctx, err) {
+		return false, nil
+	}
+	return hadPending, err
+}
+
 func reconcilePendingQuestions(ctx context.Context, native *client.Client, sessionID string, state *runState) (bool, error) {
 	pending, err := native.ListQuestions(ctx, sessionID)
 	if err != nil {
@@ -563,7 +592,7 @@ type eventReadResult struct {
 }
 
 func readEvents(ctx context.Context, stream *client.EventStream) <-chan eventReadResult {
-	reads := make(chan eventReadResult, 1)
+	reads := make(chan eventReadResult, 64)
 	go func() {
 		for {
 			event, err := stream.Next()

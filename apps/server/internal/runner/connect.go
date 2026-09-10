@@ -18,7 +18,7 @@ import (
 const (
 	sessionConnectFeature = "session_connect"
 	connectWriteChunkSize = 32 * 1024
-	connectReadQueueDepth = 32
+	connectReadQueueDepth = 256
 )
 
 var (
