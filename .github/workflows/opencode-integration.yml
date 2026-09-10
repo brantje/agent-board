@@ -102,6 +102,17 @@ jobs:
           --file apps/agent-runner/Dockerfile
           --tag agent-board-opencode-runtime:ci
           .
+      - name: Expose pinned OpenCode binary to runner E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          container="$(docker create agent-board-opencode-runtime:ci)"
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+          mkdir -p "$RUNNER_TEMP/opencode-bin"
+          docker cp "$container:/usr/local/bin/opencode" "$RUNNER_TEMP/opencode-bin/opencode"
+          chmod 0755 "$RUNNER_TEMP/opencode-bin/opencode"
+          "$RUNNER_TEMP/opencode-bin/opencode" --version
+          echo "$RUNNER_TEMP/opencode-bin" >> "$GITHUB_PATH"
       - name: Run real OpenCode/OpenRouter integration suite
         working-directory: apps/server
         env:
@@ -112,8 +123,8 @@ jobs:
           AGENT_BOARD_TEST_OPENCODE_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          if timeout --signal=TERM --kill-after=10s 480s \
-            go test -count=1 -failfast -run '^TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)$' -v ./internal/runexec; then
+          if timeout --signal=TERM --kill-after=10s 780s \
+            go test -count=1 -failfast -run '^(TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)|TestOpenCode(RunnerNormalCodingRun|InternalRunnerNormalCodingRun))$' -v ./internal/runexec; then
             exit 0
           fi
 
