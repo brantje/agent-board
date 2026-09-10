@@ -123,11 +123,60 @@ func (s *Store) CreateExecutionSession(ctx context.Context, input store.Executio
 	if cwd == "" {
 		cwd = "/workspace"
 	}
-	return scanExecutionSession(s.pool.QueryRow(ctx, `
+
+	// The live Execution Session is the durable writer-ownership record for an
+	// Issue Workspace. Serialize creation through the Workspace row so two Runs
+	// sharing one Issue cannot both acquire writer ownership concurrently.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return store.ExecutionSession{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var workspaceID string
+	if err := tx.QueryRow(ctx, `
+		SELECT workspace.id::text
+		FROM runs AS run
+		JOIN workspaces AS workspace
+		  ON workspace.project_id = run.project_id
+		 AND workspace.id = run.workspace_id
+		WHERE run.project_id = $1 AND run.id = $2
+		FOR UPDATE OF workspace
+	`, input.ProjectID, input.RunID).Scan(&workspaceID); err != nil {
+		return store.ExecutionSession{}, notFound(err)
+	}
+
+	var writerActive bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM execution_sessions AS session
+			JOIN runs AS run
+			  ON run.project_id = session.project_id
+			 AND run.id = session.run_id
+			WHERE run.project_id = $1
+			  AND run.workspace_id = $2
+			  AND session.status IN ('PENDING', 'STARTING', 'RUNNING')
+		)
+	`, input.ProjectID, workspaceID).Scan(&writerActive); err != nil {
+		return store.ExecutionSession{}, err
+	}
+	if writerActive {
+		return store.ExecutionSession{}, store.ErrConflict
+	}
+
+	created, err := scanExecutionSession(tx.QueryRow(ctx, `
 		INSERT INTO execution_sessions (project_id, run_id, runtime_instance_id, runner_id, status, cwd, command_argv, exit_code)
 		VALUES ($1, $2, nullif($3, '')::uuid, nullif($4, '')::uuid, $5, $6, $7, $8)
 		RETURNING id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
 	`, input.ProjectID, input.RunID, input.RuntimeInstanceID, input.RunnerID, status, cwd, arrayJSON(input.CommandArgv), input.ExitCode))
+	if err != nil {
+		return store.ExecutionSession{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.ExecutionSession{}, err
+	}
+	return created, nil
 }
 
 func (s *Store) CreateQuestion(ctx context.Context, input store.Question) (store.Question, error) {
