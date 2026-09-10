@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"os/exec"
@@ -40,14 +41,22 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 	}
 
 	// This staging state existed before the Runner started and is therefore
-	// present on both sides of the transfer.
+	// present on both sides of the transfer. It remains authoritative on the
+	// server and must not be replaced by staging the Runner performs later.
 	writeMode(t, filepath.Join(source, "preexisting.txt"), "staged before runner\n", 0o644)
 	runTransferGit(t, source, "add", "preexisting.txt")
 	writeMode(t, filepath.Join(destination, "preexisting.txt"), "staged before runner\n", 0o644)
 	runTransferGit(t, destination, "add", "preexisting.txt")
+	destinationHead := gitOutput(t, destination, "rev-parse", "HEAD")
+	destinationCachedBefore := gitOutput(t, destination, "diff", "--cached", "--binary")
+	destinationIndexBefore, err := os.ReadFile(filepath.Join(destination, ".git", "index"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Simulate Runner-owned changes spanning staged, unstaged, untracked and
-	// deleted files.
+	// deleted files. Runner staging is transport input, not permission to mutate
+	// the authoritative server index on sync-back.
 	writeMode(t, filepath.Join(source, "staged.go"), "package staged\nfunc changed() {}\n", 0o644)
 	runTransferGit(t, source, "add", "staged.go")
 	writeMode(t, filepath.Join(source, "tracked.go"), "package main\nfunc changed() {}\n", 0o644)
@@ -61,9 +70,6 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 	}
 	writeMode(t, filepath.Join(source, "build", "out.bin"), "cache\n", 0o644)
 
-	sourceStaged := gitOutput(t, source, "diff", "--cached", "--binary")
-	sourceUnstaged := gitOutput(t, source, "diff", "--binary")
-	sourceStatus := gitOutput(t, source, "status", "--porcelain=v1")
 	payload, err := git.TransferSnapshot(ctx, source, "xfer-1")
 	if err != nil {
 		t.Fatal(err)
@@ -108,24 +114,39 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 		t.Fatalf("tracked modification missing: %s %v", body, err)
 	}
 
-	destinationHead := gitOutput(t, destination, "rev-parse", "HEAD")
 	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
 		t.Fatal(err)
 	}
 	if got := gitOutput(t, destination, "rev-parse", "HEAD"); got != destinationHead {
 		t.Fatalf("sync-back advanced authoritative HEAD: before=%s after=%s", destinationHead, got)
 	}
-	if got := gitOutput(t, destination, "diff", "--cached", "--binary"); got != sourceStaged {
-		t.Fatalf("sync-back staged state mismatch\nwant=%s\ngot=%s", sourceStaged, got)
+	if got := gitOutput(t, destination, "diff", "--cached", "--binary"); got != destinationCachedBefore {
+		t.Fatalf("sync-back changed authoritative staging\nwant=%s\ngot=%s", destinationCachedBefore, got)
 	}
-	if got := gitOutput(t, destination, "diff", "--binary"); got != sourceUnstaged {
-		t.Fatalf("sync-back unstaged state mismatch\nwant=%s\ngot=%s", sourceUnstaged, got)
+	destinationIndexAfter, err := os.ReadFile(filepath.Join(destination, ".git", "index"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if got := gitOutput(t, destination, "status", "--porcelain=v1"); got != sourceStatus {
-		t.Fatalf("sync-back status mismatch\nwant=%s\ngot=%s", sourceStatus, got)
+	if !bytes.Equal(destinationIndexBefore, destinationIndexAfter) {
+		t.Fatal("sync-back mutated authoritative .git/index bytes")
+	}
+	status := gitOutput(t, destination, "status", "--porcelain=v1")
+	for _, expected := range []string{
+		"M  preexisting.txt",
+		" M staged.go",
+		" M tracked.go",
+		" D deleted.go",
+		"?? notes.md",
+	} {
+		if !strings.Contains(status, expected) {
+			t.Fatalf("sync-back status missing %q in:\n%s", expected, status)
+		}
 	}
 	if _, err := os.Stat(filepath.Join(destination, "notes.md")); err != nil {
 		t.Fatal("sync-back did not apply untracked file")
+	}
+	if _, err := os.Stat(filepath.Join(destination, "deleted.go")); !os.IsNotExist(err) {
+		t.Fatalf("sync-back did not preserve Runner deletion: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(destination, "ignored.txt")); !os.IsNotExist(err) {
 		t.Fatal("ignored file appeared after apply")
@@ -135,6 +156,13 @@ func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) 
 	}
 	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
 		t.Fatal(err)
+	}
+	indexAfterSecondApply, err := os.ReadFile(filepath.Join(destination, ".git", "index"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(destinationIndexBefore, indexAfterSecondApply) {
+		t.Fatal("idempotent sync-back mutated authoritative .git/index bytes")
 	}
 	if err := git.ApplyTransferBundle(ctx, destination, nil); err != nil {
 		t.Fatal(err)
