@@ -102,24 +102,24 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 }
 
 func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
-	raw, err := c.getRawJSON(ctx, "/session")
+	raw, err := c.getRawJSON(ctx, "/api/session")
 	if isNotFound(err) {
-		raw, err = c.getRawJSON(ctx, "/api/session")
+		raw, err = c.getRawJSON(ctx, "/session")
 	}
 	if err != nil {
 		return nil, err
 	}
-	var sessions []Session
-	if err := json.Unmarshal(raw, &sessions); err == nil {
-		return sessions, nil
-	}
 	var wrapped struct {
 		Data []Session `json:"data"`
 	}
-	if err := json.Unmarshal(raw, &wrapped); err != nil {
+	if err := json.Unmarshal(raw, &wrapped); err == nil && wrapped.Data != nil {
+		return wrapped.Data, nil
+	}
+	var sessions []Session
+	if err := json.Unmarshal(raw, &sessions); err != nil {
 		return nil, fmt.Errorf("opencode: decode session list: %w", err)
 	}
-	return wrapped.Data, nil
+	return sessions, nil
 }
 
 func (c *Client) CreateSession(ctx context.Context, request CreateSessionRequest) (Session, error) {
@@ -154,84 +154,79 @@ func (c *Client) Prompt(ctx context.Context, sessionID, text string) error {
 		return fmt.Errorf("opencode: session id and prompt are required")
 	}
 
-	// The documented headless server API starts execution through prompt_async.
-	// The selected model is already stored on the native session by CreateSession,
-	// so omitting model here preserves the exact configured provider/model without
-	// manufacturing another turn or issuing another model call.
-	type textPart struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	}
-	payload := struct {
-		Parts []textPart `json:"parts"`
-	}{Parts: []textPart{{Type: "text", Text: text}}}
-	path := "/session/" + url.PathEscape(sessionID) + "/prompt_async"
-	if err := c.doJSON(ctx, http.MethodPost, path, payload, nil); err == nil {
-		return nil
-	} else if !isNotFound(err) {
-		return err
-	}
-
-	// Keep a narrow compatibility fallback for OpenCode builds that predate the
-	// documented headless prompt_async route. The pinned Runtime uses the path above.
-	fallbackPayload := struct {
+	// CreateSession uses OpenCode's V2 session API, so prompt that same session
+	// through the V2 execution coordinator. Mixing a V2-created session with the
+	// legacy prompt_async runner can leave the two activity surfaces disagreeing
+	// about whether the turn is complete.
+	v2Payload := struct {
 		Prompt struct {
 			Text string `json:"text"`
 		} `json:"prompt"`
 		Delivery string `json:"delivery"`
 	}{}
-	fallbackPayload.Prompt.Text = text
-	fallbackPayload.Delivery = "steer"
-	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/prompt", fallbackPayload, nil)
+	v2Payload.Prompt.Text = text
+	v2Payload.Delivery = "steer"
+	v2Path := "/api/session/" + url.PathEscape(sessionID) + "/prompt"
+	if err := c.doJSON(ctx, http.MethodPost, v2Path, v2Payload, nil); err == nil {
+		return nil
+	} else if !isNotFound(err) {
+		return err
+	}
+
+	// Compatibility fallback for OpenCode builds without the V2 prompt route.
+	type textPart struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	legacyPayload := struct {
+		Parts []textPart `json:"parts"`
+	}{Parts: []textPart{{Type: "text", Text: text}}}
+	return c.doJSON(ctx, http.MethodPost, "/session/"+url.PathEscape(sessionID)+"/prompt_async", legacyPayload, nil)
 }
 
-// SessionActive follows the same documented headless execution surface as
-// Prompt. The pinned OpenCode Runtime exposes the legacy SessionPrompt lifecycle
-// through /session/status; polling /api/session/active would observe the separate
-// V2 execution coordinator and can report this prompt inactive while it is busy.
+// SessionActive follows the same execution coordinator as Prompt. A successful
+// V2 active response is authoritative even when the session is absent: absence
+// means that V2 execution is idle. Only a missing V2 route may fall back to the
+// legacy status API.
 func (c *Client) SessionActive(ctx context.Context, sessionID string) (bool, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return false, fmt.Errorf("opencode: session id is required")
 	}
-	type status struct {
-		Type string `json:"type"`
+	var response struct {
+		Data map[string]json.RawMessage `json:"data"`
 	}
-	var statuses map[string]status
-	if err := c.doJSON(ctx, http.MethodGet, "/session/status", nil, &statuses); err == nil {
-		current, ok := statuses[sessionID]
-		if ok {
-			return current.Type != "" && current.Type != "idle", nil
-		}
+	if err := c.doJSON(ctx, http.MethodGet, "/api/session/active", nil, &response); err == nil {
+		_, active := response.Data[sessionID]
+		return active, nil
 	} else if !isNotFound(err) {
 		return false, err
 	}
 
-	// Compatibility fallback for OpenCode builds without the documented status
-	// endpoint, and for V2-created sessions that are absent from /session/status.
-	var response struct {
-		Data map[string]json.RawMessage `json:"data"`
+	type status struct {
+		Type string `json:"type"`
 	}
-	if err := c.doJSON(ctx, http.MethodGet, "/api/session/active", nil, &response); err != nil {
+	var statuses map[string]status
+	if err := c.doJSON(ctx, http.MethodGet, "/session/status", nil, &statuses); err != nil {
 		if isNotFound(err) {
 			return false, nil
 		}
 		return false, err
 	}
-	_, active := response.Data[sessionID]
-	return active, nil
+	current, ok := statuses[sessionID]
+	return ok && current.Type != "" && current.Type != "idle", nil
 }
 
 func (c *Client) InterruptSession(ctx context.Context, sessionID string) error {
 	if strings.TrimSpace(sessionID) == "" {
 		return fmt.Errorf("opencode: session id is required")
 	}
-	path := "/session/" + url.PathEscape(sessionID) + "/abort"
-	if err := c.doJSON(ctx, http.MethodPost, path, nil, nil); err == nil {
+	v2Path := "/api/session/" + url.PathEscape(sessionID) + "/interrupt"
+	if err := c.doJSON(ctx, http.MethodPost, v2Path, nil, nil); err == nil {
 		return nil
 	} else if !isNotFound(err) {
 		return err
 	}
-	return c.doJSON(ctx, http.MethodPost, "/api/session/"+url.PathEscape(sessionID)+"/interrupt", nil, nil)
+	return c.doJSON(ctx, http.MethodPost, "/session/"+url.PathEscape(sessionID)+"/abort", nil, nil)
 }
 
 func (c *Client) ListQuestions(ctx context.Context, sessionID string) ([]QuestionRequest, error) {
@@ -239,8 +234,8 @@ func (c *Client) ListQuestions(ctx context.Context, sessionID string) ([]Questio
 		return nil, fmt.Errorf("opencode: session id is required")
 	}
 
-	// prompt_async executes through OpenCode's native Question.Service, whose
-	// documented headless list route is instance-scoped. Filter it to the exact
+	// OpenCode 1.18.x exposes Question.Service through the instance-scoped
+	// /question routes for both session execution paths. Filter to the exact
 	// session owned by this Agent Board Run before exposing requests upstream.
 	var pending []QuestionRequest
 	if err := c.doJSON(ctx, http.MethodGet, "/question", nil, &pending); err == nil {
@@ -255,8 +250,7 @@ func (c *Client) ListQuestions(ctx context.Context, sessionID string) ([]Questio
 		return nil, err
 	}
 
-	// Compatibility fallback for V2-only OpenCode builds and deterministic
-	// fixtures written against the newer session-scoped API.
+	// Compatibility fallback for builds that expose only a session-scoped API.
 	var response struct {
 		Data []QuestionRequest `json:"data"`
 	}
