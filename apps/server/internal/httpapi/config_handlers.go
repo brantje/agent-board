@@ -147,8 +147,8 @@ func (a *api) updateProject(w http.ResponseWriter, r *http.Request) {
 	if req.CloneURL != nil {
 		current.CloneURL = req.CloneURL
 	}
-	if req.SourceRef != nil {
-		current.SourceRef = req.SourceRef
+	if req.SourceRef.Set {
+		current.SourceRef = req.SourceRef.Value
 	}
 	if req.RepositoryPath != nil {
 		current.RepositoryPath = *req.RepositoryPath
@@ -589,7 +589,7 @@ func (a *api) getAgent(w http.ResponseWriter, r *http.Request, scope *string) {
 	writeJSON(w, 200, agentDTO(v))
 }
 func (a *api) updateAgent(w http.ResponseWriter, r *http.Request, scope *string) {
-	id, ok := resourceID(w, r)
+	id, ok := resourceID(w, r, "resourceID")
 	if !ok {
 		return
 	}
