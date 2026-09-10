@@ -19,6 +19,10 @@ type runtimeRunnerGenerationStore interface {
 	UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(context.Context, string, string, string, int64, string) (store.RuntimeInstance, error)
 }
 
+type workspaceBootstrapLockStore interface {
+	AcquireWorkspaceBootstrapLock(context.Context, string) (store.WorkspaceBootstrapLock, error)
+}
+
 type runnerLookupStore interface {
 	GetRunner(context.Context, string) (store.Runner, error)
 }
@@ -137,7 +141,7 @@ func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx
 }
 
 func (s *RedactingStore) AcquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string) (store.WorkspaceBootstrapLock, error) {
-	base, ok := s.ControlPlaneStore.(store.WorkspaceBootstrapStore)
+	base, ok := s.ControlPlaneStore.(workspaceBootstrapLockStore)
 	if !ok {
 		return nil, fmt.Errorf("redacting store base does not support workspace bootstrap locks")
 	}
