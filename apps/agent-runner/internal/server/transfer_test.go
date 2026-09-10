@@ -64,6 +64,19 @@ func TestWorkspaceTransferExecutionAndCleanup(t *testing.T) {
 		t.Fatalf("runner Workspace removed before apply acknowledgement: %v", err)
 	}
 
+	send(t, conn, protocol.TypeTransferApplied, "session-1", protocol.TransferApplied{TransferID: "wrong-transfer"})
+	invalidAck := read(t, conn)
+	if invalidAck.Type != protocol.TypeError {
+		t.Fatalf("invalid acknowledgement response=%+v", invalidAck)
+	}
+	invalidAckPayload, err := protocol.DecodePayload[protocol.ErrorPayload](invalidAck)
+	if err != nil || invalidAckPayload.Code != "invalid_transfer_ack" {
+		t.Fatalf("invalid acknowledgement error=%+v err=%v", invalidAckPayload, err)
+	}
+	if _, err := os.Stat(sessionRoot); err != nil {
+		t.Fatalf("runner Workspace removed after invalid apply acknowledgement: %v", err)
+	}
+
 	send(t, conn, protocol.TypeTransferApplied, "session-1", protocol.TransferApplied{TransferID: returnedTransferID})
 	waitFor(t, 3*time.Second, func() bool {
 		_, err := os.Stat(sessionRoot)
