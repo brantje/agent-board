@@ -2,10 +2,11 @@ package httpapi
 
 import (
 	"encoding/json"
-	"github.com/brantje/agent-board/apps/server/internal/store"
-	"github.com/go-chi/chi/v5"
 	"net/http"
 	"time"
+
+	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/go-chi/chi/v5"
 )
 
 type RunnerDTO struct {
@@ -33,6 +34,13 @@ func (a *api) runnerDTO(v store.Runner) RunnerDTO {
 type runnerNameRequest struct {
 	Name string `json:"name"`
 }
+type runnerRegistrationRequest struct {
+	Token string `json:"token"`
+	Name  string `json:"name"`
+}
+type runnerRegistrationResponse struct {
+	Token string `json:"token"`
+}
 type runnerCredentialResponse struct {
 	Runner RunnerDTO `json:"runner"`
 	Token  string    `json:"token"`
@@ -41,9 +49,10 @@ type runnerCredentialResponse struct {
 func (a *api) registerRunnerRoutes(r chi.Router) {
 	r.Get("/projects/{projectID}/runners", a.getProjectRunners)
 	r.Put("/projects/{projectID}/runners", a.setProjectRunners)
+	r.Post("/runner/register", a.registerRunner)
 	r.Handle("/runner/ws", a.service.Runners.Connections)
 	r.Get("/runners", a.listRunners)
-	r.Post("/runners", a.createRunner)
+	r.Post("/runners", a.createRunnerRegistration)
 	r.Get("/runners/{resourceID}", a.getRunner)
 	r.Patch("/runners/{resourceID}", a.renameRunner)
 	r.Post("/runners/{resourceID}/rotate-token", a.rotateRunner)
@@ -103,18 +112,27 @@ func (a *api) listRunners(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, out)
 }
-func (a *api) createRunner(w http.ResponseWriter, r *http.Request) {
-	var req runnerNameRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	v, token, err := a.service.Runners.Create(r.Context(), req.Name)
+func (a *api) createRunnerRegistration(w http.ResponseWriter, r *http.Request) {
+	token, err := a.service.Runners.CreateRegistration(r.Context())
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 201, runnerCredentialResponse{a.runnerDTO(v), token})
+	writeJSON(w, http.StatusCreated, runnerRegistrationResponse{Token: token})
+}
+func (a *api) registerRunner(w http.ResponseWriter, r *http.Request) {
+	var req runnerRegistrationRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	v, token, err := a.service.Runners.Register(r.Context(), req.Token, req.Name)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusCreated, runnerCredentialResponse{Runner: a.runnerDTO(v), Token: token})
 }
 func (a *api) getRunner(w http.ResponseWriter, r *http.Request) {
 	id, ok := resourceID(w, r)
@@ -155,7 +173,7 @@ func (a *api) rotateRunner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, runnerCredentialResponse{a.runnerDTO(v), token})
+	writeJSON(w, 200, runnerCredentialResponse{Runner: a.runnerDTO(v), Token: token})
 }
 func (a *api) revokeRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, false) }
 func (a *api) deleteRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, true) }
