@@ -102,16 +102,20 @@ jobs:
           --file apps/agent-runner/Dockerfile
           --tag agent-board-opencode-runtime:ci
           .
-      - name: Expose pinned OpenCode binary to runner E2E
+      - name: Install pinned host OpenCode for runner E2E
         shell: bash
         run: |
           set -euo pipefail
-          container="$(docker create agent-board-opencode-runtime:ci)"
-          trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+          . apps/agent-runner/opencode.env
+          archive="$RUNNER_TEMP/opencode-linux-x64-baseline.tar.gz"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+            "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64-baseline.tar.gz" \
+            -o "$archive"
+          echo "${OPENCODE_SHA256_AMD64_GLIBC}  ${archive}" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/opencode-bin"
-          docker cp "$container:/usr/local/bin/opencode" "$RUNNER_TEMP/opencode-bin/opencode"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/opencode-bin" opencode
           chmod 0755 "$RUNNER_TEMP/opencode-bin/opencode"
-          "$RUNNER_TEMP/opencode-bin/opencode" --version
+          test "$("$RUNNER_TEMP/opencode-bin/opencode" --version)" = "$OPENCODE_VERSION"
           echo "$RUNNER_TEMP/opencode-bin" >> "$GITHUB_PATH"
       - name: Run real OpenCode/OpenRouter integration suite
         working-directory: apps/server
