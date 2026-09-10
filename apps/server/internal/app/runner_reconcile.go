@@ -11,6 +11,10 @@ import (
 
 var runnerReconnectTimeout = 5 * time.Minute
 
+type runnerDisconnectTracker interface {
+	DisconnectedSince(string) (time.Time, bool)
+}
+
 func (s *ExecutionSessionService) reconcileRunnerSession(ctx context.Context, session store.ExecutionSession) (*ExecutionProcess, error) {
 	if process, ok := s.liveProcess(session.ProjectID, session.ID); ok {
 		return process, nil
@@ -60,19 +64,13 @@ func (s *ExecutionSessionService) reconcileRunnerSession(ctx context.Context, se
 }
 
 func (s *ExecutionSessionService) failRunnerSessionAfterDisconnectTimeout(ctx context.Context, session store.ExecutionSession) error {
-	anchor := sessionAnchorTime(session)
-	if time.Since(anchor) >= runnerReconnectTimeout {
-		_, err := s.transition(ctx, session, []string{"STARTING", "RUNNING"}, "FAILED", nil)
-		return err
+	if tracker, ok := s.registry.(runnerDisconnectTracker); ok {
+		if disconnectedAt, known := tracker.DisconnectedSince(session.RunnerID); known && time.Since(disconnectedAt) >= runnerReconnectTimeout {
+			_, err := s.transition(ctx, session, []string{"STARTING", "RUNNING"}, "FAILED", nil)
+			return err
+		}
 	}
 	return NewError("execution_session_uncertain", "runner is disconnected while Execution Session reconciliation is pending", runner.ErrDisconnected)
-}
-
-func sessionAnchorTime(session store.ExecutionSession) time.Time {
-	if session.StartedAt != nil {
-		return *session.StartedAt
-	}
-	return session.UpdatedAt
 }
 
 func (s *ExecutionSessionService) TerminateRunnerSessions(ctx context.Context, runnerID string) error {
