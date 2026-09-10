@@ -71,6 +71,9 @@ func TestInternalCredentialIsGeneratedRotatedAndNotPublic(t *testing.T) {
 	if err != nil || !first.Internal {
 		t.Fatalf("managed runner: %v", err)
 	}
+	if first.RegisteredAt == nil || len(first.RegistrationTokenHash) != 0 {
+		t.Fatalf("internal runner entered pending enrollment: %#v", first)
+	}
 	hash := sha256.Sum256([]byte(token))
 	if string(hash[:]) != string(memory.value.TokenHash) {
 		t.Fatal("plaintext persisted")
