@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { reactive, ref } from 'vue'
 import type { Runner } from '../types/api'
 import { apiRequest } from '../utils/api'
 import { useResource } from '../composables/useResource'
@@ -9,7 +9,7 @@ const registrationToken = ref('')
 const creating = ref(false)
 const createError = ref<Error>()
 const editing = ref<Runner>()
-const name = ref('')
+const editState = reactive({ name: '' })
 const saving = ref(false)
 const saveError = ref<Error>()
 
@@ -31,27 +31,30 @@ async function createRegistration() {
 function edit(runner: Runner) {
   if (runner.internal) return
   editing.value = runner
-  name.value = runner.name
+  editState.name = runner.name
+  saveError.value = undefined
+}
+
+function resetEdit() {
+  editing.value = undefined
+  editState.name = ''
   saveError.value = undefined
 }
 
 function closeEdit() {
-  if (saving.value) return
-  editing.value = undefined
-  name.value = ''
-  saveError.value = undefined
+  if (!saving.value) resetEdit()
 }
 
 async function saveName() {
-  if (!editing.value || saving.value || !name.value.trim()) return
+  if (!editing.value || saving.value || !editState.name.trim()) return
   saving.value = true
   saveError.value = undefined
   try {
     await apiRequest<Runner>(`/api/runners/${editing.value.id}`, {
       method: 'PATCH',
-      body: { name: name.value.trim() }
+      body: { name: editState.name.trim() }
     })
-    closeEdit()
+    resetEdit()
     await refresh()
   } catch (failure) {
     saveError.value = failure as Error
@@ -105,14 +108,14 @@ async function saveName() {
 
     <UModal :open="!!editing" title="Edit runner" description="Change the display name for this registered runner." :dismissible="!saving" :close="!saving" @update:open="value => { if (!value) closeEdit() }">
       <template #body>
-        <UForm :state="{ name }" class="space-y-4" @submit="saveName">
+        <UForm :state="editState" class="space-y-4" @submit="saveName">
           <UAlert v-if="saveError" color="error" title="Unable to rename runner" :description="saveError.message" />
           <UFormField label="Name" name="name" required>
-            <UInput v-model="name" class="w-full" :disabled="saving" autofocus />
+            <UInput v-model="editState.name" class="w-full" :disabled="saving" autofocus />
           </UFormField>
           <div class="flex justify-end gap-2">
             <UButton label="Cancel" color="neutral" variant="outline" :disabled="saving" @click="closeEdit" />
-            <UButton label="Save runner" type="submit" :loading="saving" :disabled="!name.trim()" />
+            <UButton label="Save runner" type="submit" :loading="saving" :disabled="!editState.name.trim()" />
           </div>
         </UForm>
       </template>
