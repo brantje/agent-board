@@ -40,6 +40,12 @@ func (c *runnerOutboundFailureClient) SendTransfer(_ context.Context, _, _, dire
 	return c.err
 }
 
+type failingRunnerSyncConnector struct{ err error }
+
+func (c failingRunnerSyncConnector) Connect(context.Context, string, string) (runnerClient, error) {
+	return nil, c.err
+}
+
 func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 	t.Run("unknown engine fails before runner sync", func(t *testing.T) {
 		repo := initProcessTestRepository(t)
@@ -81,6 +87,27 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 		}
 		if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "agent.message") || hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
 			t.Fatalf("workspace lock failure events=%+v", storeFake.events)
+		}
+	})
+
+	t.Run("runner connection failure blocks workspace transfer and execution", func(t *testing.T) {
+		repo := initProcessTestRepository(t)
+		safe := processTestSafeContext(repo)
+		safe.Runtime = executioncontext.RuntimeContext{}
+		storeFake := &runnerSyncStore{}
+		processor := newRunnerSyncProcessor(t, repo, safe, storeFake, &successfulSyncClient{})
+		processor.runners = failingRunnerSyncConnector{err: errors.New("runner disconnected before transfer")}
+		run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "STARTING"}
+
+		result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run, RunnerID: "runner-1"}, processTestLifecycle{run: run})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.RunStatus != "FAILED" || result.FailureReason == nil {
+			t.Fatalf("runner disconnect result=%+v", result)
+		}
+		if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "agent.message") || hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
+			t.Fatalf("runner disconnect events=%+v", storeFake.events)
 		}
 	})
 
