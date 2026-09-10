@@ -71,6 +71,53 @@ func TestWorkspaceTransferExecutionAndCleanup(t *testing.T) {
 	})
 }
 
+func TestWorkspaceTransferFailureBlocksStartAndAllowsRetry(t *testing.T) {
+	_, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+	defer conn.Close()
+
+	payload := []byte("data")
+	send(t, conn, protocol.TypeTransferBegin, "session-retry", protocol.TransferBegin{
+		TransferID: "broken-transfer", Direction: "to_runner", TotalBytes: int64(len(payload)), Checksum: "wrong",
+	})
+	send(t, conn, protocol.TypeTransferChunk, "session-retry", protocol.TransferChunk{
+		TransferID: "broken-transfer", Data: base64.StdEncoding.EncodeToString(payload),
+	})
+	send(t, conn, protocol.TypeTransferEnd, "session-retry", protocol.TransferEnd{TransferID: "broken-transfer"})
+
+	failure := read(t, conn)
+	if failure.Type != protocol.TypeError {
+		t.Fatalf("corrupt transfer response=%+v", failure)
+	}
+	failurePayload, err := protocol.DecodePayload[protocol.ErrorPayload](failure)
+	if err != nil || failurePayload.Code != "transfer_failed" {
+		t.Fatalf("corrupt transfer error=%+v err=%v", failurePayload, err)
+	}
+
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	send(t, conn, protocol.TypeStart, "session-retry", protocol.StartRequest{Command: []string{"true"}, Dir: "/workspace"})
+	startFailure := read(t, conn)
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if startFailure.Type != protocol.TypeError {
+		t.Fatalf("start after corrupt transfer response=%+v", startFailure)
+	}
+	startPayload, err := protocol.DecodePayload[protocol.ErrorPayload](startFailure)
+	if err != nil || startPayload.Code != "start_failed" {
+		t.Fatalf("start after corrupt transfer error=%+v err=%v", startPayload, err)
+	}
+
+	writer := &connectionWriter{conn: conn}
+	if err := writer.sendTransfer(context.Background(), "session-retry", "retry-transfer", "to_runner", createGitBundlePayload(t)); err != nil {
+		t.Fatal(err)
+	}
+	send(t, conn, protocol.TypeStart, "session-retry", protocol.StartRequest{Command: []string{"true"}, Dir: "/workspace"})
+	waitForExit(t, conn, "session-retry")
+}
+
 func TestIncomingTransferRejectsCorruptPayload(t *testing.T) {
 	state := newTransferState()
 	if err := state.begin("session-1", protocol.TransferBegin{
