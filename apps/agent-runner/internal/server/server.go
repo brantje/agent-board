@@ -257,6 +257,8 @@ func (s *Server) handleMessage(writer *connectionWriter, msg protocol.Message) {
 		s.handleTransferChunk(writer, msg)
 	case protocol.TypeTransferEnd:
 		s.handleTransferEnd(writer, msg)
+	case protocol.TypeTransferApplied:
+		s.handleTransferApplied(writer, msg)
 	default:
 		writer.sendError("invalid_direction", "message type is not accepted from server", msg.SessionID)
 	}
