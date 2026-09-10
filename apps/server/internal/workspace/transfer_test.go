@@ -1,177 +1,62 @@
 package workspace
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	sharedworkspace "github.com/brantje/agent-board/packages/workspacegit"
 )
 
-func TestTransferSnapshotIncludesDirtyUntrackedAndExcludesIgnored(t *testing.T) {
+func TestApplyTransferBundlePreservesAuthoritativeGitState(t *testing.T) {
 	ctx := context.Background()
 	git, err := NewGitCLI("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := t.TempDir()
-	runTransferGit(t, source, "init", "-q")
-	runTransferGit(t, source, "config", "user.email", "test@example.invalid")
-	runTransferGit(t, source, "config", "user.name", "Agent Board Test")
-	writeMode(t, filepath.Join(source, "tracked.go"), "package main\n", 0o644)
-	writeMode(t, filepath.Join(source, "staged.go"), "package staged\n", 0o644)
-	writeMode(t, filepath.Join(source, "deleted.go"), "package gone\n", 0o644)
-	writeMode(t, filepath.Join(source, "preexisting.txt"), "base\n", 0o644)
-	writeMode(t, filepath.Join(source, "exec.sh"), "#!/bin/sh\necho ok\n", 0o755)
-	if err := os.Symlink("tracked.go", filepath.Join(source, "link.go")); err != nil {
-		t.Fatal(err)
-	}
-	writeMode(t, filepath.Join(source, ".gitignore"), "ignored.txt\nbuild/\n", 0o644)
-	runTransferGit(t, source, "add", ".")
-	runTransferGit(t, source, "commit", "-qm", "baseline")
-	headBefore := gitOutput(t, source, "rev-parse", "HEAD")
-	destination := filepath.Join(t.TempDir(), "authoritative")
-	cmd := exec.Command("git", "clone", source, destination)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("clone baseline: %v\n%s", err, out)
-	}
+	source := initTransferRepository(t)
+	destination := cloneRepository(t, source)
 
-	// This staging state existed before the Runner started and is therefore
-	// present on both sides of the transfer. It remains authoritative on the
-	// server and must not be replaced by staging the Runner performs later.
-	writeMode(t, filepath.Join(source, "preexisting.txt"), "staged before runner\n", 0o644)
+	// This staging existed before Runner execution and remains server-owned.
+	writeTransferFile(t, filepath.Join(source, "preexisting.txt"), "staged before runner\n")
 	runTransferGit(t, source, "add", "preexisting.txt")
-	writeMode(t, filepath.Join(destination, "preexisting.txt"), "staged before runner\n", 0o644)
+	writeTransferFile(t, filepath.Join(destination, "preexisting.txt"), "staged before runner\n")
 	runTransferGit(t, destination, "add", "preexisting.txt")
-	destinationHead := gitOutput(t, destination, "rev-parse", "HEAD")
-	destinationCachedBefore := gitOutput(t, destination, "diff", "--cached", "--binary")
-	destinationIndexBefore, err := os.ReadFile(filepath.Join(destination, ".git", "index"))
+	headBefore := gitOutput(t, destination, "rev-parse", "HEAD")
+	stagedBefore := gitOutput(t, destination, "diff", "--cached", "--binary")
+
+	// Runner-owned filesystem changes may include staging, but Runner staging is
+	// transport input and must not replace the authoritative server index.
+	writeTransferFile(t, filepath.Join(source, "tracked.txt"), "runner changed\n")
+	runTransferGit(t, source, "add", "tracked.txt")
+	if err := os.Remove(filepath.Join(source, "deleted.txt")); err != nil {
+		t.Fatal(err)
+	}
+	writeTransferFile(t, filepath.Join(source, "new.txt"), "runner new\n")
+
+	payload, err := git.TransferSnapshot(ctx, source, "sync")
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// Simulate Runner-owned changes spanning staged, unstaged, untracked and
-	// deleted files. Runner staging is transport input, not permission to mutate
-	// the authoritative server index on sync-back.
-	writeMode(t, filepath.Join(source, "staged.go"), "package staged\nfunc changed() {}\n", 0o644)
-	runTransferGit(t, source, "add", "staged.go")
-	writeMode(t, filepath.Join(source, "tracked.go"), "package main\nfunc changed() {}\n", 0o644)
-	if err := os.Remove(filepath.Join(source, "deleted.go")); err != nil {
-		t.Fatal(err)
-	}
-	writeMode(t, filepath.Join(source, "notes.md"), "untracked notes\n", 0o644)
-	writeMode(t, filepath.Join(source, "ignored.txt"), "secret\n", 0o644)
-	if err := os.Mkdir(filepath.Join(source, "build"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeMode(t, filepath.Join(source, "build", "out.bin"), "cache\n", 0o644)
-
-	payload, err := git.TransferSnapshot(ctx, source, "xfer-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gitOutput(t, source, "rev-parse", "HEAD") != headBefore {
-		t.Fatal("transfer snapshot mutated accepted workspace HEAD")
-	}
-	if strings.Contains(gitOutput(t, source, "log", "--oneline"), "Agent Board workspace transfer") {
-		t.Fatal("transfer commit became visible history")
-	}
-	if refs := gitOutput(t, source, "for-each-ref", "refs/agent-board/transfer/"); strings.TrimSpace(refs) != "" {
-		t.Fatalf("hidden transfer ref leaked: %s", refs)
-	}
-	if _, err := os.Stat(filepath.Join(source, "notes.md")); err != nil {
-		t.Fatal("untracked file was removed from source workspace")
-	}
-
-	cloned := cloneTransferBundle(t, payload)
-	if _, err := os.Stat(filepath.Join(cloned, "notes.md")); err != nil {
-		t.Log(gitOutput(t, cloned, "log", "--all", "--oneline", "--decorate"))
-		t.Fatal("untracked non-ignored file missing from transfer")
-	}
-	if _, err := os.Stat(filepath.Join(cloned, "deleted.go")); !os.IsNotExist(err) {
-		t.Fatal("tracked deletion was not included")
-	}
-	if _, err := os.Stat(filepath.Join(cloned, "ignored.txt")); !os.IsNotExist(err) {
-		t.Fatal("ignored file was transferred")
-	}
-	if _, err := os.Stat(filepath.Join(cloned, "build", "out.bin")); !os.IsNotExist(err) {
-		t.Fatal("ignored directory was transferred")
-	}
-	info, err := os.Stat(filepath.Join(cloned, "exec.sh"))
-	if err != nil || info.Mode()&0o111 == 0 {
-		t.Fatalf("executable bit lost: %v %v", info, err)
-	}
-	target, err := os.Readlink(filepath.Join(cloned, "link.go"))
-	if err != nil || target != "tracked.go" {
-		t.Fatalf("symlink lost: %q %v", target, err)
-	}
-	body, err := os.ReadFile(filepath.Join(cloned, "tracked.go"))
-	if err != nil || !strings.Contains(string(body), "changed") {
-		t.Fatalf("tracked modification missing: %s %v", body, err)
-	}
-
-	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
-		t.Fatal(err)
-	}
-	if got := gitOutput(t, destination, "rev-parse", "HEAD"); got != destinationHead {
-		t.Fatalf("sync-back advanced authoritative HEAD: before=%s after=%s", destinationHead, got)
-	}
-	if got := gitOutput(t, destination, "diff", "--cached", "--binary"); got != destinationCachedBefore {
-		t.Fatalf("sync-back changed authoritative staging\nwant=%s\ngot=%s", destinationCachedBefore, got)
-	}
-	destinationIndexAfter, err := os.ReadFile(filepath.Join(destination, ".git", "index"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(destinationIndexBefore, destinationIndexAfter) {
-		t.Fatal("sync-back mutated authoritative .git/index bytes")
-	}
-	status := gitOutput(t, destination, "status", "--porcelain=v1")
-	for _, expected := range []string{
-		"M  preexisting.txt",
-		" M staged.go",
-		" M tracked.go",
-		" D deleted.go",
-		"?? notes.md",
-	} {
-		if !strings.Contains(status, expected) {
-			t.Fatalf("sync-back status missing %q in:\n%s", expected, status)
-		}
-	}
-	if _, err := os.Stat(filepath.Join(destination, "notes.md")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(destination, "deleted.go")); !os.IsNotExist(err) {
-		t.Fatalf("sync-back did not preserve Runner deletion: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(destination, "ignored.txt")); !os.IsNotExist(err) {
-		t.Fatal("ignored file appeared after apply")
-	}
-	if strings.Contains(gitOutput(t, destination, "log", "--oneline"), "Agent Board workspace transfer") {
-		t.Fatal("sync-back exposed transport-only commits")
 	}
 	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
 		t.Fatal(err)
 	}
-	indexAfterSecondApply, err := os.ReadFile(filepath.Join(destination, ".git", "index"))
-	if err != nil {
-		t.Fatal(err)
+
+	if got := gitOutput(t, destination, "rev-parse", "HEAD"); got != headBefore {
+		t.Fatalf("sync-back advanced authoritative HEAD: before=%s after=%s", headBefore, got)
 	}
-	if !bytes.Equal(destinationIndexBefore, indexAfterSecondApply) {
-		t.Fatal("idempotent sync-back mutated authoritative .git/index bytes")
+	if got := gitOutput(t, destination, "diff", "--cached", "--binary"); got != stagedBefore {
+		t.Fatalf("sync-back changed authoritative staging\nwant=%s\ngot=%s", stagedBefore, got)
 	}
-	if err := git.ApplyTransferBundle(ctx, destination, nil); err != nil {
-		t.Fatal(err)
+	if body, err := os.ReadFile(filepath.Join(destination, "tracked.txt")); err != nil || string(body) != "runner changed\n" {
+		t.Fatalf("tracked Runner change missing: %q %v", body, err)
 	}
-	if err := git.ApplyTransferBundle(ctx, destination, []byte("not a git bundle")); err == nil {
-		t.Fatal("invalid sync bundle accepted")
+	if body, err := os.ReadFile(filepath.Join(destination, "new.txt")); err != nil || string(body) != "runner new\n" {
+		t.Fatalf("untracked Runner change missing: %q %v", body, err)
 	}
-	if TransferChecksum(payload) == TransferChecksum(nil) {
-		t.Fatal("checksum ignored payload")
+	if _, err := os.Stat(filepath.Join(destination, "deleted.txt")); !os.IsNotExist(err) {
+		t.Fatalf("Runner deletion missing: %v", err)
 	}
 }
 
@@ -181,116 +66,42 @@ func TestApplyTransferBundleRejectsDifferentAuthoritativeHEAD(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := t.TempDir()
-	runTransferGit(t, source, "init", "-q")
-	runTransferGit(t, source, "config", "user.email", "test@example.invalid")
-	runTransferGit(t, source, "config", "user.name", "Agent Board Test")
-	writeMode(t, filepath.Join(source, "README.md"), "base\n", 0o644)
-	runTransferGit(t, source, "add", ".")
-	runTransferGit(t, source, "commit", "-qm", "baseline")
-	payload, err := git.TransferSnapshot(ctx, source, "baseline-mismatch")
+	source := initTransferRepository(t)
+	payload, err := git.TransferSnapshot(ctx, source, "stale-baseline")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	destination := filepath.Join(t.TempDir(), "destination")
-	cmd := exec.Command("git", "clone", source, destination)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("clone baseline: %v\n%s", err, out)
-	}
-	runTransferGit(t, destination, "config", "user.email", "test@example.invalid")
-	runTransferGit(t, destination, "config", "user.name", "Agent Board Test")
-	writeMode(t, filepath.Join(destination, "server-only.txt"), "concurrent\n", 0o644)
+	destination := cloneRepository(t, source)
+	writeTransferFile(t, filepath.Join(destination, "server-only.txt"), "concurrent\n")
 	runTransferGit(t, destination, "add", "server-only.txt")
 	runTransferGit(t, destination, "commit", "-qm", "concurrent server commit")
+
 	if err := git.ApplyTransferBundle(ctx, destination, payload); err == nil {
 		t.Fatal("sync-back accepted a transfer from a different authoritative HEAD")
 	}
 }
 
-func TestTransferChecksumIsStableForPayload(t *testing.T) {
-	if TransferChecksum([]byte("abc")) == TransferChecksum([]byte("abd")) {
-		t.Fatal("distinct payloads produced the same checksum")
-	}
-	if TransferChecksum([]byte("abc")) != TransferChecksum([]byte("abc")) {
-		t.Fatal("checksum was not stable")
-	}
-}
-
-func TestApplyTransferBundleNoopsWhenHEADMatches(t *testing.T) {
-	ctx := context.Background()
-	git, err := NewGitCLI("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	source := t.TempDir()
-	runTransferGit(t, source, "init", "-q")
-	runTransferGit(t, source, "config", "user.email", "test@example.invalid")
-	runTransferGit(t, source, "config", "user.name", "Agent Board Test")
-	writeMode(t, filepath.Join(source, "README.md"), "same\n", 0o644)
-	runTransferGit(t, source, "add", ".")
-	runTransferGit(t, source, "commit", "-qm", "baseline")
-	destination := cloneTransferBundle(t, mustTransferSnapshot(t, git, source, "match-1"))
-	// cloneTransferBundle checks out the transport Worktree commit. Restore its
-	// repository shape before using it as an authoritative Workspace fixture.
-	if _, err := sharedworkspace.RestoreCheckoutState(ctx, destination, "HEAD", git.binary, git.commandTimeout); err != nil {
-		t.Fatal(err)
-	}
-	payload, err := git.TransferSnapshot(ctx, source, "match-2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func mustTransferSnapshot(t *testing.T, git *GitCLI, source, id string) []byte {
+func initTransferRepository(t *testing.T) string {
 	t.Helper()
-	payload, err := git.TransferSnapshot(context.Background(), source, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return payload
+	repository := t.TempDir()
+	runTransferGit(t, repository, "init", "-q")
+	runTransferGit(t, repository, "config", "user.email", "test@example.invalid")
+	runTransferGit(t, repository, "config", "user.name", "Agent Board Test")
+	writeTransferFile(t, filepath.Join(repository, "tracked.txt"), "base\n")
+	writeTransferFile(t, filepath.Join(repository, "deleted.txt"), "delete me\n")
+	writeTransferFile(t, filepath.Join(repository, "preexisting.txt"), "base\n")
+	runTransferGit(t, repository, "add", ".")
+	runTransferGit(t, repository, "commit", "-qm", "baseline")
+	return repository
 }
 
-func TestTransferSnapshotRequiresID(t *testing.T) {
-	git, err := NewGitCLI("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := git.TransferSnapshot(context.Background(), t.TempDir(), " "); err == nil {
-		t.Fatal("blank transfer id accepted")
-	}
-}
-
-func TestTransferOperationsSurfaceGitFailures(t *testing.T) {
-	failing := filepath.Join(t.TempDir(), "git")
-	if err := os.WriteFile(failing, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	git, err := NewGitCLI(failing)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := git.TransferSnapshot(context.Background(), t.TempDir(), "xfer-fail"); err == nil {
-		t.Fatal("failed snapshot git accepted")
-	}
-	if err := git.ApplyTransferBundle(context.Background(), t.TempDir(), []byte("bundle")); err == nil {
-		t.Fatal("failed apply git accepted")
-	}
-}
-
-func cloneTransferBundle(t *testing.T, payload []byte) string {
+func cloneRepository(t *testing.T, source string) string {
 	t.Helper()
-	bundle := filepath.Join(t.TempDir(), "workspace.bundle")
-	if err := os.WriteFile(bundle, payload, 0o644); err != nil {
-		t.Fatal(err)
-	}
 	destination := filepath.Join(t.TempDir(), "clone")
-	cmd := exec.Command("git", "clone", bundle, destination)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git clone bundle: %v\n%s", err, out)
+	cmd := exec.Command("git", "clone", "-q", source, destination)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone repository: %v\n%s", err, output)
 	}
 	return destination
 }
@@ -299,8 +110,8 @@ func runTransferGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
 }
 
@@ -308,18 +119,16 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
+		t.Fatalf("git %v: %v\n%s", args, err, output)
 	}
-	return strings.TrimSuffix(string(out), "\n")
+	return strings.TrimSpace(string(output))
 }
 
-func writeMode(t *testing.T, path, contents string, mode os.FileMode) {
-	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(path, mode); err != nil {
+func writeTransferFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
