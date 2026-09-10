@@ -5,21 +5,34 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"github.com/brantje/agent-board/apps/server/internal/store"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type runnerMemory struct {
 	store.RunnerStore
-	value store.Runner
+	value            store.Runner
+	registrationHash []byte
 }
 
 func (m *runnerMemory) CreateRunner(_ context.Context, r store.Runner) (store.Runner, error) {
 	r.ID = "runner-id"
 	m.value = r
 	return r, nil
+}
+func (m *runnerMemory) CreateRunnerRegistration(_ context.Context, hash []byte) error {
+	m.registrationHash = append([]byte(nil), hash...)
+	return nil
+}
+func (m *runnerMemory) RegisterRunner(ctx context.Context, hash []byte, r store.Runner) (store.Runner, error) {
+	if len(m.registrationHash) == 0 || string(m.registrationHash) != string(hash) {
+		return store.Runner{}, store.ErrNotFound
+	}
+	m.registrationHash = nil
+	return m.CreateRunner(ctx, r)
 }
 func (m *runnerMemory) GetRunner(_ context.Context, id string) (store.Runner, error) {
 	if id != m.value.ID {
@@ -68,17 +81,29 @@ func (f *runnerSessionTerminatorFake) TerminateRunnerSessions(_ context.Context,
 	return nil
 }
 
-func TestRunnerCredentialsAreOneTimeHashedAndValidated(t *testing.T) {
+func TestRunnerRegistrationIsOneTimeAndCredentialsAreHashed(t *testing.T) {
 	ctx := context.Background()
 	memory := &runnerMemory{}
 	s := NewRunnerService(memory)
-	r, token, err := s.Create(ctx, "Build host")
-	if err != nil || token == "" {
-		t.Fatalf("create: %v", err)
+	registrationToken, err := s.CreateRegistration(ctx)
+	if err != nil || registrationToken == "" {
+		t.Fatalf("create registration: token=%q err=%v", registrationToken, err)
 	}
-	hash := sha256.Sum256([]byte(token))
-	if string(memory.value.TokenHash) != string(hash[:]) {
-		t.Fatal("plaintext or invalid hash persisted")
+	registrationHash := sha256.Sum256([]byte(registrationToken))
+	if string(memory.registrationHash) != string(registrationHash[:]) || string(memory.registrationHash) == registrationToken {
+		t.Fatal("registration token was not stored as a hash")
+	}
+
+	r, token, err := s.Register(ctx, registrationToken, "Build host")
+	if err != nil || token == "" {
+		t.Fatalf("register: %v", err)
+	}
+	if _, _, err := s.Register(ctx, registrationToken, "Second host"); err == nil {
+		t.Fatal("registration token reused")
+	}
+	credentialHash := sha256.Sum256([]byte(token))
+	if string(memory.value.TokenHash) != string(credentialHash[:]) {
+		t.Fatal("plaintext or invalid runner credential persisted")
 	}
 	encoded, _ := json.Marshal(r)
 	if strings.Contains(string(encoded), token) || strings.Contains(string(encoded), "TokenHash") {
@@ -118,7 +143,11 @@ func TestRunnerServiceListsRenamesAndScopesProjectRunners(t *testing.T) {
 	ctx := context.Background()
 	memory := &runnerMemory{}
 	s := NewRunnerService(memory)
-	created, _, err := s.Create(ctx, "Build host")
+	registrationToken, err := s.CreateRegistration(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := s.Register(ctx, registrationToken, "Build host")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,9 +193,9 @@ func TestRunnerManagedCredentialNotUserAccessible(t *testing.T) {
 	ctx := context.Background()
 	memory := &runnerMemory{}
 	s := NewRunnerService(memory)
-	for _, name := range []string{"", "  "} {
-		if _, _, err := s.Create(ctx, name); err == nil {
-			t.Fatal("empty name accepted")
+	for _, input := range []struct{ token, name string }{{"", "host"}, {"token", ""}, {"token", "  "}} {
+		if _, _, err := s.Register(ctx, input.token, input.name); err == nil {
+			t.Fatal("invalid registration accepted")
 		}
 	}
 	memory.value = store.Runner{ID: "internal", Internal: true}
