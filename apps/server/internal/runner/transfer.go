@@ -196,8 +196,13 @@ func (c *Connection) completeTransfer(sessionID string, result transferResult) e
 	waiter := c.transferWaiters[sessionID]
 	if waiter != nil {
 		delete(c.transferWaiters, sessionID)
+	} else {
+		// Cache only transfers that completed before ReceiveTransfer registered a
+		// waiter. A live waiter consumes the result immediately, so retaining a
+		// second copy here would leak one full transfer payload per session on a
+		// persistent Runner connection and could replay stale data later.
+		c.transferDone[sessionID] = result
 	}
-	c.transferDone[sessionID] = result
 	c.mu.Unlock()
 	if waiter != nil {
 		waiter.result <- result
