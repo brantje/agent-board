@@ -47,6 +47,21 @@ func TestOpenCodeConcurrentRunnerSessionsNormalAndQuestions(t *testing.T) {
 		"Concurrent normal coding Run",
 		"Do not ask any Question. Create concurrent-normal.txt containing exactly concurrent-normal-ok with no trailing newline. Do not modify any other file. After writing that file, stop.",
 	)
+
+	// The two Question Runs must retain their live native OpenCode processes
+	// while the normal coding Run starts on a third capacity-1 Runner. Check the
+	// Execution Sessions before waiting for the normal Run to finish so this is
+	// a direct concurrency assertion rather than an inference from final state.
+	questionASession := waitForOpenCodeSessionStatus(t, fixture.ctx, fixture.database, project.ID, questionARun.ID, "RUNNING")
+	questionBSession := waitForOpenCodeSessionStatus(t, fixture.ctx, fixture.database, project.ID, questionBRun.ID, "RUNNING")
+	normalSession := waitForOpenCodeSessionStatus(t, fixture.ctx, fixture.database, project.ID, normalRun.ID, "RUNNING")
+	if questionASession.RunnerID == "" || questionBSession.RunnerID == "" || normalSession.RunnerID == "" {
+		t.Fatalf("concurrent sessions missing Runner ownership: A=%+v B=%+v normal=%+v", questionASession, questionBSession, normalSession)
+	}
+	if questionASession.RunnerID == questionBSession.RunnerID || questionASession.RunnerID == normalSession.RunnerID || questionBSession.RunnerID == normalSession.RunnerID {
+		t.Fatalf("capacity-1 Runners reused across simultaneously running sessions: A=%s B=%s normal=%s", questionASession.RunnerID, questionBSession.RunnerID, normalSession.RunnerID)
+	}
+
 	normalTerminal := waitForScriptedRun(t, fixture.ctx, fixture.database, project.ID, normalRun.ID)
 	if normalTerminal.Status != "READY_FOR_REVIEW" {
 		t.Fatalf("normal concurrent Run status=%s failure=%q", normalTerminal.Status, openCodeFailureReason(normalTerminal.FailureReason))
@@ -61,16 +76,6 @@ func TestOpenCodeConcurrentRunnerSessionsNormalAndQuestions(t *testing.T) {
 		if run.Status != "WAITING_FOR_INPUT" {
 			t.Fatalf("%s Run status=%s while normal Run completed; want WAITING_FOR_INPUT", name, run.Status)
 		}
-	}
-
-	questionASession := singleOpenCodeExecutionSession(t, fixture, project.ID, questionARun.ID)
-	questionBSession := singleOpenCodeExecutionSession(t, fixture, project.ID, questionBRun.ID)
-	normalSession := singleOpenCodeExecutionSession(t, fixture, project.ID, normalRun.ID)
-	if questionASession.RunnerID == "" || questionBSession.RunnerID == "" || normalSession.RunnerID == "" {
-		t.Fatalf("concurrent sessions missing Runner ownership: A=%+v B=%+v normal=%+v", questionASession, questionBSession, normalSession)
-	}
-	if questionASession.RunnerID == questionBSession.RunnerID || questionASession.RunnerID == normalSession.RunnerID || questionBSession.RunnerID == normalSession.RunnerID {
-		t.Fatalf("capacity-1 Runners reused across overlapping sessions: A=%s B=%s normal=%s", questionASession.RunnerID, questionBSession.RunnerID, normalSession.RunnerID)
 	}
 
 	filterNormalRunID := normalRun.ID
