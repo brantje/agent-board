@@ -94,7 +94,48 @@ jobs:
             exit 1
           fi
 
+          echo 'OpenCode model provider: openrouter'
+          printf 'OpenCode model: %s\n' "$selected"
           printf 'AGENT_BOARD_TEST_OPENCODE_MODEL=%s\n' "$selected" >> "$GITHUB_ENV"
+      - name: Verify OpenRouter API
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'OpenRouter preflight provider: openrouter'
+          printf 'OpenRouter preflight model: %s\n' "$AGENT_BOARD_TEST_OPENCODE_MODEL"
+
+          payload="$(jq -cn --arg model "$AGENT_BOARD_TEST_OPENCODE_MODEL" '{
+            model: $model,
+            messages: [{role: "user", content: "Reply with OK."}],
+            max_tokens: 1,
+            temperature: 0
+          }')"
+          response_file="$RUNNER_TEMP/openrouter-preflight.json"
+          http_code="$(curl -sS \
+            --retry 2 \
+            --retry-delay 1 \
+            --connect-timeout 10 \
+            --max-time 45 \
+            -o "$response_file" \
+            -w '%{http_code}' \
+            -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+            -H 'Content-Type: application/json' \
+            --data "$payload" \
+            https://openrouter.ai/api/v1/chat/completions)"
+
+          if [[ "$http_code" -lt 200 || "$http_code" -ge 300 ]]; then
+            echo "OpenRouter preflight failed with HTTP ${http_code}" >&2
+            if [[ -s "$response_file" ]]; then
+              jq -r '.error.message // "OpenRouter returned an error response"' "$response_file" >&2 || true
+            fi
+            exit 1
+          fi
+
+          response_model="$(jq -r '.model // empty' "$response_file")"
+          echo "OpenRouter preflight succeeded with HTTP ${http_code}"
+          if [[ -n "$response_model" ]]; then
+            printf 'OpenRouter response model: %s\n' "$response_model"
+          fi
       - name: Build OpenCode Runtime image
         run: >-
           docker build
@@ -127,6 +168,8 @@ jobs:
           AGENT_BOARD_TEST_OPENCODE_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
+          echo 'OpenCode integration provider: openrouter'
+          printf 'OpenCode integration model: %s\n' "$AGENT_BOARD_TEST_OPENCODE_MODEL"
           if timeout --signal=TERM --kill-after=10s 780s \
             go test -count=1 -failfast -run '^(TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)|TestOpenCode(RunnerNormalCodingRun|InternalRunnerNormalCodingRun))$' -v ./internal/runexec; then
             exit 0
