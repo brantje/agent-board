@@ -15,18 +15,18 @@ registrationInput:
       schema:
         type: object
         additionalProperties: false
-        required: [token, name]
+        required: [registrationToken, hostname]
         properties:
-          token: {type: string, minLength: 1}
-          name: {type: string, minLength: 1}
+          registrationToken: {type: string, minLength: 1}
+          hostname: {type: string, minLength: 1}
 runnerResponse:
   description: Runner identity and diagnostics. Connected state comes from the live registry.
   content:
     application/json:
       schema:
         $ref: ../schemas/runners.yaml#/Runner
-registrationResponse:
-  description: One-time registration token returned only when enrollment is created.
+creationResponse:
+  description: Pending Runner identity plus the one-time registration token. The token is returned only once.
   headers:
     Cache-Control:
       schema: {type: string, const: no-store}
@@ -35,11 +35,17 @@ registrationResponse:
       schema:
         type: object
         additionalProperties: false
-        required: [token]
+        required: [runner, registrationToken]
         properties:
-          token: {type: string}
-credentialResponse:
-  description: Plaintext runner credential returned once after successful enrollment. It cannot be retrieved later.
+          runner:
+            type: object
+            additionalProperties: false
+            required: [id]
+            properties:
+              id: {type: string, format: uuid}
+          registrationToken: {type: string}
+enrollmentResponse:
+  description: Permanent Runner credential returned once to the enrolling agent-runner.
   headers:
     Cache-Control:
       schema: {type: string, const: no-store}
@@ -48,17 +54,31 @@ credentialResponse:
       schema:
         type: object
         additionalProperties: false
-        required: [runner, token]
+        required: [runnerId, runnerToken]
+        properties:
+          runnerId: {type: string, format: uuid}
+          runnerToken: {type: string}
+credentialResponse:
+  description: Rotated permanent Runner credential returned once. It cannot be retrieved later.
+  headers:
+    Cache-Control:
+      schema: {type: string, const: no-store}
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [runner, runnerToken]
         properties:
           runner:
             $ref: ../schemas/runners.yaml#/Runner
-          token: {type: string}
+          runnerToken: {type: string}
 collection:
   get:
     operationId: listRunners
     responses:
       '200':
-        description: Non-deleted runners, including the managed internal runner.
+        description: Non-deleted runners, including pending external runners and the managed internal runner.
         content:
           application/json:
             schema:
@@ -68,10 +88,10 @@ collection:
       default:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
-    operationId: createRunnerRegistration
+    operationId: createRunner
     responses:
       '201':
-        $ref: "#/registrationResponse"
+        $ref: "#/creationResponse"
       default:
         $ref: ../components/api-components.yaml#/responses/Error
 register:
@@ -81,7 +101,7 @@ register:
       $ref: "#/registrationInput"
     responses:
       '201':
-        $ref: "#/credentialResponse"
+        $ref: "#/enrollmentResponse"
       default:
         $ref: ../components/api-components.yaml#/responses/Error
 resource:
