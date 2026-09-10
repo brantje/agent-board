@@ -66,6 +66,7 @@ type IssueWorkspaceEnsurer interface {
 type runnerClient interface {
 	SendTransfer(context.Context, string, string, string, []byte, runner.TransferProgressFunc) error
 	ReceiveTransfer(context.Context, string, runner.TransferProgressFunc) (string, []byte, error)
+	ConfirmTransferApplied(context.Context, string, string) error
 }
 
 type runnerSessionPreparer interface {
@@ -870,7 +871,13 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 	if errors.Is(engineErr, engine.ErrWaitingForInput) {
 		return p.finishWaitingForInputRunner(ctx, safe)
 	}
-	syncErr := p.syncWorkspaceFromRunner(ctx, safe, runnerID, attachSessionID)
+
+	syncCtx, cancelSync := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	syncErr := p.syncWorkspaceFromRunner(syncCtx, safe, runnerID, attachSessionID)
+	cancelSync()
+	if ctx.Err() != nil {
+		return scheduler.Result{}, ctx.Err()
+	}
 	if engineErr != nil {
 		reason := safeFailure(errors.Join(engineErr, syncErr))
 		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
@@ -887,9 +894,6 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 	}
 	if engineErr == nil && snapshotErr == nil && engineResult.Summary != "" {
 		engineErr = p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, nil, nil)
-	}
-	if ctx.Err() != nil {
-		return scheduler.Result{}, ctx.Err()
 	}
 	if combined := errors.Join(engineErr, snapshotErr); combined != nil {
 		reason := safeFailure(combined)
@@ -953,6 +957,11 @@ func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executionc
 	if err := gitCLI.ApplyTransferBundle(ctx, safe.Workspace.Path, payload); err != nil {
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{"reason": err.Error()}), nil, nil)
 		return err
+	}
+	if err := client.ConfirmTransferApplied(ctx, sessionID, transferID); err != nil {
+		wrapped := fmt.Errorf("acknowledge applied workspace transfer: %w", err)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{"reason": wrapped.Error()}), nil, nil)
+		return wrapped
 	}
 	return p.record(ctx, safe, "workspace.transfer.completed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{
 		"bytesTransferred": len(payload), "totalBytes": len(payload),
