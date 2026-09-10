@@ -310,6 +310,35 @@ func TestRunnerSyncBackAppliesWorkspaceAndAcknowledgesTransfer(t *testing.T) {
 	}
 }
 
+func TestRunnerSyncBackWorkspaceLockFailureDoesNotApplyOrAcknowledge(t *testing.T) {
+	authoritative := initProcessTestRepository(t)
+	safe := processTestSafeContext(authoritative)
+	safe.Runtime = executioncontext.RuntimeContext{}
+	storeFake := &runnerSyncStore{}
+	client := &successfulSyncClient{payload: runnerTransferPayload(t, authoritative)}
+	processor := newRunnerSyncProcessor(t, authoritative, safe, storeFake, client)
+	processor.store = &runnerWorkspaceLockFailureStore{
+		runnerSyncStore: storeFake,
+		err:             errors.New("workspace already has an execution writer"),
+	}
+
+	if err := processor.syncWorkspaceFromRunner(t.Context(), safe, "runner-1", "session-1"); err == nil {
+		t.Fatal("sync-back succeeded without authoritative Workspace writer lock")
+	}
+	if client.confirmed {
+		t.Fatal("unapplied Workspace transfer was acknowledged")
+	}
+	if len(client.directions) != 1 || client.directions[0] != "from_runner" {
+		t.Fatalf("unexpected transfer directions=%v", client.directions)
+	}
+	if _, err := os.Stat(filepath.Join(authoritative, "returned.txt")); !os.IsNotExist(err) {
+		t.Fatalf("returned Workspace was applied without writer lock: %v", err)
+	}
+	if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "workspace.transfer.completed") {
+		t.Fatalf("unexpected transfer events=%+v", storeFake.events)
+	}
+}
+
 type runnerQuestionStore struct {
 	*orchestrationQuestionStore
 	open store.Question
