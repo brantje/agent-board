@@ -78,6 +78,28 @@ func TestManagerCapacityAndSequentialSessions(t *testing.T) {
 	}
 }
 
+func TestFailedStartReleasesCapacity(t *testing.T) {
+	manager := NewManagerWithWorkspace(1, t.TempDir())
+	if _, err := manager.Start("broken", Request{Command: []string{"/definitely-not-an-agent-board-command"}}); err == nil {
+		t.Fatal("expected process start failure")
+	}
+	if manager.ActiveCount() != 0 {
+		t.Fatalf("failed start retained capacity: active=%d", manager.ActiveCount())
+	}
+
+	next, err := manager.Start("next", Request{Command: []string{"true"}})
+	if err != nil {
+		t.Fatalf("capacity was not reusable after failed start: %v", err)
+	}
+	result, err := next.Wait(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ExitCode != 0 || result.Signaled {
+		t.Fatalf("unexpected replacement session result %#v", result)
+	}
+}
+
 func TestWorkspaceBoundary(t *testing.T) {
 	workspace := t.TempDir()
 	manager := NewManagerWithWorkspace(1, workspace)
