@@ -161,6 +161,43 @@ func TestIncomingTransferRejectsCorruptPayload(t *testing.T) {
 	}
 }
 
+func TestIncomingTransferIgnoresStaleTransferFrames(t *testing.T) {
+	state := newTransferState()
+	payload := []byte("current workspace")
+	if err := state.begin("session-1", protocol.TransferBegin{
+		TransferID: "current",
+		Direction:  "to_runner",
+		TotalBytes: int64(len(payload)),
+		Checksum:   protocol.TransferChecksum(payload),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := state.chunk("session-1", protocol.TransferChunk{
+		TransferID: "stale",
+		Data:       base64.StdEncoding.EncodeToString([]byte("stale workspace")),
+	}); err != nil {
+		t.Fatalf("stale chunk should be ignored: %v", err)
+	}
+	if got, direction, err := state.end("session-1", protocol.TransferEnd{TransferID: "stale"}); err != nil || got != nil || direction != "" {
+		t.Fatalf("stale end completed active transfer: payload=%q direction=%q err=%v", got, direction, err)
+	}
+
+	if err := state.chunk("session-1", protocol.TransferChunk{
+		TransferID: "current",
+		Data:       base64.StdEncoding.EncodeToString(payload),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, direction, err := state.end("session-1", protocol.TransferEnd{TransferID: "current"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) || direction != "to_runner" {
+		t.Fatalf("active transfer corrupted after stale frames: payload=%q direction=%q", got, direction)
+	}
+}
+
 func createGitBundlePayload(t *testing.T) []byte {
 	t.Helper()
 	source := t.TempDir()
