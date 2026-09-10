@@ -2,10 +2,8 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
 	"os/exec"
 	"runtime"
 	"sync"
@@ -31,9 +29,7 @@ type Config struct {
 }
 
 type Server struct {
-	manager  *session.Manager
-	upgrader websocket.Upgrader
-	mux      *http.ServeMux
+	manager *session.Manager
 
 	stdinMu    sync.RWMutex
 	stdinPumps map[string]*stdinPump
@@ -61,12 +57,8 @@ type Server struct {
 func New(config Config) *Server {
 	manager := session.NewManagerWithWorkspace(config.MaxActiveSessions, config.WorkspaceRoot)
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	s := &Server{
-		manager: manager,
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == "" },
-		},
-		mux:            http.NewServeMux(),
+	return &Server{
+		manager:        manager,
 		stdinPumps:     make(map[string]*stdinPump),
 		deliveries:     make(map[string]*sessionDelivery),
 		connectors:     make(map[string]map[string]*sessionConnector),
@@ -77,31 +69,11 @@ func New(config Config) *Server {
 		pongWait:       defaultPongWait,
 		pingPeriod:     defaultPingPeriod,
 	}
-	s.mux.HandleFunc("GET /healthz", s.handleHealth)
-	s.mux.HandleFunc("GET /v1/ws", s.handleWebSocket)
-	return s
-}
-
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
-}
-
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.health())
 }
 
 func (s *Server) health() protocol.Health {
 	ids := s.manager.ActiveIDs()
 	return protocol.Health{Status: "ok", ActiveSessions: len(ids), ActiveSessionIDs: ids}
-}
-
-func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
-	s.serveConnection(conn)
 }
 
 func (s *Server) serveConnection(conn *websocket.Conn) {
