@@ -11,6 +11,20 @@ export interface Project {
   updatedAt: string
 }
 
+export interface Runner {
+  id: string
+  name: string
+  internal: boolean
+  managed: boolean
+  deletable: boolean
+  connected: boolean
+  revokedAt: string | null
+  lastSeenAt: string | null
+  capabilities: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
 export interface RepositorySettings {
   defaultRepositoryPath: string
   repositoryRoots: string[]
