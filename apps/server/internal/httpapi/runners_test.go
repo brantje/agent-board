@@ -123,6 +123,7 @@ func TestRunnerAPIPublicLifecycle(t *testing.T) {
 			if strings.Contains(response.Body.String(), secret) {
 				t.Fatalf("credential leaked from %s", path)
 			}
+		}
 	}
 
 	rename := runnerAPIRequest(router, http.MethodPatch, "/api/runners/"+otherID, `{"name":"Edge host"}`)
