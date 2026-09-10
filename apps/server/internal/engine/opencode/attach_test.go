@@ -156,12 +156,8 @@ func TestEngineAttachPromptsWhenNoNativeSession(t *testing.T) {
 	mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, []any{})
 	})
-	mux.HandleFunc("POST /session", func(w http.ResponseWriter, _ *http.Request) {
-		writeNativeJSON(t, w, map[string]any{"id": "ses_new"})
-	})
 	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, _ *http.Request) {
-		t.Error("legacy session creation must not fall back to V2")
-		http.Error(w, "unexpected V2 create", http.StatusInternalServerError)
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "ses_new"}})
 	})
 	mux.HandleFunc("POST /session/ses_new/prompt_async", func(w http.ResponseWriter, _ *http.Request) {
 		promptCalls.Add(1)
