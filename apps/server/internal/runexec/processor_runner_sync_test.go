@@ -221,6 +221,36 @@ func TestRunnerExecutionCompletesWithWorkspaceSyncAndReviewEvidence(t *testing.T
 	}
 }
 
+func TestRunnerLiveSessionResumesWithoutRetransferringWorkspace(t *testing.T) {
+	repo := initProcessTestRepository(t)
+	safe := processTestSafeContext(repo)
+	safe.Runtime = executioncontext.RuntimeContext{}
+	storeFake := &runnerSyncStore{}
+	storeFake.sessions = []store.ExecutionSession{{
+		ID: "session-live", ProjectID: safe.Project.ID, RunID: safe.Run.ID, RunnerID: "runner-1", Status: "RUNNING",
+	}}
+	client := &successfulSyncClient{payload: runnerTransferPayload(t, repo)}
+	processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
+
+	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"}
+	result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run}, processTestLifecycle{run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RunStatus != "READY_FOR_REVIEW" {
+		t.Fatalf("result=%+v", result)
+	}
+	if len(client.directions) != 1 || client.directions[0] != "from_runner" {
+		t.Fatalf("reconciled runner transfer directions=%v", client.directions)
+	}
+	if hasProcessTestEvent(storeFake.events, "run.started") || hasProcessTestEvent(storeFake.events, "runtime.provisioning") {
+		t.Fatalf("reconciled runner execution restarted provisioning: %+v", storeFake.events)
+	}
+	if !hasProcessTestEvent(storeFake.events, "run.resumed") || !hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
+		t.Fatalf("reconciled runner execution events=%+v", storeFake.events)
+	}
+}
+
 func TestRunnerSyncBackAppliesWorkspaceAndAcknowledgesTransfer(t *testing.T) {
 	authoritative := initProcessTestRepository(t)
 	git, err := workspace.NewGitCLI("")
