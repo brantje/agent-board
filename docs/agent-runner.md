@@ -6,7 +6,7 @@ Production v0.1 prefers **external persistent Runner hosts**: a user-managed Lin
 
 The Runner is part of the v0.1 execution architecture. It is not an Agent, Run, Runtime, Runtime Instance or future Worker.
 
-Install and operate external hosts with `apps/agent-runner/README.md` and `apps/agent-runner/deploy/agent-runner.service`.
+Install and operate external hosts with `docs/external-runner-setup.md` and `apps/agent-runner/deploy/agent-runner.service`.
 
 ## Execution model
 
@@ -32,6 +32,14 @@ These identities remain separate:
 ```text
 Runner != agent-runner process != Execution Session != Run != Workspace
 ```
+
+## Enrollment and credentials
+
+External Runner enrollment does not introduce a second durable Runner identity or credential type. An administrator creates a one-time registration token, whose hash is stored server-side until it is consumed. The Runner submits that token together with its system hostname. In one transaction the server consumes the registration token and creates the normal Runner identity with its normal long-lived credential.
+
+The one-time registration token is never a Runner credential and cannot authenticate the WebSocket connection. It is not persisted by `agent-runner` and cannot be reused after successful enrollment. The binary persists only the Agent Board URL, returned Runner ID and returned long-lived credential in its private state file. Renaming a Runner later changes display metadata only.
+
+The server-managed internal Runner continues to use the same ordinary Runner identity/credential model without going through external enrollment.
 
 Required relationships:
 
@@ -154,7 +162,7 @@ Secret values remain ephemeral. They must not be echoed in Runner protocol respo
 
 For v0.1, `agent-runner` is a standalone Linux binary suitable for installation as a persistent systemd service on external hosts. Release/production builds embed a concrete version into `internal/server.Version`; that same value is advertised as protocol capability `runner_version`. Local development may use the `dev` fallback.
 
-The Docker build accepts `AGENT_RUNNER_VERSION`. Standalone release builds can inject the same value with Go `-ldflags -X`; the exact command and systemd installation are documented in `apps/agent-runner/README.md`.
+The Docker build accepts `AGENT_RUNNER_VERSION`. Standalone release builds can inject the same value with Go `-ldflags -X`; the exact command and systemd installation are documented in `docs/external-runner-setup.md`.
 
 This repository does not yet publish standalone binaries through a release workflow. Publishing/versioned artifact distribution belongs to that release pipeline; #68 does not add a package manager, installer repository or shell installer.
 
