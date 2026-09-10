@@ -7,27 +7,28 @@ const Version2 = runnerprotocol.Version2
 type MessageType = runnerprotocol.MessageType
 
 const (
-	TypeServerHello    = runnerprotocol.TypeServerHello
-	TypeRunnerHello    = runnerprotocol.TypeRunnerHello
-	TypeHealth         = runnerprotocol.TypeHealth
-	TypeStart          = runnerprotocol.TypeStart
-	TypeSessionStarted = runnerprotocol.TypeSessionStarted
-	TypeStdin          = runnerprotocol.TypeStdin
-	TypeStdinClose     = runnerprotocol.TypeStdinClose
-	TypeStdout         = runnerprotocol.TypeStdout
-	TypeStderr         = runnerprotocol.TypeStderr
-	TypeExit           = runnerprotocol.TypeExit
-	TypeTerminate      = runnerprotocol.TypeTerminate
-	TypeKill           = runnerprotocol.TypeKill
-	TypeConnect        = runnerprotocol.TypeConnect
-	TypeConnected      = runnerprotocol.TypeConnected
-	TypeConnectData    = runnerprotocol.TypeConnectData
-	TypeConnectClose   = runnerprotocol.TypeConnectClose
-	TypeTransferBegin  = runnerprotocol.TypeTransferBegin
-	TypeTransferChunk  = runnerprotocol.TypeTransferChunk
-	TypeTransferEnd    = runnerprotocol.TypeTransferEnd
-	TypeTransferFailed = runnerprotocol.TypeTransferFailed
-	TypeError          = runnerprotocol.TypeError
+	TypeServerHello      = runnerprotocol.TypeServerHello
+	TypeRunnerHello      = runnerprotocol.TypeRunnerHello
+	TypeHealth           = runnerprotocol.TypeHealth
+	TypeStart            = runnerprotocol.TypeStart
+	TypeSessionStarted   = runnerprotocol.TypeSessionStarted
+	TypeStdin            = runnerprotocol.TypeStdin
+	TypeStdinClose       = runnerprotocol.TypeStdinClose
+	TypeStdout           = runnerprotocol.TypeStdout
+	TypeStderr           = runnerprotocol.TypeStderr
+	TypeExit             = runnerprotocol.TypeExit
+	TypeTerminate        = runnerprotocol.TypeTerminate
+	TypeKill             = runnerprotocol.TypeKill
+	TypeConnect          = runnerprotocol.TypeConnect
+	TypeConnected        = runnerprotocol.TypeConnected
+	TypeConnectData      = runnerprotocol.TypeConnectData
+	TypeConnectClose     = runnerprotocol.TypeConnectClose
+	TypeTransferBegin    = runnerprotocol.TypeTransferBegin
+	TypeTransferChunk    = runnerprotocol.TypeTransferChunk
+	TypeTransferEnd      = runnerprotocol.TypeTransferEnd
+	TypeTransferFailed   = runnerprotocol.TypeTransferFailed
+	TypeTransferApplied  = runnerprotocol.TypeTransferApplied
+	TypeError            = runnerprotocol.TypeError
 )
 
 var (
@@ -52,6 +53,7 @@ type TransferBegin = runnerprotocol.TransferBegin
 type TransferChunk = runnerprotocol.TransferChunk
 type TransferEnd = runnerprotocol.TransferEnd
 type TransferFailed = runnerprotocol.TransferFailed
+type TransferApplied = runnerprotocol.TransferApplied
 
 const (
 	TransferChunkSize = runnerprotocol.TransferChunkSize

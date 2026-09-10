@@ -15,27 +15,28 @@ const RunnerIDHeader = "X-Agent-Board-Runner-Id"
 type MessageType string
 
 const (
-	TypeServerHello    MessageType = "server_hello"
-	TypeRunnerHello    MessageType = "runner_hello"
-	TypeHealth         MessageType = "health"
-	TypeStart          MessageType = "start"
-	TypeSessionStarted MessageType = "session_started"
-	TypeStdin          MessageType = "stdin"
-	TypeStdinClose     MessageType = "stdin_close"
-	TypeStdout         MessageType = "stdout"
-	TypeStderr         MessageType = "stderr"
-	TypeExit           MessageType = "exit"
-	TypeTerminate      MessageType = "terminate"
-	TypeKill           MessageType = "kill"
-	TypeConnect        MessageType = "connect"
-	TypeConnected      MessageType = "connected"
-	TypeConnectData    MessageType = "connect_data"
-	TypeConnectClose   MessageType = "connect_close"
-	TypeTransferBegin  MessageType = "transfer_begin"
-	TypeTransferChunk  MessageType = "transfer_chunk"
-	TypeTransferEnd    MessageType = "transfer_end"
-	TypeTransferFailed MessageType = "transfer_failed"
-	TypeError          MessageType = "error"
+	TypeServerHello      MessageType = "server_hello"
+	TypeRunnerHello      MessageType = "runner_hello"
+	TypeHealth           MessageType = "health"
+	TypeStart            MessageType = "start"
+	TypeSessionStarted   MessageType = "session_started"
+	TypeStdin            MessageType = "stdin"
+	TypeStdinClose       MessageType = "stdin_close"
+	TypeStdout           MessageType = "stdout"
+	TypeStderr           MessageType = "stderr"
+	TypeExit             MessageType = "exit"
+	TypeTerminate        MessageType = "terminate"
+	TypeKill             MessageType = "kill"
+	TypeConnect          MessageType = "connect"
+	TypeConnected        MessageType = "connected"
+	TypeConnectData      MessageType = "connect_data"
+	TypeConnectClose     MessageType = "connect_close"
+	TypeTransferBegin    MessageType = "transfer_begin"
+	TypeTransferChunk    MessageType = "transfer_chunk"
+	TypeTransferEnd      MessageType = "transfer_end"
+	TypeTransferFailed   MessageType = "transfer_failed"
+	TypeTransferApplied  MessageType = "transfer_applied"
+	TypeError            MessageType = "error"
 )
 
 var (
@@ -128,7 +129,6 @@ func NewMessage(version int, typ MessageType, sessionID string, payload any) (Me
 		}
 		raw = encoded
 	}
-
 	msg := Message{Version: version, Type: typ, SessionID: sessionID, Payload: raw}
 	if err := msg.Validate(); err != nil {
 		return Message{}, err
@@ -164,7 +164,6 @@ func DecodePayload[T any](m Message) (T, error) {
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return value, fmt.Errorf("%w: %s payload must be a JSON object", ErrInvalidMessage, m.Type)
 	}
-
 	decoder := json.NewDecoder(bytes.NewReader(m.Payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&value); err != nil {
@@ -186,7 +185,7 @@ func knownType(typ MessageType) bool {
 		TypeStdin, TypeStdinClose, TypeStdout, TypeStderr, TypeExit,
 		TypeTerminate, TypeKill, TypeConnect, TypeConnected, TypeConnectData,
 		TypeConnectClose, TypeTransferBegin, TypeTransferChunk, TypeTransferEnd,
-		TypeTransferFailed, TypeError:
+		TypeTransferFailed, TypeTransferApplied, TypeError:
 		return true
 	default:
 		return false
@@ -198,7 +197,7 @@ func requiresSession(typ MessageType) bool {
 	case TypeStart, TypeSessionStarted, TypeStdin, TypeStdinClose, TypeStdout,
 		TypeStderr, TypeExit, TypeTerminate, TypeKill, TypeConnect, TypeConnected,
 		TypeConnectData, TypeConnectClose, TypeTransferBegin, TypeTransferChunk,
-		TypeTransferEnd, TypeTransferFailed:
+		TypeTransferEnd, TypeTransferFailed, TypeTransferApplied:
 		return true
 	default:
 		return false

@@ -39,3 +39,10 @@ type TransferFailed struct {
 	Code       string `json:"code"`
 	Message    string `json:"message"`
 }
+
+// TransferApplied acknowledges that the server verified and successfully
+// applied a from_runner transfer. Only this acknowledgement permits the Runner
+// to delete its session Workspace.
+type TransferApplied struct {
+	TransferID string `json:"transfer_id"`
+}
