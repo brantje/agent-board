@@ -1,32 +1,43 @@
 # Source control and repository-backed Workspaces
 
-Project repository context is part of the v0.1 critical path. The first complete coding-agent flow uses a local Git repository source so repository execution can be proven without remote source authentication becoming a prerequisite.
+Project repository context is part of the v0.1 critical path. A Project has one explicit repository source configuration: either the existing local Git repository source or a provider-neutral cloneable Git URL. Repository source configuration remains separate from Workspace identity and execution lifecycle.
 
-## v0.1 Project repository
+## v0.1 Project repository source
 
-Project owns:
+Project owns one of these mutually exclusive source configurations:
 
-- local repository source/path
-- default/base branch
+```text
+local
+  -> local repository path
+  -> default/base branch
 
-The configured repository is a server-accessible Git repository. It is the bootstrap source for the Project Workspace; Agent Board does not treat it as the writable accepted checkout.
+git
+  -> clone URL
+  -> optional ref
+```
 
-The local source path is backend-owned configuration and must be validated against the deployment's permitted repository roots. A browser/API caller cannot use Project repository configuration as arbitrary filesystem access.
+For `git`, the optional ref may name a branch, tag or commit. When it is omitted, the remote default branch is resolved at execution time.
 
-### Deployment configuration
+Saving a Git source stores configuration only. The server does not clone/fetch the remote merely to validate the Project, does not require credentials at save time, and does not apply GitHub/GitLab/Forgejo-specific URL validation. Any URL usable by normal Git remains eligible configuration. Runner-side clone/fetch/cache/worktree behavior belongs to the execution path defined separately from this Project-source model.
+
+For `local`, the configured repository is a server-accessible Git repository. It is the bootstrap source for the Project Workspace; Agent Board does not treat it as the writable accepted checkout.
+
+The local source path is backend-owned configuration and must be validated against the deployment's permitted repository roots. A browser/API caller cannot use Project repository configuration as arbitrary filesystem access. These filesystem restrictions apply to `local` sources only; `git` sources do not become server-local paths when saved.
+
+### Deployment configuration for local sources
 
 The server reads these filesystem settings:
 
 - `AGENT_BOARD_REPOSITORY_ROOTS` — one or more absolute, backend-visible repository roots separated by the operating system path-list separator. With no authorized roots configured, local repository materialization is denied.
 - `AGENT_BOARD_WORKSPACE_ROOT` — absolute durable Workspace storage root. The default is `/var/lib/agent-board/workspaces`.
 
-Repository roots and configured Project repository paths are canonicalized through symlinks before access. A Project path must resolve to a directory at or below one authorized root; relative paths, sibling-prefix tricks and symlink escapes are rejected. Authorization is rechecked immediately before Git access rather than trusted only from configuration time.
+Repository roots and configured local Project repository paths are canonicalized through symlinks before access. A local Project path must resolve to a directory at or below one authorized root; relative paths, sibling-prefix tricks and symlink escapes are rejected. Authorization is rechecked immediately before Git access rather than trusted only from configuration time.
 
-When using the default Compose setup, `AGENT_BOARD_REPOSITORY_ROOT` is the host directory bind-mounted at `AGENT_BOARD_REPOSITORY_MOUNT_PATH` (default `/repositories`). `AGENT_BOARD_REPOSITORY_ROOTS` must contain the container-visible path, not the host path. For example, mounting `/srv/repos` at `/repositories` means a Project repository `/srv/repos/widget` is configured in Agent Board as `/repositories/widget`.
+When using the default Compose setup, `AGENT_BOARD_REPOSITORY_ROOT` is the host directory bind-mounted at `AGENT_BOARD_REPOSITORY_MOUNT_PATH` (default `/repositories`). `AGENT_BOARD_REPOSITORY_ROOTS` must contain the container-visible path, not the host path. For example, mounting `/srv/repos` at `/repositories` means a local Project repository `/srv/repos/widget` is configured in Agent Board as `/repositories/widget`.
 
-The repository bind mount is writable so Agent Board can create missing Project repository directories and initialize them as Git repositories on Project create/update. The configured repository remains a bootstrap source only; durable accepted and execution state still lives in backend-owned Workspaces.
+The repository bind mount is writable so Agent Board can create missing local Project repository directories and initialize them as Git repositories on Project create/update. The configured local repository remains a bootstrap source only; durable accepted and execution state still lives in backend-owned Workspaces.
 
-The Workspace root remains writable and durable. Agent Board materializes configured repositories into backend-owned Workspaces before execution or approval delivery.
+The Workspace root remains writable and durable. Agent Board materializes repository state into backend-owned Workspaces through the source-specific execution path before execution or approval delivery.
 
 ## Project Workspace
 
@@ -34,21 +45,23 @@ v0.1 uses exactly one durable **Project Workspace** per Project.
 
 The Project Workspace is Agent Board's backend-owned writable Git checkout that represents the latest **accepted** state of the Project. It is distinct from both:
 
-- the configured Project repository, which is an external/bootstrap source and may be read-only
+- the configured Project repository source, which is external/bootstrap configuration
 - Issue Workspaces, which are mutable per-Issue working copies used by agents
 
 The Project Workspace lives under `AGENT_BOARD_WORKSPACE_ROOT`, is never mounted into an agent Runtime, and is only mutated through trusted server-side lifecycle operations.
 
 ### Project Workspace initialization
 
-On first use Agent Board:
+For the existing local source path, on first use Agent Board:
 
-1. resolves and re-validates the configured Project repository
+1. resolves and re-validates the configured local Project repository
 2. materializes the configured default branch into a temporary Project Workspace checkout
 3. records the exact source revision used
 4. atomically publishes the checkout as the Project Workspace
 
-Once initialized, later edits to Project repository configuration do not silently replace or reset the Project Workspace. Reinitialization/synchronization policy is explicit rather than an implicit side effect of configuration edits.
+Git URL source materialization is an execution concern handled by the Runner-side Git flow rather than by Project save-time validation. It must reuse the same durable Workspace/Run identities instead of creating a parallel lifecycle.
+
+Once initialized, later edits to Project repository source configuration do not silently replace or reset the Project Workspace. Reinitialization/synchronization policy is explicit rather than an implicit side effect of configuration edits.
 
 ### Accepted state
 
@@ -68,14 +81,14 @@ The Project Workspace is internal accepted state only. v0.1 does not push its co
 
 v0.1 uses exactly one persistent Issue Workspace per Issue.
 
-On first execution:
+On first execution of the existing local source path:
 
 1. ensure the Project Workspace exists and is ready
 2. create or restore the Issue Workspace
 3. materialize the current Project Workspace accepted revision into the Issue Workspace
 4. create/use a deterministic Issue working branch named `agent-board/{issue-key}` (for example `agent-board/AB-12`)
 5. attach the Issue Workspace to the Run
-6. mount it at `/workspace` in the Runtime
+6. make it available as `/workspace` to the selected execution path
 
 The Issue Workspace records the Project Workspace accepted revision from which it was materialized. Later attempts for the same Issue reuse the same Workspace and Git state, including modified, staged and untracked files.
 
@@ -85,7 +98,7 @@ Runtime Instance destruction never destroys or resets an Issue Workspace.
 
 ## Failure behavior
 
-If a repository-backed Project is missing required configuration or the Project Workspace cannot be materialized, execution fails or waits with an actionable machine-readable reason.
+If a repository-backed Project is missing required source configuration or its Workspace cannot be materialized, execution fails or waits with an actionable machine-readable reason.
 
 Do not silently initialize an unrelated empty Git repository. Project and Issue Workspace bootstrap use temporary checkouts and atomically publish them only after the requested Git state is ready. Failed or interrupted temporary checkouts are cleaned before retry.
 
@@ -103,11 +116,13 @@ Durable Project Workspace metadata records the configured repository identity an
 
 Durable Issue Workspace/Run metadata records the Project Workspace accepted revision used as its base, working branch and repository identity. Review evidence remains pinned to the exact Run attempt and candidate snapshot even after either Workspace advances later.
 
-## Remote Source Connections
+## Authenticated Source Connections
 
-Authenticated remote repositories are implemented after the first complete local-repository v0.1 flow is proven.
+Basic `git` Project sources do not require a Source Connection. A Project may store a clone URL/ref without provider identity or credentials.
 
-Planned Source Connection types:
+Authenticated Source Connections are a later layer for repositories that need managed provider/server identity, credential brokering, health/validation state, or provider actions.
+
+Planned Source Connection types include:
 
 - GitHub
 - GitLab
@@ -116,7 +131,7 @@ Planned Source Connection types:
 
 A Source Connection owns provider/server identity, encrypted credential references and health/validation state. Credentials never belong in repository URLs, Workspace metadata, Events, raw logs or provenance.
 
-Remote clone/fetch and later source-provider actions such as PR/MR creation reuse the same Project Workspace / Issue Workspace model and trusted secret boundaries; they do not introduce another execution lifecycle.
+Authenticated remote clone/fetch and later source-provider actions such as PR/MR creation reuse the same Project source / Project Workspace / Issue Workspace model and trusted secret boundaries; they do not introduce another execution lifecycle.
 
 ## Delegation compatibility
 
