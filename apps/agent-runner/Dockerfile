@@ -12,20 +12,19 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/agent-r
 
 FROM alpine:3.22
 
-ARG OPENCODE_VERSION=1.18.30
-ARG OPENCODE_SHA256_AMD64=0bafa9d649085d304e4308a5a60d15e6f3943b1a3373dc4ca0d9c5abc28ce844
-ARG OPENCODE_SHA256_ARM64=7a4dc1171ca78426a4611f9a1e15c0168dc0408475d24aab32bb51187e1865ad
 ARG AGENT_BOARD_UID
+COPY apps/agent-runner/opencode.env /tmp/opencode.env
 
 RUN apk add --no-cache curl git tar libstdc++ libgcc \
+    && . /tmp/opencode.env \
     && case "$(uname -m)" in \
          x86_64) \
            opencode_asset="opencode-linux-x64-baseline-musl.tar.gz"; \
-           opencode_sha256="${OPENCODE_SHA256_AMD64}" \
+           opencode_sha256="${OPENCODE_SHA256_AMD64_MUSL}" \
            ;; \
          aarch64) \
            opencode_asset="opencode-linux-arm64-musl.tar.gz"; \
-           opencode_sha256="${OPENCODE_SHA256_ARM64}" \
+           opencode_sha256="${OPENCODE_SHA256_ARM64_MUSL}" \
            ;; \
          *) \
            echo "unsupported OpenCode architecture: $(uname -m)" >&2; \
@@ -38,7 +37,7 @@ RUN apk add --no-cache curl git tar libstdc++ libgcc \
     && echo "${opencode_sha256}  /tmp/opencode.tar.gz" | sha256sum -c - \
     && tar -xzf /tmp/opencode.tar.gz -C /usr/local/bin opencode \
     && chmod 0755 /usr/local/bin/opencode \
-    && rm -f /tmp/opencode.tar.gz \
+    && rm -f /tmp/opencode.tar.gz /tmp/opencode.env \
     && test "$(opencode --version)" = "${OPENCODE_VERSION}" \
     && addgroup -S agentboard \
     && if [ -n "${AGENT_BOARD_UID}" ]; then \
