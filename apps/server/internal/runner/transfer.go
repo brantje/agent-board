@@ -142,7 +142,6 @@ func (c *Connection) handleTransferMessage(msg protocol.Message) error {
 		transferID := transfer.transferID
 		checksum := transfer.checksum
 		expected := transfer.expected
-		delete(c.transfers, msg.SessionID)
 		c.mu.Unlock()
 
 		if err := protocol.ValidateTransferPayload(payload, expected, checksum); err != nil {
@@ -162,6 +161,7 @@ func (c *Connection) handleTransferMessage(msg protocol.Message) error {
 
 func (c *Connection) completeTransfer(sessionID string, result transferResult) error {
 	c.mu.Lock()
+	delete(c.transfers, sessionID)
 	waiter := c.transferWaiters[sessionID]
 	if waiter != nil {
 		delete(c.transferWaiters, sessionID)
