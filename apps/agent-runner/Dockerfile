@@ -3,6 +3,7 @@ FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY packages/redact/ ./packages/redact/
 COPY packages/runnerprotocol/ ./packages/runnerprotocol/
+COPY packages/workspacegit/ ./packages/workspacegit/
 COPY apps/agent-runner/go.mod apps/agent-runner/go.sum ./apps/agent-runner/
 WORKDIR /src/apps/agent-runner
 RUN go mod download
