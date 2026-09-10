@@ -3,9 +3,50 @@ package main
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestExecuteDispatchesRegistration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"runner":{"id":"runner-registered"},"token":"credential"}`))
+	}))
+	defer server.Close()
+
+	statePath := filepath.Join(t.TempDir(), "runner.json")
+	var output strings.Builder
+	if err := execute(context.Background(), []string{"agent-runner", "register"}, server.Client(), strings.NewReader(server.URL+"\nregistration-token\n"), &output, statePath); err != nil {
+		t.Fatal(err)
+	}
+	state, err := loadRunnerState(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.RunnerID != "runner-registered" || state.Token != "credential" {
+		t.Fatalf("unexpected registered state %#v", state)
+	}
+}
+
+func TestExecuteRejectsInvalidCommandAndMissingRegistration(t *testing.T) {
+	if err := execute(context.Background(), []string{"agent-runner", "unknown"}, http.DefaultClient, strings.NewReader(""), &strings.Builder{}, filepath.Join(t.TempDir(), "runner.json")); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("invalid command error=%v", err)
+	}
+	if err := execute(context.Background(), []string{"agent-runner", "register", "extra"}, http.DefaultClient, strings.NewReader(""), &strings.Builder{}, filepath.Join(t.TempDir(), "runner.json")); err == nil || !strings.Contains(err.Error(), "usage") {
+		t.Fatalf("extra argument error=%v", err)
+	}
+
+	t.Setenv("AGENT_BOARD_URL", "")
+	t.Setenv("AGENT_RUNNER_ID", "")
+	t.Setenv("AGENT_RUNNER_TOKEN", "")
+	if err := execute(context.Background(), []string{"agent-runner"}, http.DefaultClient, strings.NewReader(""), &strings.Builder{}, filepath.Join(t.TempDir(), "missing.json")); err == nil || !strings.Contains(err.Error(), "not registered") {
+		t.Fatalf("missing registration error=%v", err)
+	}
+}
 
 func TestConfigFromEnv(t *testing.T) {
 	t.Setenv("AGENT_BOARD_URL", "http://127.0.0.1:9876")
