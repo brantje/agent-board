@@ -13,8 +13,8 @@ func TestExistingProjectWithoutSourceFieldsReadsAsLocal(t *testing.T) {
 
 	var projectID string
 	if err := pool.QueryRow(ctx, `
-		INSERT INTO projects (name, issue_prefix, repository_path, default_branch)
-		VALUES ('Existing Project', 'OLD', '/repo/existing', 'main')
+		INSERT INTO projects (name, issue_prefix, repository_path)
+		VALUES ('Existing Project', 'OLD', '/repo/existing')
 		RETURNING id::text
 	`).Scan(&projectID); err != nil {
 		t.Fatalf("insert existing Project: %v", err)
