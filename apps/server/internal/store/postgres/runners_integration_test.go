@@ -15,7 +15,7 @@ func TestRunnerPersistenceLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.ID == "" || r.Internal || r.DeletedAt != nil {
+	if r.ID == "" || r.Internal || r.RegisteredAt == nil || r.DeletedAt != nil {
 		t.Fatal("invalid created runner")
 	}
 	if _, err := s.CreateRunner(ctx, store.Runner{Name: "build HOST", TokenHash: make([]byte, 32)}); !errors.Is(err, store.ErrConflict) {
@@ -55,12 +55,35 @@ func TestRunnerPersistenceLifecycle(t *testing.T) {
 	}
 }
 
+func TestPendingRunnerCannotRenameOrRotate(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	registrationHash := make([]byte, 32)
+	registrationHash[0] = 9
+	pending, err := s.CreateRunner(ctx, store.Runner{RegistrationTokenHash: registrationHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.RegisteredAt != nil || pending.Name != "" || len(pending.TokenHash) != 0 {
+		t.Fatalf("invalid pending runner %#v", pending)
+	}
+	if _, err := s.RenameRunner(ctx, pending.ID, "too early"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("pending rename: %v", err)
+	}
+	if _, err := s.RotateRunnerCredential(ctx, pending.ID, make([]byte, 32)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("pending rotation: %v", err)
+	}
+}
+
 func TestInternalRunnerIsUniqueAndProtected(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	r, err := s.CreateRunner(ctx, store.Runner{Name: "Internal", Internal: true, TokenHash: make([]byte, 32)})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if r.RegisteredAt == nil || len(r.RegistrationTokenHash) != 0 {
+		t.Fatalf("internal runner was not immediately registered: %#v", r)
 	}
 	if _, err = s.CreateRunner(ctx, store.Runner{Name: "Second", Internal: true, TokenHash: make([]byte, 32)}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("second internal: %v", err)
