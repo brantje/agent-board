@@ -75,23 +75,18 @@ func TestWorkspaceTransferFailureBlocksStartAndAllowsRetry(t *testing.T) {
 	_, httpServer := newTestRunner(t)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer conn.Close()
+	writer := &connectionWriter{conn: conn}
 
-	payload := []byte("data")
-	send(t, conn, protocol.TypeTransferBegin, "session-retry", protocol.TransferBegin{
-		TransferID: "broken-transfer", Direction: "to_runner", TotalBytes: int64(len(payload)), Checksum: "wrong",
-	})
-	send(t, conn, protocol.TypeTransferChunk, "session-retry", protocol.TransferChunk{
-		TransferID: "broken-transfer", Data: base64.StdEncoding.EncodeToString(payload),
-	})
-	send(t, conn, protocol.TypeTransferEnd, "session-retry", protocol.TransferEnd{TransferID: "broken-transfer"})
-
+	if err := writer.sendTransfer(context.Background(), "session-retry", "broken-transfer", "to_runner", []byte("not a git bundle")); err != nil {
+		t.Fatal(err)
+	}
 	failure := read(t, conn)
 	if failure.Type != protocol.TypeError {
-		t.Fatalf("corrupt transfer response=%+v", failure)
+		t.Fatalf("invalid workspace transfer response=%+v", failure)
 	}
 	failurePayload, err := protocol.DecodePayload[protocol.ErrorPayload](failure)
 	if err != nil || failurePayload.Code != "transfer_failed" {
-		t.Fatalf("corrupt transfer error=%+v err=%v", failurePayload, err)
+		t.Fatalf("invalid workspace transfer error=%+v err=%v", failurePayload, err)
 	}
 
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
@@ -103,14 +98,13 @@ func TestWorkspaceTransferFailureBlocksStartAndAllowsRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	if startFailure.Type != protocol.TypeError {
-		t.Fatalf("start after corrupt transfer response=%+v", startFailure)
+		t.Fatalf("start after invalid transfer response=%+v", startFailure)
 	}
 	startPayload, err := protocol.DecodePayload[protocol.ErrorPayload](startFailure)
 	if err != nil || startPayload.Code != "start_failed" {
-		t.Fatalf("start after corrupt transfer error=%+v err=%v", startPayload, err)
+		t.Fatalf("start after invalid transfer error=%+v err=%v", startPayload, err)
 	}
 
-	writer := &connectionWriter{conn: conn}
 	if err := writer.sendTransfer(context.Background(), "session-retry", "retry-transfer", "to_runner", createGitBundlePayload(t)); err != nil {
 		t.Fatal(err)
 	}
