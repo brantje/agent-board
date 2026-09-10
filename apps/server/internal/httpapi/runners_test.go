@@ -15,9 +15,10 @@ import (
 
 type runnerAPIStore struct {
 	fakeControlPlaneStore
-	value    store.Runner
-	attached []string
-	err      error
+	value            store.Runner
+	attached         []string
+	registrationHash []byte
+	err              error
 }
 
 func (s *runnerAPIStore) CreateRunner(_ context.Context, r store.Runner) (store.Runner, error) {
@@ -27,6 +28,23 @@ func (s *runnerAPIStore) CreateRunner(_ context.Context, r store.Runner) (store.
 	r.ID = otherID
 	s.value = r
 	return r, nil
+}
+func (s *runnerAPIStore) CreateRunnerRegistration(_ context.Context, hash []byte) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.registrationHash = append([]byte(nil), hash...)
+	return nil
+}
+func (s *runnerAPIStore) RegisterRunner(ctx context.Context, hash []byte, r store.Runner) (store.Runner, error) {
+	if s.err != nil {
+		return store.Runner{}, s.err
+	}
+	if len(s.registrationHash) == 0 || string(s.registrationHash) != string(hash) {
+		return store.Runner{}, store.ErrNotFound
+	}
+	s.registrationHash = nil
+	return s.CreateRunner(ctx, r)
 }
 func (s *runnerAPIStore) GetRunner(_ context.Context, id string) (store.Runner, error) {
 	if s.err != nil {
@@ -99,9 +117,20 @@ func TestRunnerAPIPublicLifecycle(t *testing.T) {
 	memory := &runnerAPIStore{}
 	router := NewRouter(app.New(memory))
 
-	createdResponse := runnerAPIRequest(router, http.MethodPost, "/api/runners", `{"name":"Build host"}`)
+	registrationResponse := runnerAPIRequest(router, http.MethodPost, "/api/runners", "")
+	if registrationResponse.Code != http.StatusCreated || registrationResponse.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("create registration %d %s", registrationResponse.Code, registrationResponse.Body.String())
+	}
+	var registration struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(registrationResponse.Body.Bytes(), &registration); err != nil || registration.Token == "" {
+		t.Fatalf("registration token=%q err=%v", registration.Token, err)
+	}
+
+	createdResponse := runnerAPIRequest(router, http.MethodPost, "/api/runner/register", `{"token":"`+registration.Token+`","name":"Build host"}`)
 	if createdResponse.Code != http.StatusCreated || createdResponse.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("create %d %s", createdResponse.Code, createdResponse.Body.String())
+		t.Fatalf("register %d %s", createdResponse.Code, createdResponse.Body.String())
 	}
 	var created struct {
 		Runner RunnerDTO `json:"runner"`
@@ -110,8 +139,11 @@ func TestRunnerAPIPublicLifecycle(t *testing.T) {
 	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if created.Token == "" || created.Runner.ID != otherID {
-		t.Fatal("missing runner identity or one-time token")
+	if created.Token == "" || created.Token == registration.Token || created.Runner.ID != otherID || created.Runner.Name != "Build host" {
+		t.Fatal("missing runner identity or distinct runner credential")
+	}
+	if reused := runnerAPIRequest(router, http.MethodPost, "/api/runner/register", `{"token":"`+registration.Token+`","name":"Second host"}`); reused.Code != http.StatusBadRequest {
+		t.Fatalf("registration token reused: %d %s", reused.Code, reused.Body.String())
 	}
 
 	for _, path := range []string{"/api/runners", "/api/runners/" + otherID} {
@@ -119,7 +151,7 @@ func TestRunnerAPIPublicLifecycle(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("GET %s -> %d", path, response.Code)
 		}
-		for _, secret := range []string{created.Token, "tokenHash", "TokenHash", "token_hash"} {
+		for _, secret := range []string{registration.Token, created.Token, "tokenHash", "TokenHash", "token_hash"} {
 			if strings.Contains(response.Body.String(), secret) {
 				t.Fatalf("credential leaked from %s", path)
 			}
@@ -174,6 +206,7 @@ func TestRunnerAPIValidationAndStoreFailure(t *testing.T) {
 		{http.MethodPut, "/api/projects/not-a-uuid/runners", `{"runnerIds":[]}`},
 		{http.MethodPut, "/api/projects/" + projectID + "/runners", `{"runnerIds":["not-a-uuid"]}`},
 		{http.MethodPatch, "/api/runners/" + otherID, `{`},
+		{http.MethodPost, "/api/runner/register", `{}`},
 	} {
 		if response := runnerAPIRequest(router, tc.method, tc.path, tc.body); response.Code != http.StatusBadRequest {
 			t.Fatalf("%s %s -> %d", tc.method, tc.path, response.Code)
