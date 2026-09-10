@@ -193,18 +193,17 @@ describe('ProjectEditor', () => {
     await flushPromises()
 
     const patchCall = fetch.mock.calls.find(([, options]) => options.method === 'PATCH')?.[1]
-    expect(patchCall).toMatchObject({
-      method: 'PATCH',
-      body: JSON.stringify({
-        name: 'Renamed',
-        sourceType: 'local',
-        repositoryPath: '/repo',
-        defaultBranch: 'main',
-        workflowSettings: {},
-        allowInternalRunner: true
-      })
+    expect(patchCall?.method).toBe('PATCH')
+    const body = JSON.parse(String(patchCall?.body))
+    expect(body).toEqual({
+      name: 'Renamed',
+      sourceType: 'local',
+      repositoryPath: '/repo',
+      defaultBranch: 'main',
+      workflowSettings: {},
+      allowInternalRunner: true
     })
-    expect(JSON.parse(String(patchCall?.body))).not.toHaveProperty('issuePrefix')
+    expect(body).not.toHaveProperty('issuePrefix')
   })
 
   it('guards duplicate submits while saving and clears loading after failure', async () => {
