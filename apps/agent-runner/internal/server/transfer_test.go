@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/agent-runner/internal/protocol"
+	runnerworkspace "github.com/brantje/agent-board/apps/agent-runner/internal/workspace"
 )
 
 func TestWorkspaceTransferMaterializesSessionDirectory(t *testing.T) {
@@ -17,19 +18,7 @@ func TestWorkspaceTransferMaterializesSessionDirectory(t *testing.T) {
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer conn.Close()
 
-	source := t.TempDir()
-	runGit(t, "-C", source, "init")
-	writeFile(t, filepath.Join(source, "README.md"), "hello\n")
-	runGit(t, "-C", source, "add", "README.md")
-	runGit(t, "-C", source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init")
-
-	bundlePath := filepath.Join(t.TempDir(), "workspace.bundle")
-	runGit(t, "-C", source, "bundle", "create", bundlePath, "HEAD")
-	payload, err := os.ReadFile(bundlePath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	payload := createGitBundlePayload(t)
 	writer := &connectionWriter{conn: conn}
 	if err := writer.sendTransfer(context.Background(), "session-transfer", "transfer-1", "to_runner", payload); err != nil {
 		t.Fatal(err)
@@ -344,9 +333,7 @@ func createGitBundlePayload(t *testing.T) []byte {
 	writeFile(t, filepath.Join(source, "README.md"), "hello\n")
 	runGit(t, "-C", source, "add", "README.md")
 	runGit(t, "-C", source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init")
-	bundlePath := filepath.Join(t.TempDir(), "workspace.bundle")
-	runGit(t, "-C", source, "bundle", "create", bundlePath, "HEAD")
-	payload, err := os.ReadFile(bundlePath)
+	payload, err := runnerworkspace.SnapshotBundle(context.Background(), source, "server-test-transfer")
 	if err != nil {
 		t.Fatal(err)
 	}
