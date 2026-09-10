@@ -25,9 +25,11 @@ CREATE UNIQUE INDEX projects_issue_prefix_uq ON projects (issue_prefix);
 
 CREATE TABLE runners (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    name text NOT NULL CHECK (btrim(name) <> ''),
-    token_hash bytea NOT NULL CHECK (octet_length(token_hash) = 32),
+    name text CHECK (name IS NULL OR btrim(name) <> ''),
+    token_hash bytea CHECK (token_hash IS NULL OR octet_length(token_hash) = 32),
+    registration_token_hash bytea CHECK (registration_token_hash IS NULL OR octet_length(registration_token_hash) = 32),
     internal boolean NOT NULL DEFAULT false,
+    registered_at timestamptz,
     revoked_at timestamptz,
     deleted_at timestamptz,
     last_seen_at timestamptz,
@@ -35,15 +37,16 @@ CREATE TABLE runners (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CHECK (deleted_at IS NULL OR revoked_at IS NOT NULL),
-    CHECK (NOT internal OR (revoked_at IS NULL AND deleted_at IS NULL))
+    CHECK (NOT internal OR (registered_at IS NOT NULL AND registration_token_hash IS NULL AND revoked_at IS NULL AND deleted_at IS NULL)),
+    CHECK (
+        (registered_at IS NULL AND NOT internal AND name IS NULL AND token_hash IS NULL) OR
+        (registered_at IS NOT NULL AND name IS NOT NULL AND token_hash IS NOT NULL AND registration_token_hash IS NULL)
+    ),
+    CHECK (registered_at IS NOT NULL OR registration_token_hash IS NOT NULL OR revoked_at IS NOT NULL)
 );
-CREATE UNIQUE INDEX runners_active_name_uq ON runners (lower(name)) WHERE deleted_at IS NULL;
+CREATE UNIQUE INDEX runners_active_name_uq ON runners (lower(name)) WHERE deleted_at IS NULL AND registered_at IS NOT NULL;
+CREATE UNIQUE INDEX runners_registration_token_uq ON runners (registration_token_hash) WHERE registration_token_hash IS NOT NULL;
 CREATE UNIQUE INDEX runners_internal_uq ON runners (internal) WHERE internal;
-
-CREATE TABLE runner_registrations (
-    token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
-    created_at timestamptz NOT NULL DEFAULT now()
-);
 
 CREATE TABLE project_runners (
     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
