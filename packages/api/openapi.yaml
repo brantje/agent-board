@@ -12,6 +12,8 @@ components:
 paths:
   /api/runners:
     $ref: ./paths/runners.yaml#/collection
+  /api/runner/register:
+    $ref: ./paths/runners.yaml#/register
   /api/runners/{resourceID}:
     $ref: ./paths/runners.yaml#/resource
   /api/runners/{resourceID}/rotate-token:
