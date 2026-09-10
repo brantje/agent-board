@@ -199,6 +199,7 @@ func (s *Server) handleTransferEnd(writer *connectionWriter, msg protocol.Messag
 	}
 	payload, direction, err := s.transfers.end(msg.SessionID, end)
 	if err != nil {
+		s.transfers.markFailed(msg.SessionID)
 		writer.sendError("transfer_failed", err.Error(), msg.SessionID)
 		return
 	}
