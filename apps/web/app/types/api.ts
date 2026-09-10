@@ -3,6 +3,9 @@ export interface Project {
   id: string
   name: string
   issuePrefix: string
+  sourceType: 'local' | 'git'
+  cloneUrl: string | null
+  sourceRef: string | null
   repositoryPath: string
   defaultBranch: string
   workflowSettings: Record<string, unknown>
