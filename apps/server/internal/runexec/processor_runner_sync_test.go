@@ -3,6 +3,9 @@ package runexec
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
@@ -47,6 +50,22 @@ func (c *failingSyncClient) ReceiveTransfer(context.Context, string, runner.Tran
 }
 
 func (c *failingSyncClient) ConfirmTransferApplied(context.Context, string, string) error {
+	return nil
+}
+
+type successfulSyncClient struct {
+	payload   []byte
+	confirmed bool
+}
+
+func (*successfulSyncClient) SendTransfer(context.Context, string, string, string, []byte, runner.TransferProgressFunc) error {
+	return nil
+}
+func (c *successfulSyncClient) ReceiveTransfer(context.Context, string, runner.TransferProgressFunc) (string, []byte, error) {
+	return "returned-transfer", c.payload, nil
+}
+func (c *successfulSyncClient) ConfirmTransferApplied(context.Context, string, string) error {
+	c.confirmed = true
 	return nil
 }
 
@@ -118,5 +137,80 @@ func TestRunnerSyncBackFailureOverridesEngineSuccess(t *testing.T) {
 	}
 	if len(client.directions) != 2 || client.directions[0] != "to_runner" || client.directions[1] != "from_runner" {
 		t.Fatalf("workspace transfer directions=%v", client.directions)
+	}
+}
+
+func TestRunnerSyncBackAppliesWorkspaceAndAcknowledgesTransfer(t *testing.T) {
+	authoritative := initProcessTestRepository(t)
+	runnerRepo := filepath.Join(t.TempDir(), "runner")
+	cmd := exec.Command("git", "clone", "-q", authoritative, runnerRepo)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v: %s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(runnerRepo, "returned.txt"), []byte("from runner\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git, err := workspace.NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := git.TransferSnapshot(t.Context(), runnerRepo, "returned-transfer")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	storeFake := &runnerSyncStore{}
+	recorder, err := evidence.NewRecorder(storeFake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &successfulSyncClient{payload: payload}
+	processor := &Processor{store: storeFake, events: recorder, git: git, runners: runnerSyncConnector{client: client}}
+	safe := processTestSafeContext(authoritative)
+	safe.Runtime = executioncontext.RuntimeContext{}
+
+	if err := processor.syncWorkspaceFromRunner(t.Context(), safe, "runner-1", "session-1"); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(filepath.Join(authoritative, "returned.txt"))
+	if err != nil || string(body) != "from runner\n" {
+		t.Fatalf("returned workspace file=%q err=%v", body, err)
+	}
+	if !client.confirmed || !hasProcessTestEvent(storeFake.events, "workspace.transfer.completed") {
+		t.Fatalf("confirmed=%v events=%+v", client.confirmed, storeFake.events)
+	}
+}
+
+type runnerQuestionStore struct {
+	*orchestrationQuestionStore
+	open store.Question
+}
+
+func (s *runnerQuestionStore) GetOpenBlockingQuestion(context.Context, string, string) (store.Question, error) {
+	if s.open.ID == "" {
+		return store.Question{}, store.ErrNotFound
+	}
+	return s.open, nil
+}
+
+func TestRunnerWaitingForInputKeepsRunWaitingWithoutRuntimeCleanup(t *testing.T) {
+	base := &processTestStore{}
+	questionStore := &runnerQuestionStore{
+		orchestrationQuestionStore: &orchestrationQuestionStore{processTestStore: base},
+		open:                       store.Question{ID: "question-1", Blocking: true, Status: "OPEN"},
+	}
+	recorder, err := evidence.NewRecorder(questionStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor := &Processor{store: questionStore, events: recorder}
+	safe := continuationSafeContext()
+
+	result, err := processor.finishWaitingForInputRunner(t.Context(), safe)
+	if err != nil || result.RunStatus != "WAITING_FOR_INPUT" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if event := processTestEvent(base.events, "run.waiting_for_input"); event.Type == "" || event.RuntimeInstanceID != nil {
+		t.Fatalf("waiting event=%+v", event)
 	}
 }
