@@ -139,7 +139,7 @@ export interface RuntimeInstanceEvidence {
 
 export interface ExecutionSessionEvidence {
   id: string
-  runtimeInstanceId: string
+  runtimeInstanceId: string | null
   runnerId: string | null
   status: string
   cwd: string
