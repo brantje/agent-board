@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -106,5 +107,72 @@ func TestOutboundConnectionReturnsAuthenticationFailureWithoutRetry(t *testing.T
 	}
 	if len(requests) != 1 {
 		t.Fatalf("authentication rejection retried %d times", len(requests))
+	}
+}
+
+func TestOutboundConnectionRetriesTransientFailure(t *testing.T) {
+	var attempts atomic.Int32
+	connected := make(chan struct{}, 1)
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attempts.Add(1) == 1 {
+			http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+			return
+		}
+		conn, err := (&websocket.Upgrader{}).Upgrade(w, r, nil)
+		if err != nil {
+			t.Errorf("upgrade: %v", err)
+			return
+		}
+		defer conn.Close()
+		hello, err := protocol.NewMessage(protocol.Version2, protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{protocol.Version2}})
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if err := conn.WriteJSON(hello); err != nil {
+			t.Error(err)
+			return
+		}
+		var runnerHello, health protocol.Message
+		if err := conn.ReadJSON(&runnerHello); err != nil {
+			t.Error(err)
+			return
+		}
+		if err := conn.ReadJSON(&health); err != nil {
+			t.Error(err)
+			return
+		}
+		connected <- struct{}{}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer host.Close()
+
+	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() { result <- runner.Connect(ctx, host.URL, "runner", "token") }()
+
+	select {
+	case <-connected:
+	case <-time.After(4 * time.Second):
+		cancel()
+		t.Fatal("runner did not reconnect after transient failure")
+	}
+	if attempts.Load() < 2 {
+		cancel()
+		t.Fatalf("connection attempts=%d, want retry", attempts.Load())
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("Connect() after cancellation=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Connect() did not stop after cancellation")
 	}
 }
