@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,24 +27,24 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	var err error
-	if len(os.Args) > 1 {
-		if os.Args[1] != "register" || len(os.Args) != 2 {
-			err = errors.New("usage: agent-runner [register]")
-		} else {
-			err = registerInteractive(ctx, &http.Client{Timeout: 30 * time.Second}, os.Stdin, os.Stdout, defaultStatePath)
-		}
-	} else {
-		var config appConfig
-		config, err = resolveConfig(configFromEnv(), defaultStatePath)
-		if err == nil {
-			err = run(ctx, config)
-		}
-	}
-	if err != nil {
+	if err := execute(ctx, os.Args, &http.Client{Timeout: 30 * time.Second}, os.Stdin, os.Stdout, defaultStatePath); err != nil {
 		slog.Error("agent-runner stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func execute(ctx context.Context, args []string, client httpDoer, input io.Reader, output io.Writer, statePath string) error {
+	if len(args) > 1 {
+		if args[1] != "register" || len(args) != 2 {
+			return errors.New("usage: agent-runner [register]")
+		}
+		return registerInteractive(ctx, client, input, output, statePath)
+	}
+	config, err := resolveConfig(configFromEnv(), statePath)
+	if err != nil {
+		return err
+	}
+	return run(ctx, config)
 }
 
 func configFromEnv() appConfig {
