@@ -4,15 +4,45 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
+	"github.com/gorilla/websocket"
 )
 
 func TestConfirmTransferAppliedSendsScopedAcknowledgement(t *testing.T) {
 	received := make(chan protocol.Message, 1)
-	server := newProtocolTestServer(t, protocol.Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"}}, func(_ anyConn, _ protocol.Message) {})
-	_ = received
-	_ = server
+	server := newProtocolTestServer(t, protocol.Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"}}, func(_ *websocket.Conn, msg protocol.Message) {
+		if msg.Type == protocol.TypeTransferApplied {
+			received <- msg
+		}
+	})
+	defer server.Close()
+
+	conn, err := Dial(context.Background(), wsURL(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.ConfirmTransferApplied(context.Background(), "session-1", "transfer-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	select {
+	case msg := <-received:
+		if msg.SessionID != "session-1" {
+			t.Fatalf("session id=%q", msg.SessionID)
+		}
+		applied, err := protocol.DecodePayload[protocol.TransferApplied](msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if applied.TransferID != "transfer-1" {
+			t.Fatalf("transfer id=%q", applied.TransferID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("transfer apply acknowledgement was not sent")
+	}
 }
 
 func TestConfirmTransferAppliedValidatesInputAndContext(t *testing.T) {
