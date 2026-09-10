@@ -1,84 +1,29 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
+
+	sharedworkspace "github.com/brantje/agent-board/packages/workspacegit"
 )
 
-const transferRefPrefix = "refs/agent-board/transfer/"
-
-// TransferSnapshot captures the current authoritative Workspace as a Git bundle.
+// TransferSnapshot captures the current authoritative Workspace as a Git bundle
+// without touching its real Git index.
 func (g *GitCLI) TransferSnapshot(ctx context.Context, repositoryPath, transferID string) ([]byte, error) {
-	transferID = strings.TrimSpace(transferID)
-	if transferID == "" {
-		return nil, fmt.Errorf("workspace transfer id is required")
-	}
-	if _, err := g.run(ctx, "-C", repositoryPath, "add", "-A", "--", "."); err != nil {
-		return nil, fmt.Errorf("stage workspace for transfer: %w", err)
-	}
-	head, err := g.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil {
-		return nil, fmt.Errorf("resolve workspace HEAD: %w", err)
-	}
-	commit := head
-	staged, err := g.run(ctx, "-C", repositoryPath, "diff", "--cached", "--name-only")
-	if err != nil {
-		return nil, fmt.Errorf("inspect staged workspace changes: %w", err)
-	}
-	if strings.TrimSpace(staged) != "" {
-		tree, err := g.run(ctx, "-C", repositoryPath, "write-tree")
-		if err != nil {
-			return nil, fmt.Errorf("write workspace transfer tree: %w", err)
-		}
-		commit, err = g.run(ctx, "-C", repositoryPath, "commit-tree", tree, "-p", head, "-m", "Agent Board workspace transfer")
-		if err != nil {
-			return nil, fmt.Errorf("create workspace transfer commit: %w", err)
-		}
-	}
-	if _, err := g.run(ctx, "-C", repositoryPath, "reset"); err != nil {
-		return nil, fmt.Errorf("restore workspace index after transfer snapshot: %w", err)
-	}
-	transferRef := transferRefPrefix + transferID
-	if _, err := g.run(ctx, "-C", repositoryPath, "update-ref", transferRef, commit); err != nil {
-		return nil, fmt.Errorf("pin workspace transfer ref: %w", err)
-	}
-	defer func() { _, _ = g.run(ctx, "-C", repositoryPath, "update-ref", "-d", transferRef) }()
-	bundlePath := filepath.Join(os.TempDir(), ".agent-board-transfer-"+transferID+".bundle")
-	defer os.Remove(bundlePath)
-	if err := g.writeCloneableBundle(ctx, repositoryPath, commit, bundlePath); err != nil {
-		return nil, err
-	}
-	payload, err := os.ReadFile(bundlePath)
-	if err != nil {
-		return nil, fmt.Errorf("read workspace transfer bundle: %w", err)
-	}
-	return payload, nil
+	return sharedworkspace.SnapshotBundle(ctx, repositoryPath, transferID, g.binary, g.commandTimeout)
 }
 
-func (g *GitCLI) writeCloneableBundle(ctx context.Context, repositoryPath, commit, bundlePath string) error {
-	private := filepath.Join(os.TempDir(), ".agent-board-bundle-"+filepath.Base(bundlePath))
-	defer os.RemoveAll(private)
-	if _, err := g.run(ctx, "clone", "--bare", repositoryPath, private); err != nil {
-		return fmt.Errorf("create workspace transfer bundle: %w", err)
-	}
-	if _, err := g.run(ctx, "--git-dir", private, "update-ref", "refs/heads/main", commit); err != nil {
-		return fmt.Errorf("create workspace transfer bundle: %w", err)
-	}
-	if _, err := g.run(ctx, "--git-dir", private, "symbolic-ref", "HEAD", "refs/heads/main"); err != nil {
-		return fmt.Errorf("create workspace transfer bundle: %w", err)
-	}
-	if _, err := g.run(ctx, "--git-dir", private, "bundle", "create", bundlePath, "HEAD", "main"); err != nil {
-		return fmt.Errorf("create workspace transfer bundle: %w", err)
-	}
-	return nil
-}
-
-// ApplyTransferBundle applies a runner-returned bundle onto the authoritative Workspace.
+// ApplyTransferBundle applies only the Runner's filesystem delta to the
+// authoritative working tree. HEAD and the authoritative Git index are never
+// advanced by transport.
 func (g *GitCLI) ApplyTransferBundle(ctx context.Context, repositoryPath string, bundle []byte) error {
 	if len(bundle) == 0 {
 		return nil
@@ -89,6 +34,10 @@ func (g *GitCLI) ApplyTransferBundle(ctx context.Context, repositoryPath string,
 	}
 	name := file.Name()
 	defer os.Remove(name)
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return fmt.Errorf("secure sync bundle file: %w", err)
+	}
 	if _, err := file.Write(bundle); err != nil {
 		_ = file.Close()
 		return fmt.Errorf("write sync bundle file: %w", err)
@@ -99,37 +48,78 @@ func (g *GitCLI) ApplyTransferBundle(ctx context.Context, repositoryPath string,
 	if _, err := g.run(ctx, "-C", repositoryPath, "bundle", "verify", name); err != nil {
 		return fmt.Errorf("verify sync bundle: %w", err)
 	}
-	head, err := g.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil {
-		return fmt.Errorf("resolve workspace HEAD before sync: %w", err)
-	}
-	syncRef := "refs/agent-board/sync/head"
-	if _, err := g.run(ctx, "-C", repositoryPath, "fetch", name, "HEAD:"+syncRef); err != nil {
-		if _, fallbackErr := g.run(ctx, "-C", repositoryPath, "fetch", name, "main:"+syncRef); fallbackErr != nil {
+
+	syncRef := "refs/agent-board/sync/" + TransferChecksum(bundle)[:32]
+	if _, err := g.run(ctx, "-C", repositoryPath, "fetch", "--no-tags", "--no-write-fetch-head", name, "refs/heads/main:"+syncRef); err != nil {
+		if _, fallbackErr := g.run(ctx, "-C", repositoryPath, "fetch", "--no-tags", "--no-write-fetch-head", name, "HEAD:"+syncRef); fallbackErr != nil {
 			return fmt.Errorf("fetch sync bundle: %w", err)
 		}
 	}
+	defer g.deleteTransferRef(repositoryPath, syncRef)
+
 	remote, err := g.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", syncRef+"^{commit}")
 	if err != nil {
 		return fmt.Errorf("resolve synced commit: %w", err)
 	}
-	defer func() { _, _ = g.run(ctx, "-C", repositoryPath, "update-ref", "-d", syncRef) }()
-	if remote == head {
+	base, err := g.run(ctx, "-C", repositoryPath, "rev-parse", "--verify", remote+"^")
+	if err != nil {
+		return fmt.Errorf("resolve synced baseline: %w", err)
+	}
+	patch, err := g.runBytes(ctx, nil, "-C", repositoryPath, "diff", "--binary", "--full-index", "--no-ext-diff", base, remote, "--")
+	if err != nil {
+		return fmt.Errorf("build runner workspace delta: %w", err)
+	}
+	if len(patch) == 0 {
 		return nil
 	}
-	if _, err := g.run(ctx, "-C", repositoryPath, "read-tree", "-m", "-u", head, remote); err != nil {
-		return fmt.Errorf("merge synced tree into workspace: %w", err)
-	}
-	if _, err := g.run(ctx, "-C", repositoryPath, "add", "-A", "--", "."); err != nil {
-		return fmt.Errorf("stage synced workspace changes: %w", err)
-	}
-	if _, err := g.run(ctx, "-C", repositoryPath, "-c", "user.name=Agent Board", "-c", "user.email=agent-board@localhost", "commit", "-m", "Synchronize workspace from runner"); err != nil {
-		if nothingToCommit(err) {
+	if _, err := g.runBytes(ctx, patch, "-C", repositoryPath, "apply", "--check", "--whitespace=nowarn", "-"); err != nil {
+		if _, reverseErr := g.runBytes(ctx, patch, "-C", repositoryPath, "apply", "--reverse", "--check", "--whitespace=nowarn", "-"); reverseErr == nil {
 			return nil
 		}
-		return fmt.Errorf("commit synced workspace changes: %w", err)
+		return fmt.Errorf("validate runner workspace delta: %w", err)
+	}
+	if _, err := g.runBytes(ctx, patch, "-C", repositoryPath, "apply", "--whitespace=nowarn", "-"); err != nil {
+		return fmt.Errorf("apply runner workspace delta: %w", err)
 	}
 	return nil
+}
+
+func (g *GitCLI) deleteTransferRef(repositoryPath, ref string) {
+	timeout := g.commandTimeout
+	if timeout > 10*time.Second {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_, _ = g.run(ctx, "-C", repositoryPath, "update-ref", "-d", ref)
+}
+
+func (g *GitCLI) runBytes(ctx context.Context, input []byte, args ...string) ([]byte, error) {
+	commandCtx, cancel := context.WithTimeout(ctx, g.commandTimeout)
+	defer cancel()
+	commandArgs := append(hardenedGitConfig(), args...)
+	cmd := exec.CommandContext(commandCtx, g.binary, commandArgs...)
+	cmd.Env = hardenedGitEnv()
+	if input != nil {
+		cmd.Stdin = bytes.NewReader(input)
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		if commandCtx.Err() != nil {
+			return nil, fmt.Errorf("git %s: %w", commandName(args), commandCtx.Err())
+		}
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = strings.TrimSpace(stdout.String())
+		}
+		if message == "" {
+			return nil, fmt.Errorf("git %s: %w", commandName(args), err)
+		}
+		return nil, fmt.Errorf("git %s: %w: %s", commandName(args), err, message)
+	}
+	return stdout.Bytes(), nil
 }
 
 func TransferChecksum(payload []byte) string {
@@ -137,9 +127,4 @@ func TransferChecksum(payload []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func nothingToCommit(err error) bool {
-	if err == nil {
-		return false
-	}
-	return strings.Contains(strings.ToLower(err.Error()), "nothing to commit")
-}
+var _ = filepath.Separator

@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	sharedworkspace "github.com/brantje/agent-board/packages/workspacegit"
 )
 
 const commandTimeout = 5 * time.Minute
@@ -50,73 +52,11 @@ func MaterializeBundle(ctx context.Context, repositoryPath string, bundle []byte
 	return nil
 }
 
-// SnapshotBundle captures the current session workspace as a Git bundle.
+// SnapshotBundle captures the current session filesystem without mutating the
+// session's real Git index. The same implementation is used by the server's
+// authoritative Workspace snapshot path.
 func SnapshotBundle(ctx context.Context, repositoryPath, transferID string) ([]byte, error) {
-	transferID = strings.TrimSpace(transferID)
-	if transferID == "" {
-		return nil, fmt.Errorf("workspace transfer id is required")
-	}
-	if _, err := runGit(ctx, "-C", repositoryPath, "add", "-A", "--", "."); err != nil {
-		return nil, fmt.Errorf("stage session workspace for sync: %w", err)
-	}
-	head, err := runGit(ctx, "-C", repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil {
-		return nil, fmt.Errorf("resolve session workspace HEAD: %w", err)
-	}
-	commit := head
-	staged, err := runGit(ctx, "-C", repositoryPath, "diff", "--cached", "--name-only")
-	if err != nil {
-		return nil, fmt.Errorf("inspect staged session workspace changes: %w", err)
-	}
-	if strings.TrimSpace(staged) != "" {
-		tree, err := runGit(ctx, "-C", repositoryPath, "write-tree")
-		if err != nil {
-			return nil, fmt.Errorf("write session workspace sync tree: %w", err)
-		}
-		commit, err = runGit(ctx, "-C", repositoryPath, "-c", "user.name=Agent Board", "-c", "user.email=agent-board@localhost", "commit-tree", tree, "-p", head, "-m", "Agent Board workspace sync")
-		if err != nil {
-			return nil, fmt.Errorf("create session workspace sync commit: %w", err)
-		}
-	}
-	if _, err := runGit(ctx, "-C", repositoryPath, "reset"); err != nil {
-		return nil, fmt.Errorf("restore session workspace index after sync snapshot: %w", err)
-	}
-	syncRef := "refs/agent-board/sync/head"
-	defer func() { _, _ = runGit(ctx, "-C", repositoryPath, "update-ref", "-d", syncRef) }()
-	if _, err := runGit(ctx, "-C", repositoryPath, "update-ref", syncRef, commit); err != nil {
-		return nil, fmt.Errorf("pin session workspace sync commit: %w", err)
-	}
-	bundlePath := filepath.Join(os.TempDir(), ".agent-board-sync-"+transferID+".bundle")
-	defer os.Remove(bundlePath)
-	if err := writeCloneableBundle(ctx, repositoryPath, commit, bundlePath); err != nil {
-		if strings.Contains(err.Error(), "Refusing to create empty bundle") {
-			return nil, nil
-		}
-		return nil, err
-	}
-	payload, err := os.ReadFile(bundlePath)
-	if err != nil {
-		return nil, fmt.Errorf("read session workspace sync bundle: %w", err)
-	}
-	return payload, nil
-}
-
-func writeCloneableBundle(ctx context.Context, repositoryPath, commit, bundlePath string) error {
-	private := filepath.Join(os.TempDir(), ".agent-board-bundle-"+filepath.Base(bundlePath))
-	defer os.RemoveAll(private)
-	if _, err := runGit(ctx, "clone", "--bare", repositoryPath, private); err != nil {
-		return fmt.Errorf("create session workspace sync bundle: %w", err)
-	}
-	if _, err := runGit(ctx, "--git-dir", private, "update-ref", "refs/heads/main", commit); err != nil {
-		return fmt.Errorf("create session workspace sync bundle: %w", err)
-	}
-	if _, err := runGit(ctx, "--git-dir", private, "symbolic-ref", "HEAD", "refs/heads/main"); err != nil {
-		return fmt.Errorf("create session workspace sync bundle: %w", err)
-	}
-	if _, err := runGit(ctx, "--git-dir", private, "bundle", "create", bundlePath, "HEAD", "main"); err != nil {
-		return fmt.Errorf("create session workspace sync bundle: %w", err)
-	}
-	return nil
+	return sharedworkspace.SnapshotBundle(ctx, repositoryPath, transferID, "git", commandTimeout)
 }
 
 func IsRepository(ctx context.Context, repositoryPath string) bool {
