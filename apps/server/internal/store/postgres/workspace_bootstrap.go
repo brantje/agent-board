@@ -61,12 +61,13 @@ func (s *Store) acquireWorkspaceBootstrapLock(ctx context.Context, workspaceID s
 	return &workspaceBootstrapLock{conn: conn, key: key}, nil
 }
 
-// fenceWorkspaceRunnerOwner takes the Workspace row lock on the same connection
-// already reserved by the short-lived filesystem advisory lock. CreateExecutionSession
-// takes this row lock too, so writer admission cannot race between the ownership
-// check and the snapshot/apply operation. The transaction lives only for that
-// bounded filesystem critical section; it is never retained across execution or
-// WAITING_FOR_INPUT.
+// fenceWorkspaceRunnerOwner checks durable Runner ownership while the
+// filesystem advisory lock is already held. The Workspace row lock exists only
+// for this short ownership check; it is committed before returning so normal
+// bootstrap metadata updates never block on their own filesystem lock.
+// CreateExecutionSession acquires the same advisory key transactionally before
+// taking this Workspace row lock, preventing ownership admission from crossing
+// the filesystem critical section after this check commits.
 func (s *Store) fenceWorkspaceRunnerOwner(ctx context.Context, lock *workspaceBootstrapLock, workspaceID, executionSessionID string) error {
 	if lock == nil || lock.conn == nil {
 		return store.ErrInvalidArgument
@@ -75,13 +76,10 @@ func (s *Store) fenceWorkspaceRunnerOwner(ctx context.Context, lock *workspaceBo
 	if err != nil {
 		return err
 	}
-	rollback := true
 	defer func() {
-		if rollback {
-			rollbackCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-			_ = tx.Rollback(rollbackCtx)
-		}
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
 	}()
 
 	var persistedWorkspaceID string
@@ -94,7 +92,7 @@ func (s *Store) fenceWorkspaceRunnerOwner(ctx context.Context, lock *workspaceBo
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Project-scoped users of the same advisory lock namespace deliberately
 			// have no Workspace row and therefore no Runner writer to fence.
-			return nil
+			return tx.Commit(ctx)
 		}
 		return err
 	}
@@ -122,10 +120,7 @@ func (s *Store) fenceWorkspaceRunnerOwner(ctx context.Context, lock *workspaceBo
 	if ownerSessionID != "" && ownerSessionID != executionSessionID {
 		return store.ErrConflict
 	}
-
-	lock.tx = tx
-	rollback = false
-	return nil
+	return tx.Commit(ctx)
 }
 
 func workspaceBootstrapLockWaitError(parent, lockCtx context.Context, workspaceID string, err error) error {
@@ -138,7 +133,6 @@ func workspaceBootstrapLockWaitError(parent, lockCtx context.Context, workspaceI
 type workspaceBootstrapLock struct {
 	once sync.Once
 	conn *pgxpool.Conn
-	tx   pgx.Tx
 	key  string
 	err  error
 }
@@ -150,13 +144,6 @@ func (l *workspaceBootstrapLock) Release() error {
 	l.once.Do(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if l.tx != nil {
-			if err := l.tx.Commit(ctx); err != nil {
-				l.err = err
-				discardPoolConn(l.conn)
-				return
-			}
-		}
 		var unlocked bool
 		l.err = l.conn.QueryRow(ctx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, l.key).Scan(&unlocked)
 		if l.err == nil && !unlocked {
