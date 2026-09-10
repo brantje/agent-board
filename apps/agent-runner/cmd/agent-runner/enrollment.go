@@ -9,18 +9,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+
+	runnerserver "github.com/brantje/agent-board/apps/agent-runner/internal/server"
 )
 
-const defaultStatePath = "/var/lib/agent-runner/runner.json"
+const defaultConfigPath = "/etc/agent-board/agent-runner.env"
 
-type runnerState struct {
-	ServerURL string `json:"serverUrl"`
-	RunnerID  string `json:"runnerId"`
-	Token     string `json:"token"`
+type enrollmentResult struct {
+	ServerURL   string
+	RunnerID    string
+	RunnerToken string
 }
 
 type httpDoer interface {
@@ -28,39 +29,39 @@ type httpDoer interface {
 }
 
 type enrollmentResponse struct {
-	Runner struct {
-		ID string `json:"id"`
-	} `json:"runner"`
-	Token string `json:"token"`
+	RunnerID    string `json:"runnerId"`
+	RunnerToken string `json:"runnerToken"`
 }
 
-func enrollRunner(ctx context.Context, client httpDoer, serverURL, registrationToken, name string) (runnerState, error) {
-	serverURL = strings.TrimRight(strings.TrimSpace(serverURL), "/")
+func enrollRunner(ctx context.Context, client httpDoer, serverURL, registrationToken, hostname string) (enrollmentResult, error) {
+	normalizedURL, endpoint, err := runnerserver.AgentBoardEndpoint(serverURL, "/api/runner/register", false)
+	if err != nil {
+		return enrollmentResult{}, err
+	}
 	registrationToken = strings.TrimSpace(registrationToken)
-	name = strings.TrimSpace(name)
-	parsed, err := url.Parse(serverURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		return runnerState{}, errors.New("Agent Board URL must be an absolute http or https URL")
-	}
+	hostname = strings.TrimSpace(hostname)
 	if registrationToken == "" {
-		return runnerState{}, errors.New("runner registration token is required")
+		return enrollmentResult{}, errors.New("runner registration token is required")
 	}
-	if name == "" {
-		return runnerState{}, errors.New("runner hostname is required")
+	if hostname == "" {
+		return enrollmentResult{}, errors.New("runner hostname is required")
 	}
 
-	payload, err := json.Marshal(map[string]string{"token": registrationToken, "name": name})
+	payload, err := json.Marshal(struct {
+		RegistrationToken string `json:"registrationToken"`
+		Hostname          string `json:"hostname"`
+	}{RegistrationToken: registrationToken, Hostname: hostname})
 	if err != nil {
-		return runnerState{}, err
+		return enrollmentResult{}, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, serverURL+"/api/runner/register", bytes.NewReader(payload))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(payload))
 	if err != nil {
-		return runnerState{}, err
+		return enrollmentResult{}, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 	response, err := client.Do(request)
 	if err != nil {
-		return runnerState{}, fmt.Errorf("register runner: %w", err)
+		return enrollmentResult{}, fmt.Errorf("register runner: %w", err)
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusCreated {
@@ -69,31 +70,47 @@ func enrollRunner(ctx context.Context, client httpDoer, serverURL, registrationT
 		if message == "" {
 			message = response.Status
 		}
-		return runnerState{}, fmt.Errorf("register runner: %s", message)
+		return enrollmentResult{}, fmt.Errorf("register runner: %s", message)
 	}
 	var enrolled enrollmentResponse
 	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&enrolled); err != nil {
-		return runnerState{}, fmt.Errorf("decode registration response: %w", err)
+		return enrollmentResult{}, fmt.Errorf("decode registration response: %w", err)
 	}
-	if enrolled.Runner.ID == "" || enrolled.Token == "" {
-		return runnerState{}, errors.New("registration response did not include runner credentials")
+	if enrolled.RunnerID == "" || enrolled.RunnerToken == "" {
+		return enrollmentResult{}, errors.New("registration response did not include runner credentials")
 	}
-	return runnerState{ServerURL: serverURL, RunnerID: enrolled.Runner.ID, Token: enrolled.Token}, nil
+	return enrollmentResult{ServerURL: normalizedURL, RunnerID: enrolled.RunnerID, RunnerToken: enrolled.RunnerToken}, nil
 }
 
-func saveRunnerState(path string, state runnerState) error {
-	if state.ServerURL == "" || state.RunnerID == "" || state.Token == "" {
-		return errors.New("runner state is incomplete")
+func saveRunnerEnvironment(path string, enrolled enrollmentResult, workspaceRoot string) error {
+	if enrolled.ServerURL == "" || enrolled.RunnerID == "" || enrolled.RunnerToken == "" {
+		return errors.New("runner enrollment result is incomplete")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return err
+	if workspaceRoot == "" {
+		workspaceRoot = defaultWorkspaceRoot
 	}
-	data, err := json.Marshal(state)
-	if err != nil {
+	values := []struct {
+		name  string
+		value string
+	}{
+		{"AGENT_BOARD_URL", enrolled.ServerURL},
+		{"AGENT_RUNNER_ID", enrolled.RunnerID},
+		{"AGENT_RUNNER_TOKEN", enrolled.RunnerToken},
+		{"AGENT_RUNNER_WORKSPACE_ROOT", workspaceRoot},
+	}
+	var content strings.Builder
+	for _, value := range values {
+		line, err := environmentLine(value.name, value.value)
+		if err != nil {
+			return err
+		}
+		content.WriteString(line)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return err
 	}
 	temporary := path + ".tmp"
-	if err := os.WriteFile(temporary, append(data, '\n'), 0600); err != nil {
+	if err := os.WriteFile(temporary, []byte(content.String()), 0600); err != nil {
 		return err
 	}
 	if err := os.Chmod(temporary, 0600); err != nil {
@@ -107,22 +124,15 @@ func saveRunnerState(path string, state runnerState) error {
 	return nil
 }
 
-func loadRunnerState(path string) (runnerState, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return runnerState{}, err
+func environmentLine(name, value string) (string, error) {
+	if value == "" || strings.ContainsAny(value, "\r\n") {
+		return "", fmt.Errorf("%s has an invalid value", name)
 	}
-	var state runnerState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return runnerState{}, err
-	}
-	if state.ServerURL == "" || state.RunnerID == "" || state.Token == "" {
-		return runnerState{}, errors.New("runner state is incomplete")
-	}
-	return state, nil
+	escaped := strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value)
+	return fmt.Sprintf("%s=\"%s\"\n", name, escaped), nil
 }
 
-func registerInteractive(ctx context.Context, client httpDoer, input io.Reader, output io.Writer, statePath string) error {
+func registerInteractive(ctx context.Context, client httpDoer, input io.Reader, output io.Writer, configPath string) error {
 	reader := bufio.NewReader(input)
 	fmt.Fprint(output, "Agent Board URL: ")
 	serverURL, err := reader.ReadString('\n')
@@ -130,21 +140,21 @@ func registerInteractive(ctx context.Context, client httpDoer, input io.Reader, 
 		return err
 	}
 	fmt.Fprint(output, "One-time registration token: ")
-	registrationToken, tokenErr := reader.ReadString('\n')
-	if tokenErr != nil && !errors.Is(tokenErr, io.EOF) {
-		return tokenErr
+	registrationToken, err := readRegistrationToken(reader, input, output)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
 	}
 	hostname, err := os.Hostname()
 	if err != nil {
 		return fmt.Errorf("read hostname: %w", err)
 	}
-	state, err := enrollRunner(ctx, client, serverURL, registrationToken, hostname)
+	enrolled, err := enrollRunner(ctx, client, serverURL, registrationToken, hostname)
 	if err != nil {
 		return err
 	}
-	if err := saveRunnerState(statePath, state); err != nil {
-		return fmt.Errorf("save runner credentials: %w", err)
+	if err := saveRunnerEnvironment(configPath, enrolled, os.Getenv("AGENT_RUNNER_WORKSPACE_ROOT")); err != nil {
+		return fmt.Errorf("save runner environment: %w", err)
 	}
-	fmt.Fprintf(output, "Registered runner %s as %s.\n", state.RunnerID, hostname)
+	fmt.Fprintf(output, "Registered runner %s as %s.\n", enrolled.RunnerID, hostname)
 	return nil
 }
