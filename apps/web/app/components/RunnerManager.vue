@@ -13,14 +13,15 @@ const editState = reactive({ name: '' })
 const saving = ref(false)
 const saveError = ref<Error>()
 
-async function createRegistration() {
+async function createRunner() {
   if (creating.value) return
   creating.value = true
   createError.value = undefined
   registrationToken.value = ''
   try {
-    const response = await apiRequest<{ token: string }>('/api/runners', { method: 'POST' })
-    registrationToken.value = response.token
+    const response = await apiRequest<{ runner: { id: string }, registrationToken: string }>('/api/runners', { method: 'POST' })
+    registrationToken.value = response.registrationToken
+    await refresh()
   } catch (failure) {
     createError.value = failure as Error
   } finally {
@@ -28,10 +29,15 @@ async function createRegistration() {
   }
 }
 
+async function copyRegistrationToken() {
+  if (!registrationToken.value || !navigator.clipboard) return
+  await navigator.clipboard.writeText(registrationToken.value)
+}
+
 function edit(runner: Runner) {
-  if (runner.internal) return
+  if (runner.internal || !runner.registeredAt) return
   editing.value = runner
-  editState.name = runner.name
+  editState.name = runner.name ?? ''
   saveError.value = undefined
 }
 
@@ -67,19 +73,20 @@ async function saveName() {
 <template>
   <PageFrame title="Runners" description="Manage external execution hosts and their enrollment.">
     <template #actions>
-      <UButton label="Create runner" icon="i-lucide-plus" :loading="creating" @click="createRegistration" />
+      <UButton label="Create runner" icon="i-lucide-plus" :loading="creating" @click="createRunner" />
     </template>
 
-    <UAlert v-if="createError" color="error" title="Unable to create runner registration" :description="createError.message" class="mb-4" />
+    <UAlert v-if="createError" color="error" title="Unable to create runner" :description="createError.message" class="mb-4" />
     <UAlert
       v-if="registrationToken"
       color="warning"
       title="One-time registration token"
-      description="Copy this token now. It is shown once and can register exactly one runner. The runner will use its system hostname as its initial name."
+      description="Copy this token now. It is shown once and enrolls the pending runner. The runner will use its system hostname as its initial name."
       class="mb-4"
     >
       <template #actions>
         <code class="select-all break-all font-mono text-sm" data-testid="runner-registration-token">{{ registrationToken }}</code>
+        <UButton label="Copy" color="neutral" variant="outline" @click="copyRegistrationToken" />
       </template>
     </UAlert>
 
@@ -88,19 +95,20 @@ async function saveName() {
       :error="error"
       :empty="!runners?.length"
       empty-title="No runners yet"
-      empty-description="Create a one-time registration token, then enroll an external agent-runner."
+      empty-description="Create a pending runner, then enroll an external agent-runner with its one-time registration token."
       @retry="refresh"
     >
       <div class="grid w-full gap-3">
         <UCard v-for="runner in runners" :key="runner.id">
           <div class="flex flex-wrap items-center gap-3">
             <div class="min-w-0 flex-1">
-              <h2 class="font-medium text-highlighted break-words">{{ runner.name }}</h2>
+              <h2 class="font-medium text-highlighted break-words">{{ runner.name ?? 'Pending registration' }}</h2>
               <p class="text-xs text-muted font-mono break-all">{{ runner.id }}</p>
             </div>
             <UBadge v-if="runner.internal" color="neutral" variant="subtle" label="Internal" />
-            <UBadge :color="runner.connected ? 'success' : 'neutral'" variant="subtle" :label="runner.connected ? 'Connected' : 'Offline'" />
-            <UButton v-if="!runner.internal" label="Edit" color="neutral" variant="outline" @click="edit(runner)" />
+            <UBadge v-if="!runner.registeredAt" color="warning" variant="subtle" :label="runner.revokedAt ? 'Revoked' : 'Pending registration'" />
+            <UBadge v-else :color="runner.connected ? 'success' : 'neutral'" variant="subtle" :label="runner.connected ? 'Connected' : 'Offline'" />
+            <UButton v-if="!runner.internal && runner.registeredAt" label="Edit" color="neutral" variant="outline" @click="edit(runner)" />
           </div>
         </UCard>
       </div>
