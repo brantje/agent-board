@@ -475,6 +475,9 @@ func validateProject(v store.Project) error {
 		if v.CloneURL == nil || strings.TrimSpace(*v.CloneURL) == "" {
 			return invalid("cloneUrl is required for git Projects")
 		}
+		if cloneURLHasHTTPUserInfo(*v.CloneURL) {
+			return invalid("cloneUrl must not contain embedded HTTP credentials")
+		}
 	default:
 		return invalid("sourceType must be local or git")
 	}
