@@ -24,7 +24,7 @@ CREATE TABLE projects (
     CHECK (
         (source_type = 'local' AND btrim(repository_path) <> '' AND btrim(default_branch) <> '' AND clone_url IS NULL AND source_ref IS NULL)
         OR
-        (source_type = 'git' AND btrim(clone_url) <> '' AND repository_path = '' AND default_branch = '')
+        (source_type = 'git' AND clone_url IS NOT NULL AND btrim(clone_url) <> '' AND repository_path = '' AND default_branch = '')
     )
 );
 
