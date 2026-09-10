@@ -4,6 +4,19 @@
 
 External hosts are user-trusted execution environments. Agent Board does not provide or claim Docker isolation on those hosts.
 
+## Build a versioned Linux binary
+
+Local development builds advertise `runner_version=dev`. A release/production build embeds its concrete version into the capability handshake:
+
+```bash
+VERSION=v0.1.0
+CGO_ENABLED=0 GOOS=linux go build -trimpath \
+  -ldflags="-s -w -X github.com/brantje/agent-board/apps/agent-runner/internal/server.Version=${VERSION}" \
+  -o agent-runner ./cmd/agent-runner
+```
+
+The Docker build accepts the same value through `--build-arg AGENT_RUNNER_VERSION=<version>`. The repository does not yet publish standalone release artifacts; the release pipeline that publishes them must supply a concrete version. This PR intentionally does not add a package repository or shell installer.
+
 ## Install on Linux
 
 1. Build or download the versioned `agent-runner` binary for your architecture.

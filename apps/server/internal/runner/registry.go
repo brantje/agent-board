@@ -20,19 +20,35 @@ type Observer interface {
 	ObserveRunner(context.Context, string, json.RawMessage) error
 }
 
+// ConnectionReconciler authorizes replacing a live transport for an immutable
+// runner identity. Durable session ownership remains in the application/store;
+// the registry only supplies the old and replacement transport health claims.
+type ConnectionReconciler interface {
+	ReconcileRunnerConnection(context.Context, string, protocol.Health, protocol.Health) error
+}
+
 // Registry holds authenticated live transports only. Durable reservations and
 // execution ownership remain in PostgreSQL and the existing scheduler.
 type Registry struct {
-	auth     Authenticator
-	observer Observer
-	mu       sync.RWMutex
-	entries  map[string]*Connection
+	auth       Authenticator
+	observer   Observer
+	reconciler ConnectionReconciler
+
+	installMu    sync.Mutex
+	mu           sync.RWMutex
+	entries      map[string]*Connection
 	disconnected map[string]time.Time
-	closed   bool
+	closed       bool
 }
 
 func NewRegistry(auth Authenticator, observer Observer) *Registry {
 	return &Registry{auth: auth, observer: observer, entries: map[string]*Connection{}, disconnected: map[string]time.Time{}}
+}
+
+func (r *Registry) SetConnectionReconciler(reconciler ConnectionReconciler) {
+	r.mu.Lock()
+	r.reconciler = reconciler
+	r.mu.Unlock()
 }
 
 func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
@@ -68,6 +84,34 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		_ = client.Close()
 		return
 	}
+
+	// Serialize installs for one registry so two simultaneous reconnects cannot
+	// both reconcile against and replace the same transport.
+	r.installMu.Lock()
+	defer r.installMu.Unlock()
+
+	r.mu.RLock()
+	closed := r.closed
+	old := r.entries[identity.ID]
+	reconciler := r.reconciler
+	r.mu.RUnlock()
+	if closed {
+		_ = client.Close()
+		return
+	}
+
+	var oldHealth protocol.Health
+	if old != nil && clientAlive(old) {
+		oldHealth = old.Health()
+	}
+	if reconciler != nil {
+		if err = reconciler.ReconcileRunnerConnection(req.Context(), identity.ID, oldHealth, client.Health()); err != nil {
+			_ = client.write(protocol.TypeError, "", protocol.ErrorPayload{Code: "runner_session_conflict", Message: "runner connection cannot replace active session transport"})
+			_ = client.Close()
+			return
+		}
+	}
+
 	encoded, _ := json.Marshal(client.Capabilities())
 	if r.observer != nil {
 		if err = r.observer.ObserveRunner(req.Context(), identity.ID, encoded); err != nil {
@@ -75,13 +119,14 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
 		_ = client.Close()
 		return
 	}
-	old := r.entries[identity.ID]
+	old = r.entries[identity.ID]
 	r.entries[identity.ID] = client
 	delete(r.disconnected, identity.ID)
 	r.mu.Unlock()

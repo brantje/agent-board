@@ -53,10 +53,6 @@ func TestReconcileRunnerSessionReturnsUncertainWhileReconnectWindowOpen(t *testi
 }
 
 func TestReconcileRunnerSessionFailsAfterReconnectTimeout(t *testing.T) {
-	original := runnerReconnectTimeout
-	runnerReconnectTimeout = time.Millisecond
-	defer func() { runnerReconnectTimeout = original }()
-
 	manager := &reconnectTrackingManager{
 		reconcileExecutionManager: &reconcileExecutionManager{err: runner.ErrDisconnected},
 		disconnectedAt:            time.Now().Add(-time.Second),
@@ -71,12 +67,40 @@ func TestReconcileRunnerSessionFailsAfterReconnectTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := service.SetRunnerReconnectTimeout(time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
 
 	if _, err := service.Reconcile(context.Background(), "project-1", "session-1"); err != nil {
 		t.Fatalf("reconcile error=%v", err)
 	}
 	if storeFake.session.Status != "FAILED" {
 		t.Fatalf("session status=%q", storeFake.session.Status)
+	}
+}
+
+func TestReconcileRunnerSessionReconnectBeforeTimeoutReattaches(t *testing.T) {
+	transport := newFakeExecutionTransport("session-1")
+	manager := &reconnectTrackingManager{
+		reconcileExecutionManager: &reconcileExecutionManager{transport: transport, active: true},
+		disconnectedAt:            time.Now().Add(-time.Minute),
+	}
+	storeFake := &executionSessionStoreFake{
+		session: store.ExecutionSession{
+			ID: "session-1", ProjectID: "project-1", RunID: "run-1", RunnerID: "runner-1",
+			Status: "RUNNING", UpdatedAt: time.Now(),
+		},
+	}
+	service, err := NewExecutionSessionService(storeFake, manager, manager)
+	if err != nil {
+		t.Fatal(err)
+	}
+	process, err := service.Reconcile(context.Background(), "project-1", "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process == nil || process.ID() != "session-1" || storeFake.session.Status != "RUNNING" {
+		t.Fatalf("process=%v status=%q", process, storeFake.session.Status)
 	}
 }
 

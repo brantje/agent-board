@@ -232,6 +232,10 @@ func startScheduler(ctx context.Context, handler http.Handler) (<-chan error, er
 }
 
 func configuredApplication(database *postgres.Store) (*app.Services, error) {
+	runnerReconnectTimeout, err := configuredRunnerReconnectTimeout()
+	if err != nil {
+		return nil, err
+	}
 	roots := repository.ParseRoots(os.Getenv("AGENT_BOARD_REPOSITORY_ROOTS"))
 	if len(roots) == 0 {
 		return nil, fmt.Errorf("repository roots: %w", repository.ErrNoAuthorizedRoots)
@@ -282,6 +286,10 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 			_ = dockerRuntime.Close()
 		}
 		return nil, err
+	}
+	if err := services.ConfigureRunnerReconnectTimeout(runnerReconnectTimeout); err != nil {
+		_ = services.Close()
+		return nil, fmt.Errorf("runner reconnect timeout: %w", err)
 	}
 	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
 		database.SetRunnerCandidates(services.ControlPlane.Runners.Connections.Candidates)

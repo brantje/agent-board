@@ -1,5 +1,6 @@
 FROM golang:1.25-alpine AS build
 
+ARG AGENT_RUNNER_VERSION=dev
 WORKDIR /src
 COPY packages/redact/ ./packages/redact/
 COPY packages/runnerprotocol/ ./packages/runnerprotocol/
@@ -8,7 +9,9 @@ COPY apps/agent-runner/go.mod apps/agent-runner/go.sum ./apps/agent-runner/
 WORKDIR /src/apps/agent-runner
 RUN go mod download
 COPY apps/agent-runner/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/agent-runner ./cmd/agent-runner
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+    -ldflags="-s -w -X github.com/brantje/agent-board/apps/agent-runner/internal/server.Version=${AGENT_RUNNER_VERSION}" \
+    -o /out/agent-runner ./cmd/agent-runner
 
 FROM alpine:3.22
 

@@ -9,8 +9,6 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-var runnerReconnectTimeout = 5 * time.Minute
-
 type runnerDisconnectTracker interface {
 	DisconnectedSince(string) (time.Time, bool)
 }
@@ -65,7 +63,7 @@ func (s *ExecutionSessionService) reconcileRunnerSession(ctx context.Context, se
 
 func (s *ExecutionSessionService) failRunnerSessionAfterDisconnectTimeout(ctx context.Context, session store.ExecutionSession) error {
 	if tracker, ok := s.registry.(runnerDisconnectTracker); ok {
-		if disconnectedAt, known := tracker.DisconnectedSince(session.RunnerID); known && time.Since(disconnectedAt) >= runnerReconnectTimeout {
+		if disconnectedAt, known := tracker.DisconnectedSince(session.RunnerID); known && time.Since(disconnectedAt) >= s.runnerReconnectTimeout() {
 			_, err := s.transition(ctx, session, []string{"STARTING", "RUNNING"}, "FAILED", nil)
 			return err
 		}
