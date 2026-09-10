@@ -59,7 +59,7 @@ type Engine struct {
 }
 
 func New() *Engine {
-	return &Engine{address: defaultAddress}
+	return &Engine{}
 }
 
 func newWithAddress(address string) *Engine {
@@ -84,7 +84,8 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	if err != nil {
 		return engine.Result{}, err
 	}
-	host, port, err := net.SplitHostPort(e.address)
+	address := e.nativeServerAddress(request.Context)
+	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return engine.Result{}, fmt.Errorf("opencode engine: parse native server address: %w", err)
 	}
@@ -120,7 +121,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	if !ok {
 		return engine.Result{}, fmt.Errorf("opencode engine: process does not support session-local connections")
 	}
-	native, err := client.NewSession(connector, e.address)
+	native, err := client.NewSession(connector, address)
 	if err != nil {
 		return engine.Result{}, err
 	}
