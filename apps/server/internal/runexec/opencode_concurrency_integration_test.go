@@ -3,6 +3,8 @@ package runexec
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -207,9 +209,58 @@ func newConcurrentOpenCodeIntegrationFixture(t *testing.T, runnerCount int) *ope
 		t.Fatal(err)
 	}
 	processor.SetWorkspaceEnsurer(services.Workspaces)
-	for range runnerCount {
-		startOutboundOpenCodeRunner(t, ctx, services, database, env.image)
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/runner/ws" {
+			http.NotFound(w, r)
+			return
+		}
+		services.ControlPlane.Runners.Connections.ServeHTTP(w, r)
+	})
+	server := startOpenCodeRunnerWSServer(t, handler)
+	binary := buildAgentRunnerBinary(t)
+	runnerIDs := make([]string, 0, runnerCount)
+	for index := range runnerCount {
+		created, token, err := services.ControlPlane.Runners.Create(ctx, fmt.Sprintf("OpenCode concurrency runner %d", index+1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		runnerWorkspaceRoot := filepath.Join(t.TempDir(), "runner-workspaces")
+		if err := os.MkdirAll(runnerWorkspaceRoot, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		proc := startOpenCodeAgentRunner(t, binary, server.URL, created.ID, token, runnerWorkspaceRoot)
+		t.Cleanup(func() {
+			if proc.Process != nil {
+				_ = proc.Process.Kill()
+			}
+			_ = proc.Wait()
+		})
+		waitForRunnerConnected(t, services.ControlPlane.Runners.Connections, created.ID)
+		runnerIDs = append(runnerIDs, created.ID)
 	}
+	database.SetRunnerCandidates(services.ControlPlane.Runners.Connections.Candidates)
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		candidateSet := make(map[string]struct{})
+		for _, id := range services.ControlPlane.Runners.Connections.Candidates(opencode.Name) {
+			candidateSet[id] = struct{}{}
+		}
+		allPresent := true
+		for _, id := range runnerIDs {
+			if _, ok := candidateSet[id]; !ok {
+				allPresent = false
+				break
+			}
+		}
+		if allPresent {
+			goto runnersReady
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("live registry did not advertise all OpenCode concurrency runners: want=%v got=%v", runnerIDs, services.ControlPlane.Runners.Connections.Candidates(opencode.Name))
+
+runnersReady:
 	config := scheduler.DefaultConfig("opencode-concurrency-integration")
 	config.PollInterval = 20 * time.Millisecond
 	config.LeaseDuration = 5 * time.Second
