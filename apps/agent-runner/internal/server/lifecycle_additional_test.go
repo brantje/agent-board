@@ -1,7 +1,6 @@
 package server
 
 import (
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -12,9 +11,7 @@ import (
 
 func TestSequentialSessionsIsolateWorkspaceOverOneConnection(t *testing.T) {
 	workspace := t.TempDir()
-	runner := New(Config{WorkspaceRoot: workspace, MaxActiveSessions: 1})
-	httpServer := httptest.NewServer(runner)
-	defer httpServer.Close()
+	runner, httpServer := newTestRunnerWithWorkspace(t, workspace)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer conn.Close()
 
