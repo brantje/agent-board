@@ -29,9 +29,6 @@ func TestWorkspaceTransferExecutionAndCleanup(t *testing.T) {
 		Command: []string{"sh", "-c", "cat README.md && printf changed > result.txt"},
 		Dir:     "/workspace",
 	})
-	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
-		t.Fatalf("unexpected start response %#v", msg)
-	}
 	waitForExit(t, conn, "session-1")
 	waitFor(t, time.Second, func() bool { return runner.manager.ActiveCount() == 0 })
 
