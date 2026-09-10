@@ -16,7 +16,7 @@ CREATE TABLE projects (
     clone_url text CHECK (clone_url IS NULL OR btrim(clone_url) <> ''),
     source_ref text CHECK (source_ref IS NULL OR btrim(source_ref) <> ''),
     repository_path text NOT NULL DEFAULT '',
-    default_branch text NOT NULL DEFAULT '',
+    default_branch text NOT NULL DEFAULT 'main',
     workflow_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(workflow_settings) = 'object'),
     allow_internal_runner boolean NOT NULL DEFAULT true,
     created_at timestamptz NOT NULL DEFAULT now(),
