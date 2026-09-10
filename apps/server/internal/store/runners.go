@@ -8,21 +8,22 @@ import (
 
 // Runner is deployment-global execution capacity. Connectivity is never stored.
 type Runner struct {
-	ID           string
-	Name         string
-	TokenHash    []byte `json:"-"`
-	Internal     bool
-	RevokedAt    *time.Time
-	DeletedAt    *time.Time
-	LastSeenAt   *time.Time
-	Capabilities json.RawMessage
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID                    string
+	Name                  string
+	TokenHash             []byte `json:"-"`
+	RegistrationTokenHash []byte `json:"-"`
+	Internal              bool
+	RegisteredAt          *time.Time
+	RevokedAt             *time.Time
+	DeletedAt             *time.Time
+	LastSeenAt            *time.Time
+	Capabilities          json.RawMessage
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 type RunnerStore interface {
 	CreateRunner(context.Context, Runner) (Runner, error)
-	CreateRunnerRegistration(context.Context, []byte) error
 	RegisterRunner(context.Context, []byte, Runner) (Runner, error)
 	GetRunner(context.Context, string) (Runner, error)
 	ListRunners(context.Context) ([]Runner, error)
