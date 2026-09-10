@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -18,10 +19,30 @@ const (
 )
 
 func (s *Store) AcquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string) (store.WorkspaceBootstrapLock, error) {
-	return s.acquireWorkspaceBootstrapLock(ctx, workspaceID, workspaceBootstrapLockWaitTimeout)
+	return s.acquireWorkspaceLock(ctx, workspaceID, "")
 }
 
-func (s *Store) acquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string, waitTimeout time.Duration) (store.WorkspaceBootstrapLock, error) {
+func (s *Store) AcquireWorkspaceExecutionLock(ctx context.Context, workspaceID, executionSessionID string) (store.WorkspaceBootstrapLock, error) {
+	executionSessionID = strings.TrimSpace(executionSessionID)
+	if executionSessionID == "" {
+		return nil, store.ErrInvalidArgument
+	}
+	return s.acquireWorkspaceLock(ctx, workspaceID, executionSessionID)
+}
+
+func (s *Store) acquireWorkspaceLock(ctx context.Context, workspaceID, executionSessionID string) (store.WorkspaceBootstrapLock, error) {
+	lock, err := s.acquireWorkspaceBootstrapLock(ctx, workspaceID, workspaceBootstrapLockWaitTimeout)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.fenceWorkspaceRunnerOwner(ctx, lock, workspaceID, executionSessionID); err != nil {
+		_ = lock.Release()
+		return nil, err
+	}
+	return lock, nil
+}
+
+func (s *Store) acquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string, waitTimeout time.Duration) (*workspaceBootstrapLock, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, store.ErrInvalidArgument
 	}
@@ -40,6 +61,79 @@ func (s *Store) acquireWorkspaceBootstrapLock(ctx context.Context, workspaceID s
 	return &workspaceBootstrapLock{conn: conn, key: key}, nil
 }
 
+// fenceWorkspaceRunnerOwner takes the Workspace row lock on the same connection
+// already reserved by the short-lived filesystem advisory lock. CreateExecutionSession
+// takes this row lock too, so writer admission cannot race between the ownership
+// check and the snapshot/apply operation. The transaction lives only for that
+// bounded filesystem critical section; it is never retained across execution or
+// WAITING_FOR_INPUT.
+func (s *Store) fenceWorkspaceRunnerOwner(ctx context.Context, lock *workspaceBootstrapLock, workspaceID, executionSessionID string) error {
+	if lock == nil || lock.conn == nil {
+		return store.ErrInvalidArgument
+	}
+	tx, err := lock.conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	rollback := true
+	defer func() {
+		if rollback {
+			rollbackCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = tx.Rollback(rollbackCtx)
+		}
+	}()
+
+	var persistedWorkspaceID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id::text
+		FROM workspaces
+		WHERE id::text = $1
+		FOR UPDATE
+	`, workspaceID).Scan(&persistedWorkspaceID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Project-scoped users of the same advisory lock namespace deliberately
+			// have no Workspace row and therefore no Runner writer to fence.
+			return nil
+		}
+		return err
+	}
+
+	var ownerSessionID string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE((
+			SELECT session.id::text
+			FROM execution_sessions AS session
+			JOIN runs AS run
+			  ON run.project_id = session.project_id
+			 AND run.id = session.run_id
+			WHERE run.workspace_id = $1::uuid
+			  AND session.runner_id IS NOT NULL
+			  AND (
+				run.status = 'WAITING_FOR_INPUT'
+				OR EXISTS (
+					SELECT 1
+					FROM scheduler_jobs AS job
+					WHERE job.project_id = run.project_id
+					  AND job.run_id = run.id
+					  AND job.state IN ('QUEUED', 'CLAIMED')
+				)
+			  )
+			ORDER BY session.created_at DESC
+			LIMIT 1
+		), '')
+	`, persistedWorkspaceID).Scan(&ownerSessionID); err != nil {
+		return err
+	}
+	if ownerSessionID != "" && ownerSessionID != executionSessionID {
+		return store.ErrConflict
+	}
+
+	lock.tx = tx
+	rollback = false
+	return nil
+}
+
 func workspaceBootstrapLockWaitError(parent, lockCtx context.Context, workspaceID string, err error) error {
 	if parent.Err() == nil && errors.Is(lockCtx.Err(), context.DeadlineExceeded) {
 		return fmt.Errorf("workspace %s: %w", workspaceID, store.ErrWorkspaceBootstrapLockTimeout)
@@ -50,6 +144,7 @@ func workspaceBootstrapLockWaitError(parent, lockCtx context.Context, workspaceI
 type workspaceBootstrapLock struct {
 	once sync.Once
 	conn *pgxpool.Conn
+	tx   pgx.Tx
 	key  string
 	err  error
 }
@@ -61,6 +156,13 @@ func (l *workspaceBootstrapLock) Release() error {
 	l.once.Do(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		if l.tx != nil {
+			if err := l.tx.Commit(ctx); err != nil {
+				l.err = err
+				discardPoolConn(l.conn)
+				return
+			}
+		}
 		var unlocked bool
 		l.err = l.conn.QueryRow(ctx, `SELECT pg_advisory_unlock(hashtextextended($1, 0))`, l.key).Scan(&unlocked)
 		if l.err == nil && !unlocked {
