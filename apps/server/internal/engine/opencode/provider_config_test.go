@@ -102,3 +102,16 @@ func TestServerEnvironmentPinsSmallModelToConfiguredProviderModel(t *testing.T) 
 		t.Fatalf("title agent disable=%v want true so title generation cannot steal the configured model slot", title["disable"])
 	}
 }
+
+func TestServerEnvironmentUsesProcessLocalDatabase(t *testing.T) {
+	env, err := serverEnvironment(executioncontext.SafeContext{
+		Model:    executioncontext.ModelContext{Model: "deepseek/deepseek-v4-flash"},
+		Provider: executioncontext.ProviderContext{Kind: "openrouter"},
+	}, "openrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env["OPENCODE_DB"]; got != ":memory:" {
+		t.Fatalf("OPENCODE_DB=%q want :memory: so concurrent OpenCode processes do not share SQLite state", got)
+	}
+}
