@@ -8,7 +8,7 @@ import (
 )
 
 func createExternalRunnerCredential(ctx context.Context, control *app.Service) (store.Runner, string, error) {
-	registrationToken, err := control.Runners.CreateRegistration(ctx)
+	_, registrationToken, err := control.Runners.Create(ctx)
 	if err != nil {
 		return store.Runner{}, "", err
 	}
