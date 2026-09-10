@@ -120,7 +120,7 @@ onMounted(async () => {
       <UFormField
         label="Clone URL"
         name="cloneUrl"
-        description="Any cloneable Git URL. The remote is not contacted when this Project is saved."
+        description="Credential-free Git clone URL. The remote is not contacted when this Project is saved."
         required
       >
         <UInput v-model="state.cloneUrl" class="w-full font-mono" :disabled="saving" />
