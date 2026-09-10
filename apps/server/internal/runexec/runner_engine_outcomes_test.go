@@ -21,6 +21,15 @@ func (s *runnerSnapshotFailureStore) CreateArtifact(context.Context, store.Artif
 	return store.Artifact{}, s.err
 }
 
+type runnerWorkspaceLockFailureStore struct {
+	*runnerSyncStore
+	err error
+}
+
+func (s *runnerWorkspaceLockFailureStore) AcquireWorkspaceExecutionLock(context.Context, string, string) (store.WorkspaceBootstrapLock, error) {
+	return nil, s.err
+}
+
 type runnerOutboundFailureClient struct {
 	*successfulSyncClient
 	err error
@@ -47,6 +56,31 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 		}
 		if len(client.directions) != 0 {
 			t.Fatalf("unknown engine unexpectedly transferred workspace: %v", client.directions)
+		}
+	})
+
+	t.Run("workspace lock failure blocks transfer and execution", func(t *testing.T) {
+		repo := initProcessTestRepository(t)
+		safe := processTestSafeContext(repo)
+		safe.Runtime = executioncontext.RuntimeContext{}
+		storeFake := &runnerSyncStore{}
+		client := &successfulSyncClient{}
+		processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
+		processor.store = &runnerWorkspaceLockFailureStore{runnerSyncStore: storeFake, err: errors.New("workspace already has an execution writer")}
+		run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "STARTING"}
+
+		result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run, RunnerID: "runner-1"}, processTestLifecycle{run: run})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.RunStatus != "FAILED" {
+			t.Fatalf("workspace lock failure result=%+v", result)
+		}
+		if len(client.directions) != 0 {
+			t.Fatalf("workspace lock failure still transferred data: %v", client.directions)
+		}
+		if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "agent.message") || hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
+			t.Fatalf("workspace lock failure events=%+v", storeFake.events)
 		}
 	})
 
