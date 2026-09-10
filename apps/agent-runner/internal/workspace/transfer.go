@@ -16,7 +16,8 @@ import (
 
 const commandTimeout = 5 * time.Minute
 
-// MaterializeBundle unpacks a Git bundle into the session workspace directory.
+// MaterializeBundle unpacks an Agent Board Git transfer bundle into the session
+// workspace and restores its original HEAD/index/worktree state.
 func MaterializeBundle(ctx context.Context, repositoryPath string, bundle []byte) error {
 	if len(bundle) == 0 {
 		return os.MkdirAll(repositoryPath, 0o755)
@@ -49,12 +50,16 @@ func MaterializeBundle(ctx context.Context, repositoryPath string, bundle []byte
 	if _, err := runGit(ctx, "-C", parent, "clone", name, filepath.Base(repositoryPath)); err != nil {
 		return fmt.Errorf("materialize transfer bundle: %w", err)
 	}
+	if _, err := sharedworkspace.RestoreCheckoutState(ctx, repositoryPath, "HEAD", "git", commandTimeout); err != nil {
+		_ = os.RemoveAll(repositoryPath)
+		return fmt.Errorf("restore transfer workspace state: %w", err)
+	}
 	return nil
 }
 
-// SnapshotBundle captures the current session filesystem without mutating the
-// session's real Git index. The same implementation is used by the server's
-// authoritative Workspace snapshot path.
+// SnapshotBundle captures the current session HEAD/index/worktree without
+// mutating the session's real Git index. The same implementation is used by the
+// server's authoritative Workspace snapshot path.
 func SnapshotBundle(ctx context.Context, repositoryPath, transferID string) ([]byte, error) {
 	return sharedworkspace.SnapshotBundle(ctx, repositoryPath, transferID, "git", commandTimeout)
 }
