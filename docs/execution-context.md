@@ -16,11 +16,11 @@ Run
   -> explicit Question/Review/resume context
 ```
 
-Agents select Engine and Model Profile. The scheduler selects an eligible connected Runner for execution; Agents do not select Runtime directly.
+Agents select Engine and Model Profile. The scheduler selects an eligible connected Runner for execution. Runner and Runtime are not Agent configuration, and Runner-based execution does not require Runtime resolution.
 
 The resolved non-secret context is immutable for the execution attempt and suitable for safe provenance capture.
 
-Model identifier/generation settings come from Model Profile. Provider connection metadata comes from Provider. Runner hosts own the executable environment for external execution; legacy Runtime policy remains available only on the internal managed-compute path.
+Model identifier/generation settings come from Model Profile. Provider connection metadata comes from Provider. Runner hosts own the executable environment for preferred production execution. Legacy Runtime policy is resolved only when existing internal managed-compute code actually uses that path.
 
 ## Secret separation
 
@@ -33,7 +33,7 @@ encrypted secret/reference
  -> redact before every durable sink
 ```
 
-Provider/source-control/Runtime secrets are never persisted into:
+Provider/source-control and, where applicable, legacy Runtime secrets are never persisted into:
 
 - Run rows/resume metadata
 - scheduler jobs/reservations
@@ -56,13 +56,15 @@ Secret-write HTTP operations are privileged deployment administration surfaces. 
 
 The capability grants secret-write authority across the deployment, including global and Project-scoped secrets. Project-scoped handlers still pass the target Project into the authorization boundary and validate that Project before persistence, so a future scoped authorizer can replace the deployment capability without changing handler semantics.
 
-The secret-write capability remains backend/operator-owned. It is never persisted in Agent Board data, injected into Runtime sessions, or treated as caller-supplied actor identity.
+The secret-write capability remains backend/operator-owned. It is never persisted in Agent Board data, injected into execution sessions, or treated as caller-supplied actor identity.
 
-## Runtime secret references
+## Legacy Runtime secret references
 
-Runtime declares allowed secret references. Before resolving one:
+This section applies only to the existing internal managed-compute Runtime path. External and server-managed Runner execution does not require an Agent-selected Runtime.
 
-1. verify the ref is allowed by the selected Runtime
+When a legacy Runtime declares allowed secret references, trusted Go code must:
+
+1. verify the ref is allowed by that Runtime
 2. reject undeclared refs before secret resolution
 3. authorize within current Project/Run context
 4. resolve in trusted backend code
@@ -76,7 +78,7 @@ See `source-control.md`.
 
 ## Resume and Review context
 
-Question answers continue the same Run where product policy says so. Review changes may create a new attempt linked to the reviewed Run while reusing the same Issue Workspace.
+Question answers continue the same Run where product policy says so. Native OpenCode Questions remain on the same live Runner Execution Session and native Engine session while waiting. Review changes may create a new attempt linked to the reviewed Run while reusing the same Issue Workspace.
 
 Only explicit relevant human feedback is composed into execution context. Engines do not scan arbitrary historical Events and hidden reasoning is not product state.
 
@@ -88,10 +90,10 @@ Redaction applies before every durable boundary.
 
 ## Failure behavior
 
-Missing/inaccessible configuration, failed decryption, unauthorized secret refs, unavailable Runtime prerequisites or source-authentication failures produce stable actionable error codes before coding-agent process launch where possible.
+Missing/inaccessible configuration, failed decryption, unauthorized secret refs, unavailable Runner prerequisites or source-authentication failures produce stable actionable error codes before coding-agent process launch where possible. Legacy Runtime prerequisite failures are reported only when that managed-compute path is actually selected internally.
 
 Errors never include plaintext secrets, ciphertext, full environments or sensitive authorization material.
 
 ## Provenance
 
-The safe resolved context is the source for immutable Run provenance. Historical Run inspection never reconstructs execution truth from mutable current Agent/Model/Provider/Runner records.
+The safe resolved context is the source for immutable Run provenance. Historical Run inspection never reconstructs execution truth from mutable current Agent/Model/Provider/Runner records. Runtime provenance is conditional legacy evidence, not a required Runner execution-context input.

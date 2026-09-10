@@ -2,7 +2,7 @@
 
 `agent-runner` is the Engine-neutral execution-plane binary between the trusted Go control plane and coding Engine processes such as OpenCode.
 
-Production v0.1 prefers **external persistent Runner hosts**: a user-managed Linux machine runs `agent-runner` as a systemd service and connects outbound to Agent Board over protocol v2. The server-managed internal Runner uses the same protocol and Workspace-transfer path; it is not a second execution topology.
+Production v0.1 prefers **external persistent Runner hosts**: a user-managed Linux machine runs a versioned standalone `agent-runner` binary as a systemd service and connects outbound to Agent Board over protocol v2. The server-managed internal Runner uses the same protocol and Workspace-transfer path; it is not a second execution topology.
 
 The Runner is part of the v0.1 execution architecture. It is not an Agent, Run, Runtime, Runtime Instance or future Worker.
 
@@ -15,11 +15,11 @@ Preferred path:
 ```text
 Issue
  -> Run
- -> scheduler
+ -> existing scheduler
  -> selected connected Runner
  -> transferred Issue Workspace
+ -> server-side Engine adapter
  -> Execution Session
- -> Engine adapter
  -> coding CLI on Runner host
  -> Workspace sync-back
  -> candidate / Review
@@ -37,7 +37,7 @@ Required relationships:
 
 - one Runner may execute many Execution Sessions over time
 - one active Runner Execution Session owns one process tree and one transferred Workspace copy
-- one Run may use Execution Sessions over its lifetime, but a blocking Question continues the same live Runner Execution Session
+- one Run may use Execution Sessions over its lifetime, but a blocking native Question continues the same live Runner Execution Session
 - the durable Issue Workspace remains server-authoritative
 - one logical writer owns an Issue Workspace during a Runner execution lifecycle
 - a Runtime Instance, where legacy managed compute is used, remains bound to exactly one Workspace for its lifetime
@@ -58,9 +58,9 @@ The Runner keeps its session Workspace until the server has successfully verifie
 
 ## Transport
 
-The server and Runner communicate over one outbound WebSocket initiated by the Runner.
+The server and Runner communicate over one outbound WebSocket initiated by the Runner. Protocol v2 is the only supported Runner protocol after the #68 migration.
 
-The protocol is explicitly versioned and every execution message is scoped to a server-issued Execution Session identity. The wire protocol supports multiple sessions over the lifetime of one Runner connection even when the configured concurrency limit is one.
+Every execution message is scoped to a server-issued Execution Session identity. The wire protocol supports multiple sessions over the lifetime of one Runner connection even when the configured concurrency limit is one.
 
 The protocol supports at least:
 
@@ -77,7 +77,9 @@ The protocol supports at least:
 - Runner/session errors
 - liveness/connection reconciliation
 
-A WebSocket disconnect is an infrastructure signal, not by itself durable proof that a Run or Engine process failed. The reconnect grace period starts when the live Runner connection is actually lost. If the Runner reconnects within the grace period, Agent Board may reattach to the same active Execution Session; unresolved sessions fail only after that grace expires.
+A WebSocket disconnect is an infrastructure signal, not by itself durable proof that a Run or Engine process failed. The reconnect grace period starts when the live Runner connection is actually lost. Its server deployment setting is `AGENT_BOARD_RUNNER_RECONNECT_TIMEOUT`, which defaults to `5m` and accepts a positive Go duration. If the Runner reconnects within the grace period, Agent Board may reattach to the same active Execution Session; unresolved sessions fail only after that grace expires.
+
+A newly authenticated connection claiming the same immutable `runner_id` does not blindly evict a live transport. The server compares the old/new Runner health claims with durable active Execution Session ownership. Matching claims for the same durable session permit safe replacement/reattachment. Missing, mismatched or unexpected active-session claims are rejected/fail-closed so a takeover cannot discard ownership or enable duplicate Engine execution.
 
 ## Concurrency and future fleets
 
@@ -148,9 +150,13 @@ The Runner must never receive:
 
 Secret values remain ephemeral. They must not be echoed in Runner protocol responses and must be redacted before every durable server-side sink.
 
-## Distribution
+## Distribution and versioning
 
-For v0.1, `agent-runner` is a standalone binary suitable for installation as a persistent systemd service on external Linux hosts. The internal Runner uses the same binary/protocol and can be packaged in Agent Board-managed images for quick internal execution.
+For v0.1, `agent-runner` is a standalone Linux binary suitable for installation as a persistent systemd service on external hosts. Release/production builds embed a concrete version into `internal/server.Version`; that same value is advertised as protocol capability `runner_version`. Local development may use the `dev` fallback.
+
+The Docker build accepts `AGENT_RUNNER_VERSION`. Standalone release builds can inject the same value with Go `-ldflags -X`; the exact command and systemd installation are documented in `apps/agent-runner/README.md`.
+
+This repository does not yet publish standalone binaries through a release workflow. Publishing/versioned artifact distribution belongs to that release pipeline; #68 does not add a package manager, installer repository or shell installer.
 
 Conceptual repository layout:
 
@@ -175,7 +181,7 @@ A future Worker/Pool is compute capacity and remains separate from Runner identi
 
 ```text
 Run
- -> scheduler
+ -> existing scheduler
  -> Worker/Pool placement
  -> Runner
  -> Execution Session

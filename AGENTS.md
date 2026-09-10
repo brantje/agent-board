@@ -14,9 +14,9 @@ For implementation work, read the relevant canonical docs:
 - `docs/source-control.md` — repositories and Source Connections
 - `docs/execution-context.md` — canonical execution context/secrets
 - `docs/execution-evidence.md` — provenance/logs/Artifacts/Review evidence
-- `docs/runtime-contract.md` — Runtime boundary/security
-- `docs/runtime-execution.md` — Runtime/runner Engine execution
-- `docs/agent-runner.md` — runner identity, WebSocket/session contract and same-Workspace reuse
+- `docs/runtime-contract.md` — legacy/internal managed Runtime boundary/security
+- `docs/runtime-execution.md` — Runner execution plus legacy Runtime compatibility
+- `docs/agent-runner.md` — Runner identity, protocol-v2 session contract and Workspace transfer
 - `docs/event-protocol.md` — Event contract
 - `docs/testing.md` — mandatory TDD workflow
 - `docs/frontend-implementation.md` — clean-room Nuxt/Nuxt UI implementation rules
@@ -37,6 +37,7 @@ Local Project repository
  -> durable scheduler
  -> selected connected Runner
  -> durable Issue Workspace
+ -> Workspace transfer
  -> agent-runner
  -> Execution Session
  -> real coding Engine
@@ -74,21 +75,21 @@ After the answers, finalize the plan and proceed. Avoid extended question trees 
 - Multi-project isolation is mandatory.
 - Issue is the durable unit of work.
 - Agent is durable configuration, not a process/container.
-- Run is a durable execution attempt, not a Runtime Instance, runner or Execution Session.
-- Workspace survives Runtime Instances and is reused per Issue.
-- A Runtime Instance is bound to exactly one Workspace for its lifetime.
-- Runtime Instance, `agent-runner`, Execution Session and Run are separate identities.
-- One runner may execute many Execution Sessions over time against its bound Workspace.
+- Run is a durable execution attempt, not a Runtime Instance, Runner or Execution Session.
+- Workspace survives Runner transport loss and any legacy Runtime Instance lifetime; it is reused per Issue.
+- Runtime/Runtime Instance remain legacy internal managed-compute concepts and are not Agent configuration.
+- Where legacy managed compute is used, a Runtime Instance is bound to exactly one Workspace for its lifetime.
+- Runner, `agent-runner`, Execution Session and Run are separate identities.
+- One Runner may execute many Execution Sessions over time; each Runner Execution Session uses its own transferred Workspace materialization.
 - One Execution Session owns one process tree.
-- v0.1 allows one active Execution Session per runner; the protocol must remain extensible for more.
+- v0.1 allows one active Execution Session per Runner; the protocol must remain extensible for more.
 - PostgreSQL is authoritative for structured state and scheduler ownership.
 - Browser/request lifetime never owns execution or continuation.
 - Engine adapters remain server-side; `agent-runner` stays Engine-neutral.
 - Engine processes execute on the selected Runner through `agent-runner`.
-- Server/runner transport is explicitly versioned WebSocket (runner -> server protocol v2).
+- Server/Runner transport is explicitly versioned WebSocket (Runner -> server protocol v2).
 - Model inference is independent from Runner compute.
 - Agents select Engine and Model Profile; the scheduler selects an eligible Runner.
-- Runtime remains legacy internal managed compute only and is not Agent configuration.
 - Agent concurrency, Model Profile capacity and live Runner capacity are scheduler constraints.
 - Questions and Decisions are first-class durable objects.
 - Events are append-only and persist-before-publish.
@@ -104,6 +105,8 @@ Provider -> Model Profile
 Engine + Model Profile -> Agent
 ```
 
+Agents do not configure Runtime, Runtime Instance, Runner, Executor Profile or Runner Profile. Project Runner restrictions are scheduler policy, not Agent configuration.
+
 Board workflow:
 
 ```text
@@ -117,15 +120,15 @@ Board state is separate from Run state. Capacity-only waiting remains queued and
 - Backend: Go (`apps/server`)
 - Agent runner: Go (`apps/agent-runner`)
 - HTTP: chi
-- Runner transport: WebSocket
+- Runner transport: WebSocket protocol v2, initiated outbound by the Runner
 - Frontend: Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS + Nuxt UI v4
 - Database: PostgreSQL + pgvector
 - API contracts: OpenAPI + intentional public DTOs/frontend types
 - Live updates: SSE
-- Runtime: Docker first
+- Legacy/internal managed compute: optional Docker Runtime/Runtime Instance support where existing code still uses it
 - Blob/output storage: local filesystem first, S3-compatible later
 
-The Go backend is the production control plane. `agent-runner` is a narrow execution-plane binary inside Runtime Instances. Nuxt handles web rendering, routing and browser interaction; durable product state, scheduling, execution authorization and evidence remain Go-server-owned.
+The Go backend is the production control plane. `agent-runner` is the narrow Engine-neutral execution-plane binary running on the scheduler-selected Runner host. External persistent Runners are the preferred production path; the server-managed internal Runner uses the same protocol-v2 path. Legacy Runtime Instances may also host the same binary where the existing managed-compute implementation is used. Nuxt handles web rendering, routing and browser interaction; durable product state, scheduling, execution authorization and evidence remain Go-server-owned.
 
 ## Mandatory TDD
 
@@ -176,7 +179,7 @@ pnpm build
 - Human decisions requiring continuation persist that continuation durably before success returns.
 - Do not create parallel schedulers, Run lifecycles, Workspaces or Engine-owned authoritative state.
 - Do not introduce a Runtime Profile, Executor Profile or Runner Profile domain/API/persistence/UI layer; Agents select Engine and Model Profile, and the scheduler selects Runners.
-- Keep Engine adapters server-side and independent from raw runner WebSocket framing.
+- Keep Engine adapters server-side and independent from raw Runner WebSocket framing.
 - Keep `agent-runner` Engine-neutral and free of PostgreSQL, scheduler, Review and control-plane authorization logic.
 
 ## Maintainability: DRY and YAGNI
@@ -207,28 +210,33 @@ Validate local repository paths against deployment-authorized roots. Project con
 
 Normal Run orchestration materializes or reuses the Issue Workspace from that repository. One authoritative Workspace exists per Issue in v0.1.
 
-A Runtime Instance mounts exactly one Workspace for its lifetime. It may be reused for later sessions/Runs only against that same Workspace. Cross-Workspace Runtime Instance reuse is not allowed in v0.1.
+Before Runner execution, Agent Board transfers the exact non-ignored Git state required by #68 into a fresh session Workspace. The Runner materialization is temporary; the backend-owned Issue Workspace remains authoritative. Transfer and sync-back must preserve staged, unstaged, untracked non-ignored files, deletions, executable bits and symlinks without exposing transport commits/refs or replacing authoritative staging.
+
+Where the legacy internal managed-compute path still uses Runtime Instances, a Runtime Instance remains bound to one Workspace for its lifetime. That is not the normal external-Runner placement/reuse model.
 
 Authenticated GitHub/GitLab/Bitbucket/Forgejo Source Connections are later work and must not block the first local-repository v0.1 flow. When implemented, credentials remain ephemeral and never appear in durable clone URLs or Git configuration.
 
-## Runtime and security
+## Runner execution and security
 
 Agent-executed code is untrusted.
 
+Canonical v0.1 execution:
+
 ```text
 Agent
- -> Runtime
- -> validated Runtime Spec
- -> Runtime implementation
- -> Runtime Instance
- -> agent-runner
+ -> Engine + Model Profile
+ -> Run
+ -> existing scheduler
+ -> selected connected Runner
  -> Execution Session
  -> Engine
 ```
 
-Official v0.1 Runtime images contain `agent-runner`. The server and runner use a versioned WebSocket protocol. Runner connection/session state does not become authoritative durable product state.
+External persistent Runners are preferred production execution. The server-managed internal Runner uses the same outbound protocol-v2 path and the same Git-native Workspace transfer. External Runner execution does not create a placeholder Runtime Instance.
 
-Never execute coding-agent CLIs directly in the trusted backend process. Never mount the Docker socket into Agent Runtime Instances. Never give the runner PostgreSQL credentials, server encryption keys or broad control-plane credentials.
+Legacy/internal managed compute may still provision a validated Runtime and Runtime Instance before reaching the same `agent-runner`/Execution Session boundary. Keep that code isolated from canonical Agent configuration and Runner scheduling.
+
+Never execute coding-agent CLIs directly in the trusted backend process. Never provide Docker daemon credentials/socket access as part of Agent Board's external-Runner protocol. Where a legacy managed Runtime Instance is used, never mount the Docker socket into Agent-executed compute. Never give the Runner PostgreSQL credentials, server encryption keys or broad control-plane credentials.
 
 Control-plane authorization derives trusted actor identity; caller-controlled headers cannot grant human/admin privileges.
 
@@ -236,15 +244,15 @@ Control-plane authorization derives trusted actor identity; caller-controlled he
 
 Persist important activity before live publication. Do not store hidden chain-of-thought.
 
-Large output belongs in durable raw-output/blob storage; Artifacts are first-class records. Run provenance records the selected Runtime directly. Review/Run inspection shows complete candidate evidence, including staged and new/untracked files where applicable.
+Large output belongs in durable raw-output/blob storage; Artifacts are first-class records. Run provenance records the selected Runner and resolved Engine/Model/Provider configuration. Runtime/Runtime Instance provenance is recorded only when the legacy internal managed-compute path was actually used. Review/Run inspection shows complete candidate evidence, including staged and new/untracked files where applicable.
 
 Runner output is normalized/redacted before durable persistence. A WebSocket disconnect is an infrastructure signal and is not, by itself, durable proof that a Run failed.
 
 ## Questions and Review
 
-Blocking Questions pause the same Run and may release its Runtime Instance while preserving Workspace state. The Issue moves to the `BLOCKED` state/column when human input is required according to workflow policy.
+Blocking Questions pause the same Run. For native OpenCode Questions, the same live Runner Execution Session and Runner Workspace remain attached through `WAITING_FOR_INPUT`; answering continues the same native Engine session without a replacement prompt/process. The Issue moves to the `BLOCKED` state/column when human input is required according to workflow policy.
 
-Resume state is server-owned. A later continuation may reuse a healthy same-Workspace Runtime Instance or create a replacement Runtime Instance against the same durable Workspace.
+Resume/Question state is server-owned. If the Runner transport actually disconnects, reconcile the same durable Execution Session during the configured reconnect grace before declaring infrastructure failure or allowing retry; do not blindly start duplicate work. Legacy Runtime recovery rules apply only when that managed-compute path was actually used.
 
 Human Review is the v0.1 shipping gate.
 
@@ -290,7 +298,7 @@ The project configures the Nuxt UI MCP server in `.cursor/mcp.json` at `https://
 
 Planning strategy, Automations, Agent-created Issues, Source Connections, delivery automation, delegation, Squads and worker pools reuse the canonical Issue/Run/scheduler/Workspace model.
 
-Future Worker Pools supply compute capacity but do not replace Agent, Runtime Instance, runner or Execution Session identities.
+Future Worker Pools supply/place Runner capacity but do not replace Agent, Runner or Execution Session identities. Legacy Runtime Instance identity remains separate wherever that compatibility path still exists.
 
 Users, groups, roles/permissions and broader multi-user administration are expected later but are not yet designed; do not invent their product contracts.
 

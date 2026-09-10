@@ -1,6 +1,6 @@
 # Execution provenance, logs, Artifacts and Review evidence
 
-Trustworthy execution evidence is part of the v0.1 critical path. A Run remains independently understandable after configuration changes, reconnects and later attempts.
+Trustworthy execution evidence is part of the v0.1 critical path. A Run remains independently understandable after configuration changes, Runner reconnects and later attempts.
 
 ## Immutable Run provenance
 
@@ -13,17 +13,16 @@ Include where applicable:
 - Model Profile
 - Provider identity/type/base endpoint metadata
 - selected model + generation settings
-- Runtime ID/name/kind/image/effective policy when the legacy managed-compute path was used
-- selected Runner identity/name when Runner-based execution was used
-- Runtime tooling/capability metadata where relevant
+- selected Runner identity/name and advertised version/capability metadata relevant to the attempt
 - Workspace identity
 - repository/base/working branch
 - Source Connection identity without credentials
 - relevant workflow/config revision metadata
+- Runtime ID/name/kind/image/effective policy and Runtime Instance identity only when the legacy internal managed-compute path was actually used
 
-Runner identity is captured because the scheduler selected that Runner for the attempt. Runtime is captured only when the legacy managed-compute path was used.
+Runner identity is execution provenance because the scheduler selected that Runner for the attempt. It is not Agent configuration. Runtime/Runtime Instance evidence is conditional legacy provenance, not a required canonical Runner execution field.
 
-Never persist secret plaintext in public execution evidence. Editing current Agent/Model/Provider/Runtime configuration does not alter historical Run provenance.
+Never persist secret plaintext in public execution evidence. Editing current Agent/Model/Provider/Runner configuration does not alter historical Run provenance. Editing legacy Runtime configuration likewise does not rewrite provenance for attempts that used it.
 
 ## Raw output
 
@@ -53,6 +52,8 @@ Artifacts are listable/readable/downloadable through Project-scoped APIs.
 
 Events remain the durable activity timeline. Events may reference raw-output ranges and Artifact IDs, but Event payloads are not the blob store or Artifact database.
 
+Runner transport/Workspace transfer progress Events are normalized, redacted execution evidence. Live connection state itself remains ephemeral; persisted Events/provenance describe what happened without making `last_seen` equivalent to scheduler eligibility.
+
 ## Run inspection
 
 Run detail is human-readable first and raw JSON second.
@@ -66,7 +67,8 @@ Show:
 - commands/tool calls and exit state
 - file/change evidence
 - tests/checks
-- selected Runtime and Runtime Instance lifecycle
+- selected Runner and Execution Session diagnostics/provenance
+- legacy Runtime/Runtime Instance lifecycle only for attempts that actually used internal managed compute
 - raw logs where useful
 - Artifacts
 - blocking/Review guidance
@@ -77,7 +79,7 @@ Unknown Events remain visible through a safe diagnostic fallback.
 
 Review and Run inspection share one canonical public evidence/read-model path.
 
-The candidate includes all relevant Workspace changes:
+The candidate includes all relevant authoritative Issue Workspace changes:
 
 - unstaged tracked modifications
 - staged/index changes
@@ -87,7 +89,7 @@ The candidate includes all relevant Workspace changes:
 
 Ordinary unstaged-only `git diff` is not a complete candidate representation.
 
-Ignored/runtime-private files are not automatically deliverable candidate content.
+Ignored/runtime-private/transport-private files are not automatically deliverable candidate content. Runner transfer refs/commits and Runner-local checkout internals must not appear as product-visible candidate history.
 
 ### Trusted Review delivery snapshot
 
@@ -105,9 +107,17 @@ For a Review-ready Run, Agent Board captures one backend-only **Review delivery 
 
 The delivery snapshot is immutable for that Run. Public candidate Artifacts are generated as a redacted projection of this pinned snapshot. If candidate evidence publication is retried after an interruption, Agent Board reuses the existing private snapshot instead of rereading the mutable Issue Workspace. This prevents public Review evidence and approval delivery from silently describing different candidate states.
 
-The private delivery snapshot is trusted backend Workspace state, not an Artifact. It is stored under the durable Workspace root with restricted permissions, is never mounted into an agent Runtime, and is not exposed through Artifact, raw-output, Run-evidence or Review APIs. Because it must preserve exact source bytes, it may contain byte sequences that are also registered for redaction; those bytes remain confined to this backend-only approval boundary.
+The private delivery snapshot is trusted backend Workspace state, not an Artifact. It is stored under the durable Workspace root with restricted permissions, is never transferred into an active Runner session, and is not exposed through Artifact, raw-output, Run-evidence or Review APIs. Because it must preserve exact source bytes, it may contain byte sequences that are also registered for redaction; those bytes remain confined to this backend-only approval boundary.
 
 Approval consumes this pinned private snapshot, never the current mutable Issue Workspace and never redacted public Artifacts.
+
+## Runner Workspace and recovery evidence
+
+The backend-owned Issue Workspace remains authoritative. Runner-local Workspace state is temporary execution materialization.
+
+Workspace transfer evidence should make meaningful progress/failure/recovery visible without exposing transport-only Git refs, bundle internals or secrets. Sync-back after non-zero exit/cancellation is attempted where technically possible. A Run cannot be represented as successful if returned Runner work could not be verified/applied to the authoritative Workspace.
+
+The Runner retains its session Workspace until the server has successfully applied the returned state and sent the explicit apply acknowledgement. That retained Workspace is recovery material, not authoritative product history.
 
 ## Tests/checks
 
@@ -134,6 +144,7 @@ Request changes links the next attempt without overwriting prior evidence.
 - filenames/download metadata are sanitized appropriately.
 - large public reads/uploads are bounded/streamed.
 - trusted delivery patch/file captures are bounded and validated before approval use.
+- Runner identity/capability evidence is safe diagnostic metadata, not a credential or authorization substitute.
 
 ## Retention
 

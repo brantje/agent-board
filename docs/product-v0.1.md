@@ -17,7 +17,6 @@ Local Project repository
   -> selected connected Runner
   -> durable Issue Workspace
   -> Workspace transfer
-  -> agent-runner
   -> Execution Session
   -> coding Engine
   -> commands / files / tests / Artifacts
@@ -40,7 +39,7 @@ Engine + Model Profile -> Agent
 Issue -> assignee -> Run
 ```
 
-`agent-runner` and Execution Session are infrastructure concepts, not additional user configuration layers.
+`Runner`, `agent-runner` and Execution Session are infrastructure concepts, not additional Agent configuration layers. Runner placement is scheduler-owned.
 
 Do not expose implementation layers unless they solve a concrete user problem.
 
@@ -50,14 +49,15 @@ Frontend implementation follows `frontend-implementation.md` and `frontend-theme
 
 ## Scope model
 
-Shared/global or Project-scoped:
+Shared/global or Project-scoped product configuration:
 
 - Agents
 - Providers
 - Model Profiles
-- Runtimes
 
-Project repository configuration belongs to Project.
+Project repository configuration belongs to Project. Project Runner allowlisting is execution policy, not Agent configuration; full Runner management and the Project Runner picker are follow-up work in #69.
+
+Legacy Runtime configuration remains only for internal managed-compute code that still uses it. It is not part of normal v0.1 Agent configuration or the preferred production execution path.
 
 Inside a Project, shared resources are visible/read-only and Project-owned resources remain isolated.
 
@@ -89,8 +89,6 @@ Models
   Model Profiles
 Execution
   Agents (global/shared only)
-Infrastructure
-  Runtimes
 Project page for repository/workflow
 ```
 
@@ -133,29 +131,19 @@ Capacity (optional max concurrent Runs)
 
 Empty Capacity means unlimited. The durable scheduler enforces capacity.
 
-## Runtime
+## Runner execution
 
-Runtime is the reusable configured execution environment and owns the full execution policy:
+The preferred v0.1 production execution architecture is a persistent external Linux Runner host running the standalone `agent-runner` binary. The Runner connects outbound to Agent Board over protocol v2 and advertises its installed Engine capabilities.
 
-```text
-Name
-Scope
-Kind (Docker first)
-Image
-CPU / memory / PID limits
-Timeout
-Network policy
-Workspace policy
-Allowed secret refs
-Tooling / capabilities
-Enabled state
-```
+The existing scheduler chooses an eligible connected Runner. External Runners are preferred. The server-managed internal Runner is fallback only when Project policy permits `allow_internal_runner`.
 
-Runtime health/preflight distinguishes saved configuration from operational executability.
+A Project may restrict external Runner eligibility with its Runner allowlist. Agents never select or configure a Runner.
 
-For v0.1, official Runtime images contain `agent-runner`. A Runtime Instance is bound to one Issue Workspace for its lifetime and may remain alive for many sequential Execution Sessions against that same Workspace.
+Runner, Execution Session and Run remain separate identities. v0.1 permits one active Execution Session per Runner.
 
-Runtime Instance, runner, Execution Session and Run remain separate identities. v0.1 permits one active Execution Session per runner while keeping the versioned WebSocket runner protocol compatible with higher future capacity.
+### Legacy/internal managed compute
+
+Runtime and Runtime Instance remain only where the existing internal managed-compute implementation still uses them. They are not the normal v0.1 Agent configuration or production execution path, and external Runner execution must not create placeholder Runtime Instances.
 
 ## Agent
 
@@ -166,12 +154,11 @@ Name
 Role / instructions
 Engine
 Model Profile
-Runtime
 ```
 
 Operational fields such as concurrency limit may live under Advanced. Engine settings are an optional JSON object on the Agent.
 
-Agents select Engine and Model Profile. The scheduler selects eligible connected Runners for execution. Draft, disabled or archived Agents cannot be assigned as runnable Agents. Agent concurrency is enforced by the scheduler.
+Agents select Engine and Model Profile. They do **not** configure Runtime, Runtime Instance, Runner, Executor Profile or Runner Profile. The scheduler selects eligible connected Runners for execution. Draft, disabled or archived Agents cannot be assigned as runnable Agents. Agent concurrency is enforced by the scheduler.
 
 Built-in Engine settings use the Agent Board Nuxt/Nuxt UI frontend. Plugin-provided Engine settings belong to the later sandboxed Plugin boundary.
 
@@ -233,7 +220,7 @@ Questions are answered from Issue detail. Inbox contains blocking Questions, Rev
 
 Any continuation required by a Question answer is durable before the answer command returns success.
 
-The runner owns no durable Question/resume state. Resume may reuse a healthy same-Workspace Runtime Instance or use a replacement Runtime Instance against the same durable Workspace.
+The Runner owns no durable Question/resume state. For native OpenCode Questions, the same live Runner Execution Session and Runner Workspace remain attached through `WAITING_FOR_INPUT`; answering continues that same native session. Recovery after an actual Runner/transport failure reconciles that durable session rather than starting duplicate work.
 
 ## Runs
 
@@ -247,8 +234,8 @@ Run detail is first-class and exposes persisted evidence:
 - commands/tools
 - complete changed-file evidence/diff
 - tests/checks
-- selected Runtime + Runtime Instance lifecycle
-- Execution Session/runner diagnostics where useful
+- selected Runner and Execution Session diagnostics/provenance
+- legacy Runtime/Runtime Instance lifecycle only when internal managed compute was actually used
 - raw logs when needed
 - Artifacts
 - failure/cancellation/blocking reason
@@ -294,17 +281,17 @@ The product distinguishes `configured` from `runnable`. Preflight evaluates Agen
 
 ## Implementation priority
 
-1. Agent Engine + Model Profile configuration (no Agent Runtime selection)
+1. Agent Engine + Model Profile configuration (no Agent Runtime/Runner selection)
 2. durable async scheduler/restart-safe continuation with live Runner admission
 3. local repository-backed Issue Workspaces
 4. external and internal `agent-runner` hosts over protocol v2
 5. Git-native Workspace transfer and sync-back
 6. canonical execution context + secure Provider credentials
-7. immutable provenance + durable raw logs/Artifacts
+7. immutable Runner provenance + durable raw logs/Artifacts
 8. complete Run/Review evidence
-9. operational preflight/runner-availability truthfulness
+9. operational preflight/Runner-availability truthfulness
 10. first real coding Engine (OpenCode first)
-11. prove local repository -> Run -> Runner -> Engine -> changes -> Review end to end
+11. prove local repository -> Run -> Runner -> Execution Session -> Engine -> changes -> Review end to end
 12. only then broaden repository integrations and the roadmap
 
 Frontend implementation uses Nuxt 4 + Nuxt UI v4 and remains within this v0.1 product scope. Plugin work is deliberately last, including after future users/groups/permissions work unless explicitly reprioritized.

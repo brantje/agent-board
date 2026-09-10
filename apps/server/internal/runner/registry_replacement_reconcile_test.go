@@ -132,6 +132,9 @@ func TestRegistryReplacementKeepsOldTransportOnSessionMismatch(t *testing.T) {
 func TestRegistryReplacementReattachesSameSessionWithoutDuplicateEligibility(t *testing.T) {
 	registry := NewRegistry(replacementIdentity{}, replacementIdentity{})
 	registry.SetConnectionReconciler(replacementReconcilerFunc(func(_ context.Context, _ string, current, replacement protocol.Health) error {
+		if len(current.ActiveSessionIDs) == 0 {
+			return nil
+		}
 		if len(current.ActiveSessionIDs) == 1 && len(replacement.ActiveSessionIDs) == 1 && current.ActiveSessionIDs[0] == replacement.ActiveSessionIDs[0] {
 			return nil
 		}
