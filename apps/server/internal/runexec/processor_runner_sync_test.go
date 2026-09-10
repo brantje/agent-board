@@ -47,7 +47,9 @@ func (s *runnerSyncSessions) CreateRunnerSession(_ context.Context, projectID, r
 
 type recordingSyncClient struct {
 	directions []string
+	applied    []string
 	receiveErr error
+	confirmErr error
 	receive    func(context.Context) (string, []byte, error)
 }
 
@@ -66,6 +68,11 @@ func (c *recordingSyncClient) ReceiveTransfer(ctx context.Context, _ string, _ r
 	return "", nil, errors.New("checksum mismatch")
 }
 
+func (c *recordingSyncClient) ConfirmTransferApplied(_ context.Context, sessionID, transferID string) error {
+	c.applied = append(c.applied, sessionID+"/"+transferID)
+	return c.confirmErr
+}
+
 type recordingSyncConnector struct{ client runnerClient }
 
 func (c recordingSyncConnector) Connect(context.Context, string, string) (runnerClient, error) {
@@ -77,6 +84,14 @@ type waitingTestEngine struct{}
 func (waitingTestEngine) Name() string { return "test" }
 func (waitingTestEngine) Execute(context.Context, engine.Request) (engine.Result, error) {
 	return engine.Result{}, engine.ErrWaitingForInput
+}
+
+type cancellingTestEngine struct{ cancel context.CancelFunc }
+
+func (c cancellingTestEngine) Name() string { return "test" }
+func (c cancellingTestEngine) Execute(context.Context, engine.Request) (engine.Result, error) {
+	c.cancel()
+	return engine.Result{}, context.Canceled
 }
 
 type waitingRunnerStore struct {
@@ -184,6 +199,54 @@ func TestRunnerEngineFailureIsNotMaskedBySyncBackFailure(t *testing.T) {
 	}
 	if result.RunStatus != "FAILED" || result.FailureReason == nil || !strings.Contains(*result.FailureReason, "native session did not start") {
 		t.Fatalf("engine failure was masked: %+v", result)
+	}
+}
+
+func TestRunnerCancellationStillAttemptsWorkspaceSyncBack(t *testing.T) {
+	repo := initProcessTestRepository(t)
+	safe := processTestSafeContext(repo)
+	safe.Runtime = executioncontext.RuntimeContext{}
+	evidenceStore := &runnerSyncStore{}
+	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorder, err := evidence.NewRecorder(evidenceStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := evidence.NewOutputRecorder(evidenceStore, blobs, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), evidenceStore, blobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	registry, err := engine.NewRegistry(cancellingTestEngine{cancel: cancel})
+	if err != nil {
+		t.Fatal(err)
+	}
+	git, err := workspace.NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &recordingSyncClient{receiveErr: errors.New("recovery snapshot unavailable")}
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, nil, &runnerSyncSessions{}, registry, recorder, output, candidate, git, recordingSyncConnector{client: client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "STARTING"}
+	_, err = processor.Process(ctx, &store.SchedulerAdmission{Run: run, RunnerID: "runner-1"}, processTestLifecycle{run: run})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("process error=%v", err)
+	}
+	if len(client.directions) < 2 || client.directions[len(client.directions)-1] != "from_runner" {
+		t.Fatalf("cancellation skipped recovery sync: directions=%v", client.directions)
+	}
+	if !hasProcessTestEvent(evidenceStore.events, "workspace.transfer.failed") {
+		t.Fatal("cancellation recovery failure was not recorded")
 	}
 }
 
