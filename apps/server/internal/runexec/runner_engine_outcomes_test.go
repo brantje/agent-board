@@ -7,6 +7,7 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
+	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -17,6 +18,16 @@ type runnerSnapshotFailureStore struct {
 
 func (s *runnerSnapshotFailureStore) CreateArtifact(context.Context, store.Artifact) (store.Artifact, error) {
 	return store.Artifact{}, s.err
+}
+
+type runnerOutboundFailureClient struct {
+	*successfulSyncClient
+	err error
+}
+
+func (c *runnerOutboundFailureClient) SendTransfer(_ context.Context, _, _, direction string, _ []byte, _ runner.TransferProgressFunc) error {
+	c.directions = append(c.directions, direction)
+	return c.err
 }
 
 func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
@@ -35,6 +46,33 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 		}
 		if len(client.directions) != 0 {
 			t.Fatalf("unknown engine unexpectedly transferred workspace: %v", client.directions)
+		}
+	})
+
+	t.Run("outbound workspace transfer failure blocks execution", func(t *testing.T) {
+		repo := initProcessTestRepository(t)
+		safe := processTestSafeContext(repo)
+		safe.Runtime = executioncontext.RuntimeContext{}
+		storeFake := &runnerSyncStore{}
+		client := &runnerOutboundFailureClient{
+			successfulSyncClient: &successfulSyncClient{},
+			err:                  errors.New("runner transfer disconnected"),
+		}
+		processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
+		run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "STARTING"}
+
+		result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run, RunnerID: "runner-1"}, processTestLifecycle{run: run})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.RunStatus != "FAILED" {
+			t.Fatalf("transfer failure result=%+v", result)
+		}
+		if len(client.directions) != 1 || client.directions[0] != "to_runner" {
+			t.Fatalf("transfer directions=%v", client.directions)
+		}
+		if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "agent.message") || hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
+			t.Fatalf("transfer failure events=%+v", storeFake.events)
 		}
 	})
 
