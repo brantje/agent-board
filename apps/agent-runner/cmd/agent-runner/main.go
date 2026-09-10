@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -24,7 +25,22 @@ type appConfig struct {
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, configFromEnv()); err != nil {
+
+	var err error
+	if len(os.Args) > 1 {
+		if os.Args[1] != "register" || len(os.Args) != 2 {
+			err = errors.New("usage: agent-runner [register]")
+		} else {
+			err = registerInteractive(ctx, &http.Client{Timeout: 30 * time.Second}, os.Stdin, os.Stdout, defaultStatePath)
+		}
+	} else {
+		var config appConfig
+		config, err = resolveConfig(configFromEnv(), defaultStatePath)
+		if err == nil {
+			err = run(ctx, config)
+		}
+	}
+	if err != nil {
 		slog.Error("agent-runner stopped", "error", err)
 		os.Exit(1)
 	}
@@ -36,6 +52,20 @@ func configFromEnv() appConfig {
 		root = defaultWorkspaceRoot
 	}
 	return appConfig{ServerURL: os.Getenv("AGENT_BOARD_URL"), RunnerID: os.Getenv("AGENT_RUNNER_ID"), Token: os.Getenv("AGENT_RUNNER_TOKEN"), WorkspaceRoot: root}
+}
+
+func resolveConfig(config appConfig, statePath string) (appConfig, error) {
+	if config.ServerURL != "" && config.RunnerID != "" && config.Token != "" {
+		return config, nil
+	}
+	state, err := loadRunnerState(statePath)
+	if err != nil {
+		return appConfig{}, errors.New("runner is not registered; run `agent-runner register`")
+	}
+	config.ServerURL = state.ServerURL
+	config.RunnerID = state.RunnerID
+	config.Token = state.Token
+	return config, nil
 }
 
 func run(ctx context.Context, config appConfig) error {
