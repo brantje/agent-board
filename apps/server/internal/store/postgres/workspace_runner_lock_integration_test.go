@@ -14,6 +14,18 @@ func TestRunnerWorkspaceOwnershipFencesGenericWriters(t *testing.T) {
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "runner-workspace-lock")
 	enqueueWorkspaceOwnerJob(t, s, f)
+
+	// A queued/claimed scheduler job does not own the Workspace yet. The
+	// authoritative Workspace must still be materializable before the Runner
+	// Execution Session is created and the first snapshot is transferred.
+	preSession, err := s.AcquireWorkspaceBootstrapLock(ctx, f.workspace.ID)
+	if err != nil {
+		t.Fatalf("pre-session bootstrap lock: %v", err)
+	}
+	if err := preSession.Release(); err != nil {
+		t.Fatalf("release pre-session bootstrap lock: %v", err)
+	}
+
 	runner, err := s.CreateRunner(ctx, store.Runner{Name: "runner-workspace-lock", TokenHash: make([]byte, 32)})
 	if err != nil {
 		t.Fatalf("create runner: %v", err)
@@ -68,6 +80,9 @@ func TestRunnerWorkspaceOwnershipFencesGenericWriters(t *testing.T) {
 		t.Fatalf("release waiting owning runner lock: %v", err)
 	}
 
+	if _, err := s.pool.Exec(ctx, `UPDATE execution_sessions SET status='COMPLETED', completed_at=now(), updated_at=now() WHERE id=$1`, session.ID); err != nil {
+		t.Fatalf("complete runner session: %v", err)
+	}
 	if _, err := s.pool.Exec(ctx, `UPDATE runs SET status='READY_FOR_REVIEW', updated_at=now() WHERE id=$1`, f.run.ID); err != nil {
 		t.Fatalf("release waiting ownership: %v", err)
 	}
