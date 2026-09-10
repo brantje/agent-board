@@ -1,7 +1,8 @@
 .PHONY: install-runner uninstall-runner
 
 install-runner:
-	@printf "Agent Board URL: " > /dev/tty; \
+	@set -eu; \
+	printf "Agent Board URL: " > /dev/tty; \
 	IFS= read -r agent_board_url < /dev/tty; \
 	test -n "$$agent_board_url" || { echo "Agent Board URL is required." >&2; exit 1; }; \
 	printf "One-time registration token: " > /dev/tty; \
@@ -21,15 +22,12 @@ install-runner:
 			--shell /usr/sbin/nologin \
 			agent-runner; \
 	sudo install -d -o agent-runner -g agent-runner -m 0750 /var/lib/agent-runner; \
-	printf '%s\n%s\n' "$$agent_board_url" "$$registration_token" | \
-		sudo -u agent-runner /usr/local/bin/agent-runner register; \
 	sudo install -d -o root -g root -m 0755 /etc/agent-board; \
-	sudo install -o root -g root -m 0644 \
-		apps/agent-runner/deploy/agent-runner.env.example \
-		/etc/agent-board/agent-runner.env; \
 	sudo install -o root -g root -m 0644 \
 		apps/agent-runner/deploy/agent-runner.service \
 		/etc/systemd/system/agent-runner.service; \
+	printf '%s\n%s\n' "$$agent_board_url" "$$registration_token" | \
+		sudo /usr/local/bin/agent-runner register; \
 	sudo systemctl daemon-reload; \
 	sudo systemd-analyze verify /etc/systemd/system/agent-runner.service; \
 	sudo systemctl enable --now agent-runner.service
