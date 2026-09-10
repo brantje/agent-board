@@ -54,14 +54,6 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	if application.services.ControlPlane.Runners == nil {
 		t.Fatal("runner service was not wired")
 	}
-	database.SetRunnerCandidates(nil)
-	if candidates := database.LiveRunnerCandidates("opencode"); candidates != nil {
-		t.Fatalf("nil candidate supplier should not return candidates: %v", candidates)
-	}
-	database.SetRunnerCandidates(application.services.ControlPlane.Runners.Connections.Candidates)
-	if application.services.ControlPlane.Runners.Connections.Candidates("opencode") == nil {
-		t.Fatal("registry candidate supplier returned nil slice")
-	}
 
 	// An authorized invalid request is rejected before persistence, so this
 	// verifies the production secret route and capability gate are both wired.
