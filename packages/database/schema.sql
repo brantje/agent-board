@@ -12,12 +12,20 @@ CREATE TABLE projects (
     name text NOT NULL CHECK (btrim(name) <> ''),
     issue_prefix text NOT NULL CHECK (issue_prefix ~ '^[A-Z][A-Z0-9]{1,9}$'),
     next_issue_number integer NOT NULL DEFAULT 1 CHECK (next_issue_number >= 1),
-    repository_path text NOT NULL CHECK (btrim(repository_path) <> ''),
-    default_branch text NOT NULL DEFAULT 'main' CHECK (btrim(default_branch) <> ''),
+    source_type text NOT NULL DEFAULT 'local' CHECK (source_type IN ('local', 'git')),
+    clone_url text CHECK (clone_url IS NULL OR btrim(clone_url) <> ''),
+    source_ref text CHECK (source_ref IS NULL OR btrim(source_ref) <> ''),
+    repository_path text NOT NULL DEFAULT '',
+    default_branch text NOT NULL DEFAULT '',
     workflow_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(workflow_settings) = 'object'),
     allow_internal_runner boolean NOT NULL DEFAULT true,
     created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now()
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (
+        (source_type = 'local' AND btrim(repository_path) <> '' AND btrim(default_branch) <> '' AND clone_url IS NULL AND source_ref IS NULL)
+        OR
+        (source_type = 'git' AND btrim(clone_url) <> '' AND repository_path = '' AND default_branch = '')
+    )
 );
 
 CREATE UNIQUE INDEX projects_name_uq ON projects (lower(name));
