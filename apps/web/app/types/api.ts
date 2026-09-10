@@ -13,11 +13,12 @@ export interface Project {
 
 export interface Runner {
   id: string
-  name: string
+  name: string | null
   internal: boolean
   managed: boolean
   deletable: boolean
   connected: boolean
+  registeredAt: string | null
   revokedAt: string | null
   lastSeenAt: string | null
   capabilities: Record<string, unknown>
@@ -222,33 +223,36 @@ export interface Review {
   updatedAt: string
 }
 
-export interface ReviewDecision {
+export interface ConfigurationItem {
   id: string
-  outcome: 'APPROVED' | 'CHANGES_REQUESTED' | string
-  actorType: string
-  actorId: string | null
-  safeDetails: Record<string, unknown>
-  createdAt: string
-}
-
-export interface ReviewDetail {
-  review: Review
-  decision: ReviewDecision | null
-  testStatus: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'UNKNOWN' | string
-  evidence: RunEvidence
-}
-
-export interface ReviewApprovalResponse {
-  review: Review
-  decision: ReviewDecision
-  run: Run
-  issue: Issue
-}
-
-export interface ReviewRequestChangesResponse {
-  review: Review
-  decision: ReviewDecision
-  run: Run
-  issue: Issue
-  jobId: string
+  projectId: string | null
+  name: string
+  kind?: string
+  enabled?: boolean
+  healthStatus?: string
+  state?: string
+  engine?: string
+  modelProfileId?: string
+  runtimeId?: string
+  roleInstructions?: string
+  engineSettings?: Record<string, unknown>
+  concurrencyLimit?: number
+  providerId?: string
+  model?: string
+  temperature?: number | null
+  maxTokens?: number | null
+  maxConcurrent?: number | null
+  generationSettings?: Record<string, unknown>
+  baseUrl?: string | null
+  credentialRef?: string | null
+  safeMetadata?: Record<string, unknown>
+  image?: string
+  cpuLimitMillis?: number | null
+  memoryLimitBytes?: number | null
+  pidLimit?: number | null
+  timeoutSeconds?: number | null
+  networkPolicy?: string
+  workspacePolicy?: string
+  allowedSecretRefs?: string[]
+  capabilities?: Record<string, unknown>
 }
