@@ -15,6 +15,10 @@ type cancelRunStore struct {
 	err error
 }
 
+func (s *cancelRunStore) GetProject(context.Context, string) (store.Project, error) {
+	return store.Project{ID: "project-1"}, nil
+}
+
 func (s *cancelRunStore) GetRun(context.Context, string, string) (store.Run, error) {
 	return s.run, s.err
 }
