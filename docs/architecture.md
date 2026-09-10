@@ -7,7 +7,7 @@ Agent Board is a Go-backed, server-owned work board for autonomous software agen
 Reach the complete v0.1 coding flow as quickly as possible:
 
 ```text
-Local Project repository
+Project repository source
  -> Issue
  -> Agent
       -> Engine
@@ -15,7 +15,7 @@ Local Project repository
  -> durable scheduler claim
  -> selected connected Runner
  -> durable Issue Workspace
- -> Workspace transfer
+ -> source-specific Workspace preparation/transfer
  -> Execution Session
  -> Engine process
  -> durable execution evidence
@@ -122,19 +122,33 @@ Engine adapters still execute through `agent-runner`; they never receive Docker 
 
 See `runtime-contract.md` and `runtime-execution.md` for this compatibility boundary.
 
-## Project repository and Workspace
+## Project repository source and Workspace
 
-The first v0.1 repository source is a local Git repository accessible to the trusted backend. Project owns the validated local source/path plus base/default branch.
+Project repository source configuration is explicit and provider-neutral:
 
-v0.1 uses one durable authoritative Workspace per Issue. It is materialized from that repository, has a stable Issue working branch, and is reused by later attempts.
+```text
+local
+ -> backend-visible repository path
+ -> default branch
 
-Before Runner execution, the complete non-ignored Git state required by #68 is transferred to a per-session Runner Workspace without manufacturing visible transport commits/refs or altering authoritative staging. Returned changes are applied back to the durable Workspace while preserving server-authoritative staging.
+git
+ -> clone URL
+ -> optional branch/tag/commit ref
+```
+
+Existing Projects default to `local`. Local repository paths remain validated against deployment-authorized repository roots and use the existing backend repository provisioning/materialization path.
+
+A `git` Project stores its clone URL and optional ref without the server cloning, fetching or contacting the remote merely to validate configuration. Saving a private URL does not require credentials, and Project configuration does not gain provider-specific GitHub/GitLab/Forgejo identifiers. When the ref is omitted, the remote default branch is resolved at execution time.
+
+v0.1 keeps one durable authoritative Workspace per Issue. Source-specific preparation feeds that existing Workspace/Run lifecycle rather than creating a second repository or execution model. Runner-managed clone/fetch/cache/worktree behavior for `git` Projects is an execution responsibility layered on this configuration and is not performed by Project create/update.
+
+For the existing local path, the complete non-ignored Git state required by #68 is transferred to a per-session Runner Workspace without manufacturing visible transport commits/refs or altering authoritative staging. Returned changes are applied back to the durable Workspace while preserving server-authoritative staging.
 
 Local repository paths are validated against deployment-authorized repository roots. Project repository configuration must not become arbitrary filesystem access.
 
 A repository/bootstrap failure is actionable; execution never silently falls back to an unrelated empty repository.
 
-Authenticated remote Source Connections are layered on after the first local-repository v0.1 flow is proven and reuse the same Workspace identity/lifecycle.
+Authenticated Source Connections remain a later credential/provider layer. They may supply provider identity and ephemeral credentials for Git sources without replacing Project source fields, Workspace identity, or the Runner/Execution Session lifecycle.
 
 See `source-control.md` and `agent-runner.md`.
 
