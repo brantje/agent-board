@@ -40,6 +40,11 @@ CREATE TABLE runners (
 CREATE UNIQUE INDEX runners_active_name_uq ON runners (lower(name)) WHERE deleted_at IS NULL;
 CREATE UNIQUE INDEX runners_internal_uq ON runners (internal) WHERE internal;
 
+CREATE TABLE runner_registrations (
+    token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32),
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE project_runners (
     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     runner_id uuid NOT NULL REFERENCES runners(id) ON DELETE RESTRICT,
