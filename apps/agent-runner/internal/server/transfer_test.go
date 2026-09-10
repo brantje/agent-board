@@ -110,7 +110,7 @@ func TestStartWaitsForInFlightWorkspaceTransfer(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSnapshotRequestSyncsAndCleansSession(t *testing.T) {
+func TestWorkspaceSnapshotCleansSessionOnlyAfterAppliedAck(t *testing.T) {
 	runner, httpServer := newTestRunner(t)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer conn.Close()
@@ -131,7 +131,8 @@ func TestWorkspaceSnapshotRequestSyncsAndCleansSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	var snapshot []byte
-	for {
+	var returnedTransferID string
+	for returnedTransferID == "" {
 		msg := read(t, conn)
 		switch msg.Type {
 		case protocol.TypeTransferBegin:
@@ -153,19 +154,73 @@ func TestWorkspaceSnapshotRequestSyncsAndCleansSession(t *testing.T) {
 			}
 			snapshot = append(snapshot, data...)
 		case protocol.TypeTransferEnd:
-			if len(snapshot) == 0 {
-				t.Fatal("empty workspace snapshot")
+			end, err := protocol.DecodePayload[protocol.TransferEnd](msg)
+			if err != nil {
+				t.Fatal(err)
 			}
-			waitFor(t, 3*time.Second, func() bool {
-				_, err := os.Stat(sessionRoot)
-				return os.IsNotExist(err)
-			})
-			return
+			returnedTransferID = end.TransferID
 		case protocol.TypeTransferFailed:
 			t.Fatalf("snapshot failed %#v", msg)
 		case protocol.TypeError:
 			t.Fatalf("unexpected error %#v", msg)
 		}
+	}
+	if len(snapshot) == 0 {
+		t.Fatal("empty workspace snapshot")
+	}
+	if _, err := os.Stat(sessionRoot); err != nil {
+		t.Fatalf("runner workspace removed before apply acknowledgement: %v", err)
+	}
+
+	send(t, conn, protocol.TypeTransferApplied, "session-sync", protocol.TransferApplied{TransferID: returnedTransferID})
+	waitFor(t, 3*time.Second, func() bool {
+		_, err := os.Stat(sessionRoot)
+		return os.IsNotExist(err)
+	})
+}
+
+func TestWorkspaceSnapshotPreservedOnWrongAckAndDisconnect(t *testing.T) {
+	runner, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+
+	writer := &connectionWriter{conn: conn}
+	if err := writer.sendTransfer(context.Background(), "session-preserve", "transfer-out", "to_runner", createGitBundlePayload(t)); err != nil {
+		t.Fatal(err)
+	}
+	sessionRoot := runner.manager.SessionWorkspacePath("session-preserve")
+	waitFor(t, 3*time.Second, func() bool {
+		_, err := os.Stat(filepath.Join(sessionRoot, "README.md"))
+		return err == nil
+	})
+	writeFile(t, filepath.Join(sessionRoot, "recoverable.txt"), "keep me\n")
+	if err := writer.sendTransfer(context.Background(), "session-preserve", "transfer-back", "from_runner", nil); err != nil {
+		t.Fatal(err)
+	}
+	var returnedTransferID string
+	for returnedTransferID == "" {
+		msg := read(t, conn)
+		if msg.Type == protocol.TypeTransferEnd {
+			end, err := protocol.DecodePayload[protocol.TransferEnd](msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			returnedTransferID = end.TransferID
+		} else if msg.Type == protocol.TypeError || msg.Type == protocol.TypeTransferFailed {
+			t.Fatalf("unexpected transfer failure %#v", msg)
+		}
+	}
+
+	send(t, conn, protocol.TypeTransferApplied, "session-preserve", protocol.TransferApplied{TransferID: returnedTransferID + "-wrong"})
+	assertProtocolError(t, read(t, conn), "invalid_transfer_ack")
+	if _, err := os.Stat(filepath.Join(sessionRoot, "recoverable.txt")); err != nil {
+		t.Fatalf("wrong acknowledgement removed runner workspace: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := os.Stat(filepath.Join(sessionRoot, "recoverable.txt")); err != nil {
+		t.Fatalf("disconnect before apply acknowledgement removed runner workspace: %v", err)
 	}
 }
 
@@ -248,6 +303,8 @@ func TestTransferHandlersRejectInvalidPayloadsAndFailedStart(t *testing.T) {
 	assertProtocolError(t, read(t, conn), "invalid_transfer")
 	send(t, conn, protocol.TypeTransferEnd, "session-invalid", "nope")
 	assertProtocolError(t, read(t, conn), "invalid_transfer")
+	send(t, conn, protocol.TypeTransferApplied, "session-invalid", "nope")
+	assertProtocolError(t, read(t, conn), "invalid_transfer_ack")
 
 	send(t, conn, protocol.TypeTransferBegin, "session-invalid", protocol.TransferBegin{TotalBytes: 1})
 	assertProtocolError(t, read(t, conn), "transfer_failed")
