@@ -24,17 +24,30 @@ func TestTransferChunkFitsMaxMessageSize(t *testing.T) {
 	}
 }
 
-func TestValidateTransferBeginRejectsOversizeAndMissingID(t *testing.T) {
-	if err := ValidateTransferBegin(TransferBegin{TotalBytes: 12}); err == nil {
-		t.Fatal("missing transfer id accepted")
+func TestTransferIntegrityRules(t *testing.T) {
+	for _, begin := range []TransferBegin{
+		{TotalBytes: 12},
+		{TransferID: "t", TotalBytes: -1},
+		{TransferID: "t", TotalBytes: MaxTransferBytes + 1},
+	} {
+		if err := ValidateTransferBegin(begin); err == nil {
+			t.Fatalf("invalid begin accepted: %+v", begin)
+		}
 	}
-	if err := ValidateTransferBegin(TransferBegin{TransferID: "t", TotalBytes: -1}); err == nil {
-		t.Fatal("negative size accepted")
+
+	payload := []byte("data")
+	chunk := TransferChunk{TransferID: "t", Data: base64.StdEncoding.EncodeToString(payload)}
+	buffer, err := AppendTransferChunk(nil, int64(len(payload)), chunk)
+	if err != nil || string(buffer) != "data" {
+		t.Fatalf("append=%q err=%v", buffer, err)
 	}
-	if err := ValidateTransferBegin(TransferBegin{TransferID: "t", TotalBytes: MaxTransferBytes + 1}); err == nil {
-		t.Fatal("oversize transfer accepted")
-	}
-	if err := ValidateTransferBegin(TransferBegin{TransferID: "t", TotalBytes: 0}); err != nil {
+	if err := ValidateTransferPayload(buffer, int64(len(payload)), TransferChecksum(payload)); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := AppendTransferChunk(nil, 1, chunk); err == nil {
+		t.Fatal("oversized payload accepted")
+	}
+	if err := ValidateTransferPayload(buffer, int64(len(payload)), "wrong"); err == nil {
+		t.Fatal("checksum mismatch accepted")
 	}
 }
