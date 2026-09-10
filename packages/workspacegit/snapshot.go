@@ -15,22 +15,28 @@ import (
 
 const cleanupTimeout = 10 * time.Second
 
-// SnapshotBundle captures the repository's complete non-ignored filesystem state
-// without reading from or writing to the repository's authoritative Git index.
+// SnapshotState is the three-state Git model encoded by an Agent Board
+// Workspace transfer bundle. Worktree is the advertised bundle HEAD, Index is
+// its first parent, and Base is the Index commit's first parent.
+type SnapshotState struct {
+	Base     string
+	Index    string
+	Worktree string
+}
+
+// SnapshotBundle captures HEAD, the real Git index, and the complete
+// non-ignored working tree without mutating the repository's authoritative
+// index or visible history. Two synthetic commits encode the transport-only
+// state as Base -> Index -> Worktree; only Worktree is advertised as bundle
+// HEAD.
 func SnapshotBundle(ctx context.Context, repositoryPath, transferID, gitBinary string, commandTimeout time.Duration) ([]byte, error) {
 	transferID = strings.TrimSpace(transferID)
 	if transferID == "" {
 		return nil, fmt.Errorf("workspace transfer id is required")
 	}
-	if commandTimeout <= 0 {
-		return nil, fmt.Errorf("git command timeout must be positive")
-	}
-	if strings.TrimSpace(gitBinary) == "" {
-		gitBinary = "git"
-	}
-	binary, err := exec.LookPath(gitBinary)
+	binary, err := resolveGitBinary(gitBinary, commandTimeout)
 	if err != nil {
-		return nil, fmt.Errorf("find git executable: %w", err)
+		return nil, err
 	}
 
 	tempRoot, err := os.MkdirTemp("", ".agent-board-workspace-transfer-*")
@@ -39,34 +45,48 @@ func SnapshotBundle(ctx context.Context, repositoryPath, transferID, gitBinary s
 	}
 	defer os.RemoveAll(tempRoot)
 
-	indexPath := filepath.Join(tempRoot, "index")
-	indexEnv := []string{"GIT_INDEX_FILE=" + indexPath}
 	head, err := runGit(ctx, binary, commandTimeout, nil, nil, "-C", repositoryPath, "rev-parse", "--verify", "HEAD^{commit}")
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace HEAD: %w", err)
 	}
-	if _, err := runGit(ctx, binary, commandTimeout, indexEnv, nil, "-C", repositoryPath, "read-tree", head); err != nil {
+	indexTree, err := runGit(ctx, binary, commandTimeout, nil, nil, "-C", repositoryPath, "write-tree")
+	if err != nil {
+		return nil, fmt.Errorf("capture workspace index: %w", err)
+	}
+	indexCommit, err := runGit(ctx, binary, commandTimeout, nil, nil,
+		"-C", repositoryPath,
+		"-c", "user.name=Agent Board",
+		"-c", "user.email=agent-board@localhost",
+		"commit-tree", indexTree, "-p", head, "-m", "Agent Board workspace transfer index",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("create workspace transfer index commit: %w", err)
+	}
+
+	indexPath := filepath.Join(tempRoot, "index")
+	indexEnv := []string{"GIT_INDEX_FILE=" + indexPath}
+	if _, err := runGit(ctx, binary, commandTimeout, indexEnv, nil, "-C", repositoryPath, "read-tree", indexTree); err != nil {
 		return nil, fmt.Errorf("initialize workspace transfer index: %w", err)
 	}
 	if _, err := runGit(ctx, binary, commandTimeout, indexEnv, nil, "-C", repositoryPath, "add", "-A", "--", "."); err != nil {
 		return nil, fmt.Errorf("snapshot workspace files: %w", err)
 	}
-	tree, err := runGit(ctx, binary, commandTimeout, indexEnv, nil, "-C", repositoryPath, "write-tree")
+	worktreeTree, err := runGit(ctx, binary, commandTimeout, indexEnv, nil, "-C", repositoryPath, "write-tree")
 	if err != nil {
 		return nil, fmt.Errorf("write workspace transfer tree: %w", err)
 	}
-	commit, err := runGit(ctx, binary, commandTimeout, nil, nil,
+	worktreeCommit, err := runGit(ctx, binary, commandTimeout, nil, nil,
 		"-C", repositoryPath,
 		"-c", "user.name=Agent Board",
 		"-c", "user.email=agent-board@localhost",
-		"commit-tree", tree, "-p", head, "-m", "Agent Board workspace transfer",
+		"commit-tree", worktreeTree, "-p", indexCommit, "-m", "Agent Board workspace transfer worktree",
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create workspace transfer commit: %w", err)
+		return nil, fmt.Errorf("create workspace transfer worktree commit: %w", err)
 	}
 
 	transferRef := "refs/agent-board/transfer/" + safeTransferComponent(transferID)
-	if _, err := runGit(ctx, binary, commandTimeout, nil, nil, "-C", repositoryPath, "update-ref", transferRef, commit); err != nil {
+	if _, err := runGit(ctx, binary, commandTimeout, nil, nil, "-C", repositoryPath, "update-ref", transferRef, worktreeCommit); err != nil {
 		return nil, fmt.Errorf("pin workspace transfer ref: %w", err)
 	}
 	defer deleteRef(repositoryPath, transferRef, binary, commandTimeout)
@@ -93,6 +113,67 @@ func SnapshotBundle(ctx context.Context, repositoryPath, transferID, gitBinary s
 		return nil, fmt.Errorf("read workspace transfer bundle: %w", err)
 	}
 	return payload, nil
+}
+
+// ResolveSnapshotState validates and resolves the Base -> Index -> Worktree
+// commit chain from a fetched Agent Board transfer revision.
+func ResolveSnapshotState(ctx context.Context, repositoryPath, revision, gitBinary string, commandTimeout time.Duration) (SnapshotState, error) {
+	binary, err := resolveGitBinary(gitBinary, commandTimeout)
+	if err != nil {
+		return SnapshotState{}, err
+	}
+	revision = strings.TrimSpace(revision)
+	if revision == "" {
+		return SnapshotState{}, fmt.Errorf("workspace transfer revision is required")
+	}
+	worktree, err := runGit(ctx, binary, commandTimeout, nil, nil, "-C", repositoryPath, "rev-parse", "--verify", revision+"^{commit}")
+	if err != nil {
+		return SnapshotState{}, fmt.Errorf("resolve workspace transfer worktree: %w", err)
+	}
+	index, err := runGit(ctx, binary, commandTimeout, nil, nil, "-C", repositoryPath, "rev-parse", "--verify", worktree+"^1")
+	if err != nil {
+		return SnapshotState{}, fmt.Errorf("resolve workspace transfer index: %w", err)
+	}
+	base, err := runGit(ctx, binary, commandTimeout, nil, nil, "-C", repositoryPath, "rev-parse", "--verify", index+"^1")
+	if err != nil {
+		return SnapshotState{}, fmt.Errorf("resolve workspace transfer baseline: %w", err)
+	}
+	return SnapshotState{Base: base, Index: index, Worktree: worktree}, nil
+}
+
+// RestoreCheckoutState converts a freshly cloned transfer bundle from its
+// transport-only Worktree commit into the original repository shape: HEAD at
+// Base, the Git index at Index, and the checked-out files left at Worktree.
+func RestoreCheckoutState(ctx context.Context, repositoryPath, revision, gitBinary string, commandTimeout time.Duration) (SnapshotState, error) {
+	state, err := ResolveSnapshotState(ctx, repositoryPath, revision, gitBinary, commandTimeout)
+	if err != nil {
+		return SnapshotState{}, err
+	}
+	binary, err := resolveGitBinary(gitBinary, commandTimeout)
+	if err != nil {
+		return SnapshotState{}, err
+	}
+	if _, err := runGit(ctx, binary, commandTimeout, nil, nil, "-C", repositoryPath, "update-ref", "HEAD", state.Base); err != nil {
+		return SnapshotState{}, fmt.Errorf("restore workspace transfer HEAD: %w", err)
+	}
+	if _, err := runGit(ctx, binary, commandTimeout, nil, nil, "-C", repositoryPath, "read-tree", state.Index+"^{tree}"); err != nil {
+		return SnapshotState{}, fmt.Errorf("restore workspace transfer index: %w", err)
+	}
+	return state, nil
+}
+
+func resolveGitBinary(gitBinary string, commandTimeout time.Duration) (string, error) {
+	if commandTimeout <= 0 {
+		return "", fmt.Errorf("git command timeout must be positive")
+	}
+	if strings.TrimSpace(gitBinary) == "" {
+		gitBinary = "git"
+	}
+	binary, err := exec.LookPath(gitBinary)
+	if err != nil {
+		return "", fmt.Errorf("find git executable: %w", err)
+	}
+	return binary, nil
 }
 
 func safeTransferComponent(transferID string) string {
