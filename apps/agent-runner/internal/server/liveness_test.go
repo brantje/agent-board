@@ -1,7 +1,6 @@
 package server
 
 import (
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -10,11 +9,9 @@ import (
 )
 
 func TestStaleWebSocketIsReclaimedWithoutCancelingExecution(t *testing.T) {
-	runner := New(Config{WorkspaceRoot: t.TempDir(), MaxActiveSessions: 1})
+	runner, httpServer := newTestRunner(t)
 	runner.pongWait = 250 * time.Millisecond
 	runner.pingPeriod = 50 * time.Millisecond
-	httpServer := httptest.NewServer(runner)
-	defer httpServer.Close()
 
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer func() { _ = conn.Close() }()
