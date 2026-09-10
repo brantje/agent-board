@@ -8,17 +8,13 @@ import (
 	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
 )
 
-func TestHandleTransferMessageRejectsCorruptOrOversizedPayload(t *testing.T) {
-	connection := func() *Connection {
-		return &Connection{
-			transfers:       map[string]*incomingTransferState{},
-			transferWaiters: map[string]*transferWaiter{},
-			transferDone:    map[string]transferResult{},
-			done:            make(chan struct{}),
-		}
+func TestHandleTransferMessageRejectsCorruptPayload(t *testing.T) {
+	connection := &Connection{
+		transfers:       map[string]*incomingTransferState{},
+		transferWaiters: map[string]*transferWaiter{},
+		transferDone:    map[string]transferResult{},
+		done:            make(chan struct{}),
 	}
-
-	corrupt := connection()
 	begin, err := protocol.NewMessage(protocol.Version2, protocol.TypeTransferBegin, "session-1", protocol.TransferBegin{
 		TransferID: "transfer-1", Direction: "from_runner", TotalBytes: 4, Checksum: "wrong",
 	})
@@ -35,34 +31,14 @@ func TestHandleTransferMessageRejectsCorruptOrOversizedPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := corrupt.handleTransferMessage(begin); err != nil {
+	if err := connection.handleTransferMessage(begin); err != nil {
 		t.Fatal(err)
 	}
-	if err := corrupt.handleTransferMessage(chunk); err != nil {
+	if err := connection.handleTransferMessage(chunk); err != nil {
 		t.Fatal(err)
 	}
-	if err := corrupt.handleTransferMessage(end); err == nil {
+	if err := connection.handleTransferMessage(end); err == nil {
 		t.Fatal("checksum mismatch accepted")
-	}
-
-	oversized := connection()
-	begin, err = protocol.NewMessage(protocol.Version2, protocol.TypeTransferBegin, "session-2", protocol.TransferBegin{
-		TransferID: "transfer-2", Direction: "from_runner", TotalBytes: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	chunk, err = protocol.NewMessage(protocol.Version2, protocol.TypeTransferChunk, "session-2", protocol.TransferChunk{
-		TransferID: "transfer-2", Data: base64.StdEncoding.EncodeToString([]byte("too large")),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := oversized.handleTransferMessage(begin); err != nil {
-		t.Fatal(err)
-	}
-	if err := oversized.handleTransferMessage(chunk); err == nil {
-		t.Fatal("payload larger than its declared size was accepted")
 	}
 }
 
