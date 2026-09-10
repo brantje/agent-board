@@ -10,12 +10,28 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+type reconnectTrackingManager struct {
+	*reconcileExecutionManager
+	disconnectedAt time.Time
+}
+
+func (m *reconnectTrackingManager) DisconnectedSince(string) (time.Time, bool) {
+	if m == nil || m.disconnectedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return m.disconnectedAt, true
+}
+
 func TestReconcileRunnerSessionReturnsUncertainWhileReconnectWindowOpen(t *testing.T) {
-	manager := &reconcileExecutionManager{err: runner.ErrDisconnected}
+	started := time.Now().Add(-6 * time.Hour)
+	manager := &reconnectTrackingManager{
+		reconcileExecutionManager: &reconcileExecutionManager{err: runner.ErrDisconnected},
+		disconnectedAt:            time.Now(),
+	}
 	storeFake := &executionSessionStoreFake{
 		session: store.ExecutionSession{
 			ID: "session-1", ProjectID: "project-1", RunID: "run-1", RunnerID: "runner-1",
-			Status: "RUNNING", UpdatedAt: time.Now(),
+			Status: "RUNNING", StartedAt: &started, UpdatedAt: time.Now(),
 		},
 	}
 	service, err := NewExecutionSessionService(storeFake, manager, manager)
@@ -31,6 +47,9 @@ func TestReconcileRunnerSessionReturnsUncertainWhileReconnectWindowOpen(t *testi
 	if !ok || appErr.Code != "execution_session_uncertain" {
 		t.Fatalf("unexpected error %#v", err)
 	}
+	if storeFake.session.Status != "RUNNING" {
+		t.Fatalf("long-running session failed on first disconnect: %q", storeFake.session.Status)
+	}
 }
 
 func TestReconcileRunnerSessionFailsAfterReconnectTimeout(t *testing.T) {
@@ -38,11 +57,14 @@ func TestReconcileRunnerSessionFailsAfterReconnectTimeout(t *testing.T) {
 	runnerReconnectTimeout = time.Millisecond
 	defer func() { runnerReconnectTimeout = original }()
 
-	manager := &reconcileExecutionManager{err: runner.ErrDisconnected}
+	manager := &reconnectTrackingManager{
+		reconcileExecutionManager: &reconcileExecutionManager{err: runner.ErrDisconnected},
+		disconnectedAt:            time.Now().Add(-time.Second),
+	}
 	storeFake := &executionSessionStoreFake{
 		session: store.ExecutionSession{
 			ID: "session-1", ProjectID: "project-1", RunID: "run-1", RunnerID: "runner-1",
-			Status: "RUNNING", UpdatedAt: time.Now().Add(-time.Second),
+			Status: "RUNNING", UpdatedAt: time.Now(),
 		},
 	}
 	service, err := NewExecutionSessionService(storeFake, manager, manager)
@@ -163,10 +185,6 @@ func TestReconcileRunnerSessionPromotesStartingAndCompletesInactiveTransport(t *
 	}
 	if _, err := nilService.Reconcile(context.Background(), "project-1", "session-3"); err == nil {
 		t.Fatal("nil transport accepted")
-	}
-	started := time.Now()
-	if got := sessionAnchorTime(store.ExecutionSession{StartedAt: &started, UpdatedAt: started.Add(-time.Hour)}); !got.Equal(started) {
-		t.Fatalf("anchor=%v", got)
 	}
 }
 
