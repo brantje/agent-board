@@ -52,6 +52,9 @@ func New(pool *pgxpool.Pool) *Store {
 }
 
 func NewWithPools(pool, lockPool *pgxpool.Pool) *Store {
+	if lockPool == nil {
+		lockPool = pool
+	}
 	return &Store{pool: pool, lockPool: lockPool}
 }
 
@@ -71,6 +74,15 @@ func notFound(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.ErrNotFound
 	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		switch pgErr.Code {
+		case "23505":
+			return store.ErrConflict
+		case "23502", "23503", "23514", "22P02":
+			return store.ErrInvalidArgument
+		}
+	}
 	return err
 }
 
@@ -83,31 +95,14 @@ func objectJSON(value json.RawMessage) json.RawMessage {
 
 func arrayJSON(value json.RawMessage) json.RawMessage {
 	if len(value) == 0 {
-		return json.RawMessage("[]")
+		return json.RawMessage(`[]`)
 	}
 	return value
 }
 
 func commandArgvJSON(value json.RawMessage) json.RawMessage {
 	if len(value) == 0 {
-		return json.RawMessage("[]")
+		return nil
 	}
-	return value
-}
-
-func translateConstraint(err error) error {
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) {
-		return err
-	}
-	switch pgErr.Code {
-	case "23503":
-		return store.ErrNotFound
-	case "23505":
-		return store.ErrConflict
-	case "23514", "23502", "22P02":
-		return store.ErrInvalidArgument
-	default:
-		return err
-	}
+	return arrayJSON(value)
 }
