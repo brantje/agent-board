@@ -32,8 +32,13 @@ const (
 )
 
 var (
-	ErrInvalidMessage     = runnerprotocol.ErrInvalidMessage
-	ErrUnsupportedVersion = runnerprotocol.ErrUnsupportedVersion
+	ErrInvalidMessage       = runnerprotocol.ErrInvalidMessage
+	ErrUnsupportedVersion   = runnerprotocol.ErrUnsupportedVersion
+	ValidateTransferBegin   = runnerprotocol.ValidateTransferBegin
+	TransferChecksum        = runnerprotocol.TransferChecksum
+	AppendTransferChunk     = runnerprotocol.AppendTransferChunk
+	ValidateTransferPayload = runnerprotocol.ValidateTransferPayload
+	NewMessage              = runnerprotocol.NewMessage
 )
 
 type Message = runnerprotocol.Message
@@ -60,26 +65,6 @@ const (
 	MaxTransferBytes  = runnerprotocol.MaxTransferBytes
 	MaxMessageSize    = runnerprotocol.MaxMessageSize
 )
-
-func ValidateTransferBegin(begin TransferBegin) error {
-	return runnerprotocol.ValidateTransferBegin(begin)
-}
-
-func TransferChecksum(payload []byte) string {
-	return runnerprotocol.TransferChecksum(payload)
-}
-
-func AppendTransferChunk(buffer []byte, expected int64, chunk TransferChunk) ([]byte, error) {
-	return runnerprotocol.AppendTransferChunk(buffer, expected, chunk)
-}
-
-func ValidateTransferPayload(payload []byte, expected int64, checksum string) error {
-	return runnerprotocol.ValidateTransferPayload(payload, expected, checksum)
-}
-
-func NewMessage(version int, typ MessageType, sessionID string, payload any) (Message, error) {
-	return runnerprotocol.NewMessage(version, typ, sessionID, payload)
-}
 
 func DecodePayload[T any](m Message) (T, error) {
 	return runnerprotocol.DecodePayload[T](m)
