@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"time"
 
 	protocol "github.com/brantje/agent-board/packages/runnerprotocol"
@@ -19,19 +18,10 @@ var ErrAuthentication = errors.New("runner credentials rejected")
 // Connect uses the same session dispatcher across reconnections; process trees
 // and pending output outlive a transport interruption.
 func (s *Server) Connect(ctx context.Context, serverURL, id, token string) error {
-	endpoint, err := url.Parse(serverURL)
-	if err != nil || endpoint.Host == "" || endpoint.User != nil || endpoint.RawQuery != "" || endpoint.Fragment != "" || id == "" || token == "" {
+	_, endpoint, err := AgentBoardEndpoint(serverURL, "/api/runner/ws", true)
+	if err != nil || id == "" || token == "" {
 		return errors.New("invalid runner connection configuration")
 	}
-	switch endpoint.Scheme {
-	case "http":
-		endpoint.Scheme = "ws"
-	case "https":
-		endpoint.Scheme = "wss"
-	default:
-		return errors.New("server URL must use http or https")
-	}
-	endpoint.Path = "/api/runner/ws"
 	for {
 		socket, response, err := websocket.DefaultDialer.DialContext(ctx, endpoint.String(), http.Header{"Authorization": []string{"Bearer " + token}, protocol.RunnerIDHeader: []string{id}})
 		if response != nil && response.Body != nil {
