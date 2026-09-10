@@ -9,17 +9,16 @@ import (
 	"testing"
 )
 
-func TestClientUsesV2LifecycleAndSharedQuestionRoutes(t *testing.T) {
+func TestClientUsesLegacyHeadlessLifecycleAndQuestionRoutes(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, http.StatusOK, map[string]any{
-			"data": map[string]any{
-				"ses_1": map[string]any{"type": "running"},
-			},
+			"ses_1":     map[string]any{"type": "busy"},
+			"ses_other": map[string]any{"type": "idle"},
 		})
 	})
-	mux.HandleFunc("POST /api/session/ses_1/interrupt", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
+	mux.HandleFunc("POST /session/ses_1/abort", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, http.StatusOK, true)
 	})
 	mux.HandleFunc("GET /question", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(t, w, http.StatusOK, []any{
@@ -47,11 +46,11 @@ func TestClientUsesV2LifecycleAndSharedQuestionRoutes(t *testing.T) {
 		writeJSON(t, w, http.StatusOK, true)
 	})
 
-	mux.HandleFunc("GET /session/status", unexpectedLegacyFallback(t))
-	mux.HandleFunc("POST /session/ses_1/abort", unexpectedLegacyFallback(t))
-	mux.HandleFunc("GET /api/session/ses_1/question", unexpectedLegacyFallback(t))
-	mux.HandleFunc("POST /api/session/ses_1/question/que_1/reply", unexpectedLegacyFallback(t))
-	mux.HandleFunc("POST /api/session/ses_1/question/que_1/reject", unexpectedLegacyFallback(t))
+	mux.HandleFunc("GET /api/session/active", unexpectedV2ControlFallback(t))
+	mux.HandleFunc("POST /api/session/ses_1/interrupt", unexpectedV2ControlFallback(t))
+	mux.HandleFunc("GET /api/session/ses_1/question", unexpectedV2ControlFallback(t))
+	mux.HandleFunc("POST /api/session/ses_1/question/que_1/reply", unexpectedV2ControlFallback(t))
+	mux.HandleFunc("POST /api/session/ses_1/question/que_1/reject", unexpectedV2ControlFallback(t))
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -83,23 +82,21 @@ func TestClientUsesV2LifecycleAndSharedQuestionRoutes(t *testing.T) {
 	}
 }
 
-func unexpectedLegacyFallback(t *testing.T) http.HandlerFunc {
+func unexpectedV2ControlFallback(t *testing.T) http.HandlerFunc {
 	t.Helper()
 	return func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("unexpected legacy fallback %s %s", r.Method, r.URL.Path)
-		http.Error(w, "unexpected legacy fallback", http.StatusInternalServerError)
+		t.Errorf("unexpected V2 fallback %s %s", r.Method, r.URL.Path)
+		http.Error(w, "unexpected V2 fallback", http.StatusInternalServerError)
 	}
 }
 
-func TestSessionActiveFallsBackToLegacyWhenV2RouteMissing(t *testing.T) {
+func TestSessionActiveFallsBackToV2WhenLegacyStatusRouteMissing(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	})
-	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, http.StatusOK, map[string]any{
-			"ses_1": map[string]any{"type": "busy"},
-		})
+	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{"data": map[string]any{"ses_1": map[string]any{"type": "running"}}})
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
@@ -117,31 +114,13 @@ func TestSessionActiveFallsBackToLegacyWhenV2RouteMissing(t *testing.T) {
 	}
 }
 
-func TestSessionActiveTreatsV2AbsenceAsIdleWithoutLegacyFallback(t *testing.T) {
+func TestInterruptFallsBackToV2OnlyWhenLegacyRouteMissing(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/session/active", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, http.StatusOK, map[string]any{"data": map[string]any{}})
-	})
-	mux.HandleFunc("GET /session/status", unexpectedLegacyFallback(t))
-	server := httptest.NewServer(mux)
-	defer server.Close()
-	native, err := New(server.Client(), server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	active, err := native.SessionActive(context.Background(), "ses_1")
-	if err != nil || active {
-		t.Fatalf("ses_1 active=%v err=%v", active, err)
-	}
-}
-
-func TestInterruptFallsBackToLegacyOnlyWhenV2RouteMissing(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("POST /api/session/ses_1/interrupt", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /session/ses_1/abort", func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	})
-	mux.HandleFunc("POST /session/ses_1/abort", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(t, w, http.StatusOK, true)
+	mux.HandleFunc("POST /api/session/ses_1/interrupt", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
