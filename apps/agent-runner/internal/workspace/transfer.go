@@ -2,8 +2,6 @@ package workspace
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -67,11 +65,6 @@ func SnapshotBundle(ctx context.Context, repositoryPath, transferID string) ([]b
 func IsRepository(ctx context.Context, repositoryPath string) bool {
 	_, err := runGit(ctx, "-C", repositoryPath, "rev-parse", "--is-inside-work-tree")
 	return err == nil
-}
-
-func TransferChecksum(payload []byte) string {
-	sum := sha256.Sum256(payload)
-	return hex.EncodeToString(sum[:])
 }
 
 func runGit(ctx context.Context, args ...string) (string, error) {
