@@ -366,7 +366,10 @@ func serverEnvironment(safe executioncontext.SafeContext, providerID string) (ma
 	if err != nil {
 		return nil, fmt.Errorf("opencode engine: encode provider config: %w", err)
 	}
-	return map[string]string{"OPENCODE_CONFIG_CONTENT": string(encoded)}, nil
+	return map[string]string{
+		"OPENCODE_CONFIG_CONTENT": string(encoded),
+		"OPENCODE_DB":             ":memory:",
+	}, nil
 }
 
 func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string) (engine.Process, bool, error) {
