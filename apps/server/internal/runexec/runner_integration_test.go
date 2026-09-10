@@ -70,7 +70,7 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 		}
 	})
 
-	runner, token, err := services.ControlPlane.Runners.Create(ctx, "External integration host")
+	runner, token, err := createExternalRunnerCredential(ctx, services.ControlPlane)
 	if err != nil {
 		t.Fatal(err)
 	}
