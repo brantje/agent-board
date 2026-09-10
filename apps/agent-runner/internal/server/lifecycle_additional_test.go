@@ -157,6 +157,65 @@ func TestHandshakeRequiresTextServerHelloAndSupportedVersion(t *testing.T) {
 	})
 }
 
+func TestDisconnectReconnectDeliversRemainingOutputAndExit(t *testing.T) {
+	runner, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+
+	send(t, conn, protocol.TypeStart, "resume-output", protocol.StartRequest{
+		Command: []string{"sh", "-c", "printf before; sleep 0.3; printf after"},
+	})
+	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
+		t.Fatalf("unexpected %#v", msg)
+	}
+
+	var before string
+	for before != "before" {
+		msg := read(t, conn)
+		if msg.Type != protocol.TypeStdout {
+			t.Fatalf("unexpected message before disconnect %#v", msg)
+		}
+		stream, err := protocol.DecodePayload[protocol.StreamData](msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before += string(stream.Data)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reconnected := dialAndHandshakeExpectHealth(t, httpServer.URL, 1, "resume-output")
+	defer reconnected.Close()
+
+	var after string
+	for {
+		msg := read(t, reconnected)
+		switch msg.Type {
+		case protocol.TypeStdout:
+			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after += string(stream.Data)
+		case protocol.TypeExit:
+			result, err := protocol.DecodePayload[protocol.ExitResult](msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after != "after" {
+				t.Fatalf("remaining output=%q, want after", after)
+			}
+			if result.ExitCode != 0 || result.Signaled {
+				t.Fatalf("unexpected exit %#v", result)
+			}
+			waitFor(t, time.Second, func() bool { return runner.manager.ActiveCount() == 0 })
+			return
+		case protocol.TypeError:
+			t.Fatalf("unexpected reconnect error %#v", msg)
+		}
+	}
+}
+
 func waitForExit(t *testing.T, conn *websocket.Conn, sessionID string) {
 	t.Helper()
 	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted || msg.SessionID != sessionID {
