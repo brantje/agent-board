@@ -310,6 +310,72 @@ func TestRunnerSyncBackAppliesWorkspaceAndAcknowledgesTransfer(t *testing.T) {
 	}
 }
 
+func TestRunnerSyncBackTransportFailuresDoNotApplyOrAcknowledge(t *testing.T) {
+	t.Run("missing prepared session", func(t *testing.T) {
+		authoritative := initProcessTestRepository(t)
+		safe := processTestSafeContext(authoritative)
+		safe.Runtime = executioncontext.RuntimeContext{}
+		storeFake := &runnerSyncStore{}
+		client := &successfulSyncClient{}
+		processor := newRunnerSyncProcessor(t, authoritative, safe, storeFake, client)
+
+		if err := processor.syncWorkspaceFromRunner(t.Context(), safe, "runner-1", ""); err == nil {
+			t.Fatal("sync-back succeeded without a prepared runner session")
+		}
+		if len(client.directions) != 0 || client.confirmed {
+			t.Fatalf("missing session touched runner transport: directions=%v confirmed=%v", client.directions, client.confirmed)
+		}
+	})
+
+	t.Run("runner disconnects before sync request", func(t *testing.T) {
+		authoritative := initProcessTestRepository(t)
+		safe := processTestSafeContext(authoritative)
+		safe.Runtime = executioncontext.RuntimeContext{}
+		storeFake := &runnerSyncStore{}
+		client := &successfulSyncClient{}
+		processor := newRunnerSyncProcessor(t, authoritative, safe, storeFake, client)
+		processor.runners = failingRunnerSyncConnector{err: errors.New("runner disconnected before sync-back")}
+
+		if err := processor.syncWorkspaceFromRunner(t.Context(), safe, "runner-1", "session-1"); err == nil {
+			t.Fatal("sync-back succeeded after runner disconnect")
+		}
+		if len(client.directions) != 0 || client.confirmed {
+			t.Fatalf("disconnected sync touched stale runner client: directions=%v confirmed=%v", client.directions, client.confirmed)
+		}
+		if _, err := os.Stat(filepath.Join(authoritative, "returned.txt")); !os.IsNotExist(err) {
+			t.Fatalf("disconnected runner modified authoritative Workspace: %v", err)
+		}
+		if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "workspace.transfer.completed") {
+			t.Fatalf("unexpected disconnect transfer events=%+v", storeFake.events)
+		}
+	})
+
+	t.Run("runner disconnects while requesting sync", func(t *testing.T) {
+		authoritative := initProcessTestRepository(t)
+		safe := processTestSafeContext(authoritative)
+		safe.Runtime = executioncontext.RuntimeContext{}
+		storeFake := &runnerSyncStore{}
+		client := &runnerOutboundFailureClient{
+			successfulSyncClient: &successfulSyncClient{},
+			err:                  errors.New("runner disconnected while requesting sync-back"),
+		}
+		processor := newRunnerSyncProcessor(t, authoritative, safe, storeFake, client)
+
+		if err := processor.syncWorkspaceFromRunner(t.Context(), safe, "runner-1", "session-1"); err == nil {
+			t.Fatal("sync-back succeeded after sync request transport failure")
+		}
+		if len(client.directions) != 1 || client.directions[0] != "from_runner" || client.confirmed {
+			t.Fatalf("sync request failure state directions=%v confirmed=%v", client.directions, client.confirmed)
+		}
+		if _, err := os.Stat(filepath.Join(authoritative, "returned.txt")); !os.IsNotExist(err) {
+			t.Fatalf("failed sync request modified authoritative Workspace: %v", err)
+		}
+		if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "workspace.transfer.completed") {
+			t.Fatalf("unexpected sync request failure events=%+v", storeFake.events)
+		}
+	})
+}
+
 func TestRunnerSyncBackWorkspaceLockFailureDoesNotApplyOrAcknowledge(t *testing.T) {
 	authoritative := initProcessTestRepository(t)
 	safe := processTestSafeContext(authoritative)
