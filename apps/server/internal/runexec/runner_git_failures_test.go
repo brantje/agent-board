@@ -112,13 +112,6 @@ func TestPrepareRemoteGitWorkspaceRejectsInvalidStateBeforeTransfer(t *testing.T
 		}
 	})
 
-	t.Run("missing revision store", func(t *testing.T) {
-		safe, _, processor := remoteGitFailureHarness(t, &controlledGitClient{})
-		if err := processor.prepareRemoteGitWorkspace(t.Context(), safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "revision store") {
-			t.Fatalf("prepare error=%v", err)
-		}
-	})
-
 	t.Run("revision read failure", func(t *testing.T) {
 		safe, base, processor := remoteGitFailureHarness(t, &controlledGitClient{})
 		want := errors.New("revision unavailable")
@@ -164,13 +157,6 @@ func TestPublishRemoteGitWorkspaceRejectsUnsafePublication(t *testing.T) {
 	t.Run("missing prepared session", func(t *testing.T) {
 		safe, _, processor := remoteGitFailureHarness(t, &controlledGitClient{})
 		if err := processor.publishRemoteGitWorkspace(t.Context(), safe, "runner-1", ""); err == nil || !strings.Contains(err.Error(), "prepared runner execution session") {
-			t.Fatalf("publish error=%v", err)
-		}
-	})
-
-	t.Run("missing revision store", func(t *testing.T) {
-		safe, _, processor := remoteGitFailureHarness(t, &controlledGitClient{})
-		if err := processor.publishRemoteGitWorkspace(t.Context(), safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "revision store") {
 			t.Fatalf("publish error=%v", err)
 		}
 	})
@@ -266,15 +252,7 @@ func TestPublishRemoteGitWorkspaceReportsTransportAndAckFailures(t *testing.T) {
 	})
 }
 
-func TestPersistLocalWorkspaceRevisionRequiresGitAndDurableRevisionStore(t *testing.T) {
-	t.Run("missing revision store", func(t *testing.T) {
-		safe, _, processor := remoteGitFailureHarness(t, &controlledGitClient{})
-		safe.Project.SourceType = store.ProjectSourceLocal
-		if err := processor.persistLocalWorkspaceRevision(t.Context(), safe); err == nil || !strings.Contains(err.Error(), "revision store") {
-			t.Fatalf("persist error=%v", err)
-		}
-	})
-
+func TestPersistLocalWorkspaceRevisionUsesGitAndPersistsHead(t *testing.T) {
 	t.Run("missing Git", func(t *testing.T) {
 		safe, base, processor := remoteGitFailureHarness(t, &controlledGitClient{})
 		safe.Project.SourceType = store.ProjectSourceLocal
@@ -292,6 +270,16 @@ func TestPersistLocalWorkspaceRevisionRequiresGitAndDurableRevisionStore(t *test
 		processor.store = &failingRevisionRunStore{runnerSyncStore: base}
 		if err := processor.persistLocalWorkspaceRevision(t.Context(), safe); err == nil {
 			t.Fatal("non-repository workspace unexpectedly persisted a revision")
+		}
+	})
+
+	t.Run("persistence failure", func(t *testing.T) {
+		safe, base, processor := remoteGitFailureHarness(t, &controlledGitClient{})
+		safe.Project.SourceType = store.ProjectSourceLocal
+		want := errors.New("database unavailable")
+		processor.store = &failingRevisionRunStore{runnerSyncStore: base, updateErr: want}
+		if err := processor.persistLocalWorkspaceRevision(t.Context(), safe); !errors.Is(err, want) {
+			t.Fatalf("persist error=%v want=%v", err, want)
 		}
 	})
 
