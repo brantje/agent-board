@@ -13,6 +13,8 @@ const editing = ref<Runner>()
 const editState = reactive({ name: '' })
 const saving = ref(false)
 const saveError = ref<Error>()
+const deleting = ref('')
+const deleteError = ref<Error>()
 
 async function createRunner() {
   if (creating.value) return
@@ -69,6 +71,20 @@ async function saveName() {
     saving.value = false
   }
 }
+
+async function deleteRunner(runner: Runner) {
+  if (deleting.value) return
+  deleting.value = runner.id
+  deleteError.value = undefined
+  try {
+    await apiRequest<void>(`/api/runners/${runner.id}`, { method: 'DELETE' })
+    await refresh()
+  } catch (failure) {
+    deleteError.value = failure as Error
+  } finally {
+    deleting.value = ''
+  }
+}
 </script>
 
 <template>
@@ -78,6 +94,7 @@ async function saveName() {
     </template>
 
     <UAlert v-if="createError" color="error" title="Unable to create runner" :description="createError.message" class="mb-4" />
+    <UAlert v-if="deleteError" color="error" title="Unable to delete runner" :description="deleteError.message" class="mb-4" />
     <UAlert
       v-if="registrationToken"
       color="warning"
@@ -110,6 +127,15 @@ async function saveName() {
             <UBadge v-if="!runner.registeredAt" color="warning" variant="subtle" :label="runner.revokedAt ? 'Revoked' : 'Pending registration'" />
             <UBadge v-else :color="runner.connected ? 'success' : 'neutral'" variant="subtle" :label="runner.connected ? 'Connected' : 'Offline'" />
             <UButton v-if="!runner.internal && runner.registeredAt" label="Edit" color="neutral" variant="outline" @click="edit(runner)" />
+            <UButton
+              v-if="runner.deletable"
+              label="Delete"
+              color="neutral"
+              variant="outline"
+              :loading="deleting === runner.id"
+              :disabled="Boolean(deleting)"
+              @click="deleteRunner(runner)"
+            />
           </div>
           <div v-if="runner.registeredAt" class="mt-3 flex flex-wrap items-center gap-2">
             <UBadge

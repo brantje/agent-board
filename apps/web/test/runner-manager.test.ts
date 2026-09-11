@@ -92,6 +92,38 @@ describe('RunnerManager', () => {
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
   })
 
+  it('deletes pending runners', async () => {
+    const runners = [{
+      id: 'runner-pending', name: null, internal: false, managed: false, deletable: true,
+      connected: false, registeredAt: null, revokedAt: null, lastSeenAt: null, capabilities: {},
+      activeSessions: null, reservedSessions: 0, maxActiveSessions: 10, createdAt: '', updatedAt: ''
+    }]
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      const method = init?.method ?? 'GET'
+      if (path === '/api/runners/runner-pending' && method === 'DELETE') {
+        runners.length = 0
+        return new Response(null, { status: 204 })
+      }
+      if (path === '/api/runners' && method === 'GET') {
+        return new Response(JSON.stringify(runners))
+      }
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(RunnerManager, { global })
+    await flushPromises()
+
+    const deleteButton = wrapper.findAll('button').find(button => button.text() === 'Delete')
+    expect(deleteButton).toBeDefined()
+    await deleteButton!.trigger('click')
+    await flushPromises()
+
+    expect(fetch).toHaveBeenCalledWith('/api/runners/runner-pending', expect.objectContaining({ method: 'DELETE' }))
+    expect(wrapper.text()).not.toContain('runner-pending')
+  })
+
   it('shows revoked pending runners and reports create failures', async () => {
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
