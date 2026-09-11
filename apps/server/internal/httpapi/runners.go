@@ -5,26 +5,30 @@ import (
 	"net/http"
 	"time"
 
+	runnerconn "github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/go-chi/chi/v5"
 )
 
 type RunnerDTO struct {
-	ID           string          `json:"id"`
-	Name         *string         `json:"name"`
-	Internal     bool            `json:"internal"`
-	Managed      bool            `json:"managed"`
-	Deletable    bool            `json:"deletable"`
-	Connected    bool            `json:"connected"`
-	RegisteredAt *time.Time      `json:"registeredAt"`
-	RevokedAt    *time.Time      `json:"revokedAt"`
-	LastSeenAt   *time.Time      `json:"lastSeenAt"`
-	Capabilities json.RawMessage `json:"capabilities"`
-	CreatedAt    time.Time       `json:"createdAt"`
-	UpdatedAt    time.Time       `json:"updatedAt"`
+	ID                string          `json:"id"`
+	Name              *string         `json:"name"`
+	Internal          bool            `json:"internal"`
+	Managed           bool            `json:"managed"`
+	Deletable         bool            `json:"deletable"`
+	Connected         bool            `json:"connected"`
+	RegisteredAt      *time.Time      `json:"registeredAt"`
+	RevokedAt         *time.Time      `json:"revokedAt"`
+	LastSeenAt        *time.Time      `json:"lastSeenAt"`
+	Capabilities      json.RawMessage `json:"capabilities"`
+	ActiveSessions    *int            `json:"activeSessions"`
+	ReservedSessions  int             `json:"reservedSessions"`
+	MaxActiveSessions int             `json:"maxActiveSessions"`
+	CreatedAt         time.Time       `json:"createdAt"`
+	UpdatedAt         time.Time       `json:"updatedAt"`
 }
 
-func (a *api) runnerDTO(v store.Runner) RunnerDTO {
+func (a *api) runnerDTO(v store.Runner, reserved int) RunnerDTO {
 	caps := v.Capabilities
 	if len(caps) == 0 {
 		caps = store.EmptyObject
@@ -34,7 +38,18 @@ func (a *api) runnerDTO(v store.Runner) RunnerDTO {
 		value := v.Name
 		name = &value
 	}
-	return RunnerDTO{ID: v.ID, Name: name, Internal: v.Internal, Managed: v.Internal, Deletable: !v.Internal, Connected: a.service.Runners.Connections.Connected(v.ID), RegisteredAt: v.RegisteredAt, RevokedAt: v.RevokedAt, LastSeenAt: v.LastSeenAt, Capabilities: caps, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt}
+	dto := RunnerDTO{
+		ID: v.ID, Name: name, Internal: v.Internal, Managed: v.Internal, Deletable: !v.Internal,
+		Connected: a.service.Runners.Connections.Connected(v.ID), RegisteredAt: v.RegisteredAt,
+		RevokedAt: v.RevokedAt, LastSeenAt: v.LastSeenAt, Capabilities: caps,
+		ReservedSessions: reserved, MaxActiveSessions: runnerconn.MaxActiveSessions(v.Capabilities),
+		CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+	}
+	if health, ok := a.service.Runners.Connections.Health(v.ID); ok {
+		active := health.ActiveSessions
+		dto.ActiveSessions = &active
+	}
+	return dto
 }
 
 type runnerNameRequest struct {
@@ -120,9 +135,18 @@ func (a *api) listRunners(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	ids := make([]string, len(values))
+	for i, v := range values {
+		ids[i] = v.ID
+	}
+	reserved, err := a.service.Runners.CountReservations(r.Context(), ids)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	out := make([]RunnerDTO, 0, len(values))
 	for _, v := range values {
-		out = append(out, a.runnerDTO(v))
+		out = append(out, a.runnerDTO(v, reserved[v.ID]))
 	}
 	writeJSON(w, 200, out)
 }
@@ -158,7 +182,12 @@ func (a *api) getRunner(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, 200, a.runnerDTO(v))
+	reserved, err := a.service.Runners.CountReservations(r.Context(), []string{v.ID})
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, 200, a.runnerDTO(v, reserved[v.ID]))
 }
 func (a *api) renameRunner(w http.ResponseWriter, r *http.Request) {
 	id, ok := resourceID(w, r)
@@ -174,7 +203,12 @@ func (a *api) renameRunner(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, 200, a.runnerDTO(v))
+	reserved, err := a.service.Runners.CountReservations(r.Context(), []string{v.ID})
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, 200, a.runnerDTO(v, reserved[v.ID]))
 }
 func (a *api) rotateRunner(w http.ResponseWriter, r *http.Request) {
 	id, ok := resourceID(w, r)
@@ -187,7 +221,12 @@ func (a *api) rotateRunner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, runnerCredentialResponse{Runner: a.runnerDTO(v), RunnerToken: runnerToken})
+	reserved, err := a.service.Runners.CountReservations(r.Context(), []string{v.ID})
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, 200, runnerCredentialResponse{Runner: a.runnerDTO(v, reserved[v.ID]), RunnerToken: runnerToken})
 }
 func (a *api) revokeRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, false) }
 func (a *api) deleteRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, true) }
@@ -205,5 +244,10 @@ func (a *api) disableRunner(w http.ResponseWriter, r *http.Request, deleted bool
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
-	writeJSON(w, 200, a.runnerDTO(v))
+	reserved, err := a.service.Runners.CountReservations(r.Context(), []string{v.ID})
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, 200, a.runnerDTO(v, reserved[v.ID]))
 }

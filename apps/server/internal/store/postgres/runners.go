@@ -73,3 +73,29 @@ func (s *Store) ObserveRunner(ctx context.Context, id string, capabilities json.
 	}
 	return nil
 }
+
+func (s *Store) CountRunnerReservations(ctx context.Context, ids []string) (map[string]int, error) {
+	counts := map[string]int{}
+	if len(ids) == 0 {
+		return counts, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT resource_id::text, count(*)
+		FROM scheduler_capacity_reservations
+		WHERE resource_kind='RUNNER' AND resource_id = ANY($1::uuid[])
+		GROUP BY resource_id
+	`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		var count int
+		if err := rows.Scan(&id, &count); err != nil {
+			return nil, err
+		}
+		counts[id] = count
+	}
+	return counts, rows.Err()
+}

@@ -3,6 +3,7 @@ import { reactive, ref } from 'vue'
 import type { Runner } from '../types/api'
 import { apiRequest } from '../utils/api'
 import { useResource } from '../composables/useResource'
+import { runnerEngines, runnerSessionSummary } from '../utils/runners'
 
 const { data: runners, pending, error, refresh } = useResource<Runner[]>('/api/runners')
 const registrationToken = ref('')
@@ -110,6 +111,19 @@ async function saveName() {
             <UBadge v-else :color="runner.connected ? 'success' : 'neutral'" variant="subtle" :label="runner.connected ? 'Connected' : 'Offline'" />
             <UButton v-if="!runner.internal && runner.registeredAt" label="Edit" color="neutral" variant="outline" @click="edit(runner)" />
           </div>
+          <div v-if="runner.registeredAt" class="mt-3 flex flex-wrap items-center gap-2">
+            <UBadge
+              v-for="engine in runnerEngines(runner)"
+              :key="engine"
+              color="primary"
+              variant="subtle"
+              :label="engine"
+            />
+            <span v-if="!runnerEngines(runner).length" class="text-xs text-muted">No engines reported yet</span>
+          </div>
+          <p v-if="runner.registeredAt" class="mt-2 text-sm text-muted" data-testid="runner-session-summary">
+            {{ runnerSessionSummary(runner) }}
+          </p>
         </UCard>
       </div>
     </AsyncState>

@@ -31,6 +31,7 @@ type RunnerStore interface {
 	RotateRunnerCredential(context.Context, string, []byte) (Runner, error)
 	RevokeRunner(context.Context, string, bool) (Runner, error)
 	ObserveRunner(context.Context, string, json.RawMessage) error
+	CountRunnerReservations(context.Context, []string) (map[string]int, error)
 	ListProjectRunnerIDs(context.Context, string) ([]string, error)
 	SetProjectRunnerIDs(context.Context, string, []string) error
 }

@@ -97,6 +97,9 @@ func (s *RunnerService) Get(ctx context.Context, id string) (store.Runner, error
 func (s *RunnerService) List(ctx context.Context) ([]store.Runner, error) {
 	return s.store.ListRunners(ctx)
 }
+func (s *RunnerService) CountReservations(ctx context.Context, ids []string) (map[string]int, error) {
+	return s.store.CountRunnerReservations(ctx, ids)
+}
 func (s *RunnerService) Rename(ctx context.Context, id, name string) (store.Runner, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {

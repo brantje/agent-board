@@ -152,6 +152,16 @@ func (r *Registry) Connected(id string) bool {
 	return !r.closed && c != nil && clientAlive(c)
 }
 
+func (r *Registry) Health(id string) (protocol.Health, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	c := r.entries[id]
+	if r.closed || c == nil || !clientAlive(c) {
+		return protocol.Health{}, false
+	}
+	return c.Health(), true
+}
+
 func (r *Registry) Candidates(engine string) []string {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -160,7 +170,7 @@ func (r *Registry) Candidates(engine string) []string {
 		return ids
 	}
 	for id, c := range r.entries {
-		if !clientAlive(c) || c.Health().ActiveSessions > 0 {
+		if !clientAlive(c) {
 			continue
 		}
 		for _, supported := range c.Capabilities().Engines {

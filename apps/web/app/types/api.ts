@@ -22,6 +22,9 @@ export interface Runner {
   revokedAt: string | null
   lastSeenAt: string | null
   capabilities: Record<string, unknown>
+  activeSessions: number | null
+  reservedSessions: number
+  maxActiveSessions: number
   createdAt: string
   updatedAt: string
 }

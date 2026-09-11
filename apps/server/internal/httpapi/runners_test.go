@@ -100,6 +100,9 @@ func (s *runnerAPIStore) RevokeRunner(_ context.Context, id string, deleted bool
 	return s.value, nil
 }
 func (s *runnerAPIStore) ObserveRunner(context.Context, string, json.RawMessage) error { return nil }
+func (s *runnerAPIStore) CountRunnerReservations(context.Context, []string) (map[string]int, error) {
+	return map[string]int{}, nil
+}
 func (s *runnerAPIStore) ListProjectRunnerIDs(context.Context, string) ([]string, error) {
 	if s.err != nil {
 		return nil, s.err

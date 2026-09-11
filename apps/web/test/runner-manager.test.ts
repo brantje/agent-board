@@ -7,11 +7,15 @@ const registeredAt = '2026-09-10T12:00:00Z'
 const initialRunners = [
   {
     id: 'runner-external', name: 'build-host', internal: false, managed: false, deletable: true,
-    connected: true, registeredAt, revokedAt: null, lastSeenAt: null, capabilities: {}, createdAt: '', updatedAt: ''
+    connected: true, registeredAt, revokedAt: null, lastSeenAt: null,
+    capabilities: { engines: ['opencode', 'scripted'], max_active_sessions: 10 },
+    activeSessions: 2, reservedSessions: 2, maxActiveSessions: 10, createdAt: '', updatedAt: ''
   },
   {
     id: 'runner-internal', name: 'Internal', internal: true, managed: true, deletable: false,
-    connected: true, registeredAt, revokedAt: null, lastSeenAt: null, capabilities: {}, createdAt: '', updatedAt: ''
+    connected: true, registeredAt, revokedAt: null, lastSeenAt: null,
+    capabilities: { engines: ['scripted'] }, activeSessions: 0, reservedSessions: 0, maxActiveSessions: 10,
+    createdAt: '', updatedAt: ''
   }
 ]
 
@@ -36,7 +40,8 @@ describe('RunnerManager', () => {
       if (path === '/api/runners' && method === 'POST') {
         runners.push({
           id: 'runner-pending', name: null, internal: false, managed: false, deletable: true,
-          connected: false, registeredAt: null, revokedAt: null, lastSeenAt: null, capabilities: {}, createdAt: '', updatedAt: ''
+          connected: false, registeredAt: null, revokedAt: null, lastSeenAt: null, capabilities: {},
+          activeSessions: null, reservedSessions: 0, maxActiveSessions: 10, createdAt: '', updatedAt: ''
         })
         return new Response(JSON.stringify({ runner: { id: 'runner-pending' }, registrationToken: 'one-time-registration-token' }), { status: 201 })
       }
@@ -55,6 +60,9 @@ describe('RunnerManager', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('build-host')
+    expect(wrapper.text()).toContain('opencode')
+    expect(wrapper.text()).toContain('scripted')
+    expect(wrapper.get('[data-testid="runner-session-summary"]').text()).toBe('Sessions: 2 / 10 active')
     expect(wrapper.findAll('button').filter(button => button.text() === 'Edit')).toHaveLength(1)
     expect(wrapper.find('input').exists()).toBe(false)
 
@@ -92,7 +100,7 @@ describe('RunnerManager', () => {
         return new Response(JSON.stringify([{
           id: 'runner-pending', name: null, internal: false, managed: false, deletable: true,
           connected: false, registeredAt: null, revokedAt: '2026-09-10T12:00:00Z', lastSeenAt: null,
-          capabilities: {}, createdAt: '', updatedAt: ''
+          capabilities: {}, activeSessions: null, reservedSessions: 0, maxActiveSessions: 10, createdAt: '', updatedAt: ''
         }]))
       }
       if (path === '/api/runners' && method === 'POST') {
