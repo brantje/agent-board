@@ -346,10 +346,6 @@ func buildProcessTestProcessor(t *testing.T, repository string, resolver process
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), evidenceStore, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	registry, err := engine.NewRegistry(processTestEngine{workspace: repository})
 	if err != nil {
 		t.Fatal(err)
@@ -358,7 +354,7 @@ func buildProcessTestProcessor(t *testing.T, repository string, resolver process
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, candidate, git, nil)
+	processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, git, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +362,7 @@ func buildProcessTestProcessor(t *testing.T, repository string, resolver process
 }
 
 func TestProcessorHelpersCoverFailureAndPayloadShapes(t *testing.T) {
-	if _, err := NewProcessor(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil); err == nil {
+	if _, err := NewProcessor(nil, nil, nil, nil, nil, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected dependency validation error")
 	}
 	if got := safeFailure(nil); got != "execution failed" {
