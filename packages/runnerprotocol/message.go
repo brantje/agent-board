@@ -15,31 +15,28 @@ const RunnerIDHeader = "X-Agent-Board-Runner-Id"
 type MessageType string
 
 const (
-	TypeServerHello               MessageType = "server_hello"
-	TypeRunnerHello               MessageType = "runner_hello"
-	TypeHealth                    MessageType = "health"
-	TypeStart                     MessageType = "start"
-	TypeSessionStarted            MessageType = "session_started"
-	TypeStdin                     MessageType = "stdin"
-	TypeStdinClose                MessageType = "stdin_close"
-	TypeStdout                    MessageType = "stdout"
-	TypeStderr                    MessageType = "stderr"
-	TypeExit                      MessageType = "exit"
-	TypeTerminate                 MessageType = "terminate"
-	TypeKill                      MessageType = "kill"
-	TypeConnect                   MessageType = "connect"
-	TypeConnected                 MessageType = "connected"
-	TypeConnectData               MessageType = "connect_data"
-	TypeConnectClose              MessageType = "connect_close"
-	TypeTransferBegin             MessageType = "transfer_begin"
-	TypeTransferChunk             MessageType = "transfer_chunk"
-	TypeTransferEnd               MessageType = "transfer_end"
-	TypeTransferFailed            MessageType = "transfer_failed"
-	TypeTransferApplied           MessageType = "transfer_applied"
-	TypeWorkspacePublish          MessageType = "workspace_publish"
-	TypeWorkspacePublished        MessageType = "workspace_published"
-	TypeWorkspacePublishApplied   MessageType = "workspace_publish_applied"
-	TypeError                     MessageType = "error"
+	TypeServerHello      MessageType = "server_hello"
+	TypeRunnerHello      MessageType = "runner_hello"
+	TypeHealth           MessageType = "health"
+	TypeStart            MessageType = "start"
+	TypeSessionStarted   MessageType = "session_started"
+	TypeStdin            MessageType = "stdin"
+	TypeStdinClose       MessageType = "stdin_close"
+	TypeStdout           MessageType = "stdout"
+	TypeStderr           MessageType = "stderr"
+	TypeExit             MessageType = "exit"
+	TypeTerminate        MessageType = "terminate"
+	TypeKill             MessageType = "kill"
+	TypeConnect          MessageType = "connect"
+	TypeConnected        MessageType = "connected"
+	TypeConnectData      MessageType = "connect_data"
+	TypeConnectClose     MessageType = "connect_close"
+	TypeTransferBegin    MessageType = "transfer_begin"
+	TypeTransferChunk    MessageType = "transfer_chunk"
+	TypeTransferEnd      MessageType = "transfer_end"
+	TypeTransferFailed   MessageType = "transfer_failed"
+	TypeTransferApplied  MessageType = "transfer_applied"
+	TypeError            MessageType = "error"
 )
 
 var (
@@ -78,27 +75,11 @@ type Health struct {
 	ActiveSessionIDs []string `json:"active_session_ids,omitempty"`
 }
 
-type GitWorkspace struct {
-	CloneURL         string `json:"clone_url"`
-	Ref              string `json:"ref,omitempty"`
-	IssueBranch      string `json:"issue_branch"`
-	RecordedRevision string `json:"recorded_revision,omitempty"`
-}
-
 type StartRequest struct {
-	Command   []string          `json:"command"`
-	Dir       string            `json:"dir,omitempty"`
-	Env       map[string]string `json:"env,omitempty"`
-	Secrets   map[string]string `json:"secrets,omitempty"`
-	Workspace *GitWorkspace     `json:"workspace,omitempty"`
-}
-
-type WorkspacePublished struct {
-	Revision string `json:"revision"`
-}
-
-type WorkspacePublishApplied struct {
-	Revision string `json:"revision"`
+	Command []string          `json:"command"`
+	Dir     string            `json:"dir,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
+	Secrets map[string]string `json:"secrets,omitempty"`
 }
 
 type StreamData struct {
@@ -204,8 +185,7 @@ func knownType(typ MessageType) bool {
 		TypeStdin, TypeStdinClose, TypeStdout, TypeStderr, TypeExit,
 		TypeTerminate, TypeKill, TypeConnect, TypeConnected, TypeConnectData,
 		TypeConnectClose, TypeTransferBegin, TypeTransferChunk, TypeTransferEnd,
-		TypeTransferFailed, TypeTransferApplied, TypeWorkspacePublish,
-		TypeWorkspacePublished, TypeWorkspacePublishApplied, TypeError:
+		TypeTransferFailed, TypeTransferApplied, TypeError:
 		return true
 	default:
 		return false
@@ -217,8 +197,7 @@ func requiresSession(typ MessageType) bool {
 	case TypeStart, TypeSessionStarted, TypeStdin, TypeStdinClose, TypeStdout,
 		TypeStderr, TypeExit, TypeTerminate, TypeKill, TypeConnect, TypeConnected,
 		TypeConnectData, TypeConnectClose, TypeTransferBegin, TypeTransferChunk,
-		TypeTransferEnd, TypeTransferFailed, TypeTransferApplied,
-		TypeWorkspacePublish, TypeWorkspacePublished, TypeWorkspacePublishApplied:
+		TypeTransferEnd, TypeTransferFailed, TypeTransferApplied:
 		return true
 	default:
 		return false
