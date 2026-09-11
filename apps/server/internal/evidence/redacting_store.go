@@ -63,7 +63,7 @@ func (s *RedactingStore) AppendEvent(ctx context.Context, input store.Event) (st
 	if input.RunID == nil {
 		input.Payload, err = s.registry.RedactAllJSON(input.Payload)
 	} else {
-		input.Payload, err = s.registry.RedactJSON(input.RunID, input.Payload)
+		input.Payload, err = s.registry.RedactJSON(*input.RunID, input.Payload)
 	}
 	if err != nil {
 		return store.Event{}, err
