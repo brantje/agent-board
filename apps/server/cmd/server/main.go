@@ -314,11 +314,6 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if err != nil {
 		return err
 	}
-	reviewCandidates, err := evidence.NewReviewCandidateStore(configuredReviewCandidateRoot())
-	if err != nil {
-		return err
-	}
-	services.ReviewCandidates = reviewCandidates
 	runEvidence, err := app.NewRunEvidenceService(services.ExecutionStore, blobs)
 	if err != nil {
 		return err
@@ -343,10 +338,6 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if err != nil {
 		return err
 	}
-	candidate, err := evidence.NewCandidateSnapshotterWithReviewCandidates(evidence.NewCandidateCollector(), services.ExecutionStore, blobs, reviewCandidates)
-	if err != nil {
-		return err
-	}
 	engines, err := engine.NewRegistry(scripted.New(), opencode.New())
 	if err != nil {
 		return err
@@ -355,7 +346,7 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
 		runnerConnector = runexec.NewRegistryConnector(services.ControlPlane.Runners.Connections)
 	}
-	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, candidate, git, runnerConnector)
+	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, nil, git, runnerConnector)
 	if err != nil {
 		return err
 	}
@@ -405,10 +396,6 @@ func configuredEvidenceRoot() string {
 		return filepath.Join(filepath.Dir(workspaceRoot), "evidence")
 	}
 	return defaultEvidenceRoot
-}
-
-func configuredReviewCandidateRoot() string {
-	return filepath.Join(configuredWorkspaceRoot(), ".review-candidates")
 }
 
 func configuredSchedulerOwnerID() string {
