@@ -156,6 +156,22 @@ func (s *RedactingStore) AcquireWorkspaceExecutionLock(ctx context.Context, work
 	return base.AcquireWorkspaceExecutionLock(ctx, workspaceID, executionSessionID)
 }
 
+func (s *RedactingStore) GetWorkspaceCurrentRevision(ctx context.Context, projectID, workspaceID string) (string, error) {
+	base, ok := s.ControlPlaneStore.(store.WorkspaceRevisionStore)
+	if !ok {
+		return "", fmt.Errorf("redacting store base does not support workspace revision persistence")
+	}
+	return base.GetWorkspaceCurrentRevision(ctx, projectID, workspaceID)
+}
+
+func (s *RedactingStore) UpdateWorkspaceCurrentRevision(ctx context.Context, projectID, workspaceID, revision string) (string, error) {
+	base, ok := s.ControlPlaneStore.(store.WorkspaceRevisionStore)
+	if !ok {
+		return "", fmt.Errorf("redacting store base does not support workspace revision persistence")
+	}
+	return base.UpdateWorkspaceCurrentRevision(ctx, projectID, workspaceID, revision)
+}
+
 func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner, error) {
 	base, ok := s.ControlPlaneStore.(runnerLookupStore)
 	if !ok {
@@ -163,3 +179,5 @@ func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner
 	}
 	return base.GetRunner(ctx, id)
 }
+
+var _ store.WorkspaceRevisionStore = (*RedactingStore)(nil)
