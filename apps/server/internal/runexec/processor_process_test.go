@@ -411,7 +411,7 @@ func TestProcessorHelpersCoverFailureAndPayloadShapes(t *testing.T) {
 func initProcessTestRepository(t *testing.T) string {
 	t.Helper()
 	repository := t.TempDir()
-	for _, command := range [][]string{{"git", "init", "-q"}, {"git", "config", "user.email", "test@example.invalid"}, {"git", "config", "user.name", "Agent Board Test"}} {
+	for _, command := range [][]string{{"git", "init", "-q", "-b", "agent-board/AB-1"}, {"git", "config", "user.email", "test@example.invalid"}, {"git", "config", "user.name", "Agent Board Test"}} {
 		cmd := exec.Command(command[0], command[1:]...)
 		cmd.Dir = repository
 		if output, err := cmd.CombinedOutput(); err != nil {
@@ -447,7 +447,7 @@ func processTestSafeContext(repository string) executioncontext.SafeContext {
 		Model:     executioncontext.ModelContext{ID: "model", Name: "Model", Model: "model"},
 		Provider:  executioncontext.ProviderContext{ID: "provider", Name: "Provider", Kind: "test"},
 		Runtime:   executioncontext.RuntimeContext{ID: "runtime", Name: "Runtime", Kind: "docker", Image: "image"},
-		Workspace: executioncontext.WorkspaceContext{ID: "workspace", Path: repository, BaseRevision: baseRevision, WorkingBranch: "work", BootstrapStatus: "READY"},
+		Workspace: executioncontext.WorkspaceContext{ID: "workspace", Path: repository, BaseRevision: baseRevision, WorkingBranch: "agent-board/AB-1", BootstrapStatus: "READY"},
 	}
 }
 
