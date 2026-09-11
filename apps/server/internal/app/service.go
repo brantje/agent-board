@@ -484,6 +484,9 @@ func validateProject(v store.Project) error {
 				return invalid("cloneUrl must not contain credentials")
 			}
 		}
+		if err != nil && cloneURLHasEmbeddedCredentials(cloneURL) {
+			return invalid("cloneUrl must not contain credentials")
+		}
 	default:
 		return invalid("sourceType must be local or git")
 	}
