@@ -77,7 +77,7 @@ func TestProjectBackedMaterializerAppliesReviewedRevision(t *testing.T) {
 		WorkingBranch:   workingBranch,
 		BootstrapStatus: "READY",
 	}}}
-	issueMaterializer, err := NewMaterializer(state, policy, git, filepath.Join(parent, "issues"))
+	issueMaterializer, err := NewMaterializer(state, policy, git.GitCLI, filepath.Join(parent, "issues"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestProjectBackedMaterializerReviewRevisionValidatesMetadata(t *testing.T) 
 		t.Fatal(err)
 	}
 	state := &reviewProjectBackedStore{memoryStateStore: &memoryStateStore{}}
-	issueMaterializer, err := NewMaterializer(state, policy, git, filepath.Join(root, "issues"))
+	issueMaterializer, err := NewMaterializer(state, policy, git.GitCLI, filepath.Join(root, "issues"))
 	if err != nil {
 		t.Fatal(err)
 	}
