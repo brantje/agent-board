@@ -51,16 +51,12 @@ func newFailureCoverageProcessor(t *testing.T, workspace string, resolver Contex
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), evidenceStore, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	registry, err := engine.NewRegistry(adapter)
 	if err != nil {
 		t.Fatal(err)
 	}
 	runtimes := &processTestRuntime{}
-	processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil, nil)
+	processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
