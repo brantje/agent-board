@@ -187,6 +187,7 @@ func createQueuedFixtureRun(t *testing.T, s *Store, f runFixture, suffix string)
 
 func enqueueFixtureRun(t *testing.T, s *Store, f runFixture, run store.Run, key string) store.SchedulerJob {
 	t.Helper()
+	prepareFixtureWorkspaceRevisions(t, s, run.WorkspaceID, key)
 	job, err := s.EnqueueJob(context.Background(), store.SchedulerJob{
 		ProjectID:      f.project.ID,
 		RunID:          run.ID,
@@ -196,6 +197,18 @@ func enqueueFixtureRun(t *testing.T, s *Store, f runFixture, run store.Run, key 
 		t.Fatalf("enqueue %s: %v", key, err)
 	}
 	return job
+}
+
+func prepareFixtureWorkspaceRevisions(t *testing.T, s *Store, workspaceID, key string) {
+	t.Helper()
+	if _, err := s.pool.Exec(context.Background(), `
+		UPDATE workspaces
+		SET base_revision=COALESCE(base_revision, $2),
+		    current_revision=COALESCE(current_revision, $3)
+		WHERE id=$1
+	`, workspaceID, "base-"+key, "review-"+key); err != nil {
+		t.Fatalf("prepare workspace revisions %s: %v", key, err)
+	}
 }
 
 func setSchedulerLimits(t *testing.T, s *Store, agentID string, agentLimit int, modelID string, modelLimit *int) {
