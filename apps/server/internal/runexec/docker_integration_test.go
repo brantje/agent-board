@@ -91,7 +91,7 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, nil, nil, nil)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func waitForScriptedRun(t *testing.T, ctx context.Context, database *postgres.St
 			for _, event := range events {
 				types = append(types, event.Type)
 			}
-			t.Fatalf("timed out waiting for Run: %v status=%s failure=%s events=%v", ctx.Err(), run.Status, reason, types)
+				t.Fatalf("timed out waiting for Run: %v status=%s failure=%s events=%v", ctx.Err(), run.Status, reason, types)
 		case <-ticker.C:
 		}
 	}
