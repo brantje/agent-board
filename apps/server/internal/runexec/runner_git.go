@@ -12,6 +12,8 @@ import (
 	"github.com/brantje/agent-board/packages/runnerprotocol"
 )
 
+const remoteGitPublicationAttempts = 2
+
 func isRemoteGitProject(safe executioncontext.SafeContext) bool {
 	return strings.EqualFold(strings.TrimSpace(safe.Project.SourceType), store.ProjectSourceGit)
 }
@@ -71,6 +73,20 @@ func (p *Processor) publishRemoteGitWorkspace(ctx context.Context, safe executio
 	if !ok {
 		return fmt.Errorf("workspace revision store is unavailable")
 	}
+	var lastErr error
+	for attempt := 0; attempt < remoteGitPublicationAttempts; attempt++ {
+		lastErr = p.publishRemoteGitWorkspaceAttempt(ctx, safe, runnerID, sessionID, revisions)
+		if lastErr == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return lastErr
+		}
+	}
+	return lastErr
+}
+
+func (p *Processor) publishRemoteGitWorkspaceAttempt(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string, revisions store.WorkspaceRevisionStore) error {
 	transferID := fmt.Sprintf("%s-git-publish-%d", sessionID, time.Now().UnixNano())
 	if err := p.record(ctx, safe, "workspace.transfer.started", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, nil), nil, nil); err != nil {
 		return err
