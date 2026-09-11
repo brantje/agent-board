@@ -49,7 +49,6 @@ func TestProcessorReleasesRunRedactionLeaseOnExit(t *testing.T) {
 		output,
 		nil,
 		nil,
-		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
