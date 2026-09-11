@@ -166,22 +166,27 @@ func TestCreateGitProjectRequiresCloneURL(t *testing.T) {
 	}
 }
 
-func TestCreateGitProjectRejectsCredentialsInHTTPCloneURL(t *testing.T) {
+func TestCreateGitProjectRejectsCredentialsInCloneURL(t *testing.T) {
 	service := New(&recordingProjectStore{})
-	cloneURL := "https://user:token@example.com/acme/widget.git"
-
-	_, err := service.CreateProject(context.Background(), store.Project{
-		Name:        "Widget",
-		IssuePrefix: "WG",
-		SourceType:  store.ProjectSourceGit,
-		CloneURL:    &cloneURL,
-	})
-	if err == nil {
-		t.Fatal("CreateProject() error = nil")
-	}
-	apiErr, ok := AsError(err)
-	if !ok || apiErr.Code != "invalid_argument" {
-		t.Fatalf("CreateProject() error = %v, want invalid_argument", err)
+	for _, cloneURL := range []string{
+		"https://user:token@example.com/acme/widget.git",
+		"ssh://user:token@example.com/acme/widget.git",
+	} {
+		t.Run(cloneURL, func(t *testing.T) {
+			_, err := service.CreateProject(context.Background(), store.Project{
+				Name:        "Widget",
+				IssuePrefix: "WG",
+				SourceType:  store.ProjectSourceGit,
+				CloneURL:    &cloneURL,
+			})
+			if err == nil {
+				t.Fatal("CreateProject() error = nil")
+			}
+			apiErr, ok := AsError(err)
+			if !ok || apiErr.Code != "invalid_argument" {
+				t.Fatalf("CreateProject() error = %v, want invalid_argument", err)
+			}
+		})
 	}
 }
 
