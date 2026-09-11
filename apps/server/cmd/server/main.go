@@ -346,7 +346,7 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
 		runnerConnector = runexec.NewRegistryConnector(services.ControlPlane.Runners.Connections)
 	}
-	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, nil, git, runnerConnector)
+	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, git, runnerConnector)
 	if err != nil {
 		return err
 	}
