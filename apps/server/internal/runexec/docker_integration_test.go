@@ -87,15 +87,11 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), services.ExecutionStore, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	engines, err := engine.NewRegistry(scripted.New())
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, nil, nil)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
