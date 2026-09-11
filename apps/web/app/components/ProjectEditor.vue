@@ -6,11 +6,19 @@ import { apiPath, apiRequest } from '../utils/api'
 const props = defineProps<{ project?: Project }>()
 const emit = defineEmits<{ saved: [project: Project]; cancel: [] }>()
 
+const sourceOptions = [
+  { label: 'Local', value: 'local' },
+  { label: 'Git repository', value: 'git' }
+]
+
 const state = reactive({
   name: props.project?.name ?? '',
   issuePrefix: props.project?.issuePrefix ?? '',
+  sourceType: props.project?.sourceType ?? 'local',
+  cloneUrl: props.project?.cloneUrl ?? '',
+  sourceRef: props.project?.sourceRef ?? '',
   repositoryPath: props.project?.repositoryPath ?? '',
-  defaultBranch: props.project?.defaultBranch ?? 'main',
+  defaultBranch: props.project?.defaultBranch || 'main',
   workflowSettings: props.project ? JSON.stringify(props.project.workflowSettings ?? {}, null, 2) : '{}',
   allowInternalRunner: props.project?.allowInternalRunner ?? true
 })
@@ -27,8 +35,12 @@ function validate() {
       errors.push({ name: 'issuePrefix', message: 'Use 2-10 uppercase letters and digits; must start with a letter.' })
     }
   }
-  if (!state.repositoryPath.trim()) errors.push({ name: 'repositoryPath', message: 'Local repository path is required.' })
-  if (!state.defaultBranch.trim()) errors.push({ name: 'defaultBranch', message: 'Default branch is required.' })
+  if (state.sourceType === 'git') {
+    if (!state.cloneUrl.trim()) errors.push({ name: 'cloneUrl', message: 'Clone URL is required.' })
+  } else {
+    if (!state.repositoryPath.trim()) errors.push({ name: 'repositoryPath', message: 'Local repository path is required.' })
+    if (!state.defaultBranch.trim()) errors.push({ name: 'defaultBranch', message: 'Default branch is required.' })
+  }
   try {
     const parsed = JSON.parse(state.workflowSettings)
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -44,9 +56,15 @@ function payload() {
   const workflowSettings = JSON.parse(state.workflowSettings) as Record<string, unknown>
   const body: Record<string, unknown> = {
     name: state.name.trim(),
-    repositoryPath: state.repositoryPath.trim(),
-    defaultBranch: state.defaultBranch.trim(),
+    sourceType: state.sourceType,
     workflowSettings
+  }
+  if (state.sourceType === 'git') {
+    body.cloneUrl = state.cloneUrl.trim()
+    body.sourceRef = state.sourceRef.trim()
+  } else {
+    body.repositoryPath = state.repositoryPath.trim()
+    body.defaultBranch = state.defaultBranch.trim()
   }
   if (props.project) body.allowInternalRunner = state.allowInternalRunner
   if (!props.project) body.issuePrefix = state.issuePrefix.trim().toUpperCase()
@@ -71,7 +89,7 @@ async function save() {
 }
 
 onMounted(async () => {
-  if (props.project || state.repositoryPath.trim()) return
+  if (props.project || state.sourceType !== 'local' || state.repositoryPath.trim()) return
   try {
     const settings = await apiRequest<RepositorySettings>('/api/repository-settings')
     if (settings.defaultRepositoryPath) state.repositoryPath = settings.defaultRepositoryPath
@@ -95,17 +113,39 @@ onMounted(async () => {
     >
       <UInput v-model="state.issuePrefix" class="w-full font-mono" :disabled="saving || !!project" />
     </UFormField>
-    <UFormField
-      label="Local repository path"
-      name="repositoryPath"
-      description="Backend-visible path within deployment-authorized repository roots. If the directory does not exist, Agent Board creates it and initializes a new Git repository on save."
-      required
-    >
-      <UInput v-model="state.repositoryPath" class="w-full font-mono" :disabled="saving" />
+    <UFormField label="Source" name="sourceType" required>
+      <URadioGroup v-model="state.sourceType" :items="sourceOptions" :disabled="saving" />
     </UFormField>
-    <UFormField label="Default branch" name="defaultBranch" required>
-      <UInput v-model="state.defaultBranch" class="w-full font-mono" :disabled="saving" />
-    </UFormField>
+    <template v-if="state.sourceType === 'git'">
+      <UFormField
+        label="Clone URL"
+        name="cloneUrl"
+        description="Any cloneable Git URL. The remote is not contacted when this Project is saved."
+        required
+      >
+        <UInput v-model="state.cloneUrl" class="w-full font-mono" :disabled="saving" />
+      </UFormField>
+      <UFormField
+        label="Ref (optional)"
+        name="sourceRef"
+        description="Branch, tag, or commit. Leave empty to use the remote default branch at execution time."
+      >
+        <UInput v-model="state.sourceRef" class="w-full font-mono" :disabled="saving" />
+      </UFormField>
+    </template>
+    <template v-else>
+      <UFormField
+        label="Local repository path"
+        name="repositoryPath"
+        description="Backend-visible path within deployment-authorized repository roots. If the directory does not exist, Agent Board creates it and initializes a new Git repository on save."
+        required
+      >
+        <UInput v-model="state.repositoryPath" class="w-full font-mono" :disabled="saving" />
+      </UFormField>
+      <UFormField label="Default branch" name="defaultBranch" required>
+        <UInput v-model="state.defaultBranch" class="w-full font-mono" :disabled="saving" />
+      </UFormField>
+    </template>
     <UFormField
       label="Workflow settings"
       name="workflowSettings"

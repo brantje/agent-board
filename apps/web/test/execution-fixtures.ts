@@ -4,6 +4,9 @@ export const project: Project = {
   id: 'project-a',
   name: 'Workspace',
   issuePrefix: 'AB',
+  sourceType: 'local',
+  cloneUrl: null,
+  sourceRef: null,
   repositoryPath: '/repo',
   defaultBranch: 'main',
   workflowSettings: {},
@@ -56,8 +59,7 @@ export function evidence(overrides: Partial<RunEvidence> = {}): RunEvidence {
         agent: { id: 'agent-1', name: 'Coder', engine: 'opencode', roleInstructions: 'Ship maintainable code.' },
         model: { id: 'model-1', name: 'gpt-test', model: 'openai/gpt-test' },
         provider: { id: 'provider-1', name: 'OpenRouter', kind: 'openrouter' },
-        runtime: { id: 'runtime-1', name: 'Docker', kind: 'docker' },
-        runner: { id: 'runner-1', name: 'lab-host', internal: false }
+        runtime: { id: 'runtime-1', name: 'Docker', kind: 'docker' }
       }
     },
     runtimeInstances: [{

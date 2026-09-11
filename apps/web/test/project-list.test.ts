@@ -13,6 +13,9 @@ const global = {
   }
 }
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(candidate => candidate.text() === label)!
+const selectSource = async (wrapper: ReturnType<typeof mount>, source: 'local' | 'git') => {
+  await wrapper.get(`[data-field=sourceType] input[value="${source}"]`).setValue(true)
+}
 
 afterEach(() => {
   MockEventSource.reset()
@@ -21,7 +24,7 @@ afterEach(() => {
 })
 
 describe('ProjectEditor', () => {
-  it('creates a project with uppercase prefix and valid workflow settings', async () => {
+  it('creates a local project with uppercase prefix and valid workflow settings', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(project), { status: 201 }))
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(ProjectEditor, { global })
@@ -42,11 +45,53 @@ describe('ProjectEditor', () => {
     expect(JSON.parse(String(postCall?.body))).toEqual({
       name: 'Workspace',
       issuePrefix: 'AB',
+      sourceType: 'local',
       repositoryPath: '/repo',
       defaultBranch: 'main',
       workflowSettings: { reviewRequired: true }
     })
     expect(wrapper.emitted('saved')?.[0]).toEqual([project])
+  })
+
+  it('shows Git source fields and requires a clone URL', async () => {
+    const gitProject = {
+      ...project,
+      sourceType: 'git' as const,
+      cloneUrl: 'https://example.com/acme/widget.git',
+      sourceRef: 'release/v1',
+      repositoryPath: '',
+      defaultBranch: ''
+    }
+    const fetch = vi.fn(async () => new Response(JSON.stringify(gitProject), { status: 201 }))
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectEditor, { global })
+
+    await wrapper.get('[data-field=name] input').setValue('Remote')
+    await wrapper.get('[data-field=issuePrefix] input').setValue('REM')
+    await selectSource(wrapper, 'git')
+
+    expect(wrapper.find('[data-field=repositoryPath]').exists()).toBe(false)
+    expect(wrapper.find('[data-field=defaultBranch]').exists()).toBe(false)
+    expect(wrapper.find('[data-field=cloneUrl]').exists()).toBe(true)
+    expect(wrapper.find('[data-field=sourceRef]').exists()).toBe(true)
+
+    await wrapper.get('form').trigger('submit')
+    expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false)
+
+    await wrapper.get('[data-field=cloneUrl] input').setValue(' https://example.com/acme/widget.git ')
+    await wrapper.get('[data-field=sourceRef] input').setValue(' release/v1 ')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const postCall = fetch.mock.calls.find(([, options]) => options.method === 'POST')?.[1]
+    expect(JSON.parse(String(postCall?.body))).toEqual({
+      name: 'Remote',
+      issuePrefix: 'REM',
+      sourceType: 'git',
+      cloneUrl: 'https://example.com/acme/widget.git',
+      sourceRef: 'release/v1',
+      workflowSettings: {}
+    })
   })
 
   it('rejects invalid prefix and invalid workflow JSON', async () => {
@@ -67,7 +112,7 @@ describe('ProjectEditor', () => {
     expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false)
   })
 
-  it('prefills repository path from deployment settings for new projects', async () => {
+  it('prefills repository path from deployment settings only for new local projects', async () => {
     const fetch = vi.fn(async (path: string) => {
       if (path === '/api/repository-settings') {
         return new Response(JSON.stringify({ defaultRepositoryPath: '/repositories', repositoryRoots: ['/repositories'] }))
@@ -80,7 +125,63 @@ describe('ProjectEditor', () => {
     expect((wrapper.get('[data-field=repositoryPath] input').element as HTMLInputElement).value).toBe('/repositories')
   })
 
-  it('edits with PATCH and keeps issue prefix immutable', async () => {
+  it('loads and edits an existing Git source with PATCH', async () => {
+    const gitProject = {
+      ...project,
+      sourceType: 'git' as const,
+      cloneUrl: 'https://example.com/acme/widget.git',
+      sourceRef: 'main',
+      repositoryPath: '',
+      defaultBranch: ''
+    }
+    const fetch = vi.fn(async () => new Response(JSON.stringify(gitProject)))
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectEditor, { props: { project: gitProject }, global })
+    await flushPromises()
+
+    expect((wrapper.get('[data-field=cloneUrl] input').element as HTMLInputElement).value).toBe(gitProject.cloneUrl)
+    expect((wrapper.get('[data-field=sourceRef] input').element as HTMLInputElement).value).toBe('main')
+    await wrapper.get('[data-field=sourceRef] input').setValue('feature/source')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const patchCall = fetch.mock.calls.find(([, options]) => options.method === 'PATCH')?.[1]
+    expect(JSON.parse(String(patchCall?.body))).toMatchObject({
+      sourceType: 'git',
+      cloneUrl: gitProject.cloneUrl,
+      sourceRef: 'feature/source'
+    })
+    expect(JSON.parse(String(patchCall?.body))).not.toHaveProperty('repositoryPath')
+    expect(JSON.parse(String(patchCall?.body))).not.toHaveProperty('defaultBranch')
+  })
+
+  it('switches an existing Git source to local without sending inactive Git fields', async () => {
+    const gitProject = {
+      ...project,
+      sourceType: 'git' as const,
+      cloneUrl: 'https://example.com/acme/widget.git',
+      sourceRef: 'main',
+      repositoryPath: '',
+      defaultBranch: ''
+    }
+    const fetch = vi.fn(async () => new Response(JSON.stringify(project)))
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectEditor, { props: { project: gitProject }, global })
+    await flushPromises()
+
+    await selectSource(wrapper, 'local')
+    await wrapper.get('[data-field=repositoryPath] input').setValue('/repo/imported')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const patchCall = fetch.mock.calls.find(([, options]) => options.method === 'PATCH')?.[1]
+    const body = JSON.parse(String(patchCall?.body))
+    expect(body).toMatchObject({ sourceType: 'local', repositoryPath: '/repo/imported', defaultBranch: 'main' })
+    expect(body).not.toHaveProperty('cloneUrl')
+    expect(body).not.toHaveProperty('sourceRef')
+  })
+
+  it('edits local projects with PATCH and keeps issue prefix immutable', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(project)))
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(ProjectEditor, { props: { project }, global })
@@ -92,46 +193,87 @@ describe('ProjectEditor', () => {
     await flushPromises()
 
     const patchCall = fetch.mock.calls.find(([, options]) => options.method === 'PATCH')?.[1]
-    expect(patchCall).toMatchObject({
-      method: 'PATCH',
-      body: JSON.stringify({
-        name: 'Renamed',
-        repositoryPath: '/repo',
-        defaultBranch: 'main',
-        workflowSettings: {},
-        allowInternalRunner: true
-      })
+    expect(patchCall?.method).toBe('PATCH')
+    const body = JSON.parse(String(patchCall?.body))
+    expect(body).toEqual({
+      name: 'Renamed',
+      sourceType: 'local',
+      repositoryPath: '/repo',
+      defaultBranch: 'main',
+      workflowSettings: {},
+      allowInternalRunner: true
     })
-    expect(JSON.parse(String(patchCall?.body))).not.toHaveProperty('issuePrefix')
+    expect(body).not.toHaveProperty('issuePrefix')
   })
 
-  it('shows safe API errors and emits cancel', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'validation_error', message: 'raw detail' } }), { status: 400 })))
-    const wrapper = mount(ProjectEditor, { props: { project }, global })
+  it('guards duplicate submits while saving and clears loading after failure', async () => {
+    let resolvePost: ((response: Response) => void) | undefined
+    const fetch = vi.fn((path: string, options: RequestInit = {}) => {
+      if (options.method === 'POST') {
+        return new Promise<Response>(resolve => { resolvePost = resolve })
+      }
+      return Promise.resolve(new Response(JSON.stringify({ defaultRepositoryPath: '', repositoryRoots: [] })))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectEditor, { global })
     await flushPromises()
+
+    await wrapper.get('[data-field=name] input').setValue('Workspace')
+    await wrapper.get('[data-field=issuePrefix] input').setValue('AB')
+    await wrapper.get('[data-field=repositoryPath] input').setValue('/repo')
     await wrapper.get('form').trigger('submit')
+    await wrapper.get('form').trigger('submit')
+
+    expect(fetch.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(1)
+    expect((button(wrapper, 'Create project').element as HTMLButtonElement).disabled).toBe(true)
+
+    resolvePost?.(new Response(JSON.stringify(project), { status: 201 }))
     await flushPromises()
-    expect(wrapper.text()).toContain('Check the form values')
-    expect(wrapper.text()).not.toContain('raw detail')
+    expect((button(wrapper, 'Create project').element as HTMLButtonElement).disabled).toBe(false)
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'validation_error', message: 'raw detail' } }), { status: 400 })))
+    const failed = mount(ProjectEditor, { props: { project }, global })
+    await failed.get('form').trigger('submit')
+    await flushPromises()
+    expect((button(failed, 'Save project').element as HTMLButtonElement).disabled).toBe(false)
+    expect(failed.text()).toContain('Check the form values')
+    expect(failed.text()).not.toContain('raw detail')
+  })
+
+  it('emits cancel', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(project))))
+    const wrapper = mount(ProjectEditor, { props: { project }, global })
     await button(wrapper, 'Cancel').trigger('click')
     expect(wrapper.emitted('cancel')).toHaveLength(1)
   })
 })
 
 describe('ProjectList', () => {
-  it('renders listed projects with Open board links and empty-state copy', async () => {
+  it('renders local and Git project source summaries', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('[]')))
     const wrapper = mount(ProjectList, { global })
     await flushPromises()
     expect(wrapper.text()).toContain('No projects yet')
-    expect(wrapper.text()).toContain('Create a Project with a local repository, default branch, and Issue prefix to open a board.')
+    expect(wrapper.text()).toContain('Create a Project with a local repository or Git repository source to open a board.')
     wrapper.unmount()
 
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([project]))))
+    const gitProject = {
+      ...project,
+      id: 'project-git',
+      name: 'Remote',
+      sourceType: 'git' as const,
+      cloneUrl: 'https://example.com/acme/widget.git',
+      sourceRef: null,
+      repositoryPath: '',
+      defaultBranch: ''
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([project, gitProject]))))
     const listed = mount(ProjectList, { global })
     await flushPromises()
-    expect(listed.text()).toContain('Workspace')
     expect(listed.text()).toContain('AB · /repo · main')
+    expect(listed.text()).toContain('https://example.com/acme/widget.git · remote default')
+    expect(listed.text()).toContain('Local repository')
+    expect(listed.text()).toContain('Git repository')
     expect(listed.text()).toContain('Open board')
     listed.unmount()
   })
@@ -231,15 +373,16 @@ describe('ProjectList', () => {
 })
 
 describe('ProjectSettings', () => {
-  it('loads the Project editor inside project settings', async () => {
+  it('loads the shared Project editor inside project settings', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(project))))
     const wrapper = mount(ProjectSettings, { props: { projectId: project.id }, global })
     await flushPromises()
 
     expect(wrapper.text()).toContain('Project')
-    expect(wrapper.text()).toContain('backend-managed repository context')
+    expect(wrapper.text()).toContain('repository source context')
     expect((wrapper.get('[data-field=name] input').element as HTMLInputElement).value).toBe('Workspace')
     expect((wrapper.get('[data-field=issuePrefix] input').element as HTMLInputElement).disabled).toBe(true)
+    expect(wrapper.find('[data-field=sourceType]').exists()).toBe(true)
     expect(wrapper.find('[data-kind]').exists()).toBe(false)
     wrapper.unmount()
   })
