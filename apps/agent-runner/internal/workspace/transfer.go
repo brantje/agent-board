@@ -98,14 +98,7 @@ func SnapshotBundle(ctx context.Context, repositoryPath, transferID string) ([]b
 }
 
 func FinalizeCheckout(ctx context.Context, repositoryPath string, state CheckoutState) (string, error) {
-	branch, err := sharedworkspace.CurrentBranch(ctx, repositoryPath, "git", commandTimeout)
-	if err != nil {
-		return "", err
-	}
-	if branch != state.Branch {
-		return "", fmt.Errorf("workspace branch changed from %q to %q", state.Branch, branch)
-	}
-	return sharedworkspace.FinalizeCheckout(ctx, repositoryPath, state.StartRevision, "git", commandTimeout)
+	return sharedworkspace.FinalizeCheckoutOnBranch(ctx, repositoryPath, state.Branch, state.StartRevision, "git", commandTimeout)
 }
 
 func IsRepository(ctx context.Context, repositoryPath string) bool {
