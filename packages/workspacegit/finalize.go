@@ -12,8 +12,8 @@ import (
 // execution-start ancestry.
 func FinalizeCheckoutOnBranch(ctx context.Context, repositoryPath, expectedBranch, startRevision, gitBinary string, commandTimeout time.Duration) (string, error) {
 	expectedBranch = strings.TrimSpace(expectedBranch)
-	if expectedBranch == "" {
-		return "", fmt.Errorf("expected Issue branch is required")
+	if !strings.HasPrefix(expectedBranch, "agent-board/") || strings.TrimSpace(strings.TrimPrefix(expectedBranch, "agent-board/")) == "" {
+		return "", fmt.Errorf("expected Issue branch must use agent-board/ namespace")
 	}
 	branch, err := CurrentBranch(ctx, repositoryPath, gitBinary, commandTimeout)
 	if err != nil {
