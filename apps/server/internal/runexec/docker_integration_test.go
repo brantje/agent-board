@@ -283,21 +283,6 @@ func waitForScriptedRun(t *testing.T, ctx context.Context, database *postgres.St
 	}
 }
 
-func assertCandidateStatuses(t *testing.T, candidate evidence.Candidate) {
-	t.Helper()
-	var staged, unstaged, untracked, deleted, renamed bool
-	for _, change := range candidate.Changes {
-		staged = staged || change.StagedStatus != ""
-		unstaged = unstaged || change.UnstagedStatus != ""
-		untracked = untracked || change.Untracked
-		deleted = deleted || change.StagedStatus == "deleted" || change.UnstagedStatus == "deleted"
-		renamed = renamed || change.StagedStatus == "renamed" || change.UnstagedStatus == "renamed"
-	}
-	if !staged || !unstaged || !untracked || !deleted || !renamed {
-		t.Fatalf("candidate statuses staged=%v unstaged=%v untracked=%v deleted=%v renamed=%v: %+v", staged, unstaged, untracked, deleted, renamed, candidate.Changes)
-	}
-}
-
 func findIntegrationArtifact(t *testing.T, artifacts []store.Artifact, kind, name string) store.Artifact {
 	t.Helper()
 	for _, artifact := range artifacts {
