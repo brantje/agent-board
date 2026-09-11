@@ -273,11 +273,10 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 		return p.finishWaitingForInput(ctx, safe, instance)
 	}
 
-	snapshot, snapshotErr := p.candidate.Snapshot(ctx, launcher.scope, safe.Workspace.Path)
-	if snapshotErr == nil {
-		snapshotErr = p.recordCandidate(ctx, safe, instance.ID, snapshot)
-	}
-	if engineErr == nil && snapshotErr == nil && engineResult.Summary != "" {
+	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	_, finalizeErr := p.finalizeServerWorkspace(finalizeCtx, safe)
+	cancelFinalize()
+	if engineErr == nil && finalizeErr == nil && engineResult.Summary != "" {
 		engineErr = p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, &instance.ID, nil)
 	}
 
@@ -285,12 +284,12 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
 	}
-	if combined := errors.Join(engineErr, snapshotErr, cleanupErr); combined != nil {
+	if combined := errors.Join(engineErr, finalizeErr, cleanupErr); combined != nil {
 		reason := safeFailure(combined)
 		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, &instance.ID, nil)
 		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
 	}
-	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"candidateManifestArtifactId": snapshot.Manifest.ID}, &instance.ID, nil); err != nil {
+	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, &instance.ID, nil); err != nil {
 		return scheduler.Result{}, err
 	}
 	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
