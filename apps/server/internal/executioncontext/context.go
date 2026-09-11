@@ -18,6 +18,9 @@ type SafeContext struct {
 type ProjectContext struct {
 	ID               string          `json:"id"`
 	Name             string          `json:"name"`
+	SourceType       string          `json:"sourceType"`
+	CloneURL         *string         `json:"cloneUrl,omitempty"`
+	SourceRef        *string         `json:"sourceRef,omitempty"`
 	RepositoryPath   string          `json:"repositoryPath"`
 	DefaultBranch    string          `json:"defaultBranch"`
 	WorkflowSettings json.RawMessage `json:"workflowSettings,omitempty"`
