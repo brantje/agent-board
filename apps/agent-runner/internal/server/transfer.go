@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -21,19 +22,27 @@ type incomingTransfer struct {
 	buffer     []byte
 }
 
+type remoteTransferWorkspace struct {
+	cloneURL string
+	checkout workspace.RemoteCheckout
+}
+
 type transferState struct {
 	mu              sync.Mutex
 	incoming        map[string]*incomingTransfer
 	ready           map[string]workspace.CheckoutState
+	remote          map[string]remoteTransferWorkspace
 	begun           map[string]bool
 	failed          map[string]bool
 	awaitingApplied map[string]string
+	remoteManager   *workspace.RemoteRepositoryManager
 }
 
 func newTransferState() *transferState {
 	return &transferState{
 		incoming:        make(map[string]*incomingTransfer),
 		ready:           make(map[string]workspace.CheckoutState),
+		remote:          make(map[string]remoteTransferWorkspace),
 		begun:           make(map[string]bool),
 		failed:          make(map[string]bool),
 		awaitingApplied: make(map[string]string),
@@ -51,8 +60,9 @@ func (s *transferState) begin(sessionID string, begin protocol.TransferBegin) er
 	defer s.mu.Unlock()
 	s.begun[sessionID] = true
 	delete(s.failed, sessionID)
-	if begin.Direction == "to_runner" {
+	if begin.Direction == protocol.TransferDirectionToRunner || begin.Direction == protocol.TransferDirectionGitPrepare {
 		delete(s.ready, sessionID)
+		delete(s.remote, sessionID)
 	}
 	s.incoming[sessionID] = &incomingTransfer{
 		transferID: begin.TransferID,
@@ -111,6 +121,14 @@ func (s *transferState) markReady(sessionID string, state workspace.CheckoutStat
 	s.mu.Unlock()
 }
 
+func (s *transferState) markRemoteReady(sessionID, cloneURL string, checkout workspace.RemoteCheckout) {
+	s.mu.Lock()
+	s.ready[sessionID] = workspace.CheckoutState{Branch: checkout.Branch, StartRevision: checkout.StartRevision}
+	s.remote[sessionID] = remoteTransferWorkspace{cloneURL: cloneURL, checkout: checkout}
+	delete(s.failed, sessionID)
+	s.mu.Unlock()
+}
+
 func (s *transferState) checkout(sessionID string) (workspace.CheckoutState, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -118,10 +136,27 @@ func (s *transferState) checkout(sessionID string) (workspace.CheckoutState, boo
 	return state, ok
 }
 
+func (s *transferState) remoteWorkspace(sessionID string) (remoteTransferWorkspace, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.remote[sessionID]
+	return state, ok
+}
+
+func (s *transferState) gitManager(root string) *workspace.RemoteRepositoryManager {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.remoteManager == nil {
+		s.remoteManager = workspace.NewRemoteRepositoryManager(root)
+	}
+	return s.remoteManager
+}
+
 func (s *transferState) markFailed(sessionID string) {
 	s.mu.Lock()
 	s.failed[sessionID] = true
 	delete(s.ready, sessionID)
+	delete(s.remote, sessionID)
 	s.mu.Unlock()
 }
 
@@ -153,6 +188,7 @@ func (s *transferState) waitReady(sessionID string, timeout time.Duration) bool 
 func (s *transferState) clearReady(sessionID string) {
 	s.mu.Lock()
 	delete(s.ready, sessionID)
+	delete(s.remote, sessionID)
 	delete(s.begun, sessionID)
 	delete(s.failed, sessionID)
 	s.mu.Unlock()
@@ -212,26 +248,88 @@ func (s *Server) handleTransferEnd(writer *connectionWriter, msg protocol.Messag
 		writer.sendError("transfer_failed", err.Error(), msg.SessionID)
 		return
 	}
-	if direction == "from_runner" {
+	switch direction {
+	case protocol.TransferDirectionFromRunner:
 		s.syncWorkspaceBack(writer, msg.SessionID, end.TransferID)
-		return
+	case protocol.TransferDirectionGitPublish:
+		s.publishRemoteWorkspace(writer, msg.SessionID, end.TransferID)
+	case protocol.TransferDirectionGitPrepare:
+		s.prepareRemoteWorkspace(writer, msg.SessionID, payload)
+	case protocol.TransferDirectionToRunner:
+		s.materializeLocalWorkspace(writer, msg.SessionID, payload)
 	}
-	if direction != "to_runner" {
-		return
-	}
-	repositoryPath := s.manager.SessionWorkspacePath(msg.SessionID)
+}
+
+func (s *Server) materializeLocalWorkspace(writer *connectionWriter, sessionID string, payload []byte) {
+	repositoryPath := s.manager.SessionWorkspacePath(sessionID)
 	if repositoryPath == "" {
-		s.transfers.markFailed(msg.SessionID)
-		writer.sendError("transfer_failed", "workspace could not be materialized", msg.SessionID)
+		s.transfers.markFailed(sessionID)
+		writer.sendError("transfer_failed", "workspace could not be materialized", sessionID)
 		return
 	}
 	state, err := workspace.MaterializeBranchBundle(context.Background(), repositoryPath, payload)
 	if err != nil {
-		s.transfers.markFailed(msg.SessionID)
-		writer.sendError("transfer_failed", "workspace could not be materialized: "+err.Error(), msg.SessionID)
+		s.transfers.markFailed(sessionID)
+		writer.sendError("transfer_failed", "workspace could not be materialized: "+err.Error(), sessionID)
 		return
 	}
-	s.transfers.markReady(msg.SessionID, state)
+	s.transfers.markReady(sessionID, state)
+}
+
+func (s *Server) prepareRemoteWorkspace(writer *connectionWriter, sessionID string, payload []byte) {
+	var request protocol.GitPrepare
+	if err := json.Unmarshal(payload, &request); err != nil {
+		s.transfers.markFailed(sessionID)
+		writer.sendError("transfer_failed", "remote Git workspace request is invalid", sessionID)
+		return
+	}
+	worktreePath := s.manager.SessionWorkspacePath(sessionID)
+	if worktreePath == "" {
+		s.transfers.markFailed(sessionID)
+		writer.sendError("transfer_failed", "remote Git workspace path is unavailable", sessionID)
+		return
+	}
+	manager := s.transfers.gitManager(s.manager.WorkspaceRoot())
+	checkout, err := manager.Prepare(context.Background(), request.CloneURL, request.Ref, request.IssueBranch, request.RecordedRevision, worktreePath)
+	if err != nil {
+		s.transfers.markFailed(sessionID)
+		writer.sendError("transfer_failed", "remote Git workspace could not be prepared: "+err.Error(), sessionID)
+		return
+	}
+	s.transfers.markRemoteReady(sessionID, request.CloneURL, checkout)
+}
+
+func (s *Server) publishRemoteWorkspace(writer streamWriter, sessionID, transferID string) {
+	if strings.TrimSpace(transferID) == "" {
+		transferID = sessionID + "-publish"
+	}
+	fail := func(message string) {
+		_ = writer.send(protocol.TypeTransferFailed, sessionID, protocol.TransferFailed{
+			TransferID: transferID,
+			Code:       "transfer_failed",
+			Message:    message,
+		})
+	}
+	remote, ok := s.transfers.remoteWorkspace(sessionID)
+	if !ok {
+		fail("remote Git workspace state is unavailable")
+		return
+	}
+	manager := s.transfers.gitManager(s.manager.WorkspaceRoot())
+	revision, err := manager.Publish(context.Background(), remote.cloneURL, remote.checkout)
+	if err != nil {
+		fail("remote Git workspace publication failed: " + err.Error())
+		return
+	}
+	payload, err := json.Marshal(protocol.GitPublished{Revision: revision})
+	if err != nil {
+		fail("remote Git publication result could not be encoded")
+		return
+	}
+	s.transfers.awaitApplied(sessionID, transferID)
+	if err := writer.sendTransfer(context.Background(), sessionID, transferID, protocol.TransferDirectionFromRunner, payload); err != nil {
+		fail("remote Git publication result could not be returned: " + err.Error())
+	}
 }
 
 func (s *Server) handleTransferApplied(writer *connectionWriter, msg protocol.Message) {
@@ -240,14 +338,22 @@ func (s *Server) handleTransferApplied(writer *connectionWriter, msg protocol.Me
 		writer.sendError("invalid_transfer_ack", "workspace transfer acknowledgement is invalid", msg.SessionID)
 		return
 	}
-	repositoryPath := s.manager.SessionWorkspacePath(msg.SessionID)
-	if repositoryPath == "" {
-		writer.sendError("workspace_cleanup_failed", "session workspace path is unavailable", msg.SessionID)
-		return
-	}
-	if err := os.RemoveAll(repositoryPath); err != nil {
-		writer.sendError("workspace_cleanup_failed", "session workspace could not be removed", msg.SessionID)
-		return
+	if remote, ok := s.transfers.remoteWorkspace(msg.SessionID); ok {
+		manager := s.transfers.gitManager(s.manager.WorkspaceRoot())
+		if err := manager.Cleanup(context.Background(), remote.cloneURL, remote.checkout); err != nil {
+			writer.sendError("workspace_cleanup_failed", "remote Git worktree could not be removed: "+err.Error(), msg.SessionID)
+			return
+		}
+	} else {
+		repositoryPath := s.manager.SessionWorkspacePath(msg.SessionID)
+		if repositoryPath == "" {
+			writer.sendError("workspace_cleanup_failed", "session workspace path is unavailable", msg.SessionID)
+			return
+		}
+		if err := os.RemoveAll(repositoryPath); err != nil {
+			writer.sendError("workspace_cleanup_failed", "session workspace could not be removed", msg.SessionID)
+			return
+		}
 	}
 	s.transfers.clearApplied(msg.SessionID, applied.TransferID)
 	s.transfers.clearReady(msg.SessionID)
@@ -320,8 +426,7 @@ func (s *Server) syncWorkspaceBack(writer streamWriter, sessionID, transferID st
 		return
 	}
 	s.transfers.awaitApplied(sessionID, transferID)
-	if err := writer.sendTransfer(context.Background(), sessionID, transferID, "from_runner", payload); err != nil {
+	if err := writer.sendTransfer(context.Background(), sessionID, transferID, protocol.TransferDirectionFromRunner, payload); err != nil {
 		fail("workspace branch transfer failed: " + err.Error())
-		return
 	}
 }
