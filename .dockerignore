@@ -8,3 +8,5 @@ coverage
 .env*
 *.md
 !README.md
+apps/agent-runner/agent-runner
+apps/agent-runner/tmp

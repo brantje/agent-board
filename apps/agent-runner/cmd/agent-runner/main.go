@@ -15,12 +15,14 @@ import (
 )
 
 const defaultWorkspaceRoot = "/var/lib/agent-runner/workspaces"
+const defaultMaxActiveSessions = 10
 
 type appConfig struct {
-	ServerURL     string
-	RunnerID      string
-	Token         string
-	WorkspaceRoot string
+	ServerURL         string
+	RunnerID          string
+	Token             string
+	WorkspaceRoot     string
+	MaxActiveSessions int
 }
 
 func main() {
@@ -52,11 +54,15 @@ func configFromEnv() appConfig {
 	if root == "" {
 		root = defaultWorkspaceRoot
 	}
-	return appConfig{ServerURL: os.Getenv("AGENT_BOARD_URL"), RunnerID: os.Getenv("AGENT_RUNNER_ID"), Token: os.Getenv("AGENT_RUNNER_TOKEN"), WorkspaceRoot: root}
+	return appConfig{ServerURL: os.Getenv("AGENT_BOARD_URL"), RunnerID: os.Getenv("AGENT_RUNNER_ID"), Token: os.Getenv("AGENT_RUNNER_TOKEN"), WorkspaceRoot: root, MaxActiveSessions: defaultMaxActiveSessions}
 }
 
 func run(ctx context.Context, config appConfig) error {
-	handler := runnerserver.New(runnerserver.Config{WorkspaceRoot: config.WorkspaceRoot, MaxActiveSessions: 1})
+	sessions := config.MaxActiveSessions
+	if sessions < 1 {
+		sessions = defaultMaxActiveSessions
+	}
+	handler := runnerserver.New(runnerserver.Config{WorkspaceRoot: config.WorkspaceRoot, MaxActiveSessions: sessions})
 	connectionErr := handler.Connect(ctx, config.ServerURL, config.RunnerID, config.Token)
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

@@ -2,9 +2,11 @@ package postgres
 
 import (
 	"context"
-	"github.com/brantje/agent-board/apps/server/internal/store"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 func TestSchedulerRunnerPreferencePolicyAndCapacity(t *testing.T) {
@@ -17,6 +19,12 @@ func TestSchedulerRunnerPreferencePolicyAndCapacity(t *testing.T) {
 	}
 	internal, err := s.CreateRunner(ctx, store.Runner{Name: "Internal", Internal: true, TokenHash: make([]byte, 32)})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ObserveRunner(ctx, external.ID, []byte(`{"max_active_sessions":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ObserveRunner(ctx, internal.ID, []byte(`{"max_active_sessions":1}`)); err != nil {
 		t.Fatal(err)
 	}
 	s.SetRunnerCandidates(func(engine string) []string {
@@ -51,6 +59,37 @@ func TestSchedulerRunnerPreferencePolicyAndCapacity(t *testing.T) {
 	claim, err = s.AdmitNextJob(ctx, "worker", time.Minute, time.Millisecond)
 	if err != nil || claim == nil || claim.RunnerID != internal.ID {
 		t.Fatalf("internal fallback: %+v %v", claim, err)
+	}
+}
+
+func TestSchedulerAdmitsUpToDefaultRunnerCapacity(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "runner-capacity-10")
+	runner, err := s.CreateRunner(ctx, store.Runner{Name: "Shared", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetRunnerCandidates(func(string) []string { return []string{runner.ID} })
+	if _, err = s.pool.Exec(ctx, `UPDATE agents SET concurrency_limit=20 WHERE id=$1`, f.agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	enqueueFixtureRun(t, s, f, f.run, "cap-0")
+	for i := 0; i < 10; i++ {
+		if i > 0 {
+			next := createQueuedFixtureRun(t, s, f, fmt.Sprintf("cap-%d", i))
+			enqueueFixtureRun(t, s, f, next, fmt.Sprintf("cap-job-%d", i))
+		}
+		claim, err := s.AdmitNextJob(ctx, "worker", time.Minute, time.Millisecond)
+		if err != nil || claim == nil || claim.RunnerID != runner.ID {
+			t.Fatalf("admit %d: %+v %v", i+1, claim, err)
+		}
+	}
+	overflow := createQueuedFixtureRun(t, s, f, "cap-overflow")
+	enqueueFixtureRun(t, s, f, overflow, "cap-overflow")
+	claim, err := s.AdmitNextJob(ctx, "worker", time.Minute, time.Millisecond)
+	if err != nil || claim != nil {
+		t.Fatalf("11th admit=%+v err=%v want runner_capacity wait", claim, err)
 	}
 }
 

@@ -123,7 +123,7 @@ An authorized session request supports:
 
 There is no client-facing arbitrary shell endpoint.
 
-v0.1 permits one active Execution Session per Runner. The versioned Runner protocol retains `max_active_sessions` so future capacity can raise that limit without changing the identity model.
+Default Runner capacity is 10 concurrent Execution Sessions. The versioned Runner protocol advertises `max_active_sessions` so capacity can change without changing the identity model.
 
 ## Lifecycle
 

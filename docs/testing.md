@@ -152,7 +152,7 @@ Runtime/runner contract and integration tests cover:
 - external and internal runners connect outbound over protocol v2
 - versioned WebSocket handshake and incompatible-version failure
 - explicit Execution Session identity
-- one active session per runner in v0.1
+- default advertised Runner capacity of 10 concurrent sessions
 - multiple sequential sessions over one runner lifetime
 - stdout/stderr channel fidelity
 - stdin forwarding/close

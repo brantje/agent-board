@@ -21,7 +21,8 @@ func (s *Store) lockRunnerCandidate(ctx context.Context, tx pgx.Tx, projectID, a
  AND ((runner.internal AND project.allow_internal_runner) OR
       (NOT runner.internal AND (NOT EXISTS(SELECT 1 FROM project_runners WHERE project_id=$1)
        OR EXISTS(SELECT 1 FROM project_runners WHERE project_id=$1 AND runner_id=runner.id))))
- AND NOT EXISTS(SELECT 1 FROM scheduler_capacity_reservations WHERE resource_kind='RUNNER' AND resource_id=runner.id)
+ AND (SELECT count(*) FROM scheduler_capacity_reservations WHERE resource_kind='RUNNER' AND resource_id=runner.id)
+     < COALESCE(CASE WHEN (runner.capabilities->>'max_active_sessions') ~ '^[1-9][0-9]*$' THEN (runner.capabilities->>'max_active_sessions')::int END, 10)
  ORDER BY runner.internal,runner.created_at,runner.id
  FOR UPDATE OF runner SKIP LOCKED LIMIT 1`, projectID, ids).Scan(&id)
 	return id, notFound(err)

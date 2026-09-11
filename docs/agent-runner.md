@@ -97,13 +97,13 @@ A newly authenticated connection claiming the same immutable `runner_id` does no
 
 ## Concurrency and future fleets
 
-v0.1 uses:
+Default advertised capacity is:
 
 ```text
-max active Execution Sessions per Runner = 1
+max active Execution Sessions per Runner = 10
 ```
 
-The protocol and capability model must not assume that limit is permanent. A Runner advertises its supported session capacity so future fleet implementations may raise it without changing the identity model or transport contract.
+A Runner advertises `max_active_sessions` so capacity can change without changing the identity model or transport contract. Missing or zero advertised capacity is treated as 10.
 
 Workspace write safety remains separate from Runner transport concurrency. Supporting several protocol sessions does not imply that several authoritative writers may mutate one Workspace concurrently.
 

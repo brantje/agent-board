@@ -272,7 +272,6 @@ CREATE TABLE scheduler_capacity_reservations (
 );
 
 CREATE INDEX scheduler_capacity_resource_idx ON scheduler_capacity_reservations (resource_kind, resource_id);
-CREATE UNIQUE INDEX scheduler_runner_capacity_uq ON scheduler_capacity_reservations (resource_id) WHERE resource_kind='RUNNER';
 CREATE INDEX scheduler_capacity_run_idx ON scheduler_capacity_reservations (run_id);
 
 CREATE TABLE runtime_instances (
