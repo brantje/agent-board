@@ -1,7 +1,7 @@
 Review:
   type: object
   additionalProperties: false
-  required: [id, projectId, issueId, runId, status, requestedAt, decidedAt, createdAt, updatedAt]
+  required: [id, projectId, issueId, runId, status, baseRevision, reviewRevision, requestedAt, decidedAt, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
@@ -10,6 +10,14 @@ Review:
     status:
       type: string
       enum: [PENDING, APPROVED, CHANGES_REQUESTED, CANCELLED]
+    baseRevision:
+      type: string
+      minLength: 1
+      description: Exact Issue base Git revision used for this immutable Review.
+    reviewRevision:
+      type: string
+      minLength: 1
+      description: Exact Issue branch Git revision reviewed and approved or rejected.
     requestedAt: {type: string, format: date-time}
     decidedAt: {type: [string, 'null'], format: date-time}
     createdAt: {type: string, format: date-time}
