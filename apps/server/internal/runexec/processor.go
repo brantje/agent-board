@@ -95,7 +95,6 @@ func NewProcessor(
 	engines *engine.Registry,
 	events *evidence.Recorder,
 	output *evidence.OutputRecorder,
-	candidate *evidence.CandidateSnapshotter,
 	git workspace.Git,
 	runners RunnerConnector,
 ) (*Processor, error) {
