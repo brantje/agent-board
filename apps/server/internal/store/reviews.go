@@ -23,6 +23,7 @@ type CompleteReviewApprovalCommand struct {
 	ProjectID        string
 	ReviewID         string
 	AcceptedRevision string
+	DeliveryComplete bool
 }
 
 type CompleteReviewApprovalResult struct {
