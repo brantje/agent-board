@@ -141,7 +141,7 @@ func TestApplyReviewedRevisionRejectsReviewThatDoesNotContainPinnedBase(t *testi
 	fixture.review.BaseRevision = targetHead
 
 	_, err = fixture.backed.ApplyReviewedRevision(t.Context(), fixture.project, fixture.review)
-	if err == nil || !strings.Contains(err.Error(), "reviewed commit does not contain Review base") {
+	if err == nil || !strings.Contains(err.Error(), "review revision no longer contains its Issue base revision") {
 		t.Fatalf("ApplyReviewedRevision() error=%v", err)
 	}
 	after, headErr := fixture.git.HeadRevision(t.Context(), fixture.accepted.Path)
@@ -153,7 +153,7 @@ func TestApplyReviewedRevisionRejectsReviewThatDoesNotContainPinnedBase(t *testi
 	}
 }
 
-func TestApplyReviewedRevisionRejectsTargetRewrittenPastReviewBase(t *testing.T) {
+func TestApplyReviewedRevisionRollsBackUnrelatedTarget(t *testing.T) {
 	fixture := newReviewedRevisionFixture(t)
 	if _, err := fixture.git.run(t.Context(), "-C", fixture.accepted.Path, "checkout", "--orphan", "rewritten-main"); err != nil {
 		t.Fatal(err)
@@ -170,13 +170,19 @@ func TestApplyReviewedRevisionRejectsTargetRewrittenPastReviewBase(t *testing.T)
 	if _, err := fixture.git.run(t.Context(), "-C", fixture.accepted.Path, "-c", "user.name=Agent Board", "-c", "user.email=agent-board@localhost", "commit", "-m", "Rewrite target"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := fixture.git.run(t.Context(), "-C", fixture.accepted.Path, "branch", "-f", "main", "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.git.run(t.Context(), "-C", fixture.accepted.Path, "checkout", "main"); err != nil {
+		t.Fatal(err)
+	}
 	rewrittenHead, err := fixture.git.HeadRevision(t.Context(), fixture.accepted.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	_, err = fixture.backed.ApplyReviewedRevision(t.Context(), fixture.project, fixture.review)
-	if err == nil || !strings.Contains(err.Error(), "Project target no longer contains Review base") {
+	if err == nil || !strings.Contains(err.Error(), "integrate reviewed revision") {
 		t.Fatalf("ApplyReviewedRevision() error=%v", err)
 	}
 	after, headErr := fixture.git.HeadRevision(t.Context(), fixture.accepted.Path)
@@ -184,7 +190,21 @@ func TestApplyReviewedRevisionRejectsTargetRewrittenPastReviewBase(t *testing.T)
 		t.Fatal(headErr)
 	}
 	if after != rewrittenHead {
-		t.Fatalf("rewritten target advanced after rejected Review: got=%q want=%q", after, rewrittenHead)
+		t.Fatalf("failed delivery moved target: got=%q want=%q", after, rewrittenHead)
+	}
+	branch, branchErr := fixture.git.CurrentBranch(t.Context(), fixture.accepted.Path)
+	if branchErr != nil {
+		t.Fatal(branchErr)
+	}
+	if branch != "main" {
+		t.Fatalf("failed delivery changed target branch: %q", branch)
+	}
+	clean, cleanErr := fixture.git.run(t.Context(), "-C", fixture.accepted.Path, "status", "--porcelain")
+	if cleanErr != nil {
+		t.Fatal(cleanErr)
+	}
+	if strings.TrimSpace(clean) != "" {
+		t.Fatalf("failed delivery left target dirty: %q", clean)
 	}
 }
 
@@ -196,9 +216,11 @@ func TestApplyReviewedRevisionRequiresTrustedGitIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := &reviewProjectBackedStore{memoryStateStore: &memoryStateStore{workspace: store.Workspace{
-		ProjectID: "project-1",
-		IssueID:   "issue-1",
-		Path:      filepath.Join(root, "issue"),
+		ProjectID:       "project-1",
+		IssueID:         "issue-1",
+		Path:            filepath.Join(root, "issue"),
+		WorkingBranch:   "agent-board/AB-1",
+		BootstrapStatus: "READY",
 	}}}
 	materializer, err := NewMaterializer(state, policy, counting, filepath.Join(root, "issues"))
 	if err != nil {
@@ -216,7 +238,7 @@ func TestApplyReviewedRevisionRequiresTrustedGitIntegration(t *testing.T) {
 		ReviewRevision: strings.Repeat("b", 40),
 	}
 	_, err = backed.ApplyReviewedRevision(t.Context(), store.Project{ID: "project-1", SourceType: store.ProjectSourceLocal}, review)
-	if err == nil || !strings.Contains(err.Error(), "trusted Git integration unavailable") {
+	if err == nil || !strings.Contains(err.Error(), "trusted Git integration capability is unavailable") {
 		t.Fatalf("ApplyReviewedRevision() error=%v", err)
 	}
 }
