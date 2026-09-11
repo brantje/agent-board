@@ -82,7 +82,6 @@ type Processor struct {
 	engines    *engine.Registry
 	events     *evidence.Recorder
 	output     *evidence.OutputRecorder
-	candidate  *evidence.CandidateSnapshotter
 	branches   *branchObserver
 	git        workspace.Git
 	workspaces IssueWorkspaceEnsurer
@@ -100,12 +99,12 @@ func NewProcessor(
 	git workspace.Git,
 	runners RunnerConnector,
 ) (*Processor, error) {
-	if store == nil || resolver == nil || sessions == nil || engines == nil || events == nil || output == nil || candidate == nil {
+	if store == nil || resolver == nil || sessions == nil || engines == nil || events == nil || output == nil {
 		return nil, fmt.Errorf("run execution: all processor dependencies are required")
 	}
 	return &Processor{
 		store: store, resolver: resolver, runtimes: runtimes, runners: runners, sessions: sessions, engines: engines,
-		events: events, output: output, candidate: candidate, branches: newBranchObserver(store, git, events), git: git,
+		events: events, output: output, branches: newBranchObserver(store, git, events), git: git,
 	}, nil
 }
 
@@ -227,9 +226,8 @@ func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, 
 
 func (p *Processor) materializeExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance) (store.RuntimeInstance, executioncontext.SafeContext, error) {
 	// Runtime creation is also the boundary that materializes a placeholder
-	// Issue Workspace. Resolve again after that boundary so immutable provenance,
-	// Engine context and candidate collection all refer to the same durable
-	// Workspace that is actually mounted into the Runtime.
+	// Issue Workspace. Resolve again after that boundary so immutable provenance
+	// and Engine context refer to the same durable Workspace that is mounted.
 	materialized, err := p.resolver.Resolve(ctx, run.ProjectID, run.ID)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
@@ -369,50 +367,6 @@ func (p *Processor) cleanupRuntime(parent context.Context, safe executioncontext
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func (p *Processor) recordCandidate(ctx context.Context, safe executioncontext.SafeContext, runtimeInstanceID string, snapshot evidence.CandidateSnapshot) error {
-	artifacts := append([]store.Artifact{snapshot.Manifest}, snapshot.Artifacts...)
-	fileArtifacts := make(map[string]string)
-	for _, artifact := range artifacts {
-		if artifact.Kind == "candidate_file" {
-			fileArtifacts[artifact.Name] = artifact.ID
-		}
-		if err := p.record(ctx, safe, "artifact.created", evidence.ArtifactPayload{ArtifactID: artifact.ID, Name: artifact.Name, Kind: artifact.Kind}, &runtimeInstanceID, nil); err != nil {
-			return err
-		}
-	}
-	for _, change := range snapshot.Candidate.Changes {
-		eventType := candidateEventType(change)
-		payload := evidence.FilePayload{Path: change.Path, OldPath: change.OldPath, Staged: change.StagedStatus != "", Unstaged: change.UnstagedStatus != "" || change.Untracked, ArtifactID: fileArtifacts[change.Path]}
-		if err := p.record(ctx, safe, eventType, payload, &runtimeInstanceID, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func candidateEventType(change evidence.CandidateChange) string {
-	statuses := []string{change.StagedStatus, change.UnstagedStatus}
-	if change.Untracked {
-		return "file.created"
-	}
-	for _, status := range statuses {
-		if status == "renamed" {
-			return "file.renamed"
-		}
-	}
-	for _, status := range statuses {
-		if status == "deleted" {
-			return "file.deleted"
-		}
-	}
-	for _, status := range statuses {
-		if status == "created" {
-			return "file.created"
-		}
-	}
-	return "file.modified"
 }
 
 func (p *Processor) record(ctx context.Context, safe executioncontext.SafeContext, eventType string, payload any, runtimeInstanceID *string, parentEventID *string) error {
@@ -882,40 +836,17 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
 	}
-	if engineErr != nil {
-		reason := safeFailure(errors.Join(engineErr, syncErr))
-		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
-		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
-	}
-	if syncErr != nil {
-		reason := safeFailure(syncErr)
-		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
-		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
-	}
-	if isRemoteGitProject(safe) {
-		if engineResult.Summary != "" {
-			if err := p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, nil, nil); err != nil {
-				return scheduler.Result{}, err
-			}
-		}
-		if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, nil, nil); err != nil {
-			return scheduler.Result{}, err
-		}
-		return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
-	}
-	snapshot, snapshotErr := p.candidate.Snapshot(ctx, launcher.scope, safe.Workspace.Path)
-	if snapshotErr == nil {
-		snapshotErr = p.recordCandidate(ctx, safe, "", snapshot)
-	}
-	if engineErr == nil && snapshotErr == nil && engineResult.Summary != "" {
-		engineErr = p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, nil, nil)
-	}
-	if combined := errors.Join(engineErr, snapshotErr); combined != nil {
+	if combined := errors.Join(engineErr, syncErr); combined != nil {
 		reason := safeFailure(combined)
 		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
 		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
 	}
-	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"candidateManifestArtifactId": snapshot.Manifest.ID}, nil, nil); err != nil {
+	if engineResult.Summary != "" {
+		if err := p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, nil, nil); err != nil {
+			return scheduler.Result{}, err
+		}
+	}
+	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, nil, nil); err != nil {
 		return scheduler.Result{}, err
 	}
 	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
