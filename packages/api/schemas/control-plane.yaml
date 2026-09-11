@@ -15,6 +15,9 @@ Project:
   - id
   - name
   - issuePrefix
+  - sourceType
+  - cloneUrl
+  - sourceRef
   - repositoryPath
   - defaultBranch
   - workflowSettings
@@ -25,8 +28,22 @@ Project:
     id: {type: string, format: uuid}
     name: {type: string}
     issuePrefix: {$ref: '#/IssuePrefix'}
-    repositoryPath: {type: string}
-    defaultBranch: {type: string}
+    sourceType:
+      type: string
+      enum: [local, git]
+      description: Project source kind. Existing and omitted-source Projects use local.
+    cloneUrl:
+      type: [string, 'null']
+      description: Cloneable Git URL when sourceType is git. Stored without contacting the remote; embedded URI credentials are not allowed.
+    sourceRef:
+      type: [string, 'null']
+      description: Optional branch, tag, or commit for a git source. Null means the remote default branch is resolved at execution time.
+    repositoryPath:
+      type: string
+      description: Backend-visible local repository path when sourceType is local; empty for git sources.
+    defaultBranch:
+      type: string
+      description: Local Project default branch when sourceType is local; empty for git sources.
     workflowSettings: {$ref: '#/JSONMap'}
     allowInternalRunner: {type: boolean}
     createdAt: {type: string, format: date-time}
@@ -34,10 +51,21 @@ Project:
 ProjectCreate:
   type: object
   additionalProperties: false
-  required: [name, issuePrefix, repositoryPath]
+  required: [name, issuePrefix]
+  oneOf:
+    - required: [repositoryPath]
+      properties:
+        sourceType: {type: string, enum: [local]}
+    - required: [sourceType, cloneUrl]
+      properties:
+        sourceType: {type: string, enum: [git]}
+        cloneUrl: {type: string, minLength: 1}
   properties:
     name: {type: string}
     issuePrefix: {$ref: '#/IssuePrefix'}
+    sourceType: {type: string, enum: [local, git], default: local}
+    cloneUrl: {type: [string, 'null']}
+    sourceRef: {type: [string, 'null']}
     repositoryPath: {type: string}
     defaultBranch: {type: string, default: main}
     workflowSettings: {$ref: '#/JSONMap'}
@@ -46,6 +74,9 @@ ProjectUpdate:
   additionalProperties: false
   properties:
     name: {type: string}
+    sourceType: {type: string, enum: [local, git]}
+    cloneUrl: {type: [string, 'null']}
+    sourceRef: {type: [string, 'null']}
     repositoryPath: {type: string}
     defaultBranch: {type: string}
     workflowSettings: {$ref: '#/JSONMap'}

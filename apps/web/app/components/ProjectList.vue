@@ -24,6 +24,13 @@ function openBoard(projectId: string) {
   return navigateTo(`/projects/${projectId}/board`)
 }
 
+function sourceSummary(item: Project) {
+  if (item.sourceType === 'git') {
+    return `${item.cloneUrl ?? ''} · ${item.sourceRef || 'remote default'}`
+  }
+  return `${item.repositoryPath} · ${item.defaultBranch}`
+}
+
 async function savedProject() {
   open.value = false
   saved.value = true
@@ -37,7 +44,7 @@ useProjectEvents(projectIds, event => {
 </script>
 
 <template>
-  <PageFrame title="Projects" description="Projects · backend-managed repository contexts">
+  <PageFrame title="Projects" description="Projects · repository source contexts">
     <template #actions>
       <UButton label="New project" icon="i-lucide-plus" @click="edit()" />
     </template>
@@ -48,8 +55,8 @@ useProjectEvents(projectIds, event => {
       :pending="pending"
       :error="error"
       :empty="!visible.length"
-      empty-title="No projects yet" 
-      empty-description="Create a Project with a local repository, default branch, and Issue prefix to open a board."
+      empty-title="No projects yet"
+      empty-description="Create a Project with a local repository or Git repository source to open a board."
       @retry="refresh"
     >
       <div class="grid w-full gap-3">
@@ -58,7 +65,7 @@ useProjectEvents(projectIds, event => {
             <div class="flex flex-wrap items-center gap-3">
               <div class="min-w-0 flex-1">
                 <h2 class="font-medium text-highlighted break-words">{{ item.name }}</h2>
-                <p class="text-xs text-muted">Backend-managed repository context</p>
+                <p class="text-xs text-muted">{{ item.sourceType === 'git' ? 'Git repository' : 'Local repository' }}</p>
               </div>
               <div class="flex flex-wrap items-center gap-3" @click.stop>
                 <UButton label="Open board" :to="`/projects/${item.id}/board`" variant="outline" />
@@ -66,7 +73,7 @@ useProjectEvents(projectIds, event => {
               </div>
             </div>
             <p class="mt-2 text-sm font-mono break-all">
-              {{ item.issuePrefix }} · {{ item.repositoryPath }} · {{ item.defaultBranch }}
+              {{ item.issuePrefix }} · {{ sourceSummary(item) }}
             </p>
           </div>
         </UCard>

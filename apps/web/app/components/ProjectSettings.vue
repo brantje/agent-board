@@ -21,7 +21,7 @@ function cancel() {
 </script>
 
 <template>
-  <PageFrame title="Project" description="Project settings · backend-managed repository context">
+  <PageFrame title="Project" description="Project settings · repository source context">
     <UAlert v-if="saved" title="Saved" color="success" class="mb-4" />
     <AsyncState
       :pending="pending"

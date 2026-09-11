@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/repository"
@@ -382,7 +383,37 @@ func invalid(message string) error {
 }
 
 func (s *Service) ensureProjectRepository(ctx context.Context, input store.Project) (store.Project, error) {
+	sourceType := strings.TrimSpace(input.SourceType)
+	if sourceType == "" {
+		sourceType = store.ProjectSourceLocal
+	}
+	input.SourceType = sourceType
+
+	if sourceType == store.ProjectSourceGit {
+		input.RepositoryPath = ""
+		input.DefaultBranch = ""
+		if input.CloneURL != nil {
+			cloneURL := strings.TrimSpace(*input.CloneURL)
+			input.CloneURL = &cloneURL
+		}
+		if input.SourceRef != nil {
+			ref := strings.TrimSpace(*input.SourceRef)
+			if ref == "" {
+				input.SourceRef = nil
+			} else {
+				input.SourceRef = &ref
+			}
+		}
+		return input, nil
+	}
+
+	input.CloneURL = nil
+	input.SourceRef = nil
 	if s == nil || s.projectRepositories == nil {
+		branch := strings.TrimSpace(input.DefaultBranch)
+		if branch == "" {
+			input.DefaultBranch = "main"
+		}
 		return input, nil
 	}
 	branch := strings.TrimSpace(input.DefaultBranch)
@@ -421,16 +452,45 @@ func validObject(value json.RawMessage) bool {
 	return json.Unmarshal(value, &object) == nil && object != nil
 }
 func validateProject(v store.Project) error {
-	if strings.TrimSpace(v.Name) == "" || strings.TrimSpace(v.RepositoryPath) == "" {
-		return invalid("project name and repositoryPath are required")
+	if strings.TrimSpace(v.Name) == "" {
+		return invalid("project name is required")
 	}
 	prefix := store.NormalizeIssuePrefix(v.IssuePrefix)
 	if !store.ValidIssuePrefix(prefix) {
 		return invalid("issuePrefix is required and must be 2-10 alphanumeric characters starting with a letter")
 	}
-	if v.DefaultBranch != "" && strings.TrimSpace(v.DefaultBranch) == "" {
-		return invalid("defaultBranch must not be blank")
+
+	sourceType := strings.TrimSpace(v.SourceType)
+	if sourceType == "" {
+		sourceType = store.ProjectSourceLocal
 	}
+	switch sourceType {
+	case store.ProjectSourceLocal:
+		if strings.TrimSpace(v.RepositoryPath) == "" {
+			return invalid("repositoryPath is required for local Projects")
+		}
+		if v.DefaultBranch != "" && strings.TrimSpace(v.DefaultBranch) == "" {
+			return invalid("defaultBranch must not be blank")
+		}
+	case store.ProjectSourceGit:
+		if v.CloneURL == nil || strings.TrimSpace(*v.CloneURL) == "" {
+			return invalid("cloneUrl is required for git Projects")
+		}
+		cloneURL := strings.TrimSpace(*v.CloneURL)
+		parsed, err := url.Parse(cloneURL)
+		if err == nil && parsed.User != nil {
+			_, hasPassword := parsed.User.Password()
+			if hasPassword || strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https") {
+				return invalid("cloneUrl must not contain credentials")
+			}
+		}
+		if err != nil && cloneURLHasEmbeddedCredentials(cloneURL) {
+			return invalid("cloneUrl must not contain credentials")
+		}
+	default:
+		return invalid("sourceType must be local or git")
+	}
+
 	if !validObject(v.WorkflowSettings) {
 		return invalid("workflowSettings must be a JSON object")
 	}

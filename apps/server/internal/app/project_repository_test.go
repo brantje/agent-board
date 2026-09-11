@@ -13,11 +13,13 @@ import (
 )
 
 type stubProjectRepositoryProvisioner struct {
-	path string
-	err  error
+	path  string
+	err   error
+	calls int
 }
 
-func (s stubProjectRepositoryProvisioner) EnsureProjectRepository(_ context.Context, _, _ string) (string, error) {
+func (s *stubProjectRepositoryProvisioner) EnsureProjectRepository(_ context.Context, _, _ string) (string, error) {
+	s.calls++
 	if s.err != nil {
 		return "", s.err
 	}
@@ -27,12 +29,22 @@ func (s stubProjectRepositoryProvisioner) EnsureProjectRepository(_ context.Cont
 type recordingProjectStore struct {
 	fakeStore
 	created store.Project
+	updated store.Project
 }
 
 func (s *recordingProjectStore) CreateProject(_ context.Context, input store.Project) (store.Project, error) {
 	s.created = input
 	input.ID = "project-1"
 	return input, nil
+}
+
+func (s *recordingProjectStore) UpdateProject(_ context.Context, input store.Project) (store.Project, error) {
+	s.updated = input
+	return input, nil
+}
+
+func stringPointer(value string) *string {
+	return &value
 }
 
 func TestCreateProjectProvisionsMissingRepository(t *testing.T) {
@@ -67,6 +79,9 @@ func TestCreateProjectProvisionsMissingRepository(t *testing.T) {
 	if project.RepositoryPath != want {
 		t.Fatalf("CreateProject() repositoryPath = %q, want %q", project.RepositoryPath, want)
 	}
+	if project.SourceType != store.ProjectSourceLocal {
+		t.Fatalf("CreateProject() sourceType = %q, want %q", project.SourceType, store.ProjectSourceLocal)
+	}
 	isRepo, err := git.IsRepository(context.Background(), want)
 	if err != nil || !isRepo {
 		t.Fatalf("provisioned repository missing: isRepo=%v err=%v", isRepo, err)
@@ -88,15 +103,178 @@ func TestCreateProjectWithoutProvisionerSkipsFilesystem(t *testing.T) {
 	if project.RepositoryPath != "/repositories/widget" {
 		t.Fatalf("CreateProject() repositoryPath = %q", project.RepositoryPath)
 	}
+	if project.SourceType != store.ProjectSourceLocal {
+		t.Fatalf("CreateProject() sourceType = %q, want %q", project.SourceType, store.ProjectSourceLocal)
+	}
 	if _, err := os.Stat("/repositories/widget"); !os.IsNotExist(err) {
 		t.Fatal("CreateProject() without provisioner should not create filesystem paths")
+	}
+}
+
+func TestCreateGitProjectSkipsLocalRepositoryProvisioner(t *testing.T) {
+	projectStore := &recordingProjectStore{}
+	provisioner := &stubProjectRepositoryProvisioner{path: "/should/not/be/used"}
+	service := New(projectStore)
+	service.SetProjectRepositoryProvisioner(provisioner)
+	cloneURL := "  https://example.com/acme/widget.git  "
+	ref := "  feature/source  "
+
+	project, err := service.CreateProject(context.Background(), store.Project{
+		Name:        "Widget",
+		IssuePrefix: "WG",
+		SourceType:  store.ProjectSourceGit,
+		CloneURL:    &cloneURL,
+		SourceRef:   &ref,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if provisioner.calls != 0 {
+		t.Fatalf("local repository provisioner calls = %d, want 0", provisioner.calls)
+	}
+	if project.RepositoryPath != "" || project.DefaultBranch != "" {
+		t.Fatalf("git Project retained local fields: repositoryPath=%q defaultBranch=%q", project.RepositoryPath, project.DefaultBranch)
+	}
+	if project.CloneURL == nil || *project.CloneURL != "https://example.com/acme/widget.git" {
+		t.Fatalf("CreateProject() cloneURL = %v", project.CloneURL)
+	}
+	if project.SourceRef == nil || *project.SourceRef != "feature/source" {
+		t.Fatalf("CreateProject() sourceRef = %v", project.SourceRef)
+	}
+}
+
+func TestCreateGitProjectRequiresCloneURL(t *testing.T) {
+	projectStore := &recordingProjectStore{}
+	provisioner := &stubProjectRepositoryProvisioner{path: "/should/not/be/used"}
+	service := New(projectStore)
+	service.SetProjectRepositoryProvisioner(provisioner)
+
+	_, err := service.CreateProject(context.Background(), store.Project{
+		Name:        "Widget",
+		IssuePrefix: "WG",
+		SourceType:  store.ProjectSourceGit,
+	})
+	if err == nil {
+		t.Fatal("CreateProject() error = nil")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "invalid_argument" {
+		t.Fatalf("CreateProject() error = %v, want invalid_argument", err)
+	}
+	if provisioner.calls != 0 {
+		t.Fatalf("local repository provisioner calls = %d, want 0", provisioner.calls)
+	}
+}
+
+func TestCreateGitProjectRejectsCredentialsInCloneURL(t *testing.T) {
+	service := New(&recordingProjectStore{})
+	for _, cloneURL := range []string{
+		"https://user:token@example.com/acme/widget.git",
+		"ssh://user:token@example.com/acme/widget.git",
+	} {
+		t.Run(cloneURL, func(t *testing.T) {
+			_, err := service.CreateProject(context.Background(), store.Project{
+				Name:        "Widget",
+				IssuePrefix: "WG",
+				SourceType:  store.ProjectSourceGit,
+				CloneURL:    &cloneURL,
+			})
+			if err == nil {
+				t.Fatal("CreateProject() error = nil")
+			}
+			apiErr, ok := AsError(err)
+			if !ok || apiErr.Code != "invalid_argument" {
+				t.Fatalf("CreateProject() error = %v, want invalid_argument", err)
+			}
+		})
+	}
+}
+
+func TestCreateGitProjectAllowsSCPStyleCloneURL(t *testing.T) {
+	service := New(&recordingProjectStore{})
+	cloneURL := "git@example.com:acme/widget.git"
+
+	project, err := service.CreateProject(context.Background(), store.Project{
+		Name:        "Widget",
+		IssuePrefix: "WG",
+		SourceType:  store.ProjectSourceGit,
+		CloneURL:    &cloneURL,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if project.CloneURL == nil || *project.CloneURL != cloneURL {
+		t.Fatalf("CreateProject() cloneURL = %v, want %q", project.CloneURL, cloneURL)
+	}
+}
+
+func TestCreateProjectRejectsUnknownSourceType(t *testing.T) {
+	service := New(&recordingProjectStore{})
+	_, err := service.CreateProject(context.Background(), store.Project{
+		Name:           "Widget",
+		IssuePrefix:    "WG",
+		SourceType:     "github",
+		RepositoryPath: "/repositories/widget",
+	})
+	if err == nil {
+		t.Fatal("CreateProject() error = nil")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "invalid_argument" {
+		t.Fatalf("CreateProject() error = %v, want invalid_argument", err)
+	}
+}
+
+func TestCreateLocalProjectClearsInactiveGitFields(t *testing.T) {
+	projectStore := &recordingProjectStore{}
+	service := New(projectStore)
+	cloneURL := "https://example.com/acme/widget.git"
+	ref := "main"
+
+	project, err := service.CreateProject(context.Background(), store.Project{
+		Name:           "Widget",
+		IssuePrefix:    "WG",
+		SourceType:     store.ProjectSourceLocal,
+		CloneURL:       &cloneURL,
+		SourceRef:      &ref,
+		RepositoryPath: "/repositories/widget",
+		DefaultBranch:  "main",
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if project.CloneURL != nil || project.SourceRef != nil {
+		t.Fatalf("local Project retained git fields: cloneURL=%v sourceRef=%v", project.CloneURL, project.SourceRef)
+	}
+}
+
+func TestUpdateGitProjectToLocalClearsGitFields(t *testing.T) {
+	projectStore := &recordingProjectStore{}
+	service := New(projectStore)
+	cloneURL := "https://example.com/acme/widget.git"
+	ref := "feature/source"
+
+	project, err := service.UpdateProject(context.Background(), store.Project{
+		ID:             "project-1",
+		Name:           "Widget",
+		IssuePrefix:    "WG",
+		SourceType:     store.ProjectSourceLocal,
+		CloneURL:       &cloneURL,
+		SourceRef:      &ref,
+		RepositoryPath: "/repositories/widget",
+		DefaultBranch:  "main",
+	})
+	if err != nil {
+		t.Fatalf("UpdateProject() error = %v", err)
+	}
+	if project.CloneURL != nil || project.SourceRef != nil {
+		t.Fatalf("local Project retained git fields: cloneURL=%v sourceRef=%v", project.CloneURL, project.SourceRef)
 	}
 }
 
 func TestCreateProjectTranslatesRepositoryProvisionerErrors(t *testing.T) {
 	projectStore := &recordingProjectStore{}
 	service := New(projectStore)
-	service.SetProjectRepositoryProvisioner(stubProjectRepositoryProvisioner{})
 
 	tests := []struct {
 		name string
@@ -109,7 +287,7 @@ func TestCreateProjectTranslatesRepositoryProvisionerErrors(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			service.SetProjectRepositoryProvisioner(stubProjectRepositoryProvisioner{err: tc.err})
+			service.SetProjectRepositoryProvisioner(&stubProjectRepositoryProvisioner{err: tc.err})
 			_, err := service.CreateProject(context.Background(), store.Project{
 				Name:           "Widget",
 				IssuePrefix:    "WG",
@@ -130,7 +308,7 @@ func TestCreateProjectTranslatesRepositoryProvisionerErrors(t *testing.T) {
 func TestUpdateProjectUsesDefaultBranchWhenProvisioning(t *testing.T) {
 	projectStore := &recordingProjectStore{}
 	service := New(projectStore)
-	service.SetProjectRepositoryProvisioner(stubProjectRepositoryProvisioner{path: "/repositories/widget"})
+	service.SetProjectRepositoryProvisioner(&stubProjectRepositoryProvisioner{path: "/repositories/widget"})
 
 	project, err := service.UpdateProject(context.Background(), store.Project{
 		ID:             "project-1",
@@ -143,5 +321,28 @@ func TestUpdateProjectUsesDefaultBranchWhenProvisioning(t *testing.T) {
 	}
 	if project.DefaultBranch != "main" {
 		t.Fatalf("UpdateProject() defaultBranch = %q, want main", project.DefaultBranch)
+	}
+	if project.SourceType != store.ProjectSourceLocal {
+		t.Fatalf("UpdateProject() sourceType = %q, want %q", project.SourceType, store.ProjectSourceLocal)
+	}
+}
+
+func TestCreateGitProjectClearsBlankOptionalRef(t *testing.T) {
+	projectStore := &recordingProjectStore{}
+	service := New(projectStore)
+	cloneURL := "https://example.com/acme/widget.git"
+
+	project, err := service.CreateProject(context.Background(), store.Project{
+		Name:        "Widget",
+		IssuePrefix: "WG",
+		SourceType:  store.ProjectSourceGit,
+		CloneURL:    &cloneURL,
+		SourceRef:   stringPointer("   "),
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if project.SourceRef != nil {
+		t.Fatalf("CreateProject() sourceRef = %v, want nil", project.SourceRef)
 	}
 }

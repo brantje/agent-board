@@ -95,11 +95,17 @@ func (a *api) createProject(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	branch := req.DefaultBranch
-	if branch == "" {
-		branch = "main"
-	}
-	v, err := a.service.CreateProject(r.Context(), store.Project{AllowInternalRunner: req.AllowInternalRunner, Name: req.Name, IssuePrefix: req.IssuePrefix, RepositoryPath: req.RepositoryPath, DefaultBranch: branch, WorkflowSettings: req.WorkflowSettings})
+	v, err := a.service.CreateProject(r.Context(), store.Project{
+		AllowInternalRunner: req.AllowInternalRunner,
+		Name:                req.Name,
+		IssuePrefix:         req.IssuePrefix,
+		SourceType:          req.SourceType,
+		CloneURL:            req.CloneURL,
+		SourceRef:           req.SourceRef,
+		RepositoryPath:      req.RepositoryPath,
+		DefaultBranch:       req.DefaultBranch,
+		WorkflowSettings:    req.WorkflowSettings,
+	})
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -134,6 +140,15 @@ func (a *api) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Name != nil {
 		current.Name = *req.Name
+	}
+	if req.SourceType != nil {
+		current.SourceType = *req.SourceType
+	}
+	if req.CloneURL.Set {
+		current.CloneURL = req.CloneURL.Value
+	}
+	if req.SourceRef.Set {
+		current.SourceRef = req.SourceRef.Value
 	}
 	if req.RepositoryPath != nil {
 		current.RepositoryPath = *req.RepositoryPath

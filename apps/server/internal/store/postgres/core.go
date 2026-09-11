@@ -9,6 +9,21 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const projectSelectColumns = `
+	id::text,
+	name,
+	issue_prefix,
+	source_type,
+	clone_url,
+	source_ref,
+	repository_path,
+	default_branch,
+	workflow_settings,
+	allow_internal_runner,
+	created_at,
+	updated_at
+`
+
 const issueSelectColumns = `
 	i.id::text,
 	i.project_id::text,
@@ -66,21 +81,25 @@ func (s *Store) CreateProject(ctx context.Context, input store.Project) (store.P
 	if !store.ValidIssuePrefix(prefix) {
 		return store.Project{}, store.ErrInvalidArgument
 	}
+	sourceType := input.SourceType
+	if sourceType == "" {
+		sourceType = store.ProjectSourceLocal
+	}
 	branch := input.DefaultBranch
-	if branch == "" {
+	if sourceType == store.ProjectSourceLocal && branch == "" {
 		branch = "main"
 	}
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO projects (name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner)
-		VALUES ($1, $2, $3, $4, $5, COALESCE($6,true))
-		RETURNING id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner, created_at, updated_at
-	`, input.Name, prefix, input.RepositoryPath, branch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner)
+		INSERT INTO projects (name, issue_prefix, source_type, clone_url, source_ref, repository_path, default_branch, workflow_settings, allow_internal_runner)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9,true))
+		RETURNING `+projectSelectColumns+`
+	`, input.Name, prefix, sourceType, input.CloneURL, input.SourceRef, input.RepositoryPath, branch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner)
 	return scanProject(row)
 }
 
 func (s *Store) GetProject(ctx context.Context, projectID string) (store.Project, error) {
 	return scanProject(s.pool.QueryRow(ctx, `
-		SELECT id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner, created_at, updated_at
+		SELECT `+projectSelectColumns+`
 		FROM projects WHERE id = $1
 	`, projectID))
 }
@@ -160,7 +179,20 @@ func (s *Store) GetIssueUUIDByKey(ctx context.Context, projectID, key string) (s
 
 func scanProject(row pgx.Row) (store.Project, error) {
 	var value store.Project
-	if err := row.Scan(&value.ID, &value.Name, &value.IssuePrefix, &value.RepositoryPath, &value.DefaultBranch, &value.WorkflowSettings, &value.AllowInternalRunner, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(
+		&value.ID,
+		&value.Name,
+		&value.IssuePrefix,
+		&value.SourceType,
+		&value.CloneURL,
+		&value.SourceRef,
+		&value.RepositoryPath,
+		&value.DefaultBranch,
+		&value.WorkflowSettings,
+		&value.AllowInternalRunner,
+		&value.CreatedAt,
+		&value.UpdatedAt,
+	); err != nil {
 		return store.Project{}, notFound(err)
 	}
 	return value, nil
