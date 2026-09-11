@@ -529,6 +529,48 @@ function isAgentTextActivity(item: RunActivityItem | undefined): item is AgentTe
   return item?.kind === 'thought' || item?.kind === 'message'
 }
 
+function isThoughtReorderGap(item: RunActivityItem | undefined) {
+  if (item?.kind !== 'event') return false
+  const type = item.event.type
+  return type === 'run.resumed' || type === 'run.waiting_for_input'
+}
+
+function questionToolPrompts(input: Record<string, unknown> | undefined) {
+  const prompts = new Set<string>()
+  const questions = input?.questions
+  if (!Array.isArray(questions)) return prompts
+  for (const entry of questions) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue
+    const prompt = stringValue((entry as Record<string, unknown>).question)
+    if (prompt) prompts.add(prompt)
+  }
+  return prompts
+}
+
+function moveQuestionExplanationBeforePrompts(items: RunActivityItem[]) {
+  const reordered = [...items]
+  for (let index = 0; index < reordered.length - 1; index++) {
+    const current = reordered[index]
+    const next = reordered[index + 1]
+    if (!isAgentTextActivity(current) || next?.kind !== 'tool' || next.name.trim().toLowerCase() !== 'question') continue
+    const prompts = questionToolPrompts(next.input)
+    if (!prompts.size) continue
+    let target = -1
+    for (let questionIndex = 0; questionIndex < index; questionIndex++) {
+      const item = reordered[questionIndex]
+      if (item?.kind === 'question' && prompts.has(item.prompt)) {
+        target = questionIndex
+        break
+      }
+    }
+    if (target < 0) continue
+    const [thought] = reordered.splice(index, 1)
+    reordered.splice(target, 0, thought)
+    break
+  }
+  return reordered
+}
+
 function reorderThoughtsBeforeTools(items: RunActivityItem[]) {
   const reordered = [...items]
   for (let index = 0; index < reordered.length - 1; index++) {
@@ -540,16 +582,21 @@ function reorderThoughtsBeforeTools(items: RunActivityItem[]) {
       index++
     }
   }
-  for (let index = 0; index < reordered.length - 1; index++) {
+  for (let index = 0; index < reordered.length; index++) {
     const current = reordered[index]
-    const next = reordered[index + 1]
-    if (current?.kind === 'tool' && isAgentTextActivity(next)) {
-      reordered[index] = next
-      reordered[index + 1] = current
-      index++
+    if (current?.kind !== 'tool') continue
+    if (index > 0 && isAgentTextActivity(reordered[index - 1])) continue
+    let gapEnd = index + 1
+    while (gapEnd < reordered.length && isThoughtReorderGap(reordered[gapEnd])) {
+      gapEnd++
     }
+    const thought = reordered[gapEnd]
+    if (!isAgentTextActivity(thought)) continue
+    const gapItems = reordered.slice(index + 1, gapEnd)
+    reordered.splice(index, gapEnd - index + 1, thought, current, ...gapItems)
+    index += gapItems.length
   }
-  return reordered
+  return moveQuestionExplanationBeforePrompts(reordered)
 }
 
 export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {

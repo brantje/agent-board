@@ -302,6 +302,44 @@ describe('run activity projection', () => {
     expect(items.map(item => item.kind)).toEqual(['thought', 'question'])
   })
 
+  it('shows thought before question tool when run.resumed sits between them', () => {
+    const items = projectRunActivity([
+      event({ id: 'started', type: 'tool.started', sequence: 1, payload: { toolCallId: 'call-q', name: 'question', input: { questions: [] } } }),
+      event({ id: 'resume', type: 'run.resumed', sequence: 2, payload: { questionId: 'q1' } }),
+      event({ id: 'thought', type: 'agent.message', sequence: 3, payload: { kind: 'reasoning', message: 'I need clarifying answers first.' } }),
+      event({ id: 'done', type: 'tool.completed', sequence: 4, payload: { toolCallId: 'call-q', name: 'question', summary: 'Asked 3 questions' } })
+    ])
+    expect(items.map(item => item.kind)).toEqual(['thought', 'tool', 'event'])
+    expect(items[0]).toMatchObject({ kind: 'thought', message: 'I need clarifying answers first.' })
+    expect(items[1]).toMatchObject({ kind: 'tool', label: 'Question', summary: 'Asked 3 questions' })
+    expect(items[2]).toMatchObject({ kind: 'event', event: { type: 'run.resumed' } })
+  })
+
+  it('moves late question reasoning before the related question prompts', () => {
+    const prompt = 'What type of app are you looking to build?'
+    const items = projectRunActivity([
+      event({ id: 'question', type: 'question.created', sequence: 1, payload: { questionId: 'q1', prompt } }),
+      event({ id: 'wait', type: 'run.waiting_for_input', sequence: 2, payload: { questionId: 'q1' } }),
+      event({ id: 'decision', type: 'decision.recorded', sequence: 3, payload: { questionId: 'q1', kind: 'QUESTION_ANSWER', outcome: '["option-0"]' } }),
+      event({
+        id: 'started',
+        type: 'tool.started',
+        sequence: 4,
+        payload: {
+          toolCallId: 'call-q',
+          name: 'question',
+          input: { questions: [{ question: prompt, options: [{ label: 'SaaS Web App' }] }] }
+        }
+      }),
+      event({ id: 'resume', type: 'run.resumed', sequence: 5, payload: { questionId: 'q1' } }),
+      event({ id: 'thought', type: 'agent.message', sequence: 6, payload: { kind: 'reasoning', message: 'I should ask clarifying questions first.' } }),
+      event({ id: 'done', type: 'tool.completed', sequence: 7, payload: { toolCallId: 'call-q', name: 'question', summary: 'Asked 3 questions' } })
+    ])
+    expect(items.map(item => item.kind)).toEqual(['thought', 'question', 'event', 'event', 'tool', 'event'])
+    expect(items[0]).toMatchObject({ kind: 'thought', message: 'I should ask clarifying questions first.' })
+    expect(items[1]).toMatchObject({ kind: 'question', prompt })
+  })
+
   it('hides engine question reply-accepted and binding-resolved events', () => {
     const items = projectRunActivity([
       event({ id: 'wait', type: 'run.waiting_for_input', sequence: 1 }),
