@@ -72,7 +72,7 @@ func (s *ReviewService) List(ctx context.Context, projectID string, filter store
 		return nil, translateStoreError(err, "review")
 	}
 	for index := range values {
-		values[index], err = s.hydrateReviewRevisions(ctx, values[index])
+		values[index], err = requireReviewRevisions(values[index])
 		if err != nil {
 			return nil, err
 		}
@@ -88,7 +88,7 @@ func (s *ReviewService) Get(ctx context.Context, projectID, reviewID string) (Re
 	if err != nil {
 		return ReviewInspection{}, translateStoreError(err, "review")
 	}
-	review, err = s.hydrateReviewRevisions(ctx, review)
+	review, err = requireReviewRevisions(review)
 	if err != nil {
 		return ReviewInspection{}, err
 	}
@@ -120,7 +120,7 @@ func (s *ReviewService) Approve(ctx context.Context, projectID, reviewID string,
 	if err != nil {
 		return store.CompleteReviewApprovalResult{}, translateStoreError(err, "review")
 	}
-	begin.Review, err = s.hydrateReviewRevisions(ctx, begin.Review)
+	begin.Review, err = requireReviewRevisions(begin.Review)
 	if err != nil {
 		s.persistApprovalFailure(ctx, projectID, reviewID, "Review Git identity is unavailable")
 		return store.CompleteReviewApprovalResult{}, err
@@ -183,20 +183,9 @@ func (s *ReviewService) RequestChanges(ctx context.Context, projectID, reviewID,
 	return result, nil
 }
 
-func (s *ReviewService) hydrateReviewRevisions(ctx context.Context, review store.Review) (store.Review, error) {
-	if strings.TrimSpace(review.BaseRevision) != "" && strings.TrimSpace(review.ReviewRevision) != "" {
-		return review, nil
-	}
-	revisions, ok := s.store.(store.ReviewRevisionStore)
-	if !ok {
-		return store.Review{}, NewError("review_evidence_invalid", "Review Git identity is unavailable", store.ErrConflict)
-	}
-	baseRevision, reviewRevision, err := revisions.GetReviewRevisions(ctx, review.ProjectID, review.ID)
-	if err != nil {
-		return store.Review{}, translateStoreError(err, "review")
-	}
-	review.BaseRevision = strings.TrimSpace(baseRevision)
-	review.ReviewRevision = strings.TrimSpace(reviewRevision)
+func requireReviewRevisions(review store.Review) (store.Review, error) {
+	review.BaseRevision = strings.TrimSpace(review.BaseRevision)
+	review.ReviewRevision = strings.TrimSpace(review.ReviewRevision)
 	if review.BaseRevision == "" || review.ReviewRevision == "" {
 		return store.Review{}, NewError("review_evidence_invalid", "Review Git identity is unavailable", store.ErrConflict)
 	}
