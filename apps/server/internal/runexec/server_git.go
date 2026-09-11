@@ -10,7 +10,7 @@ import (
 )
 
 type serverCheckoutFinalizer interface {
-	FinalizeCheckout(context.Context, string, string) (string, error)
+	FinalizeCheckout(context.Context, string, string, string) (string, error)
 }
 
 func (p *Processor) finalizeServerWorkspace(ctx context.Context, safe executioncontext.SafeContext) (string, error) {
@@ -33,7 +33,11 @@ func (p *Processor) finalizeServerWorkspace(ctx context.Context, safe executionc
 	if startRevision == "" {
 		return "", fmt.Errorf("execution start revision is unavailable")
 	}
-	revision, err := finalizer.FinalizeCheckout(ctx, safe.Workspace.Path, startRevision)
+	expectedBranch := strings.TrimSpace(safe.Workspace.WorkingBranch)
+	if expectedBranch == "" {
+		return "", fmt.Errorf("durable Issue branch is unavailable")
+	}
+	revision, err := finalizer.FinalizeCheckout(ctx, safe.Workspace.Path, expectedBranch, startRevision)
 	if err != nil {
 		return "", err
 	}
