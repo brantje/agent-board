@@ -11,6 +11,11 @@ const (
 	TransferChunkSize = 64 << 10
 	MaxTransferBytes  = 512 << 20
 	MaxMessageSize    = 1 << 20
+
+	TransferDirectionToRunner   = "to_runner"
+	TransferDirectionFromRunner = "from_runner"
+	TransferDirectionGitPrepare = "git_prepare"
+	TransferDirectionGitPublish = "git_publish"
 )
 
 func ValidateTransferBegin(begin TransferBegin) error {
@@ -72,9 +77,25 @@ type TransferFailed struct {
 	Message    string `json:"message"`
 }
 
+// GitPrepare describes the remote source needed to prepare one durable Issue
+// branch on the Runner. It is sent as the small payload of a git_prepare
+// transfer; repository contents themselves are fetched by Git on the Runner.
+type GitPrepare struct {
+	CloneURL         string `json:"clone_url"`
+	Ref              string `json:"ref,omitempty"`
+	IssueBranch      string `json:"issue_branch"`
+	RecordedRevision string `json:"recorded_revision,omitempty"`
+}
+
+// GitPublished is returned after the Runner safely finalizes and normally
+// pushes the Issue branch. The worktree remains retained until TransferApplied.
+type GitPublished struct {
+	Revision string `json:"revision"`
+}
+
 // TransferApplied acknowledges that the server verified and successfully
-// applied a from_runner transfer. Only this acknowledgement permits the Runner
-// to delete its session Workspace.
+// applied a from_runner transfer or persisted a git_publish revision. Only this
+// acknowledgement permits the Runner to delete its session Workspace/worktree.
 type TransferApplied struct {
 	TransferID string `json:"transfer_id"`
 }
