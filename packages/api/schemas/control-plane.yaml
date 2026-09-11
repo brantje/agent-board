@@ -34,7 +34,7 @@ Project:
       description: Project source kind. Existing and omitted-source Projects use local.
     cloneUrl:
       type: [string, 'null']
-      description: Cloneable Git URL when sourceType is git. Stored without contacting the remote.
+      description: Cloneable Git URL when sourceType is git. Stored without contacting the remote; embedded URI credentials are not allowed.
     sourceRef:
       type: [string, 'null']
       description: Optional branch, tag, or commit for a git source. Null means the remote default branch is resolved at execution time.
