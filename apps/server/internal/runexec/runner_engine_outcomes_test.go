@@ -166,6 +166,7 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 	t.Run("invalid returned workspace fails without acknowledgement", func(t *testing.T) {
 		repo := initProcessTestRepository(t)
 		safe := processTestSafeContext(repo)
+		safe.Runner = &executioncontext.RunnerContext{ID: "runner-1"}
 		storeFake := &runnerSyncStore{}
 		client := &successfulSyncClient{payload: []byte("not a git bundle")}
 		processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
@@ -186,6 +187,7 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 	t.Run("parent cancellation syncs back before returning cancellation", func(t *testing.T) {
 		repo := initProcessTestRepository(t)
 		safe := processTestSafeContext(repo)
+		safe.Runner = &executioncontext.RunnerContext{ID: "runner-1"}
 		storeFake := &runnerSyncStore{}
 		client := &successfulSyncClient{payload: runnerTransferPayload(t, repo)}
 		processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
@@ -205,6 +207,7 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 	t.Run("candidate snapshot failure blocks review ready", func(t *testing.T) {
 		repo := initProcessTestRepository(t)
 		safe := processTestSafeContext(repo)
+		safe.Runner = &executioncontext.RunnerContext{ID: "runner-1"}
 		storeFake := &runnerSyncStore{}
 		client := &successfulSyncClient{payload: runnerTransferPayload(t, repo)}
 		processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
