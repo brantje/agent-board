@@ -321,7 +321,7 @@ func (s *Server) publishRemoteWorkspace(writer streamWriter, sessionID, transfer
 		fail("remote Git workspace publication failed: " + err.Error())
 		return
 	}
-	payload, err := json.Marshal(protocol.GitPublished{Revision: revision})
+	payload, err := json.Marshal(protocol.GitPublished{StartRevision: remote.checkout.StartRevision, Revision: revision})
 	if err != nil {
 		fail("remote Git publication result could not be encoded")
 		return
@@ -338,20 +338,17 @@ func (s *Server) handleTransferApplied(writer *connectionWriter, msg protocol.Me
 		writer.sendError("invalid_transfer_ack", "workspace transfer acknowledgement is invalid", msg.SessionID)
 		return
 	}
+
+	workspacePath := s.manager.SessionWorkspacePath(msg.SessionID)
 	if remote, ok := s.transfers.remoteWorkspace(msg.SessionID); ok {
 		manager := s.transfers.gitManager(s.manager.WorkspaceRoot())
-		if err := manager.Cleanup(context.Background(), remote.cloneURL, remote.checkout); err != nil {
-			writer.sendError("workspace_cleanup_failed", "remote Git worktree could not be removed: "+err.Error(), msg.SessionID)
+		if err := manager.Cleanup(remote.checkout); err != nil {
+			writer.sendError("transfer_cleanup_failed", "remote Git worktree cleanup failed", msg.SessionID)
 			return
 		}
-	} else {
-		repositoryPath := s.manager.SessionWorkspacePath(msg.SessionID)
-		if repositoryPath == "" {
-			writer.sendError("workspace_cleanup_failed", "session workspace path is unavailable", msg.SessionID)
-			return
-		}
-		if err := os.RemoveAll(repositoryPath); err != nil {
-			writer.sendError("workspace_cleanup_failed", "session workspace could not be removed", msg.SessionID)
+	} else if workspacePath != "" {
+		if err := os.RemoveAll(workspacePath); err != nil {
+			writer.sendError("transfer_cleanup_failed", "workspace cleanup failed", msg.SessionID)
 			return
 		}
 	}
@@ -359,74 +356,27 @@ func (s *Server) handleTransferApplied(writer *connectionWriter, msg protocol.Me
 	s.transfers.clearReady(msg.SessionID)
 }
 
-func (w *connectionWriter) sendTransfer(ctx context.Context, sessionID, transferID, direction string, payload []byte) error {
-	if err := w.send(protocol.TypeTransferBegin, sessionID, protocol.TransferBegin{
-		TransferID: transferID,
-		Direction:  direction,
-		TotalBytes: int64(len(payload)),
-		Checksum:   protocol.TransferChecksum(payload),
-	}); err != nil {
-		return err
-	}
-	chunkSize := protocol.TransferChunkSize
-	for offset := 0; offset < len(payload); offset += chunkSize {
-		end := offset + chunkSize
-		if end > len(payload) {
-			end = len(payload)
-		}
-		if err := w.send(protocol.TypeTransferChunk, sessionID, protocol.TransferChunk{
-			TransferID: transferID,
-			Data:       base64.StdEncoding.EncodeToString(payload[offset:end]),
-		}); err != nil {
-			return err
-		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-	}
-	return w.send(protocol.TypeTransferEnd, sessionID, protocol.TransferEnd{TransferID: transferID})
-}
-
 func (s *Server) syncWorkspaceBack(writer streamWriter, sessionID, transferID string) {
 	if strings.TrimSpace(transferID) == "" {
 		transferID = sessionID + "-sync"
 	}
-	fail := func(message string) {
-		_ = writer.send(protocol.TypeTransferFailed, sessionID, protocol.TransferFailed{
-			TransferID: transferID,
-			Code:       "transfer_failed",
-			Message:    message,
-		})
-	}
 	repositoryPath := s.manager.SessionWorkspacePath(sessionID)
-	if repositoryPath == "" {
-		fail("session workspace path is unavailable")
-		return
-	}
 	state, ok := s.transfers.checkout(sessionID)
-	if !ok {
-		fail("workspace execution-start state is unavailable")
-		return
-	}
-	if !workspace.IsRepository(context.Background(), repositoryPath) {
-		fail("session workspace is not a Git repository")
+	if !ok || !workspace.IsRepository(repositoryPath) {
+		_ = writer.send(protocol.TypeTransferFailed, sessionID, protocol.TransferFailed{TransferID: transferID, Code: "transfer_failed", Message: "workspace is unavailable"})
 		return
 	}
 	if _, err := workspace.FinalizeCheckout(context.Background(), repositoryPath, state); err != nil {
-		fail("workspace finalization failed: " + err.Error())
+		_ = writer.send(protocol.TypeTransferFailed, sessionID, protocol.TransferFailed{TransferID: transferID, Code: "transfer_failed", Message: "workspace finalization failed: " + err.Error()})
 		return
 	}
 	payload, err := workspace.SnapshotBundle(context.Background(), repositoryPath, transferID)
-	if err != nil || len(payload) == 0 {
-		if err != nil {
-			fail("workspace branch snapshot failed: " + err.Error())
-		} else {
-			fail("workspace branch snapshot is empty")
-		}
+	if err != nil {
+		_ = writer.send(protocol.TypeTransferFailed, sessionID, protocol.TransferFailed{TransferID: transferID, Code: "transfer_failed", Message: "workspace snapshot failed: " + err.Error()})
 		return
 	}
 	s.transfers.awaitApplied(sessionID, transferID)
 	if err := writer.sendTransfer(context.Background(), sessionID, transferID, protocol.TransferDirectionFromRunner, payload); err != nil {
-		fail("workspace branch transfer failed: " + err.Error())
+		_ = writer.send(protocol.TypeTransferFailed, sessionID, protocol.TransferFailed{TransferID: transferID, Code: "transfer_failed", Message: "workspace transfer failed: " + err.Error()})
 	}
 }
