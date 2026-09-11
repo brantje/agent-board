@@ -113,22 +113,3 @@ func (m *ProjectBackedMaterializer) ApplyReviewedRevision(ctx context.Context, p
 	}
 	return updatedHead, nil
 }
-
-// ApplyReviewedCandidate is retained only while older callers are migrated to
-// Git revision delivery in this branch. New Review delivery must use
-// ApplyReviewedRevision above.
-func (m *ProjectBackedMaterializer) ApplyReviewedCandidate(ctx context.Context, project store.Project, reviewID string, candidate AcceptedCandidate) (string, error) {
-	if m == nil || m.issue == nil || m.projects == nil {
-		return "", fmt.Errorf("apply reviewed candidate: %w", ErrInvalidMetadata)
-	}
-	locks := ProjectWorkspaceLockStore(m.issue.store)
-	git, ok := m.issue.git.(candidateGit)
-	if !ok {
-		return "", fmt.Errorf("apply reviewed candidate: trusted Git candidate capability is unavailable: %w", ErrInvalidMetadata)
-	}
-	applier, err := NewCandidateApplier(locks, m.projects, git)
-	if err != nil {
-		return "", err
-	}
-	return applier.Apply(ctx, project, reviewID, candidate)
-}
