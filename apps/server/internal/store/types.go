@@ -7,11 +7,19 @@ import (
 
 var EmptyObject = json.RawMessage(`{}`)
 
+const (
+	ProjectSourceLocal = "local"
+	ProjectSourceGit   = "git"
+)
+
 type Project struct {
 	AllowInternalRunner *bool
 	ID                  string
 	Name                string
 	IssuePrefix         string
+	SourceType          string
+	CloneURL            *string
+	SourceRef           *string
 	RepositoryPath      string
 	DefaultBranch       string
 	WorkflowSettings    json.RawMessage
