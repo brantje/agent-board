@@ -42,7 +42,7 @@ Required concerns include:
 - immutable provenance
 - raw-output/Artifact storage
 - Question/Review continuation durability
-- complete Review candidate evidence
+- Review SHA identity and reproducible Git diff
 - authentication/authorization negative cases
 
 ### Core Go commands
@@ -57,12 +57,21 @@ go build ./...
 
 Confirm the reported total coverage is at least 85% before completion; 90%+ remains the normal target.
 
-Runner changes run the equivalent commands under `apps/agent-runner` once that package exists:
+Runner changes run the equivalent commands under `apps/agent-runner`:
 
 ```bash
 cd apps/agent-runner
 go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out
+go vet ./...
+go build ./...
+```
+
+Shared Git-native behavior is tested directly as its own package:
+
+```bash
+cd packages/workspacegit
+go test ./...
 go vet ./...
 go build ./...
 ```
@@ -127,19 +136,27 @@ See `scheduler.md`.
 
 ## Workspace/source tests
 
-For the first v0.1 path cover:
+Git-native source/Workspace behavior must cover:
 
-- real local fixture Git repository materialized before Engine execution
+- deterministic `agent-board/<issue-key>` branch creation and continuation
+- shared finalization accepts the expected Issue branch and rejects a switched branch even when the new HEAD descends from the execution-start SHA
+- agent-created commits survive finalization
+- non-ignored leftovers are committed; ignored files remain excluded
+- history rewrites/conflicts fail safely and retain recoverable state
 - local source path validation against authorized roots
-- same Issue reuses Workspace across attempts
-- Runtime Instance remains bound to exactly one Workspace for its lifetime
-- same-Workspace Runtime Instance reuse does not reset/corrupt Workspace state
-- replacement Runtime Instance can mount the same durable Workspace
-- cross-Project Workspace/repository isolation
-- bootstrap concurrency/retry safety
+- local branch-only Runner transfer starts/returns the exact Issue revision and retains Runner state until apply acknowledgement
+- remote bare cache first clone and later fetch
+- `refs/remotes/origin/*` source refs remain separate from `refs/heads/agent-board/*` Issue refs
+- configured source ref and refreshed remote default branch behavior
+- same-repository cache mutations serialize while different repositories can mutate concurrently
+- two Issues in the same Project remain isolated; one Issue cannot reset/rebase/mutate the other's branch
+- remote publication uses normal/non-force push
+- successful remote push followed by lost response/persistence can recover idempotently from the retained session/worktree
+- unrelated remote Issue-branch advancement/rewrite remains rejected
+- another Runner can continue a durably published Issue revision
+- clean local target integration succeeds and conflicting integration fails/rolls back cleanly
+- Review `base_revision` + `review_revision` reproduce the expected `git diff base..review`
 - repository failure does not silently create an unrelated empty repository
-
-When remote Source Connections are implemented, extend coverage with authentication failure behavior and credential non-disclosure in Git config/logs/provenance.
 
 See `source-control.md`.
 
@@ -147,7 +164,7 @@ See `source-control.md`.
 
 Runtime/runner contract and integration tests cover:
 
-- Runtime create/start/inspect/stop/destroy
+- Runtime create/start/inspect/stop/destroy for the legacy managed-compute path
 - runner starts from the official Runtime image only for the legacy Docker path
 - external and internal runners connect outbound over protocol v2
 - versioned WebSocket handshake and incompatible-version failure
@@ -159,7 +176,6 @@ Runtime/runner contract and integration tests cover:
 - non-zero exit status
 - one process tree per Execution Session
 - `/workspace` working directory/write persistence
-- same Workspace remains visible across sequential sessions
 - cancellation/graceful/forced process-tree cleanup
 - runner/session disconnect reconciliation without blindly duplicating execution
 - cleanup after backend restart
@@ -167,18 +183,10 @@ Runtime/runner contract and integration tests cover:
 - network/resource/policy enforcement
 - secret values are not reflected in runner protocol output
 - Docker socket absence inside Agent Runtime
+- `WAITING_FOR_INPUT` keeps the same live Runner/Execution Session/checkout
+- retained local/remote checkout state is cleaned only after durable apply acknowledgement
 
-A real-Docker flow should prove:
-
-```text
-Runtime Instance
- -> agent-runner connects
- -> Execution Session 1 writes Workspace
- -> session completes
- -> Execution Session 2 sees same Workspace state
- -> Runtime Instance destroyed
- -> Workspace survives
-```
+A real Runner flow should prove source-aware Git execution and continuation. Legacy Docker lifecycle integration remains required for code that changes that compatibility path.
 
 See `runtime-contract.md`, `runtime-execution.md` and `agent-runner.md`.
 
@@ -189,10 +197,12 @@ At minimum prove:
 - historical provenance unaffected by later config edits
 - raw output is bounded/chunked and redacted
 - Artifacts are first-class and Project scoped
-- complete candidate includes staged + unstaged + new/untracked files
-- deletes/renames represented correctly
+- Review pins exact `base_revision` and `review_revision`
+- `git diff base_revision..review_revision` reproduces the reviewed source change
+- Request Changes advances the same Issue branch while old Review SHAs remain immutable
+- no Review filesystem snapshot is required to reproduce reviewed code
 - missing tests are not shown as success
-- prior attempt evidence remains inspectable after later Workspace changes
+- prior attempt evidence remains inspectable after later Issue branch changes
 
 See `execution-evidence.md`.
 
@@ -222,6 +232,7 @@ Cover:
 - unsafe source/server URLs/SSRF where applicable
 - forbidden Docker/host access
 - Runtime Instance cannot be rebound to another Workspace
+- remote Git credentials remain Runner-host Git configuration rather than durable control-plane evidence
 
 ## Definition of done
 
@@ -234,6 +245,7 @@ A change is not complete until:
 - targeted tests pass
 - relevant broader Go/frontend suites pass
 - Go vet/build pass when backend or runner changed
+- shared Go packages changed by the work pass their own test/vet/build checks
 - frontend typecheck/build pass when frontend changed
 - schema applies cleanly to a fresh database when database structure changed
 - Docker/integration suites pass when the change affects those boundaries
@@ -242,20 +254,21 @@ PR descriptions should state which tests were written first, which verification 
 
 ## v0.1 end-to-end gate
 
-The repository must eventually have an integration path proving:
+The repository must have integration coverage proving the preferred flow:
 
 ```text
-Local Project repository
+Project source
  -> Issue assignment
  -> durable scheduler
- -> Issue Workspace
- -> Runtime Instance
- -> agent-runner
+ -> deterministic Issue branch
+ -> selected Runner
  -> Execution Session
  -> real coding Engine
- -> real Workspace changes
+ -> Git-native Workspace changes/finalization
  -> durable evidence
- -> Review-ready result
+ -> Review pinned to Git SHAs
 ```
+
+Legacy Runtime/Docker integration remains a separate compatibility gate where that path is changed.
 
 Green unit tests or a passing numeric coverage threshold alone are not proof that the v0.1 flow is complete.
