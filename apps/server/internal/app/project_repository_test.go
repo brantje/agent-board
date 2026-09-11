@@ -166,6 +166,43 @@ func TestCreateGitProjectRequiresCloneURL(t *testing.T) {
 	}
 }
 
+func TestCreateGitProjectRejectsCredentialsInHTTPCloneURL(t *testing.T) {
+	service := New(&recordingProjectStore{})
+	cloneURL := "https://user:token@example.com/acme/widget.git"
+
+	_, err := service.CreateProject(context.Background(), store.Project{
+		Name:        "Widget",
+		IssuePrefix: "WG",
+		SourceType:  store.ProjectSourceGit,
+		CloneURL:    &cloneURL,
+	})
+	if err == nil {
+		t.Fatal("CreateProject() error = nil")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "invalid_argument" {
+		t.Fatalf("CreateProject() error = %v, want invalid_argument", err)
+	}
+}
+
+func TestCreateGitProjectAllowsSCPStyleCloneURL(t *testing.T) {
+	service := New(&recordingProjectStore{})
+	cloneURL := "git@example.com:acme/widget.git"
+
+	project, err := service.CreateProject(context.Background(), store.Project{
+		Name:        "Widget",
+		IssuePrefix: "WG",
+		SourceType:  store.ProjectSourceGit,
+		CloneURL:    &cloneURL,
+	})
+	if err != nil {
+		t.Fatalf("CreateProject() error = %v", err)
+	}
+	if project.CloneURL == nil || *project.CloneURL != cloneURL {
+		t.Fatalf("CreateProject() cloneURL = %v, want %q", project.CloneURL, cloneURL)
+	}
+}
+
 func TestCreateProjectRejectsUnknownSourceType(t *testing.T) {
 	service := New(&recordingProjectStore{})
 	_, err := service.CreateProject(context.Background(), store.Project{
