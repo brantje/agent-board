@@ -478,7 +478,7 @@ func validateProject(v store.Project) error {
 		}
 		cloneURL := strings.TrimSpace(*v.CloneURL)
 		parsed, err := url.Parse(cloneURL)
-		if err == nil && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) && parsed.User != nil {
+		if err == nil && parsed.User != nil {
 			return invalid("cloneUrl must not contain credentials")
 		}
 	default:
