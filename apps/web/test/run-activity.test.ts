@@ -280,6 +280,28 @@ describe('run activity projection', () => {
     expect(items.map(item => item.kind)).toEqual(['event', 'thought'])
   })
 
+  it('shows thought before question and last tool when persistence arrived tool-question-thought', () => {
+    const items = projectRunActivity([
+      event({ id: 'read', type: 'tool.started', sequence: 1, payload: { toolCallId: 'read-1', name: 'read', input: { filePath: 'a.go' } } }),
+      event({ id: 'read-done', type: 'tool.completed', sequence: 2, payload: { toolCallId: 'read-1', name: 'read', summary: 'a.go' } }),
+      event({ id: 'write', type: 'tool.started', sequence: 3, payload: { toolCallId: 'write-1', name: 'write', input: { path: 'b.go' } } }),
+      event({ id: 'write-done', type: 'tool.completed', sequence: 4, payload: { toolCallId: 'write-1', name: 'write', summary: 'b.go' } }),
+      event({ id: 'question', type: 'question.created', sequence: 5, payload: { questionId: 'q1', prompt: 'Which marker should I write?' } }),
+      event({ id: 'thought', type: 'agent.message', sequence: 6, payload: { kind: 'reasoning', message: 'I need your input before continuing.' } })
+    ])
+    expect(items.map(item => item.kind)).toEqual(['tool', 'thought', 'tool', 'question'])
+    expect(items[1]).toMatchObject({ kind: 'thought', message: 'I need your input before continuing.' })
+    expect(items[3]).toMatchObject({ kind: 'question', prompt: 'Which marker should I write?' })
+  })
+
+  it('keeps thought before question when already in order', () => {
+    const items = projectRunActivity([
+      event({ id: 'thought', type: 'agent.message', sequence: 1, payload: { kind: 'reasoning', message: 'Asking first.' } }),
+      event({ id: 'question', type: 'question.created', sequence: 2, payload: { questionId: 'q1', prompt: 'Proceed?' } })
+    ])
+    expect(items.map(item => item.kind)).toEqual(['thought', 'question'])
+  })
+
   it('hides engine question reply-accepted and binding-resolved events', () => {
     const items = projectRunActivity([
       event({ id: 'wait', type: 'run.waiting_for_input', sequence: 1 }),

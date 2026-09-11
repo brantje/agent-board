@@ -534,6 +534,15 @@ function reorderThoughtsBeforeTools(items: RunActivityItem[]) {
   for (let index = 0; index < reordered.length - 1; index++) {
     const current = reordered[index]
     const next = reordered[index + 1]
+    if (current?.kind === 'question' && isAgentTextActivity(next)) {
+      reordered[index] = next
+      reordered[index + 1] = current
+      index++
+    }
+  }
+  for (let index = 0; index < reordered.length - 1; index++) {
+    const current = reordered[index]
+    const next = reordered[index + 1]
     if (current?.kind === 'tool' && isAgentTextActivity(next)) {
       reordered[index] = next
       reordered[index + 1] = current

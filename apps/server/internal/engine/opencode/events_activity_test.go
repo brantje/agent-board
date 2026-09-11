@@ -74,6 +74,69 @@ func TestFlushPendingMessagesPreservesArrivalOrder(t *testing.T) {
 	}
 }
 
+type flushOrderQuestioner struct {
+	sink            *recordingActivitySink
+	openCalled      bool
+	reasoningAtOpen bool
+}
+
+func (q *flushOrderQuestioner) Open(_ context.Context, correlation string, request engine.QuestionRequest) (engine.Question, error) {
+	q.openCalled = true
+	q.noteReasoningAtOpen()
+	return engine.Question{}, errors.New("stop after open")
+}
+
+func (q *flushOrderQuestioner) OpenBatch(_ context.Context, requests []engine.CorrelatedQuestionRequest) ([]engine.Question, error) {
+	q.openCalled = true
+	q.noteReasoningAtOpen()
+	return nil, errors.New("stop after open")
+}
+
+func (q *flushOrderQuestioner) WaitAnswer(context.Context, string) (engine.QuestionAnswer, error) {
+	return engine.QuestionAnswer{}, errors.New("unreachable")
+}
+
+func (q *flushOrderQuestioner) Resolve(context.Context, string) error {
+	return errors.New("unreachable")
+}
+
+func (q *flushOrderQuestioner) noteReasoningAtOpen() {
+	for _, event := range q.sink.events {
+		if event.Type == "agent.message" && event.Payload["kind"] == "reasoning" && event.Payload["message"] == "Need user input on approach." {
+			q.reasoningAtOpen = true
+			return
+		}
+	}
+}
+
+func TestPendingReasoningFlushesBeforeQuestion(t *testing.T) {
+	sink := &recordingActivitySink{}
+	questions := &flushOrderQuestioner{sink: sink}
+	state := newRunState("ses_1", questions, sink)
+	reasoning := mustJSON(t, map[string]any{"id": "reason_open", "sessionID": "ses_1", "text": "Need user input on approach.", "time": map[string]any{"start": 1}})
+	if err := state.handleReasoningPart(context.Background(), reasoning); err != nil {
+		t.Fatalf("buffer reasoning error=%v", err)
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("incomplete reasoning persisted early: %+v", sink.events)
+	}
+
+	err := state.handleQuestion(context.Background(), nil, client.QuestionRequest{
+		ID:        "que_1",
+		SessionID: "ses_1",
+		Questions: []client.QuestionInfo{{Question: "Which approach?"}},
+	})
+	if err == nil || !questions.openCalled {
+		t.Fatalf("handleQuestion() error=%v openCalled=%v", err, questions.openCalled)
+	}
+	if !questions.reasoningAtOpen {
+		t.Fatalf("reasoning not flushed before question open: events=%+v", sink.events)
+	}
+	if len(sink.events) != 1 || sink.events[0].Type != "agent.message" || sink.events[0].Payload["kind"] != "reasoning" {
+		t.Fatalf("events=%+v", sink.events)
+	}
+}
+
 func TestPendingReasoningFlushesBeforeToolAndIdle(t *testing.T) {
 	sink := &recordingActivitySink{}
 	state := newRunState("ses_1", nil, sink)
