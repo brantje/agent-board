@@ -115,10 +115,6 @@ func newRunnerSyncProcessor(t *testing.T, repo string, safe executioncontext.Saf
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), storeFake, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	engines, err := engine.NewRegistry(processTestEngine{workspace: repo})
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +131,6 @@ func newRunnerSyncProcessor(t *testing.T, repo string, safe executioncontext.Saf
 		engines,
 		recorder,
 		output,
-		candidate,
 		git,
 		runnerSyncConnector{client: client},
 	)
