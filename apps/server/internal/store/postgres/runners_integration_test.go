@@ -76,6 +76,34 @@ func TestPendingRunnerCannotRenameOrRotate(t *testing.T) {
 	}
 }
 
+func TestCountRunnerReservations(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "runner-reservations")
+	r, err := s.CreateRunner(ctx, store.Runner{Name: "Reservation host", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := enqueueFixtureRun(t, s, f, f.run, "runner-reservation-count")
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO scheduler_capacity_reservations (project_id, job_id, run_id, resource_kind, resource_id)
+		VALUES ($1, $2, $3, 'RUNNER', $4::uuid)
+	`, f.project.ID, job.ID, f.run.ID, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	counts, err := s.CountRunnerReservations(ctx, []string{r.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[r.ID] != 1 {
+		t.Fatalf("counts=%v", counts)
+	}
+	empty, err := s.CountRunnerReservations(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty ids counts=%v err=%v", empty, err)
+	}
+}
+
 func TestRunnerUpdateConfiguredMaxActiveSessions(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()

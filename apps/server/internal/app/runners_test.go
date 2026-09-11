@@ -15,7 +15,8 @@ import (
 
 type runnerMemory struct {
 	store.RunnerStore
-	value store.Runner
+	value        store.Runner
+	reservations map[string]int
 }
 
 func (m *runnerMemory) CreateRunner(_ context.Context, r store.Runner) (store.Runner, error) {
@@ -70,6 +71,18 @@ func (m *runnerMemory) UpdateRunner(_ context.Context, id, name string, maxActiv
 		m.value.Capabilities = runnerconn.WithConfiguredMaxActiveSessions(m.value.Capabilities, *maxActiveSessions)
 	}
 	return m.value, nil
+}
+func (m *runnerMemory) CountRunnerReservations(_ context.Context, ids []string) (map[string]int, error) {
+	if len(ids) == 0 {
+		return map[string]int{}, nil
+	}
+	counts := map[string]int{}
+	for _, id := range ids {
+		if count, ok := m.reservations[id]; ok {
+			counts[id] = count
+		}
+	}
+	return counts, nil
 }
 func (m *runnerMemory) RevokeRunner(_ context.Context, id string, deleted bool) (store.Runner, error) {
 	if id != m.value.ID || m.value.Internal || m.value.DeletedAt != nil {
@@ -201,6 +214,23 @@ func TestPendingRunnerRevokeAndDeleteInvalidateRegistration(t *testing.T) {
 				t.Fatal("revoked/deleted pending runner registered")
 			}
 		})
+	}
+}
+
+func TestRunnerServiceCountReservations(t *testing.T) {
+	ctx := context.Background()
+	memory := &runnerMemory{reservations: map[string]int{"runner-id": 2}}
+	s := NewRunnerService(memory)
+	counts, err := s.CountReservations(ctx, []string{"runner-id", "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts["runner-id"] != 2 || counts["missing"] != 0 {
+		t.Fatalf("counts=%v", counts)
+	}
+	empty, err := s.CountReservations(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty counts=%v err=%v", empty, err)
 	}
 }
 

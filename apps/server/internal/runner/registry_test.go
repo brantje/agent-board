@@ -194,6 +194,13 @@ func TestRegistryDisconnectAndReconcile(t *testing.T) {
 	if !registry.Connected("runner") {
 		t.Fatal("authenticated runner not live")
 	}
+	healthSnapshot, ok := registry.Health("runner")
+	if !ok || healthSnapshot.Status != "ok" {
+		t.Fatalf("health=%+v ok=%v", healthSnapshot, ok)
+	}
+	if _, healthOK := registry.Health("missing"); healthOK {
+		t.Fatal("missing runner reported health")
+	}
 	if _, _, err := registry.Reconcile(context.Background(), "project", "runner", ""); err == nil {
 		t.Fatal("reconcile accepted a blank session")
 	}

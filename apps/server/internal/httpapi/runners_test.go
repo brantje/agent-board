@@ -189,6 +189,10 @@ func TestRunnerAPIPublicLifecycle(t *testing.T) {
 	if capacity.Code != http.StatusOK || !strings.Contains(capacity.Body.String(), `"maxActiveSessions":4`) {
 		t.Fatalf("capacity update %d %s", capacity.Code, capacity.Body.String())
 	}
+	invalidCapacity := runnerAPIRequest(router, http.MethodPatch, "/api/runners/"+otherID, `{"name":"Edge host","maxActiveSessions":0}`)
+	if invalidCapacity.Code != http.StatusBadRequest {
+		t.Fatalf("invalid capacity accepted: %d %s", invalidCapacity.Code, invalidCapacity.Body.String())
+	}
 
 	rotate := runnerAPIRequest(router, http.MethodPost, "/api/runners/"+otherID+"/rotate-token", "")
 	var rotated struct {

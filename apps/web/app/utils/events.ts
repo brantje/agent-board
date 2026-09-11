@@ -565,6 +565,7 @@ function moveQuestionExplanationBeforePrompts(items: RunActivityItem[]) {
     }
     if (target < 0) continue
     const [thought] = reordered.splice(index, 1)
+    if (!thought) continue
     reordered.splice(target, 0, thought)
     break
   }
