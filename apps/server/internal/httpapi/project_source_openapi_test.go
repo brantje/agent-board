@@ -27,6 +27,9 @@ func TestProjectSourceOpenAPISchemasExposeLocalAndGitConfiguration(t *testing.T)
 	if !strings.Contains(project, "sourceRef:\n      type: [string, 'null']") {
 		t.Fatalf("Project sourceRef must be nullable: %s", project)
 	}
+	if !strings.Contains(project, "embedded URI credentials are not allowed") {
+		t.Fatalf("Project cloneUrl must document the credential boundary: %s", project)
+	}
 
 	create := topLevelYAMLBlock(doc, "ProjectCreate")
 	if !strings.Contains(create, "required: [name, issuePrefix]") {
