@@ -152,11 +152,13 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 
 	runnerID := strings.TrimSpace(claim.RunnerID)
 	if runnerID != "" {
-		ready, err := p.ensureRunnerWorkspace(ctx, run, safe)
-		if err != nil {
-			return failed(err), nil
+		if !isRemoteGitProject(safe) {
+			ready, err := p.ensureRunnerWorkspace(ctx, run, safe)
+			if err != nil {
+				return failed(err), nil
+			}
+			safe = ready
 		}
-		safe = ready
 		preparer, ok := p.sessions.(runnerSessionPreparer)
 		if !ok {
 			return failed(fmt.Errorf("runner session preparer is unavailable")), nil
@@ -811,6 +813,9 @@ func (p *Processor) ensureRunnerWorkspace(ctx context.Context, run store.Run, sa
 }
 
 func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
+	if isRemoteGitProject(safe) {
+		return p.prepareRemoteGitWorkspace(ctx, safe, runnerID, sessionID)
+	}
 	if p.runners == nil {
 		return fmt.Errorf("runner connector is unavailable")
 	}
@@ -888,6 +893,17 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
 		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
 	}
+	if isRemoteGitProject(safe) {
+		if engineResult.Summary != "" {
+			if err := p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, nil, nil); err != nil {
+				return scheduler.Result{}, err
+			}
+		}
+		if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, nil, nil); err != nil {
+			return scheduler.Result{}, err
+		}
+		return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
+	}
 	snapshot, snapshotErr := p.candidate.Snapshot(ctx, launcher.scope, safe.Workspace.Path)
 	if snapshotErr == nil {
 		snapshotErr = p.recordCandidate(ctx, safe, "", snapshot)
@@ -915,6 +931,9 @@ func (p *Processor) transferProgressRecorder(ctx context.Context, safe execution
 }
 
 func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
+	if isRemoteGitProject(safe) {
+		return p.publishRemoteGitWorkspace(ctx, safe, runnerID, sessionID)
+	}
 	if sessionID == "" || p.runners == nil {
 		return fmt.Errorf("workspace sync requires a prepared runner execution session")
 	}
@@ -955,6 +974,10 @@ func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executionc
 	}
 	defer func() { _ = lock.Release() }()
 	if err := gitCLI.ApplyTransferBundle(ctx, safe.Workspace.Path, payload); err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{"reason": err.Error()}), nil, nil)
+		return err
+	}
+	if err := p.persistLocalWorkspaceRevision(ctx, safe); err != nil {
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{"reason": err.Error()}), nil, nil)
 		return err
 	}
