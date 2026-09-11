@@ -144,8 +144,8 @@ func (a *api) updateProject(w http.ResponseWriter, r *http.Request) {
 	if req.SourceType != nil {
 		current.SourceType = *req.SourceType
 	}
-	if req.CloneURL != nil {
-		current.CloneURL = req.CloneURL
+	if req.CloneURL.Set {
+		current.CloneURL = req.CloneURL.Value
 	}
 	if req.SourceRef.Set {
 		current.SourceRef = req.SourceRef.Value

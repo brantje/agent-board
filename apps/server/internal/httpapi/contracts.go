@@ -176,7 +176,7 @@ type UpdateProjectRequest struct {
 	AllowInternalRunner *bool                  `json:"allowInternalRunner,omitempty"`
 	Name                *string                `json:"name"`
 	SourceType          *string                `json:"sourceType"`
-	CloneURL            *string                `json:"cloneUrl"`
+	CloneURL            optionalNullableString `json:"cloneUrl"`
 	SourceRef           optionalNullableString `json:"sourceRef"`
 	RepositoryPath      *string                `json:"repositoryPath"`
 	DefaultBranch       *string                `json:"defaultBranch"`
@@ -216,7 +216,7 @@ type UpdateProviderRequest struct {
 	Name          *string          `json:"name"`
 	Kind          *string          `json:"kind"`
 	BaseURL       *string          `json:"baseUrl"`
-	CredentialRef *string          `json:"credentialRef"`
+	CredentialRef *string         `json:"credentialRef"`
 	Enabled       *bool            `json:"enabled"`
 	SafeMetadata  *json.RawMessage `json:"safeMetadata"`
 }
