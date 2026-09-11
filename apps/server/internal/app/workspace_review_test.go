@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
-	workspacepkg "github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
 type reviewDeliveryMaterializer struct {
@@ -18,8 +17,9 @@ type reviewDeliveryMaterializer struct {
 func (m *reviewDeliveryMaterializer) Ensure(context.Context, store.Project, store.Issue, store.Workspace) (store.Workspace, error) {
 	return store.Workspace{}, nil
 }
-func (m *reviewDeliveryMaterializer) ApplyReviewedCandidate(_ context.Context, _ store.Project, reviewID string, _ workspacepkg.AcceptedCandidate) (string, error) {
-	m.reviewID = reviewID
+
+func (m *reviewDeliveryMaterializer) ApplyReviewedRevision(_ context.Context, _ store.Project, review store.Review) (string, error) {
+	m.reviewID = review.ID
 	return m.revision, m.err
 }
 
@@ -30,13 +30,15 @@ func TestWorkspaceServiceReviewDeliveryBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	revision, err := service.ApplyReviewedCandidate(t.Context(), store.Project{ID: "project"}, "review-1", workspacepkg.AcceptedCandidate{})
+	review := store.Review{ID: "review-1", BaseRevision: "base-sha", ReviewRevision: "review-sha"}
+	revision, err := service.ApplyReviewedRevision(t.Context(), store.Project{ID: "project"}, review)
 	if err != nil || revision != "accepted-sha" || materializer.reviewID != "review-1" {
 		t.Fatalf("revision=%q reviewID=%q err=%v", revision, materializer.reviewID, err)
 	}
 
 	materializer.err = errors.New("conflict")
-	if _, err := service.ApplyReviewedCandidate(t.Context(), store.Project{ID: "project"}, "review-2", workspacepkg.AcceptedCandidate{}); err == nil {
+	review.ID = "review-2"
+	if _, err := service.ApplyReviewedRevision(t.Context(), store.Project{ID: "project"}, review); err == nil {
 		t.Fatal("expected apply error")
 	} else if appErr, ok := AsError(err); !ok || appErr.Code != "review_apply_failed" {
 		t.Fatalf("error=%v", err)
@@ -58,7 +60,7 @@ func TestWorkspaceServiceReviewDeliveryRejectsUnavailableMaterializer(t *testing
 	}
 
 	var nilService *WorkspaceService
-	_, err := nilService.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", workspacepkg.AcceptedCandidate{})
+	_, err := nilService.ApplyReviewedRevision(t.Context(), store.Project{}, store.Review{})
 	assertInternalUnavailable(t, err)
 
 	service, err := NewWorkspaceService(&workspaceLookupFake{}, workspaceMaterializerFunc(func(context.Context, store.Project, store.Issue, store.Workspace) (store.Workspace, error) {
@@ -67,6 +69,6 @@ func TestWorkspaceServiceReviewDeliveryRejectsUnavailableMaterializer(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", workspacepkg.AcceptedCandidate{})
+	_, err = service.ApplyReviewedRevision(t.Context(), store.Project{}, store.Review{})
 	assertInternalUnavailable(t, err)
 }
