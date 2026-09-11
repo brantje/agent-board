@@ -52,6 +52,14 @@ ProjectCreate:
   type: object
   additionalProperties: false
   required: [name, issuePrefix]
+  oneOf:
+    - required: [repositoryPath]
+      properties:
+        sourceType: {type: string, enum: [local]}
+    - required: [sourceType, cloneUrl]
+      properties:
+        sourceType: {type: string, enum: [git]}
+        cloneUrl: {type: string, minLength: 1}
   properties:
     name: {type: string}
     issuePrefix: {$ref: '#/IssuePrefix'}
