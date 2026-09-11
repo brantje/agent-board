@@ -172,14 +172,6 @@ func (s *RedactingStore) UpdateWorkspaceCurrentRevision(ctx context.Context, pro
 	return base.UpdateWorkspaceCurrentRevision(ctx, projectID, workspaceID, revision)
 }
 
-func (s *RedactingStore) GetReviewRevisions(ctx context.Context, projectID, reviewID string) (string, string, error) {
-	base, ok := s.ControlPlaneStore.(store.ReviewRevisionStore)
-	if !ok {
-		return "", "", fmt.Errorf("redacting store base does not support review revision reads")
-	}
-	return base.GetReviewRevisions(ctx, projectID, reviewID)
-}
-
 func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner, error) {
 	base, ok := s.ControlPlaneStore.(runnerLookupStore)
 	if !ok {
@@ -189,4 +181,3 @@ func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner
 }
 
 var _ store.WorkspaceRevisionStore = (*RedactingStore)(nil)
-var _ store.ReviewRevisionStore = (*RedactingStore)(nil)
