@@ -10,10 +10,6 @@ import (
 	sharedworkspace "github.com/brantje/agent-board/packages/workspacegit"
 )
 
-func (g *GitCLI) FinalizeCheckout(ctx context.Context, repositoryPath, startRevision string) (string, error) {
-	return sharedworkspace.FinalizeCheckout(ctx, repositoryPath, startRevision, g.binary, g.commandTimeout)
-}
-
 // TransferSnapshot exports the current clean Issue branch as normal Git
 // history. Mutable staging/worktree state is intentionally not transported.
 func (g *GitCLI) TransferSnapshot(ctx context.Context, repositoryPath, transferID string) ([]byte, error) {
