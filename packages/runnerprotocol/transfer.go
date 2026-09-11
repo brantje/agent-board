@@ -88,9 +88,12 @@ type GitPrepare struct {
 }
 
 // GitPublished is returned after the Runner safely finalizes and normally
-// pushes the Issue branch. The worktree remains retained until TransferApplied.
+// pushes the Issue branch. StartRevision is the exact revision from which this
+// retained Runner worktree began; the server persists it as the remote
+// Workspace base before acknowledging cleanup.
 type GitPublished struct {
-	Revision string `json:"revision"`
+	StartRevision string `json:"start_revision"`
+	Revision      string `json:"revision"`
 }
 
 // TransferApplied acknowledges that the server verified and successfully
