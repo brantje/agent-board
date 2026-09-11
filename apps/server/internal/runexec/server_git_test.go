@@ -34,8 +34,9 @@ func (s *serverFinalizeStore) UpdateWorkspaceCurrentRevision(_ context.Context, 
 }
 
 type serverFinalizeGit struct {
-	start     string
-	revision  string
+	branch      string
+	start       string
+	revision    string
 	finalizeErr error
 }
 
@@ -47,7 +48,8 @@ func (g *serverFinalizeGit) HeadRevision(context.Context, string) (string, error
 func (g *serverFinalizeGit) CurrentBranch(context.Context, string) (string, error) { return "agent-board/AB-1", nil }
 func (g *serverFinalizeGit) OriginURL(context.Context, string) (string, error) { return "", nil }
 func (g *serverFinalizeGit) IsRepository(context.Context, string) (bool, error) { return true, nil }
-func (g *serverFinalizeGit) FinalizeCheckout(_ context.Context, _ string, start string) (string, error) {
+func (g *serverFinalizeGit) FinalizeCheckout(_ context.Context, _ string, branch, start string) (string, error) {
+	g.branch = branch
 	g.start = start
 	if g.finalizeErr != nil {
 		return "", g.finalizeErr
@@ -55,21 +57,26 @@ func (g *serverFinalizeGit) FinalizeCheckout(_ context.Context, _ string, start 
 	return g.revision, nil
 }
 
+func serverFinalizeSafeContext(base *string) executioncontext.SafeContext {
+	return executioncontext.SafeContext{
+		Project: executioncontext.ProjectContext{ID: "project-1"},
+		Workspace: executioncontext.WorkspaceContext{
+			ID: "workspace-1", Path: "/workspace", BaseRevision: base, WorkingBranch: "agent-board/AB-1",
+		},
+	}
+}
+
 func TestFinalizeServerWorkspaceUsesPersistedStartRevision(t *testing.T) {
 	storeFake := &serverFinalizeStore{current: "start-sha"}
 	git := &serverFinalizeGit{revision: "review-sha"}
 	processor := &Processor{store: storeFake, git: git}
-	safe := executioncontext.SafeContext{
-		Project: executioncontext.ProjectContext{ID: "project-1"},
-		Workspace: executioncontext.WorkspaceContext{ID: "workspace-1", Path: "/workspace"},
-	}
 
-	revision, err := processor.finalizeServerWorkspace(t.Context(), safe)
+	revision, err := processor.finalizeServerWorkspace(t.Context(), serverFinalizeSafeContext(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if revision != "review-sha" || git.start != "start-sha" || storeFake.persisted != "review-sha" {
-		t.Fatalf("revision=%q start=%q persisted=%q", revision, git.start, storeFake.persisted)
+	if revision != "review-sha" || git.branch != "agent-board/AB-1" || git.start != "start-sha" || storeFake.persisted != "review-sha" {
+		t.Fatalf("revision=%q branch=%q start=%q persisted=%q", revision, git.branch, git.start, storeFake.persisted)
 	}
 }
 
@@ -78,33 +85,30 @@ func TestFinalizeServerWorkspaceFallsBackToBaseRevision(t *testing.T) {
 	storeFake := &serverFinalizeStore{}
 	git := &serverFinalizeGit{revision: "base-sha"}
 	processor := &Processor{store: storeFake, git: git}
-	safe := executioncontext.SafeContext{
-		Project: executioncontext.ProjectContext{ID: "project-1"},
-		Workspace: executioncontext.WorkspaceContext{ID: "workspace-1", Path: "/workspace", BaseRevision: &base},
-	}
 
-	if _, err := processor.finalizeServerWorkspace(t.Context(), safe); err != nil {
+	if _, err := processor.finalizeServerWorkspace(t.Context(), serverFinalizeSafeContext(&base)); err != nil {
 		t.Fatal(err)
 	}
-	if git.start != base || storeFake.persisted != "base-sha" {
-		t.Fatalf("start=%q persisted=%q", git.start, storeFake.persisted)
+	if git.branch != "agent-board/AB-1" || git.start != base || storeFake.persisted != "base-sha" {
+		t.Fatalf("branch=%q start=%q persisted=%q", git.branch, git.start, storeFake.persisted)
 	}
 }
 
 func TestFinalizeServerWorkspaceRejectsUnsafePersistence(t *testing.T) {
 	base := "base-sha"
-	safe := executioncontext.SafeContext{
-		Project: executioncontext.ProjectContext{ID: "project-1"},
-		Workspace: executioncontext.WorkspaceContext{ID: "workspace-1", Path: "/workspace", BaseRevision: &base},
-	}
+	safe := serverFinalizeSafeContext(&base)
 
-	t.Run("finalization failure", func(t *testing.T) {
+	t.Run("finalization failure does not persist", func(t *testing.T) {
+		storeFake := &serverFinalizeStore{}
 		processor := &Processor{
-			store: &serverFinalizeStore{},
-			git:   &serverFinalizeGit{finalizeErr: errors.New("history rewritten")},
+			store: storeFake,
+			git:   &serverFinalizeGit{finalizeErr: errors.New("workspace branch changed")},
 		}
 		if _, err := processor.finalizeServerWorkspace(t.Context(), safe); err == nil {
 			t.Fatal("unsafe checkout was finalized")
+		}
+		if storeFake.persisted != "" {
+			t.Fatalf("rejected finalization persisted revision %q", storeFake.persisted)
 		}
 	})
 
