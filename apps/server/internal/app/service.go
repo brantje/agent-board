@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/repository"
@@ -474,6 +475,11 @@ func validateProject(v store.Project) error {
 	case store.ProjectSourceGit:
 		if v.CloneURL == nil || strings.TrimSpace(*v.CloneURL) == "" {
 			return invalid("cloneUrl is required for git Projects")
+		}
+		cloneURL := strings.TrimSpace(*v.CloneURL)
+		parsed, err := url.Parse(cloneURL)
+		if err == nil && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) && parsed.User != nil {
+			return invalid("cloneUrl must not contain credentials")
 		}
 	default:
 		return invalid("sourceType must be local or git")
