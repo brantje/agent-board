@@ -281,16 +281,12 @@ func newOpenCodeIntegrationFixture(t *testing.T) *openCodeIntegrationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), services.ExecutionStore, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	engines, err := engine.NewRegistry(opencode.New())
 	if err != nil {
 		t.Fatal(err)
 	}
 	runnerConnector := NewRegistryConnector(services.ControlPlane.Runners.Connections)
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, git, runnerConnector)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, git, runnerConnector)
 	if err != nil {
 		t.Fatal(err)
 	}
