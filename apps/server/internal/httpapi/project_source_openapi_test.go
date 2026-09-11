@@ -37,6 +37,18 @@ func TestProjectSourceOpenAPISchemasExposeLocalAndGitConfiguration(t *testing.T)
 			t.Fatalf("ProjectCreate missing %s: %s", field, create)
 		}
 	}
+	if !strings.Contains(create, "oneOf:\n    - required: [repositoryPath]") {
+		t.Fatalf("ProjectCreate must require repositoryPath for local source requests: %s", create)
+	}
+	if !strings.Contains(create, "sourceType: {type: string, enum: [local]}") {
+		t.Fatalf("ProjectCreate local branch must restrict sourceType to local when supplied: %s", create)
+	}
+	if !strings.Contains(create, "- required: [sourceType, cloneUrl]") {
+		t.Fatalf("ProjectCreate must require sourceType and cloneUrl for git source requests: %s", create)
+	}
+	if !strings.Contains(create, "sourceType: {type: string, enum: [git]}") || !strings.Contains(create, "cloneUrl: {type: string, minLength: 1}") {
+		t.Fatalf("ProjectCreate git branch must require a non-empty cloneUrl: %s", create)
+	}
 
 	update := topLevelYAMLBlock(doc, "ProjectUpdate")
 	for _, field := range []string{"sourceType:", "cloneUrl:", "sourceRef:", "repositoryPath:", "defaultBranch:"} {
