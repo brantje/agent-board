@@ -9,6 +9,10 @@ import (
 func TestFinalizeCheckoutCommitsLeftoversAndPreservesStartRevision(t *testing.T) {
 	git := requireGit(t)
 	repo := createFixtureRepository(t, git.GitCLI, t.TempDir())
+	const branch = "agent-board/AB-1"
+	if err := git.CheckoutNewBranch(t.Context(), repo, branch); err != nil {
+		t.Fatal(err)
+	}
 	startRevision, err := git.HeadRevision(t.Context(), repo)
 	if err != nil {
 		t.Fatal(err)
@@ -21,7 +25,7 @@ func TestFinalizeCheckoutCommitsLeftoversAndPreservesStartRevision(t *testing.T)
 		t.Fatal(err)
 	}
 
-	revision, err := git.FinalizeCheckout(t.Context(), repo, startRevision)
+	revision, err := git.FinalizeCheckout(t.Context(), repo, branch, startRevision)
 	if err != nil {
 		t.Fatalf("FinalizeCheckout() error=%v", err)
 	}
