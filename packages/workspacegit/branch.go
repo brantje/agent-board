@@ -263,7 +263,7 @@ func runGit(ctx context.Context, binary string, commandTimeout time.Duration, ex
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if commandCtx.Err() != nil {
-			return "", fmt.Errorf("git %s: %w", commandCtx.Err())
+			return "", fmt.Errorf("git %s: %w", commandName(args), commandCtx.Err())
 		}
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
