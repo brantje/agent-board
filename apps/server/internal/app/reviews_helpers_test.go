@@ -18,19 +18,17 @@ func TestNewReviewServiceRequiresEveryDependency(t *testing.T) {
 	validStore := &reviewServiceStore{}
 	validEvidence := &RunEvidenceService{}
 	validApplier := &reviewCandidateApplierFake{}
-	withoutCandidates := &reviewCapabilityControlPlane{enabled: true}
 	cases := []struct {
 		name     string
 		reviews  store.ReviewStore
 		projects reviewProjectStore
 		evidence *RunEvidenceService
-		applier  reviewCandidateApplier
+		applier  reviewRevisionApplier
 	}{
 		{name: "review store", projects: validStore, evidence: validEvidence, applier: validApplier},
 		{name: "project store", reviews: validStore, evidence: validEvidence, applier: validApplier},
 		{name: "evidence", reviews: validStore, projects: validStore, applier: validApplier},
 		{name: "applier", reviews: validStore, projects: validStore, evidence: validEvidence},
-		{name: "candidate reader", reviews: withoutCandidates, projects: validStore, evidence: validEvidence, applier: validApplier},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -51,10 +49,9 @@ func TestReviewServiceFromServicesHonorsOptionalCapability(t *testing.T) {
 
 	disabled := &reviewCapabilityControlPlane{enabled: false}
 	services := &Services{
-		ExecutionStore:   disabled,
-		RunEvidence:      &RunEvidenceService{},
-		ReviewCandidates: &reviewServiceStore{},
-		Workspaces:       &WorkspaceService{},
+		ExecutionStore: disabled,
+		RunEvidence:    &RunEvidenceService{},
+		Workspaces:     &WorkspaceService{},
 	}
 	if ReviewServiceFromServices(services) != nil {
 		t.Fatal("disabled ReviewStore capability should not expose Reviews")
@@ -66,8 +63,8 @@ func TestReviewServiceFromServicesHonorsOptionalCapability(t *testing.T) {
 		t.Fatal("complete Review-capable Services should expose Reviews")
 	}
 
-	services.ReviewCandidates = nil
+	services.Workspaces = nil
 	if ReviewServiceFromServices(services) != nil {
-		t.Fatal("missing private Review candidate reader should not expose Reviews")
+		t.Fatal("missing Git review delivery service should not expose Reviews")
 	}
 }
