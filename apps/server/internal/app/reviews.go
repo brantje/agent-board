@@ -6,9 +6,7 @@ import (
 	"strings"
 	"time"
 
-	evidencepkg "github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/store"
-	workspacepkg "github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
 const reviewFailurePersistenceTimeout = 5 * time.Second
@@ -33,46 +31,31 @@ type reviewProjectStore interface {
 	GetProject(context.Context, string) (store.Project, error)
 }
 
-type reviewCandidateApplier interface {
-	ApplyReviewedCandidate(context.Context, store.Project, string, workspacepkg.AcceptedCandidate) (string, error)
+type reviewRevisionApplier interface {
+	ApplyReviewedRevision(context.Context, store.Project, store.Review) (string, error)
 }
 
 type ReviewService struct {
-	store      store.ReviewStore
-	projects   reviewProjectStore
-	evidence   *RunEvidenceService
-	candidates evidencepkg.ReviewCandidateReader
-	applier    reviewCandidateApplier
-	publisher  persistedEventPublisher
+	store     store.ReviewStore
+	projects  reviewProjectStore
+	evidence  *RunEvidenceService
+	applier   reviewRevisionApplier
+	publisher persistedEventPublisher
 }
 
-// NewReviewService builds the Review application boundary. Production callers
-// should pass the private candidate reader explicitly. Tests and composite
-// stores may omit it only when the ReviewStore itself implements that reader.
-func NewReviewService(reviewStore store.ReviewStore, projects reviewProjectStore, evidence *RunEvidenceService, applier reviewCandidateApplier, candidateReaders ...evidencepkg.ReviewCandidateReader) (*ReviewService, error) {
-	if reviewStore == nil || projects == nil || evidence == nil || applier == nil || len(candidateReaders) > 1 {
+func NewReviewService(reviewStore store.ReviewStore, projects reviewProjectStore, evidence *RunEvidenceService, applier reviewRevisionApplier) (*ReviewService, error) {
+	if reviewStore == nil || projects == nil || evidence == nil || applier == nil {
 		return nil, fmt.Errorf("review service dependencies are required")
 	}
-	var candidates evidencepkg.ReviewCandidateReader
-	if len(candidateReaders) == 1 {
-		candidates = candidateReaders[0]
-	} else if reader, ok := any(reviewStore).(evidencepkg.ReviewCandidateReader); ok {
-		candidates = reader
-	}
-	if candidates == nil {
-		return nil, fmt.Errorf("review candidate reader is required")
-	}
-	return &ReviewService{store: reviewStore, projects: projects, evidence: evidence, candidates: candidates, applier: applier}, nil
+	return &ReviewService{store: reviewStore, projects: projects, evidence: evidence, applier: applier}, nil
 }
 
-// ReviewServiceFromServices exposes Review only when the configured persistence,
-// public evidence and private candidate-delivery stacks are all available.
 func ReviewServiceFromServices(services *Services) *ReviewService {
-	if services == nil || services.ExecutionStore == nil || services.RunEvidence == nil || services.ReviewCandidates == nil || services.Workspaces == nil || !store.SupportsReviewStore(services.ExecutionStore) {
+	if services == nil || services.ExecutionStore == nil || services.RunEvidence == nil || services.Workspaces == nil || !store.SupportsReviewStore(services.ExecutionStore) {
 		return nil
 	}
 	reviews := services.ExecutionStore.(store.ReviewStore)
-	service, err := NewReviewService(reviews, services.ExecutionStore, services.RunEvidence, services.Workspaces, services.ReviewCandidates)
+	service, err := NewReviewService(reviews, services.ExecutionStore, services.RunEvidence, services.Workspaces)
 	if err != nil {
 		return nil
 	}
@@ -88,6 +71,12 @@ func (s *ReviewService) List(ctx context.Context, projectID string, filter store
 	if err != nil {
 		return nil, translateStoreError(err, "review")
 	}
+	for index := range values {
+		values[index], err = s.hydrateReviewRevisions(ctx, values[index])
+		if err != nil {
+			return nil, err
+		}
+	}
 	return values, nil
 }
 
@@ -98,6 +87,10 @@ func (s *ReviewService) Get(ctx context.Context, projectID, reviewID string) (Re
 	review, err := s.store.GetReview(ctx, projectID, reviewID)
 	if err != nil {
 		return ReviewInspection{}, translateStoreError(err, "review")
+	}
+	review, err = s.hydrateReviewRevisions(ctx, review)
+	if err != nil {
+		return ReviewInspection{}, err
 	}
 	evidence, err := s.evidence.Inspect(ctx, projectID, review.RunID)
 	if err != nil {
@@ -127,30 +120,46 @@ func (s *ReviewService) Approve(ctx context.Context, projectID, reviewID string,
 	if err != nil {
 		return store.CompleteReviewApprovalResult{}, translateStoreError(err, "review")
 	}
+	begin.Review, err = s.hydrateReviewRevisions(ctx, begin.Review)
+	if err != nil {
+		s.persistApprovalFailure(ctx, projectID, reviewID, "Review Git identity is unavailable")
+		return store.CompleteReviewApprovalResult{}, err
+	}
 	project, err := s.projects.GetProject(ctx, projectID)
 	if err != nil {
 		return store.CompleteReviewApprovalResult{}, translateStoreError(err, "project")
 	}
-	privateCandidate, err := s.candidates.Open(ctx, begin.Run.ID)
-	if err != nil {
-		s.persistApprovalFailure(ctx, projectID, reviewID, "Review candidate delivery snapshot is unavailable")
-		return store.CompleteReviewApprovalResult{}, NewError("review_evidence_invalid", "Review candidate delivery snapshot is unavailable", err)
+
+	sourceType := strings.TrimSpace(project.SourceType)
+	if sourceType == "" {
+		sourceType = store.ProjectSourceLocal
 	}
-	candidate := acceptedCandidateFromPrivate(privateCandidate)
-	revision, err := s.applier.ApplyReviewedCandidate(ctx, project, begin.Review.ID, candidate)
-	if err != nil {
-		s.persistApprovalFailure(ctx, projectID, reviewID, "candidate could not be applied to the current Project Workspace")
-		return store.CompleteReviewApprovalResult{}, err
+	acceptedRevision := begin.Review.ReviewRevision
+	deliveryComplete := false
+	switch sourceType {
+	case store.ProjectSourceLocal:
+		acceptedRevision, err = s.applier.ApplyReviewedRevision(ctx, project, begin.Review)
+		if err != nil {
+			s.persistApprovalFailure(ctx, projectID, reviewID, "reviewed Git revision could not be integrated into the current Project Workspace")
+			return store.CompleteReviewApprovalResult{}, err
+		}
+		deliveryComplete = true
+	case store.ProjectSourceGit:
+		// Publishing the Issue branch is not target integration. Approval pins the
+		// accepted code identity but leaves Run/Issue delivery state unchanged.
+	default:
+		return store.CompleteReviewApprovalResult{}, NewError("review_delivery_invalid", "Project source type is not supported for Review delivery", store.ErrInvalidArgument)
 	}
+
 	result, err := s.store.CompleteReviewApproval(ctx, store.CompleteReviewApprovalCommand{
 		ProjectID:        projectID,
 		ReviewID:         reviewID,
-		AcceptedRevision: revision,
+		AcceptedRevision: acceptedRevision,
+		DeliveryComplete: deliveryComplete,
 	})
 	if err != nil {
-		// Do not convert a post-apply persistence failure into a failed approval.
-		// The approval intent plus acceptance commit is intentionally recoverable
-		// by retrying this command after a crash/database outage.
+		// A local integration may already be durable when persistence fails.
+		// The approval intent plus Git ancestry makes retry safe and idempotent.
 		return store.CompleteReviewApprovalResult{}, translateStoreError(err, "review")
 	}
 	publishPersistedEvents(ctx, s.publisher, result.Events)
@@ -172,6 +181,26 @@ func (s *ReviewService) RequestChanges(ctx context.Context, projectID, reviewID,
 	}
 	publishPersistedEvents(ctx, s.publisher, result.Events)
 	return result, nil
+}
+
+func (s *ReviewService) hydrateReviewRevisions(ctx context.Context, review store.Review) (store.Review, error) {
+	if strings.TrimSpace(review.BaseRevision) != "" && strings.TrimSpace(review.ReviewRevision) != "" {
+		return review, nil
+	}
+	revisions, ok := s.store.(store.ReviewRevisionStore)
+	if !ok {
+		return store.Review{}, NewError("review_evidence_invalid", "Review Git identity is unavailable", store.ErrConflict)
+	}
+	baseRevision, reviewRevision, err := revisions.GetReviewRevisions(ctx, review.ProjectID, review.ID)
+	if err != nil {
+		return store.Review{}, translateStoreError(err, "review")
+	}
+	review.BaseRevision = strings.TrimSpace(baseRevision)
+	review.ReviewRevision = strings.TrimSpace(reviewRevision)
+	if review.BaseRevision == "" || review.ReviewRevision == "" {
+		return store.Review{}, NewError("review_evidence_invalid", "Review Git identity is unavailable", store.ErrConflict)
+	}
+	return review, nil
 }
 
 func (s *ReviewService) persistApprovalFailure(parent context.Context, projectID, reviewID, reason string) {
@@ -206,23 +235,4 @@ func summarizeReviewTests(events []store.Event) ReviewTestStatus {
 		return ReviewTestsUnknown
 	}
 	return ReviewTestsNotRun
-}
-
-func acceptedCandidateFromPrivate(value evidencepkg.ReviewCandidateSnapshot) workspacepkg.AcceptedCandidate {
-	candidate := workspacepkg.AcceptedCandidate{}
-	if value.StagedPatch != nil {
-		candidate.StagedPatch = workspacepkg.CandidateBlobSource(value.StagedPatch)
-	}
-	if value.UnstagedPatch != nil {
-		candidate.UnstagedPatch = workspacepkg.CandidateBlobSource(value.UnstagedPatch)
-	}
-	candidate.Files = make([]workspacepkg.CandidateFileSource, 0, len(value.Files))
-	for _, file := range value.Files {
-		candidate.Files = append(candidate.Files, workspacepkg.CandidateFileSource{
-			Path:       file.Path,
-			Executable: file.Executable,
-			Chunks:     []workspacepkg.CandidateBlobSource{workspacepkg.CandidateBlobSource(file.Source)},
-		})
-	}
-	return candidate
 }
