@@ -14,6 +14,10 @@ import (
 
 const remoteGitPublicationAttempts = 2
 
+type remoteWorkspaceReadyStore interface {
+	MarkWorkspaceBootstrapReady(context.Context, string, string, string, string, string, string, string, string) (store.Workspace, error)
+}
+
 func isRemoteGitProject(safe executioncontext.SafeContext) bool {
 	return strings.EqualFold(strings.TrimSpace(safe.Project.SourceType), store.ProjectSourceGit)
 }
@@ -109,12 +113,16 @@ func (p *Processor) publishRemoteGitWorkspaceAttempt(ctx context.Context, safe e
 		transferID = receivedID
 	}
 	var published runnerprotocol.GitPublished
-	if err := json.Unmarshal(payload, &published); err != nil || strings.TrimSpace(published.Revision) == "" {
+	if err := json.Unmarshal(payload, &published); err != nil || strings.TrimSpace(published.StartRevision) == "" || strings.TrimSpace(published.Revision) == "" {
 		if err == nil {
-			err = fmt.Errorf("published revision is empty")
+			err = fmt.Errorf("published start/review revision is empty")
 		}
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
 		return fmt.Errorf("decode remote Git publication: %w", err)
+	}
+	if err := p.ensureRemoteWorkspaceReady(ctx, safe, published.StartRevision); err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
+		return fmt.Errorf("persist remote Issue base revision: %w", err)
 	}
 	if _, err := revisions.UpdateWorkspaceCurrentRevision(ctx, safe.Project.ID, safe.Workspace.ID, published.Revision); err != nil {
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
@@ -128,6 +136,45 @@ func (p *Processor) publishRemoteGitWorkspaceAttempt(ctx context.Context, safe e
 	return p.record(ctx, safe, "workspace.transfer.completed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{
 		"revision": published.Revision, "bytesTransferred": len(payload), "totalBytes": len(payload),
 	}), nil, nil)
+}
+
+func (p *Processor) ensureRemoteWorkspaceReady(ctx context.Context, safe executioncontext.SafeContext, startRevision string) error {
+	startRevision = strings.TrimSpace(startRevision)
+	if startRevision == "" {
+		return fmt.Errorf("remote Git execution start revision is required")
+	}
+	if safe.Workspace.BootstrapStatus == "READY" {
+		return nil
+	}
+	current, err := p.store.GetWorkspace(ctx, safe.Project.ID, safe.Workspace.ID)
+	if err != nil {
+		return err
+	}
+	if current.BootstrapStatus == "READY" {
+		if current.BaseRevision == nil || strings.TrimSpace(*current.BaseRevision) != startRevision {
+			return fmt.Errorf("remote Workspace base revision changed while publication was pending")
+		}
+		return nil
+	}
+	if current.BootstrapStatus != "PENDING" {
+		return fmt.Errorf("remote Workspace is not ready for publication bootstrap")
+	}
+	readyStore, ok := p.store.(remoteWorkspaceReadyStore)
+	if !ok {
+		return fmt.Errorf("workspace ready store is unavailable")
+	}
+	_, err = readyStore.MarkWorkspaceBootstrapReady(
+		ctx,
+		current.ProjectID,
+		current.IssueID,
+		current.ID,
+		current.Path,
+		optionalStringValue(current.RepositoryPath),
+		optionalStringValue(current.BaseBranch),
+		startRevision,
+		current.WorkingBranch,
+	)
+	return err
 }
 
 func (p *Processor) persistLocalWorkspaceRevision(ctx context.Context, safe executioncontext.SafeContext) error {
