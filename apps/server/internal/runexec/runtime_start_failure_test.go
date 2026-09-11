@@ -14,9 +14,9 @@ import (
 )
 
 type startFailureRuntime struct {
-	stopProjectID    string
-	stopInstanceID   string
-	destroyProjectID string
+	stopProjectID     string
+	stopInstanceID    string
+	destroyProjectID  string
 	destroyInstanceID string
 }
 
@@ -24,7 +24,7 @@ func (r *startFailureRuntime) Create(_ context.Context, projectID, _, runtimeID 
 	return store.RuntimeInstance{
 		ID:        "runtime-instance",
 		ProjectID: projectID,
-				Status:    string(runtimepkg.StateProvisioning),
+		Status:    string(runtimepkg.StateProvisioning),
 	}, nil
 }
 
@@ -60,10 +60,6 @@ func TestProcessorPreservesCreatedRuntimeIdentityWhenStartFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), evidenceStore, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	registry, err := engine.NewRegistry(processTestEngine{workspace: workspace})
 	if err != nil {
 		t.Fatal(err)
@@ -77,7 +73,7 @@ func TestProcessorPreservesCreatedRuntimeIdentityWhenStartFails(t *testing.T) {
 		registry,
 		recorder,
 		output,
-		candidate,
+		nil,
 		nil,
 		nil,
 	)
