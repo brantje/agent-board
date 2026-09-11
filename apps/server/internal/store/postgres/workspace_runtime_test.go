@@ -42,6 +42,21 @@ func TestWorkspaceCurrentRevisionPersistsAndIsProjectScoped(t *testing.T) {
 	fixture := seedRunFixture(t, s, "runtime-workspace-revision")
 	other := seedRunFixture(t, s, "runtime-workspace-revision-other")
 
+	const baseRevision = "1111111111111111111111111111111111111111"
+	if _, err := s.MarkWorkspaceBootstrapReady(
+		ctx,
+		fixture.project.ID,
+		fixture.issue.ID,
+		fixture.workspace.ID,
+		fixture.workspace.Path,
+		fixture.project.RepositoryPath,
+		fixture.project.DefaultBranch,
+		baseRevision,
+		fixture.workspace.WorkingBranch,
+	); err != nil {
+		t.Fatalf("MarkWorkspaceBootstrapReady() error=%v", err)
+	}
+
 	if got, err := s.GetWorkspaceCurrentRevision(ctx, fixture.project.ID, fixture.workspace.ID); err != nil || got != "" {
 		t.Fatalf("initial GetWorkspaceCurrentRevision()=%q err=%v", got, err)
 	}
