@@ -59,11 +59,17 @@ type TransferChunk = runnerprotocol.TransferChunk
 type TransferEnd = runnerprotocol.TransferEnd
 type TransferFailed = runnerprotocol.TransferFailed
 type TransferApplied = runnerprotocol.TransferApplied
+type GitPrepare = runnerprotocol.GitPrepare
+type GitPublished = runnerprotocol.GitPublished
 
 const (
-	TransferChunkSize = runnerprotocol.TransferChunkSize
-	MaxTransferBytes  = runnerprotocol.MaxTransferBytes
-	MaxMessageSize    = runnerprotocol.MaxMessageSize
+	TransferChunkSize           = runnerprotocol.TransferChunkSize
+	MaxTransferBytes            = runnerprotocol.MaxTransferBytes
+	MaxMessageSize              = runnerprotocol.MaxMessageSize
+	TransferDirectionToRunner   = runnerprotocol.TransferDirectionToRunner
+	TransferDirectionFromRunner = runnerprotocol.TransferDirectionFromRunner
+	TransferDirectionGitPrepare = runnerprotocol.TransferDirectionGitPrepare
+	TransferDirectionGitPublish = runnerprotocol.TransferDirectionGitPublish
 )
 
 func DecodePayload[T any](m Message) (T, error) {
