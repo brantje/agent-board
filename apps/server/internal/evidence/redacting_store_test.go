@@ -91,8 +91,9 @@ func TestRedactingStoreSanitizesEveryEvidenceWrite(t *testing.T) {
 
 type runnerCapabilityStore struct {
 	store.ControlPlaneStore
-	instance   store.RuntimeInstance
-	generation int64
+	instance          store.RuntimeInstance
+	generation        int64
+	workspaceRevision string
 }
 
 func (s *runnerCapabilityStore) UpdateRuntimeInstanceRunnerStatusIfStatus(_ context.Context, _, _ string, status, _ string) (store.RuntimeInstance, error) {
@@ -118,6 +119,13 @@ func (s *runnerCapabilityStore) AcquireWorkspaceBootstrapLock(context.Context, s
 }
 func (s *runnerCapabilityStore) AcquireWorkspaceExecutionLock(context.Context, string, string) (store.WorkspaceBootstrapLock, error) {
 	return redactingTestLock{}, nil
+}
+func (s *runnerCapabilityStore) GetWorkspaceCurrentRevision(context.Context, string, string) (string, error) {
+	return s.workspaceRevision, nil
+}
+func (s *runnerCapabilityStore) UpdateWorkspaceCurrentRevision(_ context.Context, _, _, revision string) (string, error) {
+	s.workspaceRevision = revision
+	return revision, nil
 }
 func (s *runnerCapabilityStore) GetRunner(_ context.Context, id string) (store.Runner, error) {
 	return store.Runner{ID: id, Name: "External runner"}, nil
@@ -153,6 +161,12 @@ func TestRedactingStorePreservesRunnerFencingCapabilities(t *testing.T) {
 	if err != nil || executionLock == nil {
 		t.Fatalf("execution lock=%v err=%v", executionLock, err)
 	}
+	if got, err := wrapped.UpdateWorkspaceCurrentRevision(ctx, "project", "workspace", "revision-1"); err != nil || got != "revision-1" {
+		t.Fatalf("workspace revision update=%q err=%v", got, err)
+	}
+	if got, err := wrapped.GetWorkspaceCurrentRevision(ctx, "project", "workspace"); err != nil || got != "revision-1" {
+		t.Fatalf("workspace revision get=%q err=%v", got, err)
+	}
 	if runner, err := wrapped.GetRunner(ctx, "runner-1"); err != nil || runner.ID != "runner-1" {
 		t.Fatalf("runner=%+v err=%v", runner, err)
 	}
@@ -178,6 +192,12 @@ func TestRedactingStoreReportsMissingRunnerFencingCapabilities(t *testing.T) {
 	}
 	if _, err := wrapped.AcquireWorkspaceExecutionLock(ctx, "workspace", "session"); err == nil {
 		t.Fatal("expected missing workspace execution lock capability error")
+	}
+	if _, err := wrapped.GetWorkspaceCurrentRevision(ctx, "project", "workspace"); err == nil {
+		t.Fatal("expected missing workspace revision read capability error")
+	}
+	if _, err := wrapped.UpdateWorkspaceCurrentRevision(ctx, "project", "workspace", "revision"); err == nil {
+		t.Fatal("expected missing workspace revision update capability error")
 	}
 	if _, err := wrapped.GetRunner(ctx, "runner"); err == nil {
 		t.Fatal("expected missing runner lookup capability error")
