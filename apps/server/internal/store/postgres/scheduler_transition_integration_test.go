@@ -239,3 +239,18 @@ func mustAdmit(t *testing.T, s *Store, owner string) *store.SchedulerAdmission {
 	}
 	return admission
 }
+
+func assertSchedulerOwnershipCounts(t *testing.T, s *Store, jobID string, wantLeases, wantReservations int) {
+	t.Helper()
+	ctx := context.Background()
+	var leases, reservations int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_leases WHERE job_id=$1`, jobID).Scan(&leases); err != nil {
+		t.Fatalf("count leases: %v", err)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_capacity_reservations WHERE job_id=$1`, jobID).Scan(&reservations); err != nil {
+		t.Fatalf("count reservations: %v", err)
+	}
+	if leases != wantLeases || reservations != wantReservations {
+		t.Fatalf("ownership counts leases=%d reservations=%d want leases=%d reservations=%d", leases, reservations, wantLeases, wantReservations)
+	}
+}
