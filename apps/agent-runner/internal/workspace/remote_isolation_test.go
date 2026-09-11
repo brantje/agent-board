@@ -5,19 +5,47 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
-func TestRemoteRepositoryManagerUsesIndependentRepositoryLocks(t *testing.T) {
-	manager := NewRemoteRepositoryManager(t.TempDir())
-	firstKey := remoteRepositoryKey("https://example.invalid/acme/one.git")
-	secondKey := remoteRepositoryKey("https://example.invalid/acme/two.git")
+func TestRemoteRepositoryManagerMutatesDifferentRepositoryCachesConcurrently(t *testing.T) {
+	firstOrigin, _, _ := initRemoteRepository(t)
+	secondOrigin, _, _ := initRemoteRepository(t)
+	root := t.TempDir()
+	manager := NewRemoteRepositoryManager(root)
 
-	first := manager.repositoryLock(firstKey)
-	if again := manager.repositoryLock(firstKey); again != first {
-		t.Fatal("same repository did not reuse its mutation lock")
+	// Hold the first repository's mutation lock so its real Prepare operation
+	// cannot complete. A different repository Prepare must still finish while
+	// that lock is held, proving mutations are not globally serialized.
+	firstLock := manager.repositoryLock(remoteRepositoryKey(firstOrigin))
+	firstLock.Lock()
+	firstDone := make(chan error, 1)
+	go func() {
+		_, err := manager.Prepare(context.Background(), firstOrigin, "main", "agent-board/AB-60", "", filepath.Join(root, "first-session"))
+		firstDone <- err
+	}()
+
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := manager.Prepare(context.Background(), secondOrigin, "main", "agent-board/AB-61", "", filepath.Join(root, "second-session"))
+		secondDone <- err
+	}()
+
+	select {
+	case err := <-secondDone:
+		if err != nil {
+			firstLock.Unlock()
+			t.Fatalf("different-repository Prepare() error=%v", err)
+		}
+	case <-time.After(3 * time.Second):
+		firstLock.Unlock()
+		<-firstDone
+		t.Fatal("different repository mutation was blocked by another repository cache")
 	}
-	if second := manager.repositoryLock(secondKey); second == first {
-		t.Fatal("different repositories unexpectedly share a mutation lock")
+
+	firstLock.Unlock()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("first Prepare() error=%v", err)
 	}
 }
 
