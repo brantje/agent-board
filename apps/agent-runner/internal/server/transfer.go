@@ -24,7 +24,7 @@ type incomingTransfer struct {
 type transferState struct {
 	mu              sync.Mutex
 	incoming        map[string]*incomingTransfer
-	ready           map[string]bool
+	ready           map[string]workspace.CheckoutState
 	begun           map[string]bool
 	failed          map[string]bool
 	awaitingApplied map[string]string
@@ -33,7 +33,7 @@ type transferState struct {
 func newTransferState() *transferState {
 	return &transferState{
 		incoming:        make(map[string]*incomingTransfer),
-		ready:           make(map[string]bool),
+		ready:           make(map[string]workspace.CheckoutState),
 		begun:           make(map[string]bool),
 		failed:          make(map[string]bool),
 		awaitingApplied: make(map[string]string),
@@ -51,7 +51,9 @@ func (s *transferState) begin(sessionID string, begin protocol.TransferBegin) er
 	defer s.mu.Unlock()
 	s.begun[sessionID] = true
 	delete(s.failed, sessionID)
-	delete(s.ready, sessionID)
+	if begin.Direction == "to_runner" {
+		delete(s.ready, sessionID)
+	}
 	s.incoming[sessionID] = &incomingTransfer{
 		transferID: begin.TransferID,
 		direction:  begin.Direction,
@@ -102,11 +104,18 @@ func (s *transferState) end(sessionID string, end protocol.TransferEnd) ([]byte,
 	return payload, direction, nil
 }
 
-func (s *transferState) markReady(sessionID string) {
+func (s *transferState) markReady(sessionID string, state workspace.CheckoutState) {
 	s.mu.Lock()
-	s.ready[sessionID] = true
+	s.ready[sessionID] = state
 	delete(s.failed, sessionID)
 	s.mu.Unlock()
+}
+
+func (s *transferState) checkout(sessionID string) (workspace.CheckoutState, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state, ok := s.ready[sessionID]
+	return state, ok
 }
 
 func (s *transferState) markFailed(sessionID string) {
@@ -120,7 +129,7 @@ func (s *transferState) waitReady(sessionID string, timeout time.Duration) bool 
 	deadline := time.Now().Add(timeout)
 	for {
 		s.mu.Lock()
-		ready := s.ready[sessionID]
+		_, ready := s.ready[sessionID]
 		failed := s.failed[sessionID]
 		begun := s.begun[sessionID]
 		incoming := s.incoming[sessionID] != nil
@@ -216,12 +225,13 @@ func (s *Server) handleTransferEnd(writer *connectionWriter, msg protocol.Messag
 		writer.sendError("transfer_failed", "workspace could not be materialized", msg.SessionID)
 		return
 	}
-	if err := workspace.MaterializeBundle(context.Background(), repositoryPath, payload); err != nil {
+	state, err := workspace.MaterializeBranchBundle(context.Background(), repositoryPath, payload)
+	if err != nil {
 		s.transfers.markFailed(msg.SessionID)
 		writer.sendError("transfer_failed", "workspace could not be materialized: "+err.Error(), msg.SessionID)
 		return
 	}
-	s.transfers.markReady(msg.SessionID)
+	s.transfers.markReady(msg.SessionID, state)
 }
 
 func (s *Server) handleTransferApplied(writer *connectionWriter, msg protocol.Message) {
@@ -240,6 +250,7 @@ func (s *Server) handleTransferApplied(writer *connectionWriter, msg protocol.Me
 		return
 	}
 	s.transfers.clearApplied(msg.SessionID, applied.TransferID)
+	s.transfers.clearReady(msg.SessionID)
 }
 
 func (w *connectionWriter) sendTransfer(ctx context.Context, sessionID, transferID, direction string, payload []byte) error {
@@ -274,31 +285,43 @@ func (s *Server) syncWorkspaceBack(writer streamWriter, sessionID, transferID st
 	if strings.TrimSpace(transferID) == "" {
 		transferID = sessionID + "-sync"
 	}
-	fail := func() {
+	fail := func(message string) {
 		_ = writer.send(protocol.TypeTransferFailed, sessionID, protocol.TransferFailed{
 			TransferID: transferID,
 			Code:       "transfer_failed",
-			Message:    "workspace sync snapshot failed",
+			Message:    message,
 		})
 	}
-	s.transfers.clearReady(sessionID)
 	repositoryPath := s.manager.SessionWorkspacePath(sessionID)
 	if repositoryPath == "" {
-		fail()
+		fail("session workspace path is unavailable")
+		return
+	}
+	state, ok := s.transfers.checkout(sessionID)
+	if !ok {
+		fail("workspace execution-start state is unavailable")
 		return
 	}
 	if !workspace.IsRepository(context.Background(), repositoryPath) {
-		fail()
+		fail("session workspace is not a Git repository")
+		return
+	}
+	if _, err := workspace.FinalizeCheckout(context.Background(), repositoryPath, state); err != nil {
+		fail("workspace finalization failed: " + err.Error())
 		return
 	}
 	payload, err := workspace.SnapshotBundle(context.Background(), repositoryPath, transferID)
 	if err != nil || len(payload) == 0 {
-		fail()
+		if err != nil {
+			fail("workspace branch snapshot failed: " + err.Error())
+		} else {
+			fail("workspace branch snapshot is empty")
+		}
 		return
 	}
 	s.transfers.awaitApplied(sessionID, transferID)
 	if err := writer.sendTransfer(context.Background(), sessionID, transferID, "from_runner", payload); err != nil {
-		fail()
+		fail("workspace branch transfer failed: " + err.Error())
 		return
 	}
 }

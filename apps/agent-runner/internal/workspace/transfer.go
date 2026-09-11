@@ -14,52 +14,96 @@ import (
 
 const commandTimeout = 5 * time.Minute
 
-// MaterializeBundle unpacks an Agent Board Git transfer bundle into the session
-// workspace and restores its original HEAD/index/worktree state.
-func MaterializeBundle(ctx context.Context, repositoryPath string, bundle []byte) error {
+type CheckoutState struct {
+	Branch        string
+	StartRevision string
+}
+
+// MaterializeBranchBundle creates a session checkout from a branch-only Agent
+// Board transfer and returns the exact branch/revision the execution starts at.
+func MaterializeBranchBundle(ctx context.Context, repositoryPath string, bundle []byte) (CheckoutState, error) {
 	if len(bundle) == 0 {
-		return os.MkdirAll(repositoryPath, 0o755)
+		return CheckoutState{}, fmt.Errorf("workspace branch bundle is required")
 	}
 	if err := os.RemoveAll(repositoryPath); err != nil {
-		return fmt.Errorf("reset session workspace: %w", err)
+		return CheckoutState{}, fmt.Errorf("reset session workspace: %w", err)
 	}
 	file, err := os.CreateTemp("", ".agent-board-transfer-*.bundle")
 	if err != nil {
-		return fmt.Errorf("create transfer bundle file: %w", err)
+		return CheckoutState{}, fmt.Errorf("create transfer bundle file: %w", err)
 	}
 	name := file.Name()
 	defer os.Remove(name)
+	if err := file.Chmod(0o600); err != nil {
+		_ = file.Close()
+		return CheckoutState{}, fmt.Errorf("secure transfer bundle file: %w", err)
+	}
 	if _, err := file.Write(bundle); err != nil {
 		_ = file.Close()
-		return fmt.Errorf("write transfer bundle file: %w", err)
+		return CheckoutState{}, fmt.Errorf("write transfer bundle file: %w", err)
 	}
 	if err := file.Close(); err != nil {
-		return fmt.Errorf("close transfer bundle file: %w", err)
+		return CheckoutState{}, fmt.Errorf("close transfer bundle file: %w", err)
 	}
-	// Git 2.53+ `bundle verify` requires an existing repository. `list-heads`
-	// still rejects truncated/non-bundle payloads without that requirement.
-	if _, err := runGit(ctx, "bundle", "list-heads", name); err != nil {
-		return fmt.Errorf("verify transfer bundle: %w", err)
+	branch, revision, err := sharedworkspace.BundleHead(ctx, name, "git", commandTimeout)
+	if err != nil {
+		return CheckoutState{}, err
 	}
 	parent := filepath.Dir(repositoryPath)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
-		return fmt.Errorf("prepare session workspace parent: %w", err)
+		return CheckoutState{}, fmt.Errorf("prepare session workspace parent: %w", err)
 	}
-	if _, err := runGit(ctx, "-C", parent, "clone", name, filepath.Base(repositoryPath)); err != nil {
-		return fmt.Errorf("materialize transfer bundle: %w", err)
+	if _, err := runGit(ctx, "init", "-q", repositoryPath); err != nil {
+		return CheckoutState{}, fmt.Errorf("initialize session repository: %w", err)
 	}
-	if _, err := sharedworkspace.RestoreCheckoutState(ctx, repositoryPath, "HEAD", "git", commandTimeout); err != nil {
+	branchRef := "refs/heads/" + branch
+	if _, err := runGit(ctx, "-C", repositoryPath, "fetch", "--no-tags", "--no-write-fetch-head", name, branchRef+":"+branchRef); err != nil {
 		_ = os.RemoveAll(repositoryPath)
-		return fmt.Errorf("restore transfer workspace state: %w", err)
+		return CheckoutState{}, fmt.Errorf("materialize transfer branch: %w", err)
 	}
-	return nil
+	if _, err := runGit(ctx, "-C", repositoryPath, "checkout", "-q", branch); err != nil {
+		_ = os.RemoveAll(repositoryPath)
+		return CheckoutState{}, fmt.Errorf("checkout transferred branch: %w", err)
+	}
+	actualBranch, err := sharedworkspace.CurrentBranch(ctx, repositoryPath, "git", commandTimeout)
+	if err != nil {
+		_ = os.RemoveAll(repositoryPath)
+		return CheckoutState{}, err
+	}
+	actualRevision, err := sharedworkspace.HeadRevision(ctx, repositoryPath, "git", commandTimeout)
+	if err != nil {
+		_ = os.RemoveAll(repositoryPath)
+		return CheckoutState{}, err
+	}
+	if actualBranch != branch || actualRevision != revision {
+		_ = os.RemoveAll(repositoryPath)
+		return CheckoutState{}, fmt.Errorf("materialized workspace does not match transferred branch head")
+	}
+	return CheckoutState{Branch: branch, StartRevision: revision}, nil
 }
 
-// SnapshotBundle captures the current session HEAD/index/worktree without
-// mutating the session's real Git index. The same implementation is used by the
-// server's authoritative Workspace snapshot path.
+// MaterializeBundle remains the simple materialization API used by tests and
+// callers that do not need to retain execution-start identity.
+func MaterializeBundle(ctx context.Context, repositoryPath string, bundle []byte) error {
+	_, err := MaterializeBranchBundle(ctx, repositoryPath, bundle)
+	return err
+}
+
+// SnapshotBundle exports only the checked-out branch history. Callers must
+// finalize the checkout first so the execution boundary is clean Git state.
 func SnapshotBundle(ctx context.Context, repositoryPath, transferID string) ([]byte, error) {
-	return sharedworkspace.SnapshotBundle(ctx, repositoryPath, transferID, "git", commandTimeout)
+	return sharedworkspace.BranchBundle(ctx, repositoryPath, transferID, "git", commandTimeout)
+}
+
+func FinalizeCheckout(ctx context.Context, repositoryPath string, state CheckoutState) (string, error) {
+	branch, err := sharedworkspace.CurrentBranch(ctx, repositoryPath, "git", commandTimeout)
+	if err != nil {
+		return "", err
+	}
+	if branch != state.Branch {
+		return "", fmt.Errorf("workspace branch changed from %q to %q", state.Branch, branch)
+	}
+	return sharedworkspace.FinalizeCheckout(ctx, repositoryPath, state.StartRevision, "git", commandTimeout)
 }
 
 func IsRepository(ctx context.Context, repositoryPath string) bool {
