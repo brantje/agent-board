@@ -2,6 +2,7 @@ FROM golang:1.25-alpine AS build
 WORKDIR /src
 COPY packages/redact/ ./packages/redact/
 COPY packages/runnerprotocol/ ./packages/runnerprotocol/
+COPY packages/workspacegit/ ./packages/workspacegit/
 COPY apps/server/go.mod apps/server/go.sum ./apps/server/
 WORKDIR /src/apps/server
 RUN go mod download

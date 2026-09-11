@@ -26,7 +26,7 @@ const codeMessages: Record<string, string> = {
   invalid_argument: 'The server rejected one or more values. Check required fields, limits, references and policy settings.',
   conflict: 'The resource conflicts with existing state. Refresh and try again.',
   project_not_found: 'This Project is unavailable or belongs to another project scope.',
-  execution_configuration_invalid: 'The selected execution configuration is not runnable. Check the Agent, Model Profile, Runtime and Provider.',
+  execution_configuration_invalid: 'The selected execution configuration is not runnable. Check the Agent, Model Profile and Provider.',
   agent_unavailable: 'The selected Agent is not currently runnable. Check its state and referenced configuration.',
   issue_done: 'Done Issues cannot start Runs. Reopen the Issue into Todo before assigning an Agent.',
   issue_relationship_target_not_found: 'The target Issue no longer exists in this Project. Refresh and choose another Issue.',

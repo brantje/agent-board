@@ -84,7 +84,7 @@ func TestBlockingQuestionAnswerRejectsActiveSchedulerWork(t *testing.T) {
 	if persisted.Status != "OPEN" {
 		t.Fatalf("question status=%s want OPEN", persisted.Status)
 	}
-	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 2)
+	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 3)
 }
 
 func TestAnswerQuestionRejectsInvalidCommand(t *testing.T) {

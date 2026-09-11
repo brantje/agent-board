@@ -174,7 +174,7 @@ func (q *questioner) Ask(ctx context.Context, request engine.QuestionRequest) (e
 		"blocking":   question.Blocking,
 	})
 	if err == nil {
-		issueID, runID, agentID, workspaceID, runtimeID := q.safe.Issue.ID, q.safe.Run.ID, q.safe.Agent.ID, q.safe.Workspace.ID, q.runtimeInstanceID
+		issueID, runID, agentID, workspaceID := q.safe.Issue.ID, q.safe.Run.ID, q.safe.Agent.ID, q.safe.Workspace.ID
 		_, err = q.events.Record(ctx, store.Event{
 			Type:              "question.created",
 			ProjectID:         q.safe.Project.ID,
@@ -182,7 +182,7 @@ func (q *questioner) Ask(ctx context.Context, request engine.QuestionRequest) (e
 			RunID:             &runID,
 			AgentID:           &agentID,
 			WorkspaceID:       &workspaceID,
-			RuntimeInstanceID: &runtimeID,
+			RuntimeInstanceID: optionalEventID(q.runtimeInstanceID),
 			Actor:             store.EmptyObject,
 			Payload:           payload,
 		})

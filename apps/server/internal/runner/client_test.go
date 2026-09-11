@@ -164,7 +164,7 @@ func newProtocolTestServer(t *testing.T, caps protocol.Capabilities, handle func
 			t.Errorf("server hello: msg=%+v err=%v", hello, err)
 			return
 		}
-		if err := writeProtocol(conn, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version1, Capabilities: caps}); err != nil {
+		if err := writeProtocol(conn, protocol.TypeRunnerHello, "", protocol.RunnerHello{Version: protocol.Version2, Capabilities: caps}); err != nil {
 			t.Errorf("write runner_hello: %v", err)
 			return
 		}
@@ -190,7 +190,7 @@ func newProtocolTestServer(t *testing.T, caps protocol.Capabilities, handle func
 }
 
 func writeProtocol(conn *websocket.Conn, typ protocol.MessageType, sessionID string, payload any) error {
-	msg, err := protocol.NewMessage(protocol.Version1, typ, sessionID, payload)
+	msg, err := protocol.NewMessage(protocol.Version2, typ, sessionID, payload)
 	if err != nil {
 		return err
 	}

@@ -1,0 +1,155 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	runnerconn "github.com/brantje/agent-board/apps/server/internal/runner"
+	"github.com/brantje/agent-board/apps/server/internal/store"
+)
+
+func TestRunnerPersistenceLifecycle(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	r, err := s.CreateRunner(ctx, store.Runner{Name: "Build host", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ID == "" || r.Internal || r.RegisteredAt == nil || r.DeletedAt != nil {
+		t.Fatal("invalid created runner")
+	}
+	if _, err := s.CreateRunner(ctx, store.Runner{Name: "build HOST", TokenHash: make([]byte, 32)}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("duplicate name: %v", err)
+	}
+	r, err = s.RenameRunner(ctx, r.ID, "Renamed")
+	if err != nil || r.Name != "Renamed" {
+		t.Fatalf("rename: %v", err)
+	}
+	hash := make([]byte, 32)
+	hash[0] = 1
+	if _, err = s.RotateRunnerCredential(ctx, r.ID, hash); err != nil {
+		t.Fatal(err)
+	}
+	r, err = s.GetRunner(ctx, r.ID)
+	if err != nil || r.TokenHash[0] != 1 {
+		t.Fatalf("rotation: %v", err)
+	}
+	if _, err = s.RevokeRunner(ctx, r.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.RotateRunnerCredential(ctx, r.ID, hash); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("revoked credential restored: %v", err)
+	}
+	if _, err = s.RevokeRunner(ctx, r.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.GetRunner(ctx, r.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted runner visible: %v", err)
+	}
+	if _, err = s.CreateRunner(ctx, store.Runner{Name: "Renamed", TokenHash: hash}); err != nil {
+		t.Fatalf("name reuse: %v", err)
+	}
+	values, err := s.ListRunners(ctx)
+	if err != nil || len(values) != 1 {
+		t.Fatalf("active listing: %d %v", len(values), err)
+	}
+}
+
+func TestPendingRunnerCannotRenameOrRotate(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	registrationHash := make([]byte, 32)
+	registrationHash[0] = 9
+	pending, err := s.CreateRunner(ctx, store.Runner{RegistrationTokenHash: registrationHash})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.RegisteredAt != nil || pending.Name != "" || len(pending.TokenHash) != 0 {
+		t.Fatalf("invalid pending runner %#v", pending)
+	}
+	if _, err := s.RenameRunner(ctx, pending.ID, "too early"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("pending rename: %v", err)
+	}
+	if _, err := s.RotateRunnerCredential(ctx, pending.ID, make([]byte, 32)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("pending rotation: %v", err)
+	}
+}
+
+func TestCountRunnerReservations(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "runner-reservations")
+	r, err := s.CreateRunner(ctx, store.Runner{Name: "Reservation host", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := enqueueFixtureRun(t, s, f, f.run, "runner-reservation-count")
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO scheduler_capacity_reservations (project_id, job_id, run_id, resource_kind, resource_id)
+		VALUES ($1, $2, $3, 'RUNNER', $4::uuid)
+	`, f.project.ID, job.ID, f.run.ID, r.ID); err != nil {
+		t.Fatal(err)
+	}
+	counts, err := s.CountRunnerReservations(ctx, []string{r.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[r.ID] != 1 {
+		t.Fatalf("counts=%v", counts)
+	}
+	empty, err := s.CountRunnerReservations(ctx, nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("empty ids counts=%v err=%v", empty, err)
+	}
+}
+
+func TestRunnerUpdateConfiguredMaxActiveSessions(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	r, err := s.CreateRunner(ctx, store.Runner{Name: "Build host", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capacity := 4
+	updated, err := s.UpdateRunner(ctx, r.ID, r.Name, &capacity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runnerconn.MaxActiveSessions(updated.Capabilities) != 4 {
+		t.Fatalf("updated capabilities=%s", updated.Capabilities)
+	}
+	if err := s.ObserveRunner(ctx, r.ID, []byte(`{"engines":["opencode"],"max_active_sessions":10,"os":"linux"}`)); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.GetRunner(ctx, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runnerconn.MaxActiveSessions(stored.Capabilities) != 4 {
+		t.Fatalf("observed overwrite configured capacity: %s", stored.Capabilities)
+	}
+}
+
+func TestInternalRunnerIsUniqueAndProtected(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	r, err := s.CreateRunner(ctx, store.Runner{Name: "Internal", Internal: true, TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.RegisteredAt == nil || len(r.RegistrationTokenHash) != 0 {
+		t.Fatalf("internal runner was not immediately registered: %#v", r)
+	}
+	if _, err = s.CreateRunner(ctx, store.Runner{Name: "Second", Internal: true, TokenHash: make([]byte, 32)}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("second internal: %v", err)
+	}
+	for _, deleted := range []bool{false, true} {
+		if _, err = s.RevokeRunner(ctx, r.ID, deleted); !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("managed lifecycle: %v", err)
+		}
+	}
+	if _, err = s.RenameRunner(ctx, r.ID, "User rename"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("managed rename: %v", err)
+	}
+}

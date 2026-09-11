@@ -130,7 +130,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   runtimes: {
     title: 'Runtimes',
     singular: 'Runtime',
-    emptyDescription: 'Define a Runtime image and execution policy so Agents can start agent-runner.',
+    emptyDescription: 'Define a Runtime image and execution policy for legacy internal managed compute.',
     fields: [
       name,
       { key: 'kind', label: 'Kind', type: 'select', options: ['docker'], initial: 'docker' },
@@ -148,13 +148,12 @@ export const definitions: Record<ConfigKind, Definition> = {
   agents: {
     title: 'Agents',
     singular: 'Agent',
-    emptyDescription: 'Create an Agent with role instructions, Engine, Model Profile, and Runtime before assigning Issues.',
+    emptyDescription: 'Create an Agent with role instructions, Engine and Model Profile before assigning Issues.',
     fields: [
       name,
       { key: 'roleInstructions', label: 'Role / instructions', type: 'textarea' },
       { key: 'engine', label: 'Engine', type: 'select', options: ['opencode', 'scripted'], initial: 'opencode' },
       reference('modelProfileId', 'Model Profile', 'model-profiles'),
-      reference('runtimeId', 'Runtime', 'runtimes'),
       { key: 'engineSettings', label: 'Engine settings', type: 'json', initial: '{}' },
       { key: 'concurrencyLimit', label: 'Concurrency limit', type: 'number', initial: 1, min: 1, required: true },
       { key: 'state', label: 'State', type: 'select', options: ['DRAFT', 'ENABLED', 'DISABLED', 'ARCHIVED'], initial: 'ENABLED' }

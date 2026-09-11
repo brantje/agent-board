@@ -23,6 +23,10 @@ func (w *recordingStreamWriter) sendError(code, message, _ string) {
 	w.errors = append(w.errors, protocol.ErrorPayload{Code: code, Message: message})
 }
 
+func (w *recordingStreamWriter) sendTransfer(context.Context, string, string, string, []byte) error {
+	return nil
+}
+
 func TestPumpStreamReportsTruncatedOutput(t *testing.T) {
 	manager := session.NewManagerWithWorkspace(1, t.TempDir())
 	execution, err := manager.Start("truncated", session.Request{

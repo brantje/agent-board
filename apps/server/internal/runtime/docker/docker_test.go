@@ -280,3 +280,15 @@ func TestDockerRecoverFindsContainerWithoutPersistedExternalID(t *testing.T) {
 		t.Fatalf("Recover() handle=%+v inspection=%+v err=%v", handle, inspection, err)
 	}
 }
+
+func TestNewConnectsUsingDockerEnv(t *testing.T) {
+	t.Setenv("AGENT_BOARD_DOCKER_NETWORK", " agent-board ")
+	runtime, err := New()
+	if err != nil {
+		t.Skipf("docker daemon unavailable: %v", err)
+	}
+	defer runtime.Close()
+	if runtime.controlNetwork != "agent-board" {
+		t.Fatalf("controlNetwork=%q", runtime.controlNetwork)
+	}
+}

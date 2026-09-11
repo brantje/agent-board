@@ -19,6 +19,10 @@ func TestSessionLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if s.ID() != "session-1" {
+		t.Fatalf("session id=%q", s.ID())
+	}
+
 	if _, err := io.WriteString(s.Stdin(), "hello\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -74,13 +78,35 @@ func TestManagerCapacityAndSequentialSessions(t *testing.T) {
 	}
 }
 
-func TestWorkspaceBoundary(t *testing.T) {
-	workspace := t.TempDir()
-	subdir := filepath.Join(workspace, "sub")
-	if err := os.Mkdir(subdir, 0o755); err != nil {
+func TestFailedStartReleasesCapacity(t *testing.T) {
+	manager := NewManagerWithWorkspace(1, t.TempDir())
+	if _, err := manager.Start("broken", Request{Command: []string{"/definitely-not-an-agent-board-command"}}); err == nil {
+		t.Fatal("expected process start failure")
+	}
+	if manager.ActiveCount() != 0 {
+		t.Fatalf("failed start retained capacity: active=%d", manager.ActiveCount())
+	}
+
+	next, err := manager.Start("next", Request{Command: []string{"true"}})
+	if err != nil {
+		t.Fatalf("capacity was not reusable after failed start: %v", err)
+	}
+	result, err := next.Wait(context.Background())
+	if err != nil {
 		t.Fatal(err)
 	}
+	if result.ExitCode != 0 || result.Signaled {
+		t.Fatalf("unexpected replacement session result %#v", result)
+	}
+}
+
+func TestWorkspaceBoundary(t *testing.T) {
+	workspace := t.TempDir()
 	manager := NewManagerWithWorkspace(1, workspace)
+	subdir := filepath.Join(manager.SessionWorkspacePath("inside"), "sub")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 
 	s, err := manager.Start("inside", Request{Command: []string{"pwd"}, Dir: "sub"})
 	if err != nil {
@@ -103,19 +129,36 @@ func TestWorkspaceBoundary(t *testing.T) {
 	}
 }
 
+func TestSessionWorkspacePathRejectsTraversalIDs(t *testing.T) {
+	workspace := t.TempDir()
+	manager := NewManagerWithWorkspace(1, workspace)
+	for _, id := range []string{"../escape", "a/../../etc", "/tmp/outside", "foo/bar"} {
+		if path := manager.SessionWorkspacePath(id); path != "" {
+			t.Fatalf("session id %q resolved to %q", id, path)
+		}
+		if _, err := manager.Start(id, Request{Command: []string{"true"}}); err == nil {
+			t.Fatalf("session id %q was accepted", id)
+		}
+	}
+}
+
 func TestWorkspaceBoundaryRejectsSymlinkEscape(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()
-	if err := os.Symlink(outside, filepath.Join(workspace, "outside")); err != nil {
+	manager := NewManagerWithWorkspace(1, workspace)
+	sessionRoot := manager.SessionWorkspacePath("escape")
+	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	manager := NewManagerWithWorkspace(1, workspace)
+	if err := os.Symlink(outside, filepath.Join(sessionRoot, "outside")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := manager.Start("escape", Request{Command: []string{"true"}, Dir: "outside"}); err == nil || !strings.Contains(err.Error(), "escapes workspace") {
 		t.Fatalf("expected symlink escape error, got %v", err)
 	}
 }
 
-func TestSequentialSessionsReuseWorkspaceWithoutEnvironmentLeak(t *testing.T) {
+func TestSequentialSessionsIsolateWorkspaceAndEnvironment(t *testing.T) {
 	workspace := t.TempDir()
 	manager := NewManagerWithWorkspace(1, workspace)
 	secretName := "AGENT_BOARD_TEST_SESSION_SECRET_9D5A"
@@ -132,7 +175,7 @@ func TestSequentialSessionsReuseWorkspaceWithoutEnvironmentLeak(t *testing.T) {
 	}
 	waitFor(t, time.Second, func() bool { return manager.ActiveCount() == 0 })
 
-	second, err := manager.Start("second", Request{Command: []string{"sh", "-c", "printf '%s|%s' \"$(cat state)\" \"${" + secretName + "-unset}\""}})
+	second, err := manager.Start("second", Request{Command: []string{"sh", "-c", "printf '%s|%s' \"$(cat state 2>/dev/null)\" \"${" + secretName + "-unset}\""}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +186,7 @@ func TestSequentialSessionsReuseWorkspaceWithoutEnvironmentLeak(t *testing.T) {
 	if _, err := second.Wait(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if string(output) != "***|unset" {
+	if string(output) != "|unset" {
 		t.Fatalf("workspace/env isolation mismatch: %q", output)
 	}
 	if strings.Contains(string(output), "ephemeral") {
@@ -208,6 +251,17 @@ func TestTerminateProcessTree(t *testing.T) {
 	}
 	if !result.Signaled {
 		t.Fatalf("expected signaled result, got %#v", result)
+	}
+}
+
+func TestNewManagerDefaultsAndWorkspaceRoot(t *testing.T) {
+	manager := NewManager(0)
+	if manager.Capacity() != 1 || manager.WorkspaceRoot() != DefaultWorkspaceRoot {
+		t.Fatalf("defaults capacity=%d root=%q", manager.Capacity(), manager.WorkspaceRoot())
+	}
+	custom := NewManagerWithWorkspace(3, "")
+	if custom.Capacity() != 3 || custom.WorkspaceRoot() != DefaultWorkspaceRoot {
+		t.Fatalf("empty root fallback capacity=%d root=%q", custom.Capacity(), custom.WorkspaceRoot())
 	}
 }
 

@@ -1,6 +1,6 @@
 # OpenCode Engine adapter
 
-Agent Board v0.1 uses OpenCode as its first real interactive Engine adapter. OpenCode runs inside the selected Runtime Instance through `agent-runner`; the trusted server never starts OpenCode locally and never exposes the OpenCode HTTP service as a public Agent Board endpoint.
+Agent Board v0.1 uses OpenCode as its first real interactive Engine adapter. OpenCode runs on the selected Runner through `agent-runner`; the trusted server never starts OpenCode locally and never exposes the OpenCode HTTP service as a public Agent Board endpoint.
 
 The official `apps/agent-runner/Dockerfile` installs OpenCode from the immutable upstream `v1.18.30` release, selecting the architecture-specific musl asset and verifying its SHA-256 digest before extraction. Engine adapters still depend only on Agent Board Engine capabilities, not on Docker or WebSocket implementation details.
 
@@ -8,13 +8,16 @@ The official `apps/agent-runner/Dockerfile` installs OpenCode from the immutable
 
 For an OpenCode Run, the server-side adapter:
 
-1. starts `opencode serve --hostname 127.0.0.1 --port 4096` through the generic Execution Session launcher;
-2. opens HTTP connections to that loopback service through the Engine-neutral, session-scoped runner connection capability;
-3. creates one native OpenCode session for the Run attempt;
-4. sends the issue/agent/review context once as the initial native prompt;
-5. consumes OpenCode's SSE event stream and maps explicitly visible activity into canonical Agent Board evidence;
-6. reconciles pending native Questions from OpenCode's queryable Question endpoint after an SSE disconnect;
-7. stops the native service when the execution reaches its terminal result or the Run is cancelled.
+1. starts `opencode serve` through the generic Execution Session launcher on a deterministic Run-scoped address inside Linux `127/8`, using a high Run-scoped port so multiple OpenCode services can coexist on the same Runner host without sharing a listener;
+2. sets `OPENCODE_DB=:memory:` for that child process so concurrent OpenCode services do not share OpenCode's global SQLite state; Agent Board's durable Run, Execution Session, Question and evidence stores remain authoritative;
+3. opens HTTP connections to that loopback service through the Engine-neutral, session-scoped runner connection capability;
+4. creates one native OpenCode session in the Execution Session working directory so host runners and Docker share the same OpenCode project as `opencode serve` (a hardcoded `/workspace` path is a different OpenCode project on persistent hosts);
+5. sends the issue/agent/review context once as the initial native prompt;
+6. consumes OpenCode's SSE event stream and maps explicitly visible activity into canonical Agent Board evidence;
+7. reconciles pending native Questions from OpenCode's queryable Question endpoint after an SSE disconnect;
+8. stops the native service when the execution reaches its terminal result or the Run is cancelled.
+
+The Run-scoped loopback endpoint is derived from the durable Run ID, so reconnecting the same live Execution Session computes the same endpoint again. The in-memory OpenCode database is intentionally process-local: live native Question handling and Runner reconnect keep the same OpenCode process alive, while Agent Board does not depend on OpenCode's global database as a durability boundary.
 
 The adapter does not use `opencode run --format json` as its protocol boundary.
 
@@ -53,13 +56,29 @@ All structured activity still passes through Agent Board's centralized Run-scope
 
 ## Credential-gated real verification
 
-The deterministic unit/integration tests run without provider credentials and cover protocol framing, session-local connectivity, native Question mapping, same-session reply behavior, reconnect reconciliation, stale answers, and audit-event ordering.
+The deterministic unit/integration tests run without provider credentials and cover protocol framing, session-local connectivity, native Question mapping, same-session reply behavior, reconnect reconciliation, stale answers, audit-event ordering, Run-scoped OpenCode endpoints, and process-local database isolation.
 
-A separate manual/credential-gated test proves a real model-backed OpenCode Question round trip through Docker and Agent Board's scheduler:
+Credential-gated tests prove a real model-backed OpenCode path through Agent Board's scheduler. Both Docker Runtime and persistent Runner variants reset the PostgreSQL `public` schema. They refuse to do so unless the database is named `agent_board_test` and `AGENT_BOARD_TEST_DATABASE_RESET=1` is set. Never point them at a development or production database.
+
+`TestOpenCodeRunnerNormalCodingRun` in `apps/server/internal/runexec/opencode_runner_integration_test.go` is the preferred v0.1 path: scheduler selects a live `agent-runner`, transfers the Issue Workspace, starts OpenCode on that runner, talks to OpenRouter, and syncs untracked results back without a Runtime Instance. `TestOpenCodeInternalRunnerNormalCodingRun` covers the same coding path through `SuperviseInternalRunner`. `opencode` must be on the runner host `$PATH`. `AGENT_BOARD_TEST_OPENCODE_API_KEY` / `AGENT_BOARD_TEST_OPENCODE_MODEL` may fall back to `OPENROUTER_API_KEY` / the first `OPENROUTER_MODELS` entry.
+
+`TestOpenCodeConcurrentRunnerSessionsNormalAndQuestions` is the concurrency regression. It starts three real capacity-1 host-process Runners, holds two real OpenCode Runs simultaneously in `WAITING_FOR_INPUT` on separate native Questions, requires a third normal coding Run to finish while those Questions remain blocked, then answers both Questions concurrently. The test verifies distinct Runner ownership, zero Question leakage into the normal Run, correct Workspace results for each Question answer, and the expected durable Question lifecycle for both sessions.
+
+```sh
+cd apps/server
+
+AGENT_BOARD_TEST_OPENCODE=1 \
+AGENT_BOARD_TEST_DATABASE_RESET=1 \
+AGENT_BOARD_TEST_DATABASE_URL='postgres://agent_board:agent_board@127.0.0.1:5432/agent_board_test?sslmode=disable' \
+AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND='openrouter' \
+AGENT_BOARD_TEST_OPENCODE_MODEL='<model-id>' \
+AGENT_BOARD_TEST_OPENCODE_API_KEY='<provider-api-key>' \
+go test -count=1 -timeout 6m -run '^TestOpenCodeRunnerNormalCodingRun$' -v ./internal/runexec
+```
+
+The Docker-backed tests remain for Runtime isolation:
 
 `TestOpenCodeDockerInteractiveQuestionRoundTrip` in `apps/server/internal/runexec/opencode_integration_test.go`.
-
-The test deliberately resets the PostgreSQL `public` schema. It refuses to do so unless the database is named `agent_board_test` and `AGENT_BOARD_TEST_DATABASE_RESET=1` is set. Never point it at a development or production database.
 
 ### 1. Build the Runtime image
 
@@ -120,4 +139,4 @@ The test instructs the real OpenCode execution to ask one single-choice native Q
 - `opencode-result.txt` to contain `beta` followed by a newline;
 - `question.created < run.waiting_for_input < question.answered < run.resumed` in the persisted Run Event stream.
 
-The complementary deterministic test `TestEngineAnswersNativeQuestionWithoutSecondPrompt` counts native prompt calls and requires exactly one. Together, the two tests prove that a real OpenCode Question round trip works and that Agent Board answers it through OpenCode's native reply operation rather than paying for a synthetic continuation prompt.
+The complementary deterministic test `TestEngineAnswersNativeQuestionWithoutSecondPrompt` counts native prompt calls and requires exactly one. Together, the Docker Question test and that unit test prove that a real OpenCode Question round trip works and that Agent Board answers it through OpenCode's native reply operation rather than paying for a synthetic continuation prompt.

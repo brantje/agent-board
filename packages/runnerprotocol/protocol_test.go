@@ -8,7 +8,7 @@ import (
 )
 
 func TestMessageRoundTrip(t *testing.T) {
-	want, err := NewMessage(Version1, TypeStdout, "session-1", StreamData{Data: []byte("hello\n")})
+	want, err := NewMessage(Version2, TypeStdout, "session-1", StreamData{Data: []byte("hello\n")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestMessageRoundTrip(t *testing.T) {
 }
 
 func TestConnectionMessageRoundTrip(t *testing.T) {
-	want, err := NewMessage(Version1, TypeConnectData, "session-1", ConnectData{ConnectionID: "conn-1", Data: []byte("GET / HTTP/1.1\r\n\r\n")})
+	want, err := NewMessage(Version2, TypeConnectData, "session-1", ConnectData{ConnectionID: "conn-1", Data: []byte("GET / HTTP/1.1\r\n\r\n")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,21 +55,21 @@ func TestConnectionMessageRoundTrip(t *testing.T) {
 }
 
 func TestProtocolValidation(t *testing.T) {
-	if _, err := Decode([]byte(`{"version":2,"type":"health"}`)); !errors.Is(err, ErrUnsupportedVersion) {
+	if _, err := Decode([]byte(`{"version":3,"type":"health"}`)); !errors.Is(err, ErrUnsupportedVersion) {
 		t.Fatalf("expected unsupported-version error, got %v", err)
 	}
-	if _, err := Decode([]byte(`{"version":1,"type":"health","surprise":true}`)); !errors.Is(err, ErrInvalidMessage) {
+	if _, err := Decode([]byte(`{"version":2,"type":"health","surprise":true}`)); !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("expected invalid-message error, got %v", err)
 	}
 	for _, typ := range []MessageType{TypeStart, TypeConnect, TypeConnected, TypeConnectData, TypeConnectClose} {
-		if err := (Message{Version: Version1, Type: typ}).Validate(); !errors.Is(err, ErrInvalidMessage) {
+		if err := (Message{Version: Version2, Type: typ}).Validate(); !errors.Is(err, ErrInvalidMessage) {
 			t.Fatalf("expected %s session scoping error, got %v", typ, err)
 		}
 	}
 }
 
 func TestRunnerHelloPayloadShape(t *testing.T) {
-	msg, err := NewMessage(Version1, TypeRunnerHello, "", RunnerHello{Version: Version1, Capabilities: Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout"}}})
+	msg, err := NewMessage(Version2, TypeRunnerHello, "", RunnerHello{Version: Version2, Capabilities: Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestRunnerHelloPayloadShape(t *testing.T) {
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["version"] != float64(Version1) {
+	if payload["version"] != float64(Version2) {
 		t.Fatalf("unexpected version payload: %#v", payload)
 	}
 }
@@ -89,7 +89,7 @@ func TestConnectionPayloadRejectsMalformedOrAmbiguousInput(t *testing.T) {
 		`{"connection_id":"c"} trailing`,
 	} {
 		t.Run(payload, func(t *testing.T) {
-			_, err := DecodePayload[ConnectData](Message{Version: Version1, Type: TypeConnectData, SessionID: "s", Payload: json.RawMessage(payload)})
+			_, err := DecodePayload[ConnectData](Message{Version: Version2, Type: TypeConnectData, SessionID: "s", Payload: json.RawMessage(payload)})
 			if err == nil {
 				t.Fatal("malformed connection payload accepted")
 			}
@@ -99,15 +99,15 @@ func TestConnectionPayloadRejectsMalformedOrAmbiguousInput(t *testing.T) {
 
 func TestOutboundMessagesEnforceProtocolBoundary(t *testing.T) {
 	for _, message := range []Message{
-		{Version: Version1, Type: "unknown", SessionID: "s"},
-		{Version: Version1, Type: TypeHealth, SessionID: "s"},
-		{Version: Version1, Type: TypeConnectData, SessionID: "s", Payload: json.RawMessage(`{"data":`)},
+		{Version: Version2, Type: "unknown", SessionID: "s"},
+		{Version: Version2, Type: TypeHealth, SessionID: "s"},
+		{Version: Version2, Type: TypeConnectData, SessionID: "s", Payload: json.RawMessage(`{"data":`)},
 	} {
 		if _, err := Encode(message); !errors.Is(err, ErrInvalidMessage) {
 			t.Fatalf("invalid outbound message %+v: %v", message, err)
 		}
 	}
-	if _, err := NewMessage(Version1, TypeConnect, "", ConnectRequest{ConnectionID: "c", Network: "tcp", Address: "127.0.0.1:4096"}); !errors.Is(err, ErrInvalidMessage) {
+	if _, err := NewMessage(Version2, TypeConnect, "", ConnectRequest{ConnectionID: "c", Network: "tcp", Address: "127.0.0.1:4096"}); !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("unscoped outbound connect: %v", err)
 	}
 }

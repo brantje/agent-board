@@ -123,11 +123,75 @@ func (s *Store) CreateExecutionSession(ctx context.Context, input store.Executio
 	if cwd == "" {
 		cwd = "/workspace"
 	}
-	return scanExecutionSession(s.pool.QueryRow(ctx, `
-		INSERT INTO execution_sessions (project_id, run_id, runtime_instance_id, status, cwd, command_argv, exit_code)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
-	`, input.ProjectID, input.RunID, input.RuntimeInstanceID, status, cwd, arrayJSON(input.CommandArgv), input.ExitCode))
+
+	// Execution Session admission participates in the same advisory-lock
+	// namespace as Workspace filesystem writers. Resolve the immutable Run ->
+	// Workspace binding first, then acquire the transaction-scoped advisory lock
+	// before taking the Workspace row lock. This prevents a new Runner writer
+	// from crossing an in-flight bootstrap/snapshot/apply operation without
+	// keeping a PostgreSQL connection checked out for the execution lifetime.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return store.ExecutionSession{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var workspaceID string
+	if err := tx.QueryRow(ctx, `
+		SELECT run.workspace_id::text
+		FROM runs AS run
+		WHERE run.project_id = $1 AND run.id = $2
+	`, input.ProjectID, input.RunID).Scan(&workspaceID); err != nil {
+		return store.ExecutionSession{}, notFound(err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, workspaceBootstrapLockPrefix+workspaceID); err != nil {
+		return store.ExecutionSession{}, err
+	}
+	if err := tx.QueryRow(ctx, `
+		SELECT workspace.id::text
+		FROM runs AS run
+		JOIN workspaces AS workspace
+		  ON workspace.project_id = run.project_id
+		 AND workspace.id = run.workspace_id
+		WHERE run.project_id = $1
+		  AND run.id = $2
+		  AND workspace.id = $3::uuid
+		FOR UPDATE OF workspace
+	`, input.ProjectID, input.RunID, workspaceID).Scan(&workspaceID); err != nil {
+		return store.ExecutionSession{}, notFound(err)
+	}
+
+	var writerActive bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM execution_sessions AS session
+			JOIN runs AS run
+			  ON run.project_id = session.project_id
+			 AND run.id = session.run_id
+			WHERE run.project_id = $1
+			  AND run.workspace_id = $2
+			  AND session.status IN ('PENDING', 'STARTING', 'RUNNING')
+		)
+	`, input.ProjectID, workspaceID).Scan(&writerActive); err != nil {
+		return store.ExecutionSession{}, err
+	}
+	if writerActive {
+		return store.ExecutionSession{}, store.ErrConflict
+	}
+
+	created, err := scanExecutionSession(tx.QueryRow(ctx, `
+		INSERT INTO execution_sessions (project_id, run_id, runtime_instance_id, runner_id, status, cwd, command_argv, exit_code)
+		VALUES ($1, $2, nullif($3, '')::uuid, nullif($4, '')::uuid, $5, $6, $7, $8)
+		RETURNING id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
+	`, input.ProjectID, input.RunID, input.RuntimeInstanceID, input.RunnerID, status, cwd, arrayJSON(input.CommandArgv), input.ExitCode))
+	if err != nil {
+		return store.ExecutionSession{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.ExecutionSession{}, err
+	}
+	return created, nil
 }
 
 func (s *Store) CreateQuestion(ctx context.Context, input store.Question) (store.Question, error) {
@@ -230,7 +294,7 @@ func scanRuntimeInstance(row pgx.Row) (store.RuntimeInstance, error) {
 
 func scanExecutionSession(row pgx.Row) (store.ExecutionSession, error) {
 	var value store.ExecutionSession
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.RunID, &value.RuntimeInstanceID, &value.Status, &value.CWD, &value.CommandArgv, &value.ExitCode, &value.CreatedAt, &value.StartedAt, &value.CompletedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.RunID, &value.RuntimeInstanceID, &value.RunnerID, &value.Status, &value.CWD, &value.CommandArgv, &value.ExitCode, &value.CreatedAt, &value.StartedAt, &value.CompletedAt, &value.UpdatedAt); err != nil {
 		return store.ExecutionSession{}, notFound(err)
 	}
 	return value, nil

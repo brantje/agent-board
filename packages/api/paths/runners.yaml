@@ -1,0 +1,153 @@
+nameInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [name]
+        properties:
+          name: {type: string, minLength: 1}
+          maxActiveSessions: {type: integer, minimum: 1}
+registrationInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [registrationToken, hostname]
+        properties:
+          registrationToken: {type: string, minLength: 1}
+          hostname: {type: string, minLength: 1}
+runnerResponse:
+  description: Runner identity and diagnostics. Connected state comes from the live registry.
+  content:
+    application/json:
+      schema:
+        $ref: ../schemas/runners.yaml#/Runner
+creationResponse:
+  description: Pending Runner identity plus the one-time registration token. The token is returned only once.
+  headers:
+    Cache-Control:
+      schema: {type: string, const: no-store}
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [runner, registrationToken]
+        properties:
+          runner:
+            type: object
+            additionalProperties: false
+            required: [id]
+            properties:
+              id: {type: string, format: uuid}
+          registrationToken: {type: string}
+enrollmentResponse:
+  description: Permanent Runner credential returned once to the enrolling agent-runner.
+  headers:
+    Cache-Control:
+      schema: {type: string, const: no-store}
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [runnerId, runnerToken]
+        properties:
+          runnerId: {type: string, format: uuid}
+          runnerToken: {type: string}
+credentialResponse:
+  description: Rotated permanent Runner credential returned once. It cannot be retrieved later.
+  headers:
+    Cache-Control:
+      schema: {type: string, const: no-store}
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [runner, runnerToken]
+        properties:
+          runner:
+            $ref: ../schemas/runners.yaml#/Runner
+          runnerToken: {type: string}
+collection:
+  get:
+    operationId: listRunners
+    responses:
+      '200':
+        description: Non-deleted runners, including pending external runners and the managed internal runner.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: ../schemas/runners.yaml#/Runner
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createRunner
+    responses:
+      '201':
+        $ref: "#/creationResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+register:
+  post:
+    operationId: registerRunner
+    requestBody:
+      $ref: "#/registrationInput"
+    responses:
+      '201':
+        $ref: "#/enrollmentResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+resource:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getRunner
+    responses:
+      '200':
+        $ref: "#/runnerResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  patch:
+    operationId: updateRunner
+    requestBody:
+      $ref: "#/nameInput"
+    responses:
+      '200':
+        $ref: "#/runnerResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  delete:
+    operationId: deleteRunner
+    responses:
+      '204':
+        description: Permanently soft-deleted and revoked. Historical provenance is retained.
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+rotate:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  post:
+    operationId: rotateRunnerToken
+    responses:
+      '200':
+        $ref: "#/credentialResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+revoke:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  post:
+    operationId: revokeRunner
+    responses:
+      '200':
+        $ref: "#/runnerResponse"
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

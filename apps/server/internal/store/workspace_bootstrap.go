@@ -23,3 +23,11 @@ type WorkspaceBootstrapStore interface {
 	MarkWorkspaceBootstrapReady(ctx context.Context, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, baseRevision, workingBranch string) (Workspace, error)
 	MarkWorkspaceBootstrapFailed(ctx context.Context, projectID, issueID, workspaceID string) (Workspace, error)
 }
+
+// WorkspaceExecutionLockStore lets the execution path enter the same filesystem
+// critical section while proving it owns the Runner-backed Workspace lifecycle.
+// Generic Workspace writers use WorkspaceBootstrapStore and are rejected while
+// another Runner execution owns that Workspace.
+type WorkspaceExecutionLockStore interface {
+	AcquireWorkspaceExecutionLock(ctx context.Context, workspaceID, executionSessionID string) (WorkspaceBootstrapLock, error)
+}

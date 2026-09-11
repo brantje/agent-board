@@ -39,26 +39,20 @@ func TestPrepareBuildsOnlyRequestedExecutionSecretsAndProvenance(t *testing.T) {
 
 	prepared, err := preparer.Prepare(context.Background(), "p1", "r1", SecretRequest{
 		ProviderCredentialEnv: "PROVIDER_TOKEN",
-		RuntimeSecretRefs: map[string]string{
-			"RUNTIME_TOKEN": "runtime-token",
-		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prepared.RuntimeID != "rt1" {
-		t.Fatalf("runtime ID = %q", prepared.RuntimeID)
-	}
-	if prepared.Secrets["PROVIDER_TOKEN"] != "provider-plain" || prepared.Secrets["RUNTIME_TOKEN"] != "runtime-plain" {
+	if prepared.Secrets["PROVIDER_TOKEN"] != "provider-plain" {
 		t.Fatalf("execution secrets = %+v", prepared.Secrets)
 	}
-	if len(prepared.Secrets) != 2 || len(prepared.RedactionValues) != 2 {
+	if len(prepared.Secrets) != 1 || len(prepared.RedactionValues) != 1 {
 		t.Fatalf("prepared = %+v", prepared)
 	}
 	if provenance.puts != 1 {
 		t.Fatalf("provenance writes = %d", provenance.puts)
 	}
-	if redaction.registeredRun != "r1" || len(redaction.registered) != 2 || prepared.ReleaseRedaction == nil {
+	if redaction.registeredRun != "r1" || len(redaction.registered) != 1 || prepared.ReleaseRedaction == nil {
 		t.Fatalf("redaction registration=%+v prepared=%+v", redaction, prepared)
 	}
 	prepared.ReleaseRedaction()
@@ -91,14 +85,7 @@ func TestPrepareRedactsAuthorizedSecretsWithoutInjectingThem(t *testing.T) {
 	if len(prepared.Secrets) != 0 {
 		t.Fatalf("attach must not inject secrets: %+v", prepared.Secrets)
 	}
-	if len(prepared.RedactionValues) != 2 {
-		t.Fatalf("redaction values=%v", prepared.RedactionValues)
-	}
-	seen := map[string]bool{}
-	for _, value := range prepared.RedactionValues {
-		seen[value] = true
-	}
-	if !seen["provider-plain"] || !seen["runtime-plain"] {
+	if len(prepared.RedactionValues) != 1 || prepared.RedactionValues[0] != "provider-plain" {
 		t.Fatalf("redaction values=%v", prepared.RedactionValues)
 	}
 }

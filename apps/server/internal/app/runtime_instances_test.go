@@ -24,6 +24,9 @@ func (s *runtimeServiceStore) GetRuntime(_ context.Context, scope *string, id st
 }
 func (s *runtimeServiceStore) CreateRuntimeInstance(_ context.Context, input store.RuntimeInstance) (store.RuntimeInstance, error) {
 	input.ID = "instance-1"
+	if input.RuntimeID == "" {
+		input.RuntimeID = s.runtime.ID
+	}
 	if input.Status == "" {
 		input.Status = "PROVISIONING"
 	}
@@ -121,7 +124,7 @@ func TestRuntimeInstanceServiceLifecyclePreservesWorkspaceBinding(t *testing.T) 
 	if instance.Status != "PROVISIONING" || instance.WorkspaceID != workspace.ID || instance.ExternalID == nil || *instance.ExternalID != "container-1" {
 		t.Fatalf("created instance=%+v", instance)
 	}
-	if implementation.createdSpec.Workspace.Source != workspace.Path || implementation.createdSpec.WorkspaceID != workspace.ID || implementation.createdSpec.IssueID != workspace.IssueID {
+	if implementation.createdSpec.Workspace.Source != workspace.Path || implementation.createdSpec.WorkspaceID != workspace.ID || implementation.createdSpec.IssueID != workspace.IssueID || implementation.createdSpec.RuntimeID != runtimeStore.runtime.ID {
 		t.Fatalf("RuntimeSpec=%+v", implementation.createdSpec)
 	}
 

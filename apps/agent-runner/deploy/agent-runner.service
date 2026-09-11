@@ -1,0 +1,35 @@
+[Unit]
+Description=Agent Board external agent-runner
+Documentation=https://github.com/brantje/agent-board/blob/main/docs/external-runner-setup.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agent-runner
+Group=agent-runner
+WorkingDirectory=/var/lib/agent-runner
+Environment=HOME=/var/lib/agent-runner
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=/etc/agent-board/agent-runner.env
+ExecStart=/usr/local/bin/agent-runner
+Restart=on-failure
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=15
+UMask=0027
+
+# systemd creates /var/lib/agent-runner with ownership for the service user.
+StateDirectory=agent-runner
+StateDirectoryMode=0750
+
+# Conservative defaults for a user-managed execution host. The Runner still
+# needs outbound network access and write access to its state/workspace root.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/agent-runner
+
+[Install]
+WantedBy=multi-user.target

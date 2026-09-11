@@ -42,7 +42,7 @@ func (s *runtimeRunnerCapabilityStore) UpdateRuntimeInstanceRunnerStatusGenerati
 
 func TestRuntimeInstanceServiceUsesRunnerFencingCapabilities(t *testing.T) {
 	base := &runtimeRunnerCapabilityStore{instance: store.RuntimeInstance{
-		ID: "runtime-instance", ProjectID: "project", WorkspaceID: "workspace", RuntimeID: "runtime", Status: string(runtimepkg.StateRunning),
+		ID: "runtime-instance", ProjectID: "project", WorkspaceID: "workspace", Status: string(runtimepkg.StateRunning),
 	}}
 	service := &RuntimeInstanceService{store: base}
 
@@ -66,7 +66,7 @@ func TestRuntimeInstanceServiceUsesRunnerFencingCapabilities(t *testing.T) {
 
 func TestRuntimeInstanceServiceRejectsRunnerClaimWhenNotRunning(t *testing.T) {
 	base := &runtimeRunnerCapabilityStore{instance: store.RuntimeInstance{
-		ID: "runtime-instance", ProjectID: "project", WorkspaceID: "workspace", RuntimeID: "runtime", Status: string(runtimepkg.StateStopped),
+		ID: "runtime-instance", ProjectID: "project", WorkspaceID: "workspace", Status: string(runtimepkg.StateStopped),
 	}}
 	service := &RuntimeInstanceService{store: base}
 	_, err := service.ClaimRunnerConnection(t.Context(), "project", "runtime-instance")

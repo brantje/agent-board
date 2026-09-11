@@ -11,19 +11,7 @@ import (
 )
 
 func TestSessionConnectForwardsLoopbackTCP(t *testing.T) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	go func() {
-		conn, acceptErr := listener.Accept()
-		if acceptErr != nil {
-			return
-		}
-		defer conn.Close()
-		_, _ = io.Copy(conn, conn)
-	}()
+	listener := newLoopbackEchoListener(t)
 
 	_, httpServer := newTestRunner(t)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
@@ -77,6 +65,104 @@ func TestSessionConnectForwardsLoopbackTCP(t *testing.T) {
 			return
 		}
 	}
+}
+
+func TestSessionEndClosesLoopbackConnection(t *testing.T) {
+	listener := newLoopbackEchoListener(t)
+	runner, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+	defer conn.Close()
+
+	send(t, conn, protocol.TypeStart, "connect-session-end", protocol.StartRequest{Command: []string{"sh", "-c", "sleep 30"}})
+	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
+		t.Fatalf("unexpected start response %#v", msg)
+	}
+	send(t, conn, protocol.TypeConnect, "connect-session-end", protocol.ConnectRequest{
+		ConnectionID: "tcp-session-end",
+		Network:      "tcp",
+		Address:      listener.Addr().String(),
+	})
+	if msg := read(t, conn); msg.Type != protocol.TypeConnected {
+		t.Fatalf("expected connected, got %#v", msg)
+	}
+
+	send(t, conn, protocol.TypeKill, "connect-session-end", nil)
+	seenClose := false
+	seenExit := false
+	for !seenClose || !seenExit {
+		msg := read(t, conn)
+		switch msg.Type {
+		case protocol.TypeConnectClose:
+			payload, err := protocol.DecodePayload[protocol.ConnectClose](msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if payload.ConnectionID != "tcp-session-end" || payload.Code != "session_ended" {
+				t.Fatalf("unexpected session-end close %#v", payload)
+			}
+			seenClose = true
+		case protocol.TypeExit:
+			seenExit = true
+		case protocol.TypeError:
+			t.Fatalf("unexpected protocol error %#v", msg)
+		}
+	}
+	waitFor(t, time.Second, func() bool {
+		return runner.connector("connect-session-end", "tcp-session-end") == nil && runner.manager.ActiveCount() == 0
+	})
+}
+
+func TestTransportDisconnectClosesTunnelButPreservesSession(t *testing.T) {
+	firstListener := newLoopbackEchoListener(t)
+	runner, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+
+	send(t, conn, protocol.TypeStart, "connect-reconnect", protocol.StartRequest{Command: []string{"sh", "-c", "sleep 30"}})
+	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
+		t.Fatalf("unexpected start response %#v", msg)
+	}
+	send(t, conn, protocol.TypeConnect, "connect-reconnect", protocol.ConnectRequest{
+		ConnectionID: "tcp-reconnect",
+		Network:      "tcp",
+		Address:      firstListener.Addr().String(),
+	})
+	if msg := read(t, conn); msg.Type != protocol.TypeConnected {
+		t.Fatalf("expected initial connected response, got %#v", msg)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	waitFor(t, time.Second, func() bool {
+		return runner.connector("connect-reconnect", "tcp-reconnect") == nil && runner.manager.ActiveCount() == 1
+	})
+
+	secondListener := newLoopbackEchoListener(t)
+	reconnected := dialAndHandshakeExpectHealth(t, httpServer.URL, 1, "connect-reconnect")
+	defer reconnected.Close()
+	send(t, reconnected, protocol.TypeConnect, "connect-reconnect", protocol.ConnectRequest{
+		ConnectionID: "tcp-reconnect",
+		Network:      "tcp",
+		Address:      secondListener.Addr().String(),
+	})
+	if msg := read(t, reconnected); msg.Type != protocol.TypeConnected {
+		t.Fatalf("expected tunnel to be reusable after transport reconnect, got %#v", msg)
+	}
+	send(t, reconnected, protocol.TypeConnectData, "connect-reconnect", protocol.ConnectData{ConnectionID: "tcp-reconnect", Data: []byte("after-reconnect")})
+	msg := read(t, reconnected)
+	if msg.Type != protocol.TypeConnectData {
+		t.Fatalf("expected data over reconnected tunnel, got %#v", msg)
+	}
+	data, err := protocol.DecodePayload[protocol.ConnectData](msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data.Data) != "after-reconnect" {
+		t.Fatalf("reconnected tunnel data=%q", data.Data)
+	}
+
+	send(t, reconnected, protocol.TypeKill, "connect-reconnect", nil)
+	waitFor(t, 2*time.Second, func() bool { return runner.manager.ActiveCount() == 0 })
 }
 
 func TestSessionConnectRejectsNonLoopbackDestination(t *testing.T) {
@@ -148,4 +234,22 @@ func TestValidateConnectDestination(t *testing.T) {
 	if err := validateConnectDestination("udp", "127.0.0.1:4096"); err == nil {
 		t.Fatal("udp destination unexpectedly allowed")
 	}
+}
+
+func newLoopbackEchoListener(t *testing.T) net.Listener {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		conn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.Copy(conn, conn)
+	}()
+	return listener
 }

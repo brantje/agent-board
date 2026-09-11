@@ -10,6 +10,7 @@ type SafeContext struct {
 	Model          ModelContext           `json:"model"`
 	Provider       ProviderContext        `json:"provider"`
 	Runtime        RuntimeContext         `json:"runtime"`
+	Runner         *RunnerContext         `json:"runner,omitempty"`
 	Workspace      WorkspaceContext       `json:"workspace"`
 	ReviewFeedback *ReviewFeedbackContext `json:"reviewFeedback,omitempty"`
 }
@@ -72,6 +73,12 @@ type RuntimeContext struct {
 	NetworkPolicy    string          `json:"networkPolicy"`
 	WorkspacePolicy  string          `json:"workspacePolicy"`
 	Capabilities     json.RawMessage `json:"capabilities,omitempty"`
+}
+
+type RunnerContext struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Internal bool   `json:"internal,omitempty"`
 }
 
 type WorkspaceContext struct {

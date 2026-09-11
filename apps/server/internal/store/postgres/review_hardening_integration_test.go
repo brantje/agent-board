@@ -48,27 +48,27 @@ func TestSchedulerIdempotencyKeyCollisionReturnsConflict(t *testing.T) {
 	second := seedRunFixture(t, s, "idem-second")
 
 	if _, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: first.project.ID,
-		RunID: first.run.ID,
-		Kind: "START",
+		ProjectID:      first.project.ID,
+		RunID:          first.run.ID,
+		Kind:           "START",
 		IdempotencyKey: "shared-key",
 	}); err != nil {
 		t.Fatalf("enqueue first job: %v", err)
 	}
 
 	if _, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: second.project.ID,
-		RunID: second.run.ID,
-		Kind: "START",
+		ProjectID:      second.project.ID,
+		RunID:          second.run.ID,
+		Kind:           "START",
 		IdempotencyKey: "shared-key",
 	}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("cross-job collision error=%v, want ErrConflict", err)
 	}
 
 	if _, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: first.project.ID,
-		RunID: first.run.ID,
-		Kind: "RESUME",
+		ProjectID:      first.project.ID,
+		RunID:          first.run.ID,
+		Kind:           "RESUME",
 		IdempotencyKey: "shared-key",
 	}); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("kind collision error=%v, want ErrConflict", err)
@@ -83,6 +83,11 @@ func TestConfigurationOwnershipChangesCannotBreakProjectScope(t *testing.T) {
 
 	if _, err := s.pool.Exec(ctx, `UPDATE model_profiles SET project_id = $1 WHERE id = $2`, second.project.ID, first.model.ID); err == nil {
 		t.Fatal("expected referenced model profile ownership change to fail")
+	}
+	if _, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
+		ProjectID: first.project.ID, WorkspaceID: first.workspace.ID, RuntimeID: first.runtime.ID,
+	}); err != nil {
+		t.Fatalf("create referenced runtime instance: %v", err)
 	}
 	if _, err := s.pool.Exec(ctx, `UPDATE runtimes SET project_id = $1 WHERE id = $2`, second.project.ID, first.runtime.ID); err == nil {
 		t.Fatal("expected referenced runtime ownership change to fail")
@@ -120,7 +125,6 @@ func TestImmutableEvidenceBlocksParentDeletion(t *testing.T) {
 		Name:           "history-agent",
 		Engine:         "test",
 		ModelProfileID: f.model.ID,
-		RuntimeID:      f.runtime.ID,
 		EngineSettings: store.EmptyObject,
 	})
 	if err != nil {

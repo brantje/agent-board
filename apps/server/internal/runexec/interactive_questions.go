@@ -386,7 +386,7 @@ func (q *interactiveQuestioner) record(ctx context.Context, eventType string, pa
 	if err != nil {
 		return err
 	}
-	issueID, runID, agentID, workspaceID, runtimeID := q.safe.Issue.ID, q.safe.Run.ID, q.safe.Agent.ID, q.safe.Workspace.ID, q.runtimeInstanceID
+	issueID, runID, agentID, workspaceID := q.safe.Issue.ID, q.safe.Run.ID, q.safe.Agent.ID, q.safe.Workspace.ID
 	_, err = q.events.Record(ctx, store.Event{
 		Type:              eventType,
 		ProjectID:         q.safe.Project.ID,
@@ -394,7 +394,7 @@ func (q *interactiveQuestioner) record(ctx context.Context, eventType string, pa
 		RunID:             &runID,
 		AgentID:           &agentID,
 		WorkspaceID:       &workspaceID,
-		RuntimeInstanceID: &runtimeID,
+		RuntimeInstanceID: optionalEventID(q.runtimeInstanceID),
 		Actor:             store.EmptyObject,
 		Payload:           encoded,
 	})

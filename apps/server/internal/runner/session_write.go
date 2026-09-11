@@ -24,7 +24,7 @@ func (c *Connection) writeSessionMessage(
 	deadlineWake <-chan struct{},
 	sessionDone <-chan struct{},
 ) error {
-	msg, err := protocol.NewMessage(protocol.Version1, typ, sessionID, payload)
+	msg, err := protocol.NewMessage(protocol.Version2, typ, sessionID, payload)
 	if err != nil {
 		return err
 	}

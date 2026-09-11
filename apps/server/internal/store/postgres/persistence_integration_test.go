@@ -26,6 +26,26 @@ type runFixture struct {
 
 func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	t.Helper()
+	if s.runnerCandidates == nil {
+		rows, err := s.pool.Query(context.Background(), `INSERT INTO runners(name,token_hash,registered_at) SELECT 'fixture-'||gen_random_uuid()::text,decode(repeat('00',32),'hex'),now() FROM generate_series(1,16) RETURNING id::text`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := []string{}
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		s.SetRunnerCandidates(func(string) []string { return append([]string(nil), ids...) })
+	}
+
 	ctx := context.Background()
 	project, err := s.CreateProject(ctx, testProjectInput("project-"+suffix, "/repo/"+suffix, ""))
 	if err != nil {
@@ -43,7 +63,7 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
-	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "test", ModelProfileID: model.ID, RuntimeID: runtime.ID, EngineSettings: store.EmptyObject})
+	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}

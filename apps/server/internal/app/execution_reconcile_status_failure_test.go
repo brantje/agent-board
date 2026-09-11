@@ -22,7 +22,7 @@ func TestReconcileRetainsActiveProcessWhenBusyPersistenceFails(t *testing.T) {
 		stdout:                 newReadSignalReader(),
 		stderr:                 newReadSignalReader(),
 	}
-	service, err := NewExecutionSessionService(storeWithFailure, &reconcileExecutionManager{transport: transport, active: true})
+	service, err := NewExecutionSessionService(storeWithFailure, &reconcileExecutionManager{transport: transport, active: true}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -98,7 +98,8 @@ describe('ProjectEditor', () => {
         name: 'Renamed',
         repositoryPath: '/repo',
         defaultBranch: 'main',
-        workflowSettings: {}
+        workflowSettings: {},
+        allowInternalRunner: true
       })
     })
     expect(JSON.parse(String(patchCall?.body))).not.toHaveProperty('issuePrefix')
@@ -240,6 +241,28 @@ describe('ProjectSettings', () => {
     expect((wrapper.get('[data-field=name] input').element as HTMLInputElement).value).toBe('Workspace')
     expect((wrapper.get('[data-field=issuePrefix] input').element as HTMLInputElement).disabled).toBe(true)
     expect(wrapper.find('[data-kind]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('saves allowInternalRunner with project edits', async () => {
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      if (options.method === 'PATCH') {
+        const body = JSON.parse(String(options.body))
+        return new Response(JSON.stringify({ ...project, allowInternalRunner: body.allowInternalRunner }))
+      }
+      return new Response(JSON.stringify(project))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectSettings, { props: { projectId: project.id }, global })
+    await flushPromises()
+
+    const toggle = wrapper.get('[data-field=allowInternalRunner] input')
+    await toggle.setValue(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const patchCall = fetch.mock.calls.find(([, options]) => options.method === 'PATCH')
+    expect(JSON.parse(String(patchCall?.[1]?.body)).allowInternalRunner).toBe(false)
     wrapper.unmount()
   })
 

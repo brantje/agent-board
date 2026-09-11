@@ -75,10 +75,11 @@ RuntimeInstanceEvidence:
 ExecutionSessionEvidence:
   type: object
   additionalProperties: false
-  required: [id, runtimeInstanceId, status, cwd, command, exitCode, createdAt, startedAt, completedAt, updatedAt]
+  required: [id, runtimeInstanceId, runnerId, status, cwd, command, exitCode, createdAt, startedAt, completedAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
-    runtimeInstanceId: {type: string, format: uuid}
+    runtimeInstanceId: {type: [string, 'null'], format: uuid}
+    runnerId: {type: [string, 'null'], format: uuid}
     status: {type: string}
     cwd: {type: string}
     command:

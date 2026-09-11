@@ -8,7 +8,7 @@ import (
 )
 
 func (s *Store) ListProjects(ctx context.Context) ([]store.Project, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, created_at, updated_at FROM projects ORDER BY created_at, id`)
+	rows, err := s.pool.Query(ctx, `SELECT id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner, created_at, updated_at FROM projects ORDER BY created_at, id`)
 	if err != nil {
 		return nil, err
 	}
@@ -26,10 +26,10 @@ func (s *Store) ListProjects(ctx context.Context) ([]store.Project, error) {
 
 func (s *Store) UpdateProject(ctx context.Context, input store.Project) (store.Project, error) {
 	return scanProject(s.pool.QueryRow(ctx, `
-		UPDATE projects SET name=$2, repository_path=$3, default_branch=$4, workflow_settings=$5, updated_at=now()
+		UPDATE projects SET name=$2, repository_path=$3, default_branch=$4, workflow_settings=$5, allow_internal_runner=COALESCE($6,allow_internal_runner), updated_at=now()
 		WHERE id=$1
-		RETURNING id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, created_at, updated_at
-	`, input.ID, input.Name, input.RepositoryPath, input.DefaultBranch, objectJSON(input.WorkflowSettings)))
+		RETURNING id::text, name, issue_prefix, repository_path, default_branch, workflow_settings, allow_internal_runner, created_at, updated_at
+	`, input.ID, input.Name, input.RepositoryPath, input.DefaultBranch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner))
 }
 
 func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue, error) {
@@ -241,7 +241,7 @@ func (s *Store) UpdateRuntime(ctx context.Context, scope *string, input store.Ru
 
 func (s *Store) ListAgents(ctx context.Context, projectID *string) ([]store.Agent, error) {
 	project, scoped := visibleScope(projectID)
-	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, runtime_id::text, engine_settings, concurrency_limit, state, created_at, updated_at FROM agents WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
+	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, engine_settings, concurrency_limit, state, created_at, updated_at FROM agents WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
 	if err != nil {
 		return nil, err
 	}
@@ -259,9 +259,9 @@ func (s *Store) ListAgents(ctx context.Context, projectID *string) ([]store.Agen
 
 func (s *Store) GetAgentInScope(ctx context.Context, projectID *string, id string) (store.Agent, error) {
 	project, scoped := visibleScope(projectID)
-	return scanAgent(s.pool.QueryRow(ctx, `SELECT id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, runtime_id::text, engine_settings, concurrency_limit, state, created_at, updated_at FROM agents WHERE id=$3 AND (($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL))`, nullableUUID(project, scoped), scoped, id))
+	return scanAgent(s.pool.QueryRow(ctx, `SELECT id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, engine_settings, concurrency_limit, state, created_at, updated_at FROM agents WHERE id=$3 AND (($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL))`, nullableUUID(project, scoped), scoped, id))
 }
 
 func (s *Store) UpdateAgent(ctx context.Context, scope *string, input store.Agent) (store.Agent, error) {
-	return scanAgent(s.pool.QueryRow(ctx, `UPDATE agents SET name=$3, role_instructions=$4, engine=$5, model_profile_id=$6, runtime_id=$7, engine_settings=$8, concurrency_limit=$9, state=$10, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, runtime_id::text, engine_settings, concurrency_limit, state, created_at, updated_at`, scope, input.ID, input.Name, input.RoleInstructions, input.Engine, input.ModelProfileID, input.RuntimeID, objectJSON(input.EngineSettings), input.ConcurrencyLimit, input.State))
+	return scanAgent(s.pool.QueryRow(ctx, `UPDATE agents SET name=$3, role_instructions=$4, engine=$5, model_profile_id=$6, engine_settings=$7, concurrency_limit=$8, state=$9, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, engine_settings, concurrency_limit, state, created_at, updated_at`, scope, input.ID, input.Name, input.RoleInstructions, input.Engine, input.ModelProfileID, objectJSON(input.EngineSettings), input.ConcurrencyLimit, input.State))
 }

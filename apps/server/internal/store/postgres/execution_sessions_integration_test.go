@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -38,9 +39,10 @@ func TestExecutionSessionLifecycleAndSequentialReuse(t *testing.T) {
 
 	first, err = s.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
 		ProjectID: fixture.project.ID, SessionID: first.ID, FromStatuses: []string{"PENDING"}, Status: "STARTING",
+		CommandArgv: json.RawMessage(`["opencode","serve"]`),
 	})
-	if err != nil {
-		t.Fatalf("transition starting: %v", err)
+	if err != nil || !bytes.Contains(first.CommandArgv, []byte("opencode")) {
+		t.Fatalf("transition starting: session=%+v err=%v", first, err)
 	}
 	first, err = s.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
 		ProjectID: fixture.project.ID, SessionID: first.ID, FromStatuses: []string{"STARTING"}, Status: "RUNNING",
@@ -89,6 +91,33 @@ func TestExecutionSessionLifecycleAndSequentialReuse(t *testing.T) {
 		t.Fatalf("cross-project get error=%v", err)
 	}
 	if _, err := s.ListExecutionSessions(ctx, fixture.project.ID, []string{"BOGUS"}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid status error=%v", err)
+	}
+}
+
+func TestListExecutionSessionsByRunner(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	fixture := seedRunFixture(t, s, "runner-session-list")
+	runner, err := s.CreateRunner(ctx, store.Runner{Name: "Build host", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+	session, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: fixture.project.ID, RunID: fixture.run.ID, RunnerID: runner.ID,
+		Status: "RUNNING", CommandArgv: json.RawMessage(`["true"]`),
+	})
+	if err != nil {
+		t.Fatalf("create runner session: %v", err)
+	}
+	active, err := s.ListExecutionSessionsByRunner(ctx, runner.ID, []string{"RUNNING"})
+	if err != nil || len(active) != 1 || active[0].ID != session.ID {
+		t.Fatalf("active runner sessions=%+v err=%v", active, err)
+	}
+	if _, err := s.ListExecutionSessionsByRunner(ctx, "", nil); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("empty runner id error=%v", err)
+	}
+	if _, err := s.ListExecutionSessionsByRunner(ctx, runner.ID, []string{"BOGUS"}); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("invalid status error=%v", err)
 	}
 }

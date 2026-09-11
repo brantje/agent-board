@@ -3,7 +3,10 @@ package session
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -52,6 +55,26 @@ func (m *Manager) ActiveCount() int {
 	return len(m.sessions)
 }
 
+func (m *Manager) WorkspaceRoot() string {
+	return m.workspaceRoot
+}
+
+func (m *Manager) SessionWorkspacePath(sessionID string) string {
+	id := sanitizeSessionID(sessionID)
+	if id == "" {
+		return ""
+	}
+	return filepath.Join(m.workspaceRoot, id)
+}
+
+func sanitizeSessionID(sessionID string) string {
+	cleaned := filepath.Clean(sessionID)
+	if cleaned == "." || cleaned == ".." || strings.Contains(cleaned, string(filepath.Separator)) || filepath.IsAbs(cleaned) {
+		return ""
+	}
+	return cleaned
+}
+
 func (m *Manager) ActiveIDs() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -64,6 +87,7 @@ func (m *Manager) ActiveIDs() []string {
 }
 
 func (m *Manager) Start(id string, request Request) (*Session, error) {
+	id = sanitizeSessionID(id)
 	if id == "" {
 		return nil, errors.New("execution session id is required")
 	}
@@ -89,7 +113,14 @@ func (m *Manager) Start(id string, request Request) (*Session, error) {
 		}
 	}
 
-	s, err := start(id, m.workspaceRoot, request, redactionValues)
+	sessionRoot := m.SessionWorkspacePath(id)
+	if sessionRoot == "" {
+		return nil, errors.New("execution session id is required")
+	}
+	if err := os.MkdirAll(sessionRoot, 0o755); err != nil {
+		return nil, fmt.Errorf("prepare session workspace: %w", err)
+	}
+	s, err := start(id, sessionRoot, request, redactionValues)
 	if err != nil {
 		return nil, err
 	}

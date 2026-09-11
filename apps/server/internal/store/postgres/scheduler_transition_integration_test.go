@@ -31,7 +31,7 @@ func TestSchedulerTransitionKeepsCapacityWhileRunning(t *testing.T) {
 	if run.Status != "RUNNING" {
 		t.Fatalf("run status=%s want RUNNING", run.Status)
 	}
-	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 2)
+	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 3)
 }
 
 func TestSchedulerTransitionReleasesCapacityOnInactiveStates(t *testing.T) {
@@ -216,7 +216,7 @@ func TestSchedulerTransitionRejectsStaleLeaseToken(t *testing.T) {
 	if !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("stale lease error=%v want not found", err)
 	}
-	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 2)
+	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 3)
 
 	run, err := s.GetRun(ctx, f.project.ID, f.run.ID)
 	if err != nil {

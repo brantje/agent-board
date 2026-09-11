@@ -360,9 +360,8 @@ describe('configuration screens', () => {
 
   it('rejects saving an existing configuration that references a disabled dependency', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
-      if (path === '/api/agents') return new Response(JSON.stringify([{ id: 'a', name: 'Coder', engine: 'opencode', modelProfileId: 'm', runtimeId: 'r', engineSettings: {}, state: 'ENABLED' }]))
+      if (path === '/api/agents') return new Response(JSON.stringify([{ id: 'a', name: 'Coder', engine: 'opencode', modelProfileId: 'm', engineSettings: {}, state: 'ENABLED' }]))
       if (path === '/api/model-profiles') return new Response(JSON.stringify([{ id: 'm', name: 'Disabled model', enabled: false }]))
-      if (path === '/api/runtimes') return new Response(JSON.stringify([{ id: 'r', name: 'Runtime', enabled: true }]))
       return new Response('{}', { status: options.method === 'PUT' ? 200 : 404 })
     })
     vi.stubGlobal('fetch', fetch)

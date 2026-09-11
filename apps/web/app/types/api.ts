@@ -6,6 +6,25 @@ export interface Project {
   repositoryPath: string
   defaultBranch: string
   workflowSettings: Record<string, unknown>
+  allowInternalRunner: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Runner {
+  id: string
+  name: string | null
+  internal: boolean
+  managed: boolean
+  deletable: boolean
+  connected: boolean
+  registeredAt: string | null
+  revokedAt: string | null
+  lastSeenAt: string | null
+  capabilities: Record<string, unknown>
+  activeSessions: number | null
+  reservedSessions: number
+  maxActiveSessions: number
   createdAt: string
   updatedAt: string
 }
@@ -68,7 +87,6 @@ export interface Agent {
   roleInstructions: string
   engine: string
   modelProfileId: string
-  runtimeId: string
   engineSettings: Record<string, unknown>
   concurrencyLimit: number
   state: string
@@ -139,7 +157,8 @@ export interface RuntimeInstanceEvidence {
 
 export interface ExecutionSessionEvidence {
   id: string
-  runtimeInstanceId: string
+  runtimeInstanceId: string | null
+  runnerId: string | null
   status: string
   cwd: string
   command: string[]

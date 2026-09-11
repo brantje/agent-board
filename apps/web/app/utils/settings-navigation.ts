@@ -33,6 +33,7 @@ export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
   }
   groups.push([
     { label: 'Infrastructure', type: 'label' },
+    ...(!projectId ? [{ label: 'Runners', to: '/settings/runners' }] : []),
     { label: 'Runtimes', to: runtimes }
   ])
   return groups

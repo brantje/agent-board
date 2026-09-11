@@ -59,7 +59,7 @@ type Engine struct {
 }
 
 func New() *Engine {
-	return &Engine{address: defaultAddress}
+	return &Engine{}
 }
 
 func newWithAddress(address string) *Engine {
@@ -84,7 +84,8 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	if err != nil {
 		return engine.Result{}, err
 	}
-	host, port, err := net.SplitHostPort(e.address)
+	address := e.nativeServerAddress(request.Context)
+	host, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return engine.Result{}, fmt.Errorf("opencode engine: parse native server address: %w", err)
 	}
@@ -120,7 +121,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	if !ok {
 		return engine.Result{}, fmt.Errorf("opencode engine: process does not support session-local connections")
 	}
-	native, err := client.NewSession(connector, e.address)
+	native, err := client.NewSession(connector, address)
 	if err != nil {
 		return engine.Result{}, err
 	}
@@ -196,7 +197,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			cancelNativeSession(ctx, native, session.ID, state)
 			return engine.Result{}, ctx.Err()
 		case <-statePoll.C:
-			hadPending, err := reconcilePendingQuestions(ctx, native, session.ID, state)
+			hadPending, err := reconcilePendingQuestionsForPoll(ctx, native, session.ID, state)
 			if err != nil {
 				return engine.Result{}, err
 			}
@@ -205,8 +206,11 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				inactivePolls = 0
 				continue
 			}
-			active, err := native.SessionActive(ctx, session.ID)
+			active, err := queryNativeSessionActive(ctx, native, session.ID)
 			if err != nil {
+				if isTransientNativePollTimeout(ctx, err) {
+					continue
+				}
 				statePollFailures++
 				inactivePolls = 0
 				if statePollFailures >= nativeStatePollFailureLimit {
@@ -228,7 +232,8 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			if !executionObserved {
 				promptStallPolls++
 				if promptStallPolls >= promptAdmissionPollLimit {
-					return engine.Result{}, fmt.Errorf("opencode engine: native session did not start execution after prompt")
+					detail := nativeSessionStallDetail(ctx, native, session.ID)
+					return engine.Result{}, fmt.Errorf("opencode engine: native session did not start execution after prompt%s", detail)
 				}
 				inactivePolls = 0
 				continue
@@ -259,18 +264,20 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			}
 			if idle {
 				if !executionObserved {
-					active, err := native.SessionActive(ctx, session.ID)
+					active, err := queryNativeSessionActive(ctx, native, session.ID)
 					if err != nil {
-						return engine.Result{}, fmt.Errorf("opencode engine: query native session activity before idle handling: %w", err)
-					}
-					if !active {
+						if !isTransientNativePollTimeout(ctx, err) {
+							return engine.Result{}, fmt.Errorf("opencode engine: query native session activity before idle handling: %w", err)
+						}
+					} else if !active {
 						return engine.Result{}, fmt.Errorf("opencode engine: native session became idle before execution started")
+					} else {
+						executionObserved = true
+						promptStallPolls = 0
+						inactivePolls = 0
 					}
-					executionObserved = true
-					promptStallPolls = 0
-					inactivePolls = 0
 				}
-				hadPending, err := reconcilePendingQuestions(ctx, native, session.ID, state)
+				hadPending, err := reconcilePendingQuestionsForPoll(ctx, native, session.ID, state)
 				if err != nil {
 					return engine.Result{}, err
 				}
@@ -282,12 +289,10 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
 				return engine.Result{}, err
 			}
-			// A native Question can be asked and answered before the first activity
-			// poll. Since handleQuestion only retains requests for this exact native
-			// session, its presence is authoritative proof that execution started.
-			if len(state.nativeQuestions) > 0 {
+			if indicatesSessionExecution(eventRead.event, session.ID) || len(state.nativeQuestions) > 0 {
 				executionObserved = true
 				inactivePolls = 0
+				promptStallPolls = 0
 			}
 		}
 	}
@@ -344,15 +349,26 @@ func serverEnvironment(safe executioncontext.SafeContext, providerID string) (ma
 		}
 	}
 	config := map[string]any{
+		"permission": "allow",
 		"provider": map[string]any{
 			providerID: providerConfig,
 		},
+	}
+	if providerID != "" && modelID != "" {
+		ref := providerID + "/" + modelID
+		config["model"] = ref
+		config["small_model"] = ref
+		config["agent"] = map[string]any{
+			"title": map[string]any{"disable": true},
+		}
 	}
 	encoded, err := json.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("opencode engine: encode provider config: %w", err)
 	}
-	return map[string]string{"OPENCODE_CONFIG_CONTENT": string(encoded)}, nil
+	env := openCodeProcessIsolationEnvironment(safe)
+	env["OPENCODE_CONFIG_CONTENT"] = string(encoded)
+	return env, nil
 }
 
 func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string) (engine.Process, bool, error) {
@@ -397,7 +413,6 @@ func ensureNativeSession(ctx context.Context, native *client.Client, safe execut
 		}
 	}
 	session, err := native.CreateSession(ctx, client.CreateSessionRequest{
-		Directory: "/workspace",
 		Model: client.ModelRef{
 			ID:         safe.Model.Model,
 			ProviderID: settings.ProviderID,
@@ -447,7 +462,7 @@ func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	if safe.ReviewFeedback != nil && strings.TrimSpace(safe.ReviewFeedback.Feedback) != "" {
 		sections = append(sections, "Review feedback:\n"+strings.TrimSpace(safe.ReviewFeedback.Feedback))
 	}
-	sections = append(sections, "Work directly in /workspace and implement the requested issue. If human input is required, use OpenCode's native Question capability rather than guessing.")
+	sections = append(sections, "Work directly in the current project directory and implement the requested issue. Treat /workspace as the logical workspace root: use project-relative paths for workspace files rather than absolute /workspace paths. If human input is required, use OpenCode's native Question capability rather than guessing.")
 	return strings.Join(sections, "\n\n")
 }
 
@@ -496,6 +511,30 @@ func reconnectEvents(ctx context.Context, native *client.Client) (*client.EventS
 	return nil, fmt.Errorf("opencode engine: reconnect native event stream: %w", lastErr)
 }
 
+func nativeStatePollContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, nativeStatePollInterval)
+}
+
+func isTransientNativePollTimeout(parent context.Context, err error) bool {
+	return err != nil && parent.Err() == nil && errors.Is(err, context.DeadlineExceeded)
+}
+
+func queryNativeSessionActive(ctx context.Context, native *client.Client, sessionID string) (bool, error) {
+	pollCtx, cancel := nativeStatePollContext(ctx)
+	defer cancel()
+	return native.SessionActive(pollCtx, sessionID)
+}
+
+func reconcilePendingQuestionsForPoll(ctx context.Context, native *client.Client, sessionID string, state *runState) (bool, error) {
+	pollCtx, cancel := nativeStatePollContext(ctx)
+	defer cancel()
+	hadPending, err := reconcilePendingQuestions(pollCtx, native, sessionID, state)
+	if isTransientNativePollTimeout(ctx, err) {
+		return false, nil
+	}
+	return hadPending, err
+}
+
 func reconcilePendingQuestions(ctx context.Context, native *client.Client, sessionID string, state *runState) (bool, error) {
 	pending, err := native.ListQuestions(ctx, sessionID)
 	if err != nil {
@@ -518,13 +557,37 @@ func isSessionIdleEvent(event client.Event, sessionID string) (bool, error) {
 	if event.Type != "session.idle" {
 		return false, nil
 	}
-	var properties struct {
+	var payload struct {
 		SessionID string `json:"sessionID"`
 	}
-	if err := json.Unmarshal(event.Properties, &properties); err != nil {
+	if err := json.Unmarshal(event.Properties, &payload); err != nil {
 		return false, fmt.Errorf("opencode engine: decode session idle event: %w", err)
 	}
-	return properties.SessionID == sessionID, nil
+	return payload.SessionID == sessionID, nil
+}
+
+func nativeSessionStallDetail(ctx context.Context, native *client.Client, sessionID string) string {
+	active, activeErr := native.SessionActive(ctx, sessionID)
+	sessions, listErr := native.ListSessions(ctx)
+	return fmt.Sprintf(" (session=%s active=%v activeErr=%v sessions=%d listErr=%v)", sessionID, active, activeErr, len(sessions), listErr)
+}
+
+func indicatesSessionExecution(event client.Event, sessionID string) bool {
+	if strings.TrimSpace(sessionID) == "" || !eventBelongsToSession(event, sessionID) {
+		return false
+	}
+	eventType := event.Type
+	return strings.HasPrefix(eventType, "message.") || strings.HasPrefix(eventType, "session.next.") || strings.HasPrefix(eventType, "question.")
+}
+
+func eventBelongsToSession(event client.Event, sessionID string) bool {
+	var payload struct {
+		SessionID string `json:"sessionID"`
+	}
+	if json.Unmarshal(event.Properties, &payload) != nil {
+		return false
+	}
+	return payload.SessionID == sessionID
 }
 
 type eventReadResult struct {
@@ -533,7 +596,7 @@ type eventReadResult struct {
 }
 
 func readEvents(ctx context.Context, stream *client.EventStream) <-chan eventReadResult {
-	reads := make(chan eventReadResult, 1)
+	reads := make(chan eventReadResult, 64)
 	go func() {
 		for {
 			event, err := stream.Next()

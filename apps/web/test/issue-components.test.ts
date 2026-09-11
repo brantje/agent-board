@@ -30,7 +30,6 @@ const agent = {
   roleInstructions: '',
   engine: 'opencode',
   modelProfileId: 'm',
-  runtimeId: 'r',
   engineSettings: {},
   concurrencyLimit: 1,
   state: 'ENABLED'

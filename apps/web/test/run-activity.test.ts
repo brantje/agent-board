@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ActivityTimeline from '../app/components/ActivityTimeline.vue'
-import { projectRunActivity, eventActivityIcon, toolActivityIcon, toolActivityLabel, toolActivityTarget } from '../app/utils/events'
+import { projectRunActivity, eventActivityIcon, eventTitle, toolActivityIcon, toolActivityLabel, toolActivityTarget } from '../app/utils/events'
 import { event } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
@@ -60,6 +60,35 @@ describe('run activity projection', () => {
       target: 'opencode serve --hostname 127.0.0.1 --port 4096',
       status: 'running'
     })
+  })
+
+  it('projects workspace transfer lifecycle events with runner names and coalesces progress', () => {
+    const items = projectRunActivity([
+      event({ id: 'xfer-start', type: 'workspace.transfer.started', sequence: 1, payload: { direction: 'to_runner', runnerId: 'runner-1', runnerName: 'Internal runner', transferId: 'xfer-1' } }),
+      event({ id: 'xfer-progress', type: 'workspace.transfer.progress', sequence: 2, payload: { direction: 'to_runner', runnerName: 'Internal runner', transferId: 'xfer-1', bytesTransferred: 65536, totalBytes: 131072 } }),
+      event({ id: 'xfer-done', type: 'workspace.transfer.completed', sequence: 3, payload: { direction: 'to_runner', runnerName: 'Internal runner', transferId: 'xfer-1', bytesTransferred: 131072, totalBytes: 131072 } }),
+      event({ id: 'sync-fail', type: 'workspace.transfer.failed', sequence: 4, payload: { direction: 'from_runner', runnerName: 'Internal runner', transferId: 'xfer-2', reason: 'runner disconnected' } })
+    ])
+    expect(items).toHaveLength(2)
+    expect(items.map(item => item.kind === 'event' ? item.title : item.kind)).toEqual([
+      'Workspace transferred to Internal runner',
+      'Failed to synchronize changes from Internal runner'
+    ])
+    expect(items[0]).toMatchObject({ description: '128.0 KiB (100%)' })
+    expect(items[1]).toMatchObject({ description: 'runner disconnected' })
+    expect(eventTitle(event({
+      type: 'workspace.transfer.started',
+      payload: { direction: 'to_runner', runnerName: 'lab-host' }
+    }))).toBe('Preparing workspace')
+    expect(eventTitle(event({
+      type: 'workspace.transfer.progress',
+      payload: { direction: 'to_runner', runnerName: 'lab-host' }
+    }))).toBe('Transferring workspace to lab-host')
+    expect(eventTitle(event({
+      type: 'workspace.transfer.started',
+      payload: { direction: 'from_runner', runnerName: 'lab-host' }
+    }))).toBe('Synchronizing changes from lab-host')
+    expect(eventActivityIcon('workspace.transfer.started')).toBe('i-lucide-folder-sync')
   })
 
   it('projects an intentional process stop as stopped rather than failed', () => {
@@ -249,6 +278,66 @@ describe('run activity projection', () => {
       event({ id: 'thought', type: 'agent.message', sequence: 2, payload: { kind: 'reasoning', message: 'Starting work.' } })
     ])
     expect(items.map(item => item.kind)).toEqual(['event', 'thought'])
+  })
+
+  it('shows thought before question and last tool when persistence arrived tool-question-thought', () => {
+    const items = projectRunActivity([
+      event({ id: 'read', type: 'tool.started', sequence: 1, payload: { toolCallId: 'read-1', name: 'read', input: { filePath: 'a.go' } } }),
+      event({ id: 'read-done', type: 'tool.completed', sequence: 2, payload: { toolCallId: 'read-1', name: 'read', summary: 'a.go' } }),
+      event({ id: 'write', type: 'tool.started', sequence: 3, payload: { toolCallId: 'write-1', name: 'write', input: { path: 'b.go' } } }),
+      event({ id: 'write-done', type: 'tool.completed', sequence: 4, payload: { toolCallId: 'write-1', name: 'write', summary: 'b.go' } }),
+      event({ id: 'question', type: 'question.created', sequence: 5, payload: { questionId: 'q1', prompt: 'Which marker should I write?' } }),
+      event({ id: 'thought', type: 'agent.message', sequence: 6, payload: { kind: 'reasoning', message: 'I need your input before continuing.' } })
+    ])
+    expect(items.map(item => item.kind)).toEqual(['tool', 'thought', 'tool', 'question'])
+    expect(items[1]).toMatchObject({ kind: 'thought', message: 'I need your input before continuing.' })
+    expect(items[3]).toMatchObject({ kind: 'question', prompt: 'Which marker should I write?' })
+  })
+
+  it('keeps thought before question when already in order', () => {
+    const items = projectRunActivity([
+      event({ id: 'thought', type: 'agent.message', sequence: 1, payload: { kind: 'reasoning', message: 'Asking first.' } }),
+      event({ id: 'question', type: 'question.created', sequence: 2, payload: { questionId: 'q1', prompt: 'Proceed?' } })
+    ])
+    expect(items.map(item => item.kind)).toEqual(['thought', 'question'])
+  })
+
+  it('shows thought before question tool when run.resumed sits between them', () => {
+    const items = projectRunActivity([
+      event({ id: 'started', type: 'tool.started', sequence: 1, payload: { toolCallId: 'call-q', name: 'question', input: { questions: [] } } }),
+      event({ id: 'resume', type: 'run.resumed', sequence: 2, payload: { questionId: 'q1' } }),
+      event({ id: 'thought', type: 'agent.message', sequence: 3, payload: { kind: 'reasoning', message: 'I need clarifying answers first.' } }),
+      event({ id: 'done', type: 'tool.completed', sequence: 4, payload: { toolCallId: 'call-q', name: 'question', summary: 'Asked 3 questions' } })
+    ])
+    expect(items.map(item => item.kind)).toEqual(['thought', 'tool', 'event'])
+    expect(items[0]).toMatchObject({ kind: 'thought', message: 'I need clarifying answers first.' })
+    expect(items[1]).toMatchObject({ kind: 'tool', label: 'Question', summary: 'Asked 3 questions' })
+    expect(items[2]).toMatchObject({ kind: 'event', event: { type: 'run.resumed' } })
+  })
+
+  it('moves late question reasoning before the related question prompts', () => {
+    const prompt = 'What type of app are you looking to build?'
+    const items = projectRunActivity([
+      event({ id: 'question', type: 'question.created', sequence: 1, payload: { questionId: 'q1', prompt } }),
+      event({ id: 'wait', type: 'run.waiting_for_input', sequence: 2, payload: { questionId: 'q1' } }),
+      event({ id: 'decision', type: 'decision.recorded', sequence: 3, payload: { questionId: 'q1', kind: 'QUESTION_ANSWER', outcome: '["option-0"]' } }),
+      event({
+        id: 'started',
+        type: 'tool.started',
+        sequence: 4,
+        payload: {
+          toolCallId: 'call-q',
+          name: 'question',
+          input: { questions: [{ question: prompt, options: [{ label: 'SaaS Web App' }] }] }
+        }
+      }),
+      event({ id: 'resume', type: 'run.resumed', sequence: 5, payload: { questionId: 'q1' } }),
+      event({ id: 'thought', type: 'agent.message', sequence: 6, payload: { kind: 'reasoning', message: 'I should ask clarifying questions first.' } }),
+      event({ id: 'done', type: 'tool.completed', sequence: 7, payload: { toolCallId: 'call-q', name: 'question', summary: 'Asked 3 questions' } })
+    ])
+    expect(items.map(item => item.kind)).toEqual(['thought', 'question', 'event', 'event', 'tool', 'event'])
+    expect(items[0]).toMatchObject({ kind: 'thought', message: 'I should ask clarifying questions first.' })
+    expect(items[1]).toMatchObject({ kind: 'question', prompt })
   })
 
   it('hides engine question reply-accepted and binding-resolved events', () => {

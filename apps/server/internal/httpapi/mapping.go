@@ -3,7 +3,7 @@ package httpapi
 import "github.com/brantje/agent-board/apps/server/internal/store"
 
 func projectDTO(v store.Project) ProjectDTO {
-	return ProjectDTO{v.ID, v.Name, v.IssuePrefix, v.RepositoryPath, v.DefaultBranch, v.WorkflowSettings, v.CreatedAt, v.UpdatedAt}
+	return ProjectDTO{boolDefault(v.AllowInternalRunner, true), v.ID, v.Name, v.IssuePrefix, v.RepositoryPath, v.DefaultBranch, v.WorkflowSettings, v.CreatedAt, v.UpdatedAt}
 }
 
 func issueDTO(v store.Issue) IssueDTO {
@@ -39,7 +39,7 @@ func runtimeDTO(v store.Runtime) RuntimeDTO {
 }
 
 func agentDTO(v store.Agent) AgentDTO {
-	return AgentDTO{v.ID, v.ProjectID, v.Name, v.RoleInstructions, v.Engine, v.ModelProfileID, v.RuntimeID, v.EngineSettings, v.ConcurrencyLimit, v.State, v.CreatedAt, v.UpdatedAt}
+	return AgentDTO{v.ID, v.ProjectID, v.Name, v.RoleInstructions, v.Engine, v.ModelProfileID, v.EngineSettings, v.ConcurrencyLimit, v.State, v.CreatedAt, v.UpdatedAt}
 }
 
 func runDTO(v store.Run, issueKeys map[string]string) RunDTO {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -18,10 +19,30 @@ const (
 )
 
 func (s *Store) AcquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string) (store.WorkspaceBootstrapLock, error) {
-	return s.acquireWorkspaceBootstrapLock(ctx, workspaceID, workspaceBootstrapLockWaitTimeout)
+	return s.acquireWorkspaceLock(ctx, workspaceID, "")
 }
 
-func (s *Store) acquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string, waitTimeout time.Duration) (store.WorkspaceBootstrapLock, error) {
+func (s *Store) AcquireWorkspaceExecutionLock(ctx context.Context, workspaceID, executionSessionID string) (store.WorkspaceBootstrapLock, error) {
+	executionSessionID = strings.TrimSpace(executionSessionID)
+	if executionSessionID == "" {
+		return nil, store.ErrInvalidArgument
+	}
+	return s.acquireWorkspaceLock(ctx, workspaceID, executionSessionID)
+}
+
+func (s *Store) acquireWorkspaceLock(ctx context.Context, workspaceID, executionSessionID string) (store.WorkspaceBootstrapLock, error) {
+	lock, err := s.acquireWorkspaceBootstrapLock(ctx, workspaceID, workspaceBootstrapLockWaitTimeout)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.fenceWorkspaceRunnerOwner(ctx, lock, workspaceID, executionSessionID); err != nil {
+		_ = lock.Release()
+		return nil, err
+	}
+	return lock, nil
+}
+
+func (s *Store) acquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string, waitTimeout time.Duration) (*workspaceBootstrapLock, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, store.ErrInvalidArgument
 	}
@@ -38,6 +59,68 @@ func (s *Store) acquireWorkspaceBootstrapLock(ctx context.Context, workspaceID s
 		return nil, workspaceBootstrapLockWaitError(ctx, lockCtx, workspaceID, err)
 	}
 	return &workspaceBootstrapLock{conn: conn, key: key}, nil
+}
+
+// fenceWorkspaceRunnerOwner checks durable Runner ownership while the
+// filesystem advisory lock is already held. The Workspace row lock exists only
+// for this short ownership check; it is committed before returning so normal
+// bootstrap metadata updates never block on their own filesystem lock.
+// CreateExecutionSession acquires the same advisory key transactionally before
+// taking this Workspace row lock, preventing ownership admission from crossing
+// the filesystem critical section after this check commits.
+func (s *Store) fenceWorkspaceRunnerOwner(ctx context.Context, lock *workspaceBootstrapLock, workspaceID, executionSessionID string) error {
+	if lock == nil || lock.conn == nil {
+		return store.ErrInvalidArgument
+	}
+	tx, err := lock.conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
+
+	var persistedWorkspaceID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id::text
+		FROM workspaces
+		WHERE id::text = $1
+		FOR UPDATE
+	`, workspaceID).Scan(&persistedWorkspaceID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Project-scoped users of the same advisory lock namespace deliberately
+			// have no Workspace row and therefore no Runner writer to fence.
+			return tx.Commit(ctx)
+		}
+		return err
+	}
+
+	var ownerSessionID string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE((
+			SELECT session.id::text
+			FROM execution_sessions AS session
+			JOIN runs AS run
+			  ON run.project_id = session.project_id
+			 AND run.id = session.run_id
+			WHERE run.workspace_id = $1::uuid
+			  AND session.runner_id IS NOT NULL
+			  AND (
+				session.status IN ('PENDING', 'STARTING', 'RUNNING')
+				OR run.status IN ('STARTING', 'RUNNING', 'WAITING_FOR_INPUT', 'PAUSED')
+			  )
+			ORDER BY session.created_at DESC
+			LIMIT 1
+		), '')
+	`, persistedWorkspaceID).Scan(&ownerSessionID); err != nil {
+		return err
+	}
+	if ownerSessionID != "" && ownerSessionID != executionSessionID {
+		return store.ErrConflict
+	}
+	return tx.Commit(ctx)
 }
 
 func workspaceBootstrapLockWaitError(parent, lockCtx context.Context, workspaceID string, err error) error {

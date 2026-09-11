@@ -16,3 +16,4 @@ apps/server/tmp/
 repositories/
 workspaces/
 evidence/
+.e2e-test/

@@ -15,14 +15,15 @@ type APIError struct {
 }
 
 type ProjectDTO struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	IssuePrefix      string          `json:"issuePrefix"`
-	RepositoryPath   string          `json:"repositoryPath"`
-	DefaultBranch    string          `json:"defaultBranch"`
-	WorkflowSettings json.RawMessage `json:"workflowSettings"`
-	CreatedAt        time.Time       `json:"createdAt"`
-	UpdatedAt        time.Time       `json:"updatedAt"`
+	AllowInternalRunner bool            `json:"allowInternalRunner"`
+	ID                  string          `json:"id"`
+	Name                string          `json:"name"`
+	IssuePrefix         string          `json:"issuePrefix"`
+	RepositoryPath      string          `json:"repositoryPath"`
+	DefaultBranch       string          `json:"defaultBranch"`
+	WorkflowSettings    json.RawMessage `json:"workflowSettings"`
+	CreatedAt           time.Time       `json:"createdAt"`
+	UpdatedAt           time.Time       `json:"updatedAt"`
 }
 
 type IssueDTO struct {
@@ -113,7 +114,6 @@ type AgentDTO struct {
 	RoleInstructions string          `json:"roleInstructions"`
 	Engine           string          `json:"engine"`
 	ModelProfileID   string          `json:"modelProfileId"`
-	RuntimeID        string          `json:"runtimeId"`
 	EngineSettings   json.RawMessage `json:"engineSettings"`
 	ConcurrencyLimit int             `json:"concurrencyLimit"`
 	State            string          `json:"state"`
@@ -139,18 +139,20 @@ type RunDTO struct {
 }
 
 type CreateProjectRequest struct {
-	Name             string          `json:"name"`
-	IssuePrefix      string          `json:"issuePrefix"`
-	RepositoryPath   string          `json:"repositoryPath"`
-	DefaultBranch    string          `json:"defaultBranch"`
-	WorkflowSettings json.RawMessage `json:"workflowSettings"`
+	AllowInternalRunner *bool           `json:"allowInternalRunner,omitempty"`
+	Name                string          `json:"name"`
+	IssuePrefix         string          `json:"issuePrefix"`
+	RepositoryPath      string          `json:"repositoryPath"`
+	DefaultBranch       string          `json:"defaultBranch"`
+	WorkflowSettings    json.RawMessage `json:"workflowSettings"`
 }
 
 type UpdateProjectRequest struct {
-	Name             *string          `json:"name"`
-	RepositoryPath   *string          `json:"repositoryPath"`
-	DefaultBranch    *string          `json:"defaultBranch"`
-	WorkflowSettings *json.RawMessage `json:"workflowSettings"`
+	AllowInternalRunner *bool            `json:"allowInternalRunner,omitempty"`
+	Name                *string          `json:"name"`
+	RepositoryPath      *string          `json:"repositoryPath"`
+	DefaultBranch       *string          `json:"defaultBranch"`
+	WorkflowSettings    *json.RawMessage `json:"workflowSettings"`
 }
 
 type CreateIssueRequest struct {
@@ -221,7 +223,6 @@ type CreateAgentRequest struct {
 	RoleInstructions string          `json:"roleInstructions"`
 	Engine           string          `json:"engine"`
 	ModelProfileID   string          `json:"modelProfileId"`
-	RuntimeID        string          `json:"runtimeId"`
 	EngineSettings   json.RawMessage `json:"engineSettings"`
 	ConcurrencyLimit int             `json:"concurrencyLimit"`
 	State            string          `json:"state"`

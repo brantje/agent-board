@@ -40,7 +40,7 @@ func (s *reconcileBranchStore) ListExecutionSessions(_ context.Context, projectI
 
 func reconcileBranchService(t *testing.T, sessionStore ExecutionSessionStore, manager RunnerConnectionManager) *ExecutionSessionService {
 	t.Helper()
-	service, err := NewExecutionSessionService(sessionStore, manager)
+	service, err := NewExecutionSessionService(sessionStore, manager, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

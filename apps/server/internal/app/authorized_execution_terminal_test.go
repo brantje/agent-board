@@ -24,16 +24,15 @@ func TestAuthorizedExecutionPreservesUnreadTerminalOutputBeforeRelease(t *testin
 	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
 	storeFake := &executionSessionStoreFake{
 		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-config-1", Status: "RUNNING", RunnerStatus: "READY"},
+		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
 	}
-	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	released := make(chan struct{})
 	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{prepared: executioncontext.Prepared{
-		RuntimeID:        "runtime-config-1",
-		RedactionValues:  []string{"plain-secret"},
+				RedactionValues:  []string{"plain-secret"},
 		ReleaseRedaction: func() { close(released) },
 	}})
 	if err != nil {
@@ -73,16 +72,15 @@ func TestAuthorizedExecutionExplicitAbandonCompletesLifecycle(t *testing.T) {
 	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
 	storeFake := &executionSessionStoreFake{
 		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", RuntimeID: "runtime-config-1", Status: "RUNNING", RunnerStatus: "READY"},
+		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
 	}
-	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	released := make(chan struct{})
 	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{prepared: executioncontext.Prepared{
-		RuntimeID:        "runtime-config-1",
-		RedactionValues:  []string{"plain-secret"},
+				RedactionValues:  []string{"plain-secret"},
 		ReleaseRedaction: func() { close(released) },
 	}})
 	if err != nil {

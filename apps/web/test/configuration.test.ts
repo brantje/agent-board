@@ -21,8 +21,9 @@ describe('intentional configuration inputs', () => {
     expect(payloadFor('runtimes', draftFor('runtimes', { name: 'Runtime', workspacePolicy: 'issue' }))).not.toHaveProperty('workspacePolicy')
   })
 
-  it('uses direct Runtime selection on Agents and omits server-owned credential references', () => {
-    expect(definitions.agents.fields.map(field => field.key)).toEqual(expect.arrayContaining(['engine', 'modelProfileId', 'runtimeId', 'engineSettings']))
+  it('uses Engine and Model Profile on Agents and omits server-owned credential references', () => {
+    expect(definitions.agents.fields.map(field => field.key)).toEqual(expect.arrayContaining(['engine', 'modelProfileId', 'engineSettings']))
+    expect(definitions.agents.fields.map(field => field.key)).not.toContain('runtimeId')
     expect(definitions.agents.fields.map(field => field.key)).not.toContain('executorProfileId')
     expect(definitions).not.toHaveProperty('executor-profiles')
     expect(definitions).not.toHaveProperty('runtime-profiles')
@@ -103,8 +104,8 @@ describe('intentional configuration inputs', () => {
     expect(definitions.projects.fields.find(field => field.key === 'repositoryPath')?.help).toContain('creates it and initializes a new Git repository')
     expect(definitions.providers.emptyDescription).toBe('Add a Provider with encrypted credentials so Model Profiles can call a model API.')
     expect(definitions['model-profiles'].emptyDescription).toBe('Create a Model Profile to select a Provider, model, and optional concurrent Run capacity.')
-    expect(definitions.runtimes.emptyDescription).toBe('Define a Runtime image and execution policy so Agents can start agent-runner.')
-    expect(definitions.agents.emptyDescription).toBe('Create an Agent with role instructions, Engine, Model Profile, and Runtime before assigning Issues.')
+    expect(definitions.runtimes.emptyDescription).toBe('Define a Runtime image and execution policy for legacy internal managed compute.')
+    expect(definitions.agents.emptyDescription).toBe('Create an Agent with role instructions, Engine and Model Profile before assigning Issues.')
     for (const kind of Object.keys(definitions) as (keyof typeof definitions)[]) {
       expect(definitions[kind].emptyDescription).not.toContain('New work will appear here')
     }

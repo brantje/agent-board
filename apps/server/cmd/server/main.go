@@ -87,11 +87,49 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
+	internalDone := make(chan struct{})
+	go func() {
+		defer close(internalDone)
+		runInternalRunnerSupervisor(ctx, stop, handler)
+	}()
 	code := supervise(ctx, stop, func() int {
 		return exitCode(ctx, configuredAddress(), handler)
 	}, schedulerDone)
+	<-internalDone
 	closeStore()
 	os.Exit(code)
+}
+
+func shouldStopControlPlaneForInternalRunner(err error) bool {
+	return err != nil && !errors.Is(err, app.ErrInternalRunnerUnavailable)
+}
+
+func runInternalRunnerSupervisor(ctx context.Context, stop context.CancelFunc, handler http.Handler) {
+	application, ok := handler.(*applicationHandler)
+	if !ok || application.services == nil || application.services.ControlPlane == nil || application.services.ControlPlane.Runners == nil {
+		return
+	}
+	binary := os.Getenv("AGENT_BOARD_RUNNER_BINARY")
+	if binary == "" {
+		binary = "agent-runner"
+	}
+	host, port, err := net.SplitHostPort(configuredAddress())
+	if err != nil {
+		slog.Error("internal runner address is invalid")
+		stop()
+		return
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	endpoint := "http://" + net.JoinHostPort(host, port)
+	root := filepath.Join(configuredWorkspaceRoot(), ".internal-runner")
+	if err := application.services.ControlPlane.Runners.SuperviseInternalRunner(ctx, binary, endpoint, root); err != nil && ctx.Err() == nil {
+		slog.Error("internal runner supervision failed", "error", err)
+		if shouldStopControlPlaneForInternalRunner(err) {
+			stop()
+		}
+	}
 }
 
 func supervise(ctx context.Context, cancel context.CancelFunc, serve func() int, schedulerDone <-chan error) int {
@@ -194,6 +232,10 @@ func startScheduler(ctx context.Context, handler http.Handler) (<-chan error, er
 }
 
 func configuredApplication(database *postgres.Store) (*app.Services, error) {
+	runnerReconnectTimeout, err := configuredRunnerReconnectTimeout()
+	if err != nil {
+		return nil, err
+	}
 	roots := repository.ParseRoots(os.Getenv("AGENT_BOARD_REPOSITORY_ROOTS"))
 	if len(roots) == 0 {
 		return nil, fmt.Errorf("repository roots: %w", repository.ErrNoAuthorizedRoots)
@@ -223,19 +265,34 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	dockerRuntime, err := dockerruntime.New()
-	if err != nil {
-		return nil, err
+	dockerRuntime, dockerErr := dockerruntime.New()
+	if dockerErr != nil {
+		slog.Warn("Docker runtime unavailable; runner execution remains available", "error", dockerErr)
 	}
 	secretResolver, err := configuredSecretResolver(database)
 	if err != nil {
-		_ = dockerRuntime.Close()
+		if dockerRuntime != nil {
+			_ = dockerRuntime.Close()
+		}
 		return nil, err
 	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, map[string]runtimepkg.Implementation{"docker": dockerRuntime}, secretResolver)
+	implementations := map[string]runtimepkg.Implementation{}
+	if dockerRuntime != nil {
+		implementations["docker"] = dockerRuntime
+	}
+	services, err := app.NewServicesWithRuntimes(database, materializer, implementations, secretResolver)
 	if err != nil {
-		_ = dockerRuntime.Close()
+		if dockerRuntime != nil {
+			_ = dockerRuntime.Close()
+		}
 		return nil, err
+	}
+	if err := services.ConfigureRunnerReconnectTimeout(runnerReconnectTimeout); err != nil {
+		_ = services.Close()
+		return nil, fmt.Errorf("runner reconnect timeout: %w", err)
+	}
+	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
+		database.SetRunnerCandidates(services.ControlPlane.Runners.Connections.Candidates)
 	}
 	services.ControlPlane.SetProjectRepositoryProvisioner(provisioner)
 	if err := configureExecutionScheduler(services, git); err != nil {
@@ -294,10 +351,15 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if err != nil {
 		return err
 	}
-	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, candidate, git)
+	var runnerConnector runexec.RunnerConnector
+	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
+		runnerConnector = runexec.NewRegistryConnector(services.ControlPlane.Runners.Connections)
+	}
+	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, candidate, git, runnerConnector)
 	if err != nil {
 		return err
 	}
+	processor.SetWorkspaceEnsurer(services.Workspaces)
 	config := scheduler.DefaultConfig(configuredSchedulerOwnerID())
 	config.ReportError = func(err error) { slog.Error("scheduler execution", "error", err) }
 	coordinator, err := scheduler.New(services.ExecutionStore, processor, processor, config)

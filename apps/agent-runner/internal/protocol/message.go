@@ -2,33 +2,43 @@ package protocol
 
 import runnerprotocol "github.com/brantje/agent-board/packages/runnerprotocol"
 
-const Version1 = runnerprotocol.Version1
+const Version2 = runnerprotocol.Version2
 
 type MessageType = runnerprotocol.MessageType
 
 const (
-	TypeServerHello    = runnerprotocol.TypeServerHello
-	TypeRunnerHello    = runnerprotocol.TypeRunnerHello
-	TypeHealth         = runnerprotocol.TypeHealth
-	TypeStart          = runnerprotocol.TypeStart
-	TypeSessionStarted = runnerprotocol.TypeSessionStarted
-	TypeStdin          = runnerprotocol.TypeStdin
-	TypeStdinClose     = runnerprotocol.TypeStdinClose
-	TypeStdout         = runnerprotocol.TypeStdout
-	TypeStderr         = runnerprotocol.TypeStderr
-	TypeExit           = runnerprotocol.TypeExit
-	TypeTerminate      = runnerprotocol.TypeTerminate
-	TypeKill           = runnerprotocol.TypeKill
-	TypeConnect        = runnerprotocol.TypeConnect
-	TypeConnected      = runnerprotocol.TypeConnected
-	TypeConnectData    = runnerprotocol.TypeConnectData
-	TypeConnectClose   = runnerprotocol.TypeConnectClose
-	TypeError          = runnerprotocol.TypeError
+	TypeServerHello      = runnerprotocol.TypeServerHello
+	TypeRunnerHello      = runnerprotocol.TypeRunnerHello
+	TypeHealth           = runnerprotocol.TypeHealth
+	TypeStart            = runnerprotocol.TypeStart
+	TypeSessionStarted   = runnerprotocol.TypeSessionStarted
+	TypeStdin            = runnerprotocol.TypeStdin
+	TypeStdinClose       = runnerprotocol.TypeStdinClose
+	TypeStdout           = runnerprotocol.TypeStdout
+	TypeStderr           = runnerprotocol.TypeStderr
+	TypeExit             = runnerprotocol.TypeExit
+	TypeTerminate        = runnerprotocol.TypeTerminate
+	TypeKill             = runnerprotocol.TypeKill
+	TypeConnect          = runnerprotocol.TypeConnect
+	TypeConnected        = runnerprotocol.TypeConnected
+	TypeConnectData      = runnerprotocol.TypeConnectData
+	TypeConnectClose     = runnerprotocol.TypeConnectClose
+	TypeTransferBegin    = runnerprotocol.TypeTransferBegin
+	TypeTransferChunk    = runnerprotocol.TypeTransferChunk
+	TypeTransferEnd      = runnerprotocol.TypeTransferEnd
+	TypeTransferFailed   = runnerprotocol.TypeTransferFailed
+	TypeTransferApplied  = runnerprotocol.TypeTransferApplied
+	TypeError            = runnerprotocol.TypeError
 )
 
 var (
-	ErrInvalidMessage     = runnerprotocol.ErrInvalidMessage
-	ErrUnsupportedVersion = runnerprotocol.ErrUnsupportedVersion
+	ErrInvalidMessage       = runnerprotocol.ErrInvalidMessage
+	ErrUnsupportedVersion   = runnerprotocol.ErrUnsupportedVersion
+	ValidateTransferBegin   = runnerprotocol.ValidateTransferBegin
+	TransferChecksum        = runnerprotocol.TransferChecksum
+	AppendTransferChunk     = runnerprotocol.AppendTransferChunk
+	ValidateTransferPayload = runnerprotocol.ValidateTransferPayload
+	NewMessage              = runnerprotocol.NewMessage
 )
 
 type Message = runnerprotocol.Message
@@ -44,10 +54,17 @@ type ConnectData = runnerprotocol.ConnectData
 type ConnectClose = runnerprotocol.ConnectClose
 type ExitResult = runnerprotocol.ExitResult
 type ErrorPayload = runnerprotocol.ErrorPayload
+type TransferBegin = runnerprotocol.TransferBegin
+type TransferChunk = runnerprotocol.TransferChunk
+type TransferEnd = runnerprotocol.TransferEnd
+type TransferFailed = runnerprotocol.TransferFailed
+type TransferApplied = runnerprotocol.TransferApplied
 
-func NewMessage(version int, typ MessageType, sessionID string, payload any) (Message, error) {
-	return runnerprotocol.NewMessage(version, typ, sessionID, payload)
-}
+const (
+	TransferChunkSize = runnerprotocol.TransferChunkSize
+	MaxTransferBytes  = runnerprotocol.MaxTransferBytes
+	MaxMessageSize    = runnerprotocol.MaxMessageSize
+)
 
 func DecodePayload[T any](m Message) (T, error) {
 	return runnerprotocol.DecodePayload[T](m)

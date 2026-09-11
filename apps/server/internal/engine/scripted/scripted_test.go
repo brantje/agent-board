@@ -37,6 +37,9 @@ type nopWriteCloser struct{ io.Writer }
 func (nopWriteCloser) Close() error { return nil }
 
 func TestScriptedEngineUsesDeterministicExecutionSequence(t *testing.T) {
+	if New().Name() != Name {
+		t.Fatalf("engine name=%q", New().Name())
+	}
 	launcher := &fakeLauncher{}
 	result, err := New().Execute(context.Background(), engine.Request{Launcher: launcher})
 	if err != nil {

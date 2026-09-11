@@ -1,51 +1,51 @@
-# Runtime Engine execution
+# Runtime and Runner Engine execution
 
-The Runtime Instance is the actual execution environment for Engine processes. Coding-agent processes never execute directly in the trusted Go backend process.
+Preferred production execution uses an external persistent `agent-runner` host selected by the existing scheduler. The server-managed internal Runner uses the same Runner/Execution Session/protocol-v2 path. Runtime/Runtime Instance remain only for **legacy internal managed compute** where existing code still uses them. Coding-agent processes never execute directly in the trusted Go backend process.
 
 ## Execution boundary
 
+Canonical v0.1 path:
+
 ```text
-Go Run worker
-  -> execution service
-      -> resolved Runtime
-          -> Runtime implementation
-              -> Runtime Instance
-                  -> agent-runner
-                      -> Execution Session
-                          -> Engine process tree
-                              -> stdin
-                              -> stdout
-                              -> stderr
-                              -> wait/exit
-                              -> terminate/kill
+Run
+  -> existing scheduler
+      -> selected connected Runner
+          -> authenticated outbound protocol-v2 WebSocket
+              -> agent-runner
+                  -> Execution Session
+                      -> Engine process tree
 ```
 
-Engine adapters remain in the trusted server. They receive a provider-neutral execution capability for the Runtime Instance already selected for the Run. They do not receive Docker clients, Docker sockets, provider-specific runtime handles or raw WebSocket framing.
+Agents configure Engine + Model Profile, not Runtime, Runtime Instance, Runner, Executor Profile or Runner Profile. Legacy managed compute may still provision a Runtime Instance before reaching the same `agent-runner` / Execution Session boundary. Do not create a placeholder Runtime Instance merely to run an external Runner.
+
+Engine adapters remain in the trusted server. They receive a provider-neutral execution capability for the Runner already selected for the Run. They do not receive Docker clients, Docker sockets, provider-specific Runtime handles or raw WebSocket framing.
 
 ## Workspace
 
-The durable Issue Workspace is mounted at `/workspace`. Engine execution uses `/workspace` as its working directory unless an explicitly safe subdirectory is selected.
+The backend-owned durable Issue Workspace is authoritative. Before Runner execution, its exact required non-ignored Git state is transferred into a fresh Runner-local session Workspace and exposed to the Engine as `/workspace`.
 
-A Runtime Instance is bound to exactly one Workspace for its lifetime. A healthy instance/runner may execute many sequential Execution Sessions against that same Workspace.
+Each external/internal Runner Execution Session gets its own temporary Runner Workspace materialization. The Runner itself is not bound to one Issue Workspace and may execute sequential sessions for different Runs/Workspaces over time. Sync-back returns resulting filesystem state to the authoritative Issue Workspace while preserving authoritative staging and avoiding visible transport commits/refs.
 
-Destroying Runtime compute never deletes or resets the Workspace. A replacement Runtime Instance may later mount the same Workspace.
+Where legacy internal managed compute uses Runtime Instances, a Runtime Instance remains bound to exactly one Workspace for its lifetime. Runtime teardown never deletes the durable Workspace.
 
 ## Runner transport
 
-The server and `agent-runner` communicate over WebSocket.
+The Runner initiates one authenticated outbound WebSocket to the Agent Board server. Protocol v2 is authoritative for both external and server-managed internal Runners.
 
-The protocol is explicitly versioned and every execution message is scoped to a server-issued Execution Session ID. The exact connection-initiation/registration mechanism and final wire schema are implementation details, but transport semantics must support:
+Every execution message is scoped to a server-issued Execution Session ID. Transport semantics support:
 
-- protocol handshake/version negotiation
-- runner capability advertisement
+- protocol-v2 handshake/version negotiation
+- Runner version/capability advertisement
 - session start
+- Git-native Workspace transfer in both directions
 - stdin/stdout/stderr streaming
 - exit/result reporting
 - graceful termination and forced kill
-- session/runner errors
+- session/Runner errors
+- health with active session IDs
 - liveness and reconnect/reconciliation handling
 
-A disconnected WebSocket is not by itself proof that the Engine process or Run failed. The server reconciles durable Run/Runtime state with external execution state before deciding whether to retry, terminate or replace compute.
+A disconnected WebSocket is not by itself proof that the Engine process or Run failed. Disconnect time starts the configured reconnect grace. The durable Execution Session remains uncertain/reconciling and cannot be duplicated while ownership is unresolved. If the same Runner reconnects and reports the same active session, the server reattaches. Only after the grace expires without reconciliation may the session become infrastructure-failed and existing Run retry behavior decide what happens next.
 
 See `agent-runner.md`.
 
@@ -72,9 +72,9 @@ type ProcessSession interface {
 }
 ```
 
-Exact package/type names may differ; semantics are authoritative. The server-side execution client maps this interface onto the versioned runner WebSocket protocol.
+Exact package/type names may differ; semantics are authoritative. The server-side execution client maps this interface onto protocol v2.
 
-Callers that intentionally stop consuming stdout or stderr must explicitly abandon that stream through the provider-neutral execution API (`AbandonStdout` / `AbandonStderr` in the server implementation). Abandoning output releases only the local consumer; it does not terminate the Execution Session. The transport continues draining already-received output so the runner connection cannot deadlock on backpressure.
+Callers that intentionally stop consuming stdout or stderr must explicitly abandon that stream through the provider-neutral execution API (`AbandonStdout` / `AbandonStderr` in the server implementation). Abandoning output releases only the local consumer; it does not terminate the Execution Session. The transport continues draining already-received output so the Runner connection cannot deadlock on backpressure.
 
 Requirements:
 
@@ -88,9 +88,11 @@ Requirements:
 - context cancellation
 - graceful termination then forced containment
 - one process tree per Execution Session
-- recoverable durable Runtime Instance external identity for cleanup/reconciliation after backend restart
+- restart/reconnect reconciliation that does not require process-local control-plane state
 
-v0.1 permits one active Execution Session per runner. A runner may execute many sessions sequentially over its lifetime. The protocol must not encode the v0.1 concurrency limit as a permanent architectural restriction.
+Default Runner capacity is 5 concurrent Execution Sessions. A Runner may execute many sessions over its lifetime. Advertised `max_active_sessions` is the scheduler admission limit for that Runner.
+
+For the legacy Runtime path only, durable Runtime Instance external identity remains sufficient to inspect/clean up managed compute after backend restart.
 
 ## Raw output
 
@@ -98,39 +100,47 @@ Runner output feeds the durable output sink described in `execution-evidence.md`
 
 Large stdout/stderr/protocol streams are not accumulated unboundedly in backend memory and are not duplicated into giant Event payloads.
 
-Redaction occurs before persistence. Secret values must not be reflected by runner protocol responses.
+Redaction occurs before persistence. Secret values must not be reflected by Runner protocol responses.
 
 ## Cancellation and containment
 
-Session cancellation:
+Runner session cancellation:
 
 1. cancel Run/session execution context
-2. request graceful process-tree termination through the runner
-3. wait bounded grace period
-4. force kill/contain the session if needed
-5. decide whether the same Runtime Instance remains healthy/reusable for the same Workspace
-6. stop/destroy Runtime Instance when policy or health requires it
-7. preserve durable Workspace
+2. request graceful process-tree termination through the Runner
+3. wait a bounded grace period
+4. force-kill the process tree if needed
+5. sync Runner Workspace state back whenever technically possible, including cancellation/failure
+6. retain Runner Workspace until successful server apply acknowledgement
+7. finalize durable execution outcome and release Workspace ownership only after recovery/apply handling completes
+
+For legacy internal managed compute, Runtime-specific cleanup may additionally stop/destroy unhealthy compute after the same Execution Session recovery rules. That is not part of normal external-Runner cancellation.
 
 Cleanup is idempotent and restart-safe.
 
-## Restart recovery
+## Questions and waiting for input
 
-Durable Runtime Instance metadata includes enough external identity for a restarted Go backend to inspect/terminate/cleanup compute created by an earlier process.
+A native blocking Question does not end the Runner Execution Session. The same Runner, native Engine session and Runner Workspace remain attached through `WAITING_FOR_INPUT`. Answering routes back into that same live session. Agent/Model scheduler capacity policy is separate from this Execution Session ownership; the Runner must not become eligible for duplicate work while its active session is waiting for input.
 
-Runner connection state itself is not authoritative durable state. After restart or WebSocket loss, the server reconciles the Runtime Instance and any potentially active execution before starting replacement work.
+## Restart and reconnect recovery
+
+Runner connection state is ephemeral, but Run/Execution Session ownership is durable. On backend restart or WebSocket loss, the server reconciles the selected Runner and potentially active Execution Session before starting replacement work.
+
+A newly authenticated connection for the same immutable `runner_id` may replace a stale transport only after active-session reconciliation. Matching claims for the durable active session permit reattachment. Missing/mismatched/unexpected active-session claims remain fail-closed rather than discarding ownership or starting duplicate Engine work.
 
 Lease expiry alone must not cause blind duplicate Engine execution when external execution may still be alive.
 
-## Docker implementation
+Legacy Runtime Instance metadata is reconciled separately only where internal managed compute was actually used.
 
-Docker is implementation #1.
+## Legacy Docker implementation
 
-Official Agent Board Runtime images include `agent-runner`. The trusted backend creates the container with one Workspace bind mount and controlled Docker access, starts/reconciles the runner connection, and executes Engine work through runner Execution Sessions.
+Docker remains implementation #1 for legacy/internal managed compute; it is not the preferred production placement architecture.
 
-Agent Runtime Instances never receive Docker daemon credentials/socket.
+Official Agent Board managed Runtime images may include `agent-runner`. The trusted backend creates the container with its authorized Workspace binding and controlled Docker access, starts/reconciles the Runner connection, and executes Engine work through the same protocol-v2 Execution Session boundary.
 
-A real-Docker integration test should prove create/start/runner-connect/session-start/stdout/stderr/non-zero exit/Workspace write/cancel/reuse-same-Workspace/destroy and Workspace survival.
+Agent Runtime Instances never receive Docker daemon credentials/socket. External Runner hosts are user-trusted machines and may independently have Docker/Podman installed as host tooling; Agent Board does not provide those daemon credentials through the Runner protocol.
+
+Real-Docker integration tests continue to cover the supported legacy managed-compute path without making Docker Runtime Instances a release prerequisite for normal external Runner execution.
 
 ## Engine responsibilities
 
@@ -138,9 +148,9 @@ Engine adapter owns Engine-specific behavior:
 
 - command/invocation
 - protocol parsing
-- model/provider configuration materialization
+- Model Profile/Provider configuration materialization
 - mapping visible messages/commands/files/tests/questions/completion into canonical Agent Board evidence
 
 `agent-runner` stays Engine-neutral and owns process-tree/session supervision only.
 
-Infrastructure owns scheduler admission, Runtime containment, Workspace durability, secret resolution/injection, raw-output persistence, cancellation, reconciliation and cleanup.
+Infrastructure owns scheduler admission/Runner placement, Workspace durability/transfer, secret resolution/injection, raw-output persistence, cancellation, reconciliation and cleanup. Legacy Runtime containment remains a conditional internal-managed-compute responsibility, not a second execution lifecycle.

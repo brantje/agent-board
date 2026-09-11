@@ -47,6 +47,33 @@ func TestIsSessionIdleEventFiltersAndValidatesNativeSession(t *testing.T) {
 	}
 }
 
+func TestIndicatesSessionExecutionRequiresMatchingPromptActivity(t *testing.T) {
+	if !indicatesSessionExecution(client.Event{
+		Type:       "message.part.updated",
+		Properties: idleEventProperties(t, "ses_1"),
+	}, "ses_1") {
+		t.Fatal("session-scoped message event should indicate execution")
+	}
+	if !indicatesSessionExecution(client.Event{
+		Type:       "session.next.prompted",
+		Properties: idleEventProperties(t, "ses_1"),
+	}, "ses_1") {
+		t.Fatal("session.next event should indicate execution")
+	}
+	if indicatesSessionExecution(client.Event{
+		Type:       "session.created",
+		Properties: idleEventProperties(t, "ses_1"),
+	}, "ses_1") {
+		t.Fatal("session.created must not count as prompt execution")
+	}
+	if indicatesSessionExecution(client.Event{
+		Type:       "message.part.updated",
+		Properties: idleEventProperties(t, "ses_other"),
+	}, "ses_1") {
+		t.Fatal("other session message event must not indicate execution")
+	}
+}
+
 func TestReconcilePendingQuestionsHandlesEmptyAndErrorResponses(t *testing.T) {
 	emptyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, []any{})
@@ -131,7 +158,7 @@ func TestEngineCompletesOnMatchingNativeIdleEvent(t *testing.T) {
 	_, err = adapter.Execute(context.Background(), engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Complete on native idle"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "test-model"},
 			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
 		},
@@ -143,6 +170,77 @@ func TestEngineCompletesOnMatchingNativeIdleEvent(t *testing.T) {
 	}
 	if launcher.starts != 1 {
 		t.Fatalf("server starts=%d want 1", launcher.starts)
+	}
+}
+
+func TestEngineCompletesOnIdleWhenActivityPollBlocks(t *testing.T) {
+	idleEvents := make(chan struct{}, 1)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
+	})
+	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "ses_hang"}})
+	})
+	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"properties\":{}}\n\n")
+		flusher.Flush()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-idleEvents:
+		}
+		properties := idleEventProperties(t, "ses_hang")
+		event, err := json.Marshal(map[string]any{"id": "evt_idle", "type": "session.idle", "properties": properties})
+		if err != nil {
+			t.Errorf("marshal idle event: %v", err)
+			return
+		}
+		_, _ = io.WriteString(w, "data: "+string(event)+"\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	})
+	mux.HandleFunc("POST /api/session/ses_hang/prompt", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "input_hang"}})
+		idleEvents <- struct{}{}
+	})
+	mux.HandleFunc("GET /api/session/ses_hang/question", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"data": []any{}})
+	})
+	hang := func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}
+	mux.HandleFunc("GET /question", hang)
+	mux.HandleFunc("GET /session/status", hang)
+	mux.HandleFunc("GET /api/session/active", hang)
+	mux.HandleFunc("POST /api/session/ses_hang/interrupt", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &fakeOpenCodeLauncher{process: newFakeOpenCodeProcess(parsed.Host)}
+	adapter := newWithAddress(parsed.Host)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if _, err := adapter.Execute(ctx, engine.Request{
+		Context: executioncontext.SafeContext{
+			Issue:    executioncontext.IssueContext{Title: "Complete while status polling blocks"},
+			Agent:    executioncontext.AgentContext{Engine: Name},
+			Model:    executioncontext.ModelContext{Model: "test-model"},
+			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
+		},
+		Launcher:             launcher,
+		InteractiveQuestions: &fakeInteractiveQuestions{},
+	}); err != nil {
+		t.Fatalf("Execute() error=%v", err)
 	}
 }
 
@@ -265,7 +363,7 @@ func TestEngineFailsWhenIdleBeforeExecutionStarts(t *testing.T) {
 	_, err = adapter.Execute(context.Background(), engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Fail on early idle"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "test-model"},
 			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
 		},
@@ -349,7 +447,7 @@ func nativeStateRequest(launcher *fakeOpenCodeLauncher) engine.Request {
 	return engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Observe native completion"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "test-model"},
 			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
 		},

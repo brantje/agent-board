@@ -64,6 +64,31 @@ func (s *launcherSessionStore) GetExecutionSession(_ context.Context, projectID,
 	return session, nil
 }
 
+func (s *launcherSessionStore) ListExecutionSessionsByRunner(_ context.Context, runnerID string, statuses []string) ([]store.ExecutionSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sessions := make([]store.ExecutionSession, 0, len(s.sessions))
+	for _, session := range s.sessions {
+		if session.RunnerID != runnerID {
+			continue
+		}
+		if len(statuses) > 0 {
+			matched := false
+			for _, status := range statuses {
+				if session.Status == status {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
+}
+
 func (s *launcherSessionStore) TransitionExecutionSession(_ context.Context, transition store.ExecutionSessionTransition) (store.ExecutionSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -81,6 +106,9 @@ func (s *launcherSessionStore) TransitionExecutionSession(_ context.Context, tra
 	now := time.Now()
 	session.Status = transition.Status
 	session.ExitCode = transition.ExitCode
+	if len(transition.CommandArgv) > 0 {
+		session.CommandArgv = append(json.RawMessage(nil), transition.CommandArgv...)
+	}
 	if transition.Status == "RUNNING" && session.StartedAt == nil {
 		session.StartedAt = &now
 	}
@@ -102,7 +130,7 @@ func (s *launcherSessionStore) UpdateRuntimeInstanceRunnerStatus(_ context.Conte
 type launcherPreparer struct{ runtimeID string }
 
 func (p launcherPreparer) Prepare(context.Context, string, string, executioncontext.SecretRequest) (executioncontext.Prepared, error) {
-	return executioncontext.Prepared{RuntimeID: p.runtimeID}, nil
+	return executioncontext.Prepared{}, nil
 }
 
 type launcherRunnerManager struct{ client runner.Client }
@@ -120,6 +148,11 @@ func (m launcherRunnerManager) Reconcile(_ context.Context, _, _, sessionID stri
 		return nil, false, err
 	}
 	return session, session != nil, nil
+}
+
+func newLauncherExecutionSessionService(sessionStore app.ExecutionSessionStore, client runner.Client) (*app.ExecutionSessionService, error) {
+	manager := launcherRunnerManager{client: client}
+	return app.NewExecutionSessionService(sessionStore, manager, manager)
 }
 
 type launcherClient struct {
@@ -267,10 +300,10 @@ func TestProcessLauncherCapturesAuthorizedProcessEvidence(t *testing.T) {
 
 			sessionStore := &launcherSessionStore{
 				run:      store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
-				instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, RuntimeID: safe.Runtime.ID, Status: "RUNNING"},
+				instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"},
 			}
 			client := newLauncherClient(strings.Repeat("stdout-", 8), "stderr-data", tc.exitCode, tc.waitErr)
-			transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client})
+			transportSessions, err := newLauncherExecutionSessionService(sessionStore, client)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -380,12 +413,12 @@ func TestProcessLauncherRecordsStoppedWhenTerminatedDuringWait(t *testing.T) {
 	}
 	sessionStore := &launcherSessionStore{
 		run:      store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
-		instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, RuntimeID: safe.Runtime.ID, Status: "RUNNING"},
+		instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"},
 	}
 	gate := newLauncherWaitGate()
 	client := newLauncherClient("", "", 137, nil)
 	client.waitGate = gate
-	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client})
+	transportSessions, err := newLauncherExecutionSessionService(sessionStore, client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,7 +541,7 @@ func TestProcessLauncherAttachDoesNotRecordToolStarted(t *testing.T) {
 		run: store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
 		instance: store.RuntimeInstance{
 			ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID,
-			RuntimeID: safe.Runtime.ID, Status: "RUNNING",
+			Status: "RUNNING",
 		},
 		sessions: map[string]store.ExecutionSession{
 			"session-1": {
@@ -518,7 +551,7 @@ func TestProcessLauncherAttachDoesNotRecordToolStarted(t *testing.T) {
 		},
 	}
 	client := newLauncherClient("stdout", "stderr", 0, nil)
-	transportSessions, err := app.NewExecutionSessionService(sessionStore, launcherRunnerManager{client: client})
+	transportSessions, err := newLauncherExecutionSessionService(sessionStore, client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -608,6 +641,21 @@ func TestProcessLauncherAttachFailureBoundaries(t *testing.T) {
 		}
 		if _, err := launcher.Attach(t.Context()); !errors.Is(err, want) {
 			t.Fatalf("Attach() error=%v want=%v", err, want)
+		}
+	})
+
+	t.Run("pending runner session", func(t *testing.T) {
+		launcher := &processLauncher{
+			sessions:        failingLauncherSessions{err: app.NewError("execution_session_not_running", "Execution Session is not running", store.ErrConflict)},
+			events:          recorder,
+			output:          output,
+			safe:            safe,
+			runnerID:        "runner-1",
+			attachSessionID: "session-1",
+			scope:           evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+		}
+		if _, err := launcher.Attach(t.Context()); !errors.Is(err, engine.ErrNotAttachable) {
+			t.Fatalf("Attach() error=%v want ErrNotAttachable", err)
 		}
 	})
 

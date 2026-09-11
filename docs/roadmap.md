@@ -35,7 +35,7 @@ Required work includes:
 - `agent-runner` binary in official Runtime images
 - versioned server/runner WebSocket transport
 - separate Runtime Instance / runner / Execution Session / Run identities
-- one active Execution Session per runner in v0.1, with protocol support for many sessions over runner lifetime
+- default Runner capacity of 5 concurrent Execution Sessions, with protocol support for advertised `max_active_sessions`
 - canonical execution context and ephemeral Provider secrets
 - immutable Run provenance
 - durable raw logs and first-class Artifacts

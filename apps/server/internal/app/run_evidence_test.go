@@ -93,7 +93,7 @@ func TestRunEvidenceInspectReconstructsCompleteRun(t *testing.T) {
 			{ID: "session", ProjectID: projectID, RunID: runID, RuntimeInstanceID: runtimeID, CommandArgv: json.RawMessage(`["go","test","./..."]`)},
 			{ID: "other-session", ProjectID: projectID, RunID: "other-run", RuntimeInstanceID: "other-runtime"},
 		},
-		instances: map[string]store.RuntimeInstance{runtimeID: {ID: runtimeID, ProjectID: projectID, RuntimeID: "runtime-config", Status: "DESTROYED"}},
+		instances: map[string]store.RuntimeInstance{runtimeID: {ID: runtimeID, ProjectID: projectID, Status: "DESTROYED"}},
 		chunks:    []store.RawOutputChunk{{ID: "chunk", ProjectID: projectID, RunID: runID, Stream: "STDOUT", Sequence: 1}},
 		artifacts: []store.Artifact{{ID: "artifact", ProjectID: projectID, RunID: runID, Name: "candidate.json", Kind: "candidate_manifest"}},
 	}

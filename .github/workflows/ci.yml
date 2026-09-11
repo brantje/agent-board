@@ -105,6 +105,12 @@ jobs:
           AGENT_BOARD_TEST_DOCKER: "1"
           AGENT_BOARD_TEST_RUNNER_IMAGE: agent-board-agent-runner:ci
         run: go test -count=1 -run '^TestDockerRunnerIntegration$' -v ./internal/runner
+      - name: Run external runner scripted walking skeleton
+        working-directory: apps/server
+        env:
+          AGENT_BOARD_TEST_RUNNER: "1"
+          AGENT_BOARD_TEST_DATABASE_RESET: "1"
+        run: go test -count=1 -run '^TestScriptedEngineExternalRunnerWalkingSkeleton$' -v ./internal/runexec
       - name: Run scripted Engine walking skeleton
         working-directory: apps/server
         env:

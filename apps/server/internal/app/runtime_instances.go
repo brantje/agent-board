@@ -35,9 +35,6 @@ func NewRuntimeInstanceService(runtimeStore RuntimeInstanceStore, workspaces Iss
 	if runtimeStore == nil || workspaces == nil {
 		return nil, fmt.Errorf("runtime instance service dependencies are required")
 	}
-	if len(implementations) == 0 {
-		return nil, fmt.Errorf("at least one Runtime implementation is required")
-	}
 	copyImplementations := make(map[string]runtimepkg.Implementation, len(implementations))
 	for kind, implementation := range implementations {
 		kind = strings.TrimSpace(kind)
@@ -256,7 +253,7 @@ func runtimeSpec(instance store.RuntimeInstance, workspace store.Workspace, issu
 		ProjectID:         instance.ProjectID,
 		IssueID:           issueID,
 		WorkspaceID:       workspace.ID,
-		RuntimeID:         runtimeConfig.ID,
+		RuntimeID:         instance.RuntimeID,
 		Image:             runtimeConfig.Image,
 		WorkingDirectory:  runtimepkg.WorkspaceTarget,
 		Resources: runtimepkg.ResourcePolicy{

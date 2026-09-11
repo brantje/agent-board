@@ -104,6 +104,9 @@ func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceServ
 	}
 	router.Route("/api", func(r chi.Router) {
 		a.registerConfigurationRoutes(r)
+		if a.service.Runners != nil {
+			a.registerRunnerRoutes(r)
+		}
 		a.registerIssueRunRoutes(r)
 		a.registerRunEvidenceRoutes(r)
 		if a.questions != nil {

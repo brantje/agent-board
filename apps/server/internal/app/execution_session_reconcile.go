@@ -64,6 +64,9 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 	case "COMPLETED", "FAILED", "CANCELLED":
 		return nil, nil
 	case "PENDING":
+		if session.RunnerID != "" {
+			return nil, nil
+		}
 		_, err := s.transition(ctx, session, []string{"PENDING"}, "FAILED", nil)
 		return nil, err
 	case "STARTING", "RUNNING":
@@ -72,6 +75,9 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 	}
 	if process, ok := s.liveProcess(projectID, sessionID); ok {
 		return process, nil
+	}
+	if session.RunnerID != "" {
+		return s.reconcileRunnerSession(ctx, session)
 	}
 
 	instance, err := s.store.GetRuntimeInstance(ctx, projectID, session.RuntimeInstanceID)

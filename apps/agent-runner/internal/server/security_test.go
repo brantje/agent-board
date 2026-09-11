@@ -27,11 +27,15 @@ func TestExecutionSecretsAreRedactedFromStdoutAndStderr(t *testing.T) {
 		switch msg.Type {
 		case protocol.TypeStdout:
 			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			stdout.Write(stream.Data)
 		case protocol.TypeStderr:
 			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			stderr.Write(stream.Data)
 		case protocol.TypeExit:
 			if stdout.String() != "out:***" || stderr.String() != "err:***" {

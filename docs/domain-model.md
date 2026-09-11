@@ -66,7 +66,7 @@ Relationships are server-authoritative workflow inputs. Creating or deleting a r
 
 Durable worker identity/configuration, not a process or container.
 
-An Agent selects Engine, Model Profile and Runtime directly and may define operational policy such as concurrency.
+An Agent selects Engine and Model Profile directly and may define operational policy such as concurrency. Runner placement is scheduler-owned at Run time.
 
 ### Provider
 
@@ -78,9 +78,13 @@ Reusable model selection and inference settings associated with a Provider. May 
 
 ### Runtime
 
-Reusable configured execution environment and complete execution policy.
+Reusable configured execution environment and complete execution policy for **legacy internal managed compute only**. External runner hosts do not require a Runtime or Runtime Instance.
 
 Contains implementation kind, image, resources, timeout, network policy, Workspace policy, allowed secret references, tooling/capabilities, enabled state and health/preflight information.
+
+### Runner
+
+Deployment-global execution capacity. External hosts and the server-managed internal runner authenticate outbound over protocol v2. Live connectivity is ephemeral; persisted last-seen/capabilities never make a Runner scheduler-eligible.
 
 ### Runtime Instance
 
@@ -92,7 +96,7 @@ Runtime Instance identity is not Agent or Run identity. Destroying an instance n
 
 One durable execution attempt for an Issue by an Agent.
 
-A Run records status, attempt identity, scheduler ownership, immutable execution provenance, execution evidence and relationships to Workspace/Runtime Instances.
+A Run records status, attempt identity, scheduler ownership, immutable execution provenance, execution evidence and relationships to Workspace/selected Runner (and Runtime Instances only on the legacy managed-compute path).
 
 Later attempts reuse the Issue Workspace.
 
@@ -128,10 +132,10 @@ Later Project delivery policy may allow explicit autonomous PR/MR delivery witho
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Agent
+Engine + Model Profile -> Agent
 ```
 
-There is no Runtime Profile layer.
+There is no Runtime Profile, Executor Profile or Runner Profile layer. The scheduler selects an eligible Runner.
 
 ## Identity and lifetime invariants
 
@@ -139,6 +143,7 @@ There is no Runtime Profile layer.
 Issue != Run
 Agent != process
 Run != Runtime Instance
+Run != Runner
 Runtime != Runtime Instance
 Workspace != Runtime Instance
 ```

@@ -21,7 +21,7 @@ const (
 )
 
 var (
-	connectDialContext = (&net.Dialer{}).DialContext
+	connectDialContext  = (&net.Dialer{}).DialContext
 	connectLookupIPAddr = net.DefaultResolver.LookupIPAddr
 )
 

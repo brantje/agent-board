@@ -8,7 +8,7 @@ import (
 )
 
 func TestMessageRoundTrip(t *testing.T) {
-	want, err := NewMessage(Version1, TypeStdout, "session-1", StreamData{Data: []byte("hello\n")})
+	want, err := NewMessage(Version2, TypeStdout, "session-1", StreamData{Data: []byte("hello\n")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,14 +35,14 @@ func TestMessageRoundTrip(t *testing.T) {
 }
 
 func TestDecodeRejectsUnsupportedVersion(t *testing.T) {
-	_, err := Decode([]byte(`{"version":2,"type":"health"}`))
+	_, err := Decode([]byte(`{"version":3,"type":"health"}`))
 	if !errors.Is(err, ErrUnsupportedVersion) {
 		t.Fatalf("expected unsupported-version error, got %v", err)
 	}
 }
 
 func TestDecodeRejectsUnknownFields(t *testing.T) {
-	_, err := Decode([]byte(`{"version":1,"type":"health","surprise":true}`))
+	_, err := Decode([]byte(`{"version":2,"type":"health","surprise":true}`))
 	if !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("expected invalid-message error, got %v", err)
 	}
@@ -53,9 +53,9 @@ func TestValidateSessionScoping(t *testing.T) {
 		name string
 		msg  Message
 	}{
-		{name: "start requires session", msg: Message{Version: Version1, Type: TypeStart}},
-		{name: "hello forbids session", msg: Message{Version: Version1, Type: TypeServerHello, SessionID: "session-1"}},
-		{name: "unknown type", msg: Message{Version: Version1, Type: MessageType("future")}},
+		{name: "start requires session", msg: Message{Version: Version2, Type: TypeStart}},
+		{name: "hello forbids session", msg: Message{Version: Version2, Type: TypeServerHello, SessionID: "session-1"}},
+		{name: "unknown type", msg: Message{Version: Version2, Type: MessageType("future")}},
 	}
 
 	for _, tt := range tests {
@@ -68,22 +68,22 @@ func TestValidateSessionScoping(t *testing.T) {
 }
 
 func TestNewMessageRejectsUnencodablePayload(t *testing.T) {
-	_, err := NewMessage(Version1, TypeError, "", func() {})
+	_, err := NewMessage(Version2, TypeError, "", func() {})
 	if err == nil {
 		t.Fatal("expected payload marshal error")
 	}
 }
 
 func TestDecodePayloadRequiresPayload(t *testing.T) {
-	_, err := DecodePayload[Health](Message{Version: Version1, Type: TypeHealth})
+	_, err := DecodePayload[Health](Message{Version: Version2, Type: TypeHealth})
 	if !errors.Is(err, ErrInvalidMessage) {
 		t.Fatalf("expected invalid-message error, got %v", err)
 	}
 }
 
 func TestPayloadShape(t *testing.T) {
-	msg, err := NewMessage(Version1, TypeRunnerHello, "", RunnerHello{
-		Version: Version1,
+	msg, err := NewMessage(Version2, TypeRunnerHello, "", RunnerHello{
+		Version: Version2,
 		Capabilities: Capabilities{
 			MaxActiveSessions: 1,
 			Features:          []string{"stdin", "stdout", "stderr", "terminate", "kill"},
@@ -96,7 +96,19 @@ func TestPayloadShape(t *testing.T) {
 	if err := json.Unmarshal(msg.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["version"] != float64(Version1) {
+	if payload["version"] != float64(Version2) {
 		t.Fatalf("unexpected version payload: %#v", payload)
+	}
+}
+
+func TestValidateTransferBeginRejectsBlankIDAndOversize(t *testing.T) {
+	if err := ValidateTransferBegin(TransferBegin{TransferID: "t1", TotalBytes: 8}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateTransferBegin(TransferBegin{TotalBytes: 1}); err == nil {
+		t.Fatal("blank transfer id accepted")
+	}
+	if err := ValidateTransferBegin(TransferBegin{TransferID: "t1", TotalBytes: MaxTransferBytes + 1}); err == nil {
+		t.Fatal("oversize transfer accepted")
 	}
 }

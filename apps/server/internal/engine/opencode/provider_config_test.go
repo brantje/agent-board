@@ -76,3 +76,42 @@ func TestServerEnvironmentBuiltInProviderOmitsCustomPackage(t *testing.T) {
 		t.Fatalf("models=%v", models)
 	}
 }
+
+func TestServerEnvironmentPinsSmallModelToConfiguredProviderModel(t *testing.T) {
+	env, err := serverEnvironment(executioncontext.SafeContext{
+		Model: executioncontext.ModelContext{Model: "nvidia/nemotron-3-ultra-550b-a55b:free"},
+		Provider: executioncontext.ProviderContext{
+			Name: "OpenRouter",
+			Kind: "openrouter",
+		},
+	}, "openrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(env["OPENCODE_CONFIG_CONTENT"]), &decoded); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	want := "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free"
+	if decoded["model"] != want || decoded["small_model"] != want {
+		t.Fatalf("model=%v small_model=%v want %s", decoded["model"], decoded["small_model"], want)
+	}
+	agent, _ := decoded["agent"].(map[string]any)
+	title, _ := agent["title"].(map[string]any)
+	if title["disable"] != true {
+		t.Fatalf("title agent disable=%v want true so title generation cannot steal the configured model slot", title["disable"])
+	}
+}
+
+func TestServerEnvironmentUsesProcessLocalDatabase(t *testing.T) {
+	env, err := serverEnvironment(executioncontext.SafeContext{
+		Model:    executioncontext.ModelContext{Model: "deepseek/deepseek-v4-flash"},
+		Provider: executioncontext.ProviderContext{Kind: "openrouter"},
+	}, "openrouter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := env["OPENCODE_DB"]; got != ":memory:" {
+		t.Fatalf("OPENCODE_DB=%q want :memory: so concurrent OpenCode processes do not share SQLite state", got)
+	}
+}

@@ -28,6 +28,8 @@ var inheritedEnvironmentAllowlist = []string{
 	"LC_ALL",
 	"LC_CTYPE",
 	"TZ",
+	"SSL_CERT_FILE",
+	"SSL_CERT_DIR",
 }
 
 type Request struct {
@@ -60,7 +62,7 @@ func start(id, workspaceRoot string, request Request, redactionValues []string) 
 		return nil, errors.New("command is required")
 	}
 
-	workingDir, err := resolveWorkingDir(workspaceRoot, request.Dir)
+	workingDir, err := resolveWorkingDir(workspaceRoot, normalizeWorkspaceDir(request.Dir))
 	if err != nil {
 		return nil, err
 	}
@@ -113,10 +115,10 @@ func start(id, workspaceRoot string, request Request, redactionValues []string) 
 	return s, nil
 }
 
-func (s *Session) ID() string { return s.id }
+func (s *Session) ID() string            { return s.id }
 func (s *Session) Stdin() io.WriteCloser { return s.stdin }
-func (s *Session) Stdout() io.Reader { return s.stdout }
-func (s *Session) Stderr() io.Reader { return s.stderr }
+func (s *Session) Stdout() io.Reader     { return s.stdout }
+func (s *Session) Stderr() io.Reader     { return s.stderr }
 func (s *Session) Done() <-chan struct{} { return s.done }
 
 func (s *Session) Wait(ctx context.Context) (Result, error) {
@@ -200,6 +202,17 @@ func (s *Session) complete(result Result, err error) {
 	s.err = err
 	close(s.done)
 	s.mu.Unlock()
+}
+
+func normalizeWorkspaceDir(requested string) string {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || requested == "/workspace" {
+		return ""
+	}
+	if strings.HasPrefix(requested, "/workspace/") {
+		return strings.TrimPrefix(requested, "/workspace/")
+	}
+	return requested
 }
 
 func resolveWorkingDir(workspaceRoot, requested string) (string, error) {

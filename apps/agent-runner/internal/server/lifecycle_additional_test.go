@@ -1,9 +1,6 @@
 package server
 
 import (
-	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,11 +9,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func TestSequentialSessionsReuseWorkspaceOverOneConnection(t *testing.T) {
+func TestSequentialSessionsIsolateWorkspaceOverOneConnection(t *testing.T) {
 	workspace := t.TempDir()
-	runner := New(Config{WorkspaceRoot: workspace, MaxActiveSessions: 1})
-	httpServer := httptest.NewServer(runner)
-	defer httpServer.Close()
+	runner, httpServer := newTestRunnerWithWorkspace(t, workspace)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer conn.Close()
 
@@ -24,20 +19,23 @@ func TestSequentialSessionsReuseWorkspaceOverOneConnection(t *testing.T) {
 	waitForExit(t, conn, "first")
 	waitFor(t, time.Second, func() bool { return runner.manager.ActiveCount() == 0 })
 
-	send(t, conn, protocol.TypeStart, "second", protocol.StartRequest{Command: []string{"cat", "state"}})
-	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted { t.Fatalf("unexpected %#v", msg) }
+	send(t, conn, protocol.TypeStart, "second", protocol.StartRequest{Command: []string{"sh", "-c", "cat state 2>/dev/null || true"}})
+	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
+		t.Fatalf("unexpected %#v", msg)
+	}
 	var output string
 	for {
 		msg := read(t, conn)
 		switch msg.Type {
 		case protocol.TypeStdout:
 			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			output += string(stream.Data)
 		case protocol.TypeExit:
-			if output != "persisted" { t.Fatalf("unexpected workspace output %q", output) }
-			if data, err := os.ReadFile(filepath.Join(workspace, "state")); err != nil || string(data) != "persisted" {
-				t.Fatalf("workspace state mismatch data=%q err=%v", data, err)
+			if output != "" {
+				t.Fatalf("expected isolated workspace output, got %q", output)
 			}
 			return
 		}
@@ -50,7 +48,9 @@ func TestGracefulTerminateThenForcedKill(t *testing.T) {
 	defer conn.Close()
 
 	send(t, conn, protocol.TypeStart, "stubborn", protocol.StartRequest{Command: []string{"sh", "-c", "trap '' TERM; printf ready; sleep 30 & wait"}})
-	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted { t.Fatalf("unexpected %#v", msg) }
+	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
+		t.Fatalf("unexpected %#v", msg)
+	}
 
 	ready := false
 	for !ready {
@@ -58,7 +58,9 @@ func TestGracefulTerminateThenForcedKill(t *testing.T) {
 		switch msg.Type {
 		case protocol.TypeStdout:
 			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			ready = strings.Contains(string(stream.Data), "ready")
 		case protocol.TypeError:
 			t.Fatalf("unexpected protocol error before readiness %#v", msg)
@@ -75,10 +77,16 @@ func TestGracefulTerminateThenForcedKill(t *testing.T) {
 	send(t, conn, protocol.TypeKill, "stubborn", nil)
 	for {
 		msg := read(t, conn)
-		if msg.Type != protocol.TypeExit { continue }
+		if msg.Type != protocol.TypeExit {
+			continue
+		}
 		result, err := protocol.DecodePayload[protocol.ExitResult](msg)
-		if err != nil { t.Fatal(err) }
-		if !result.Signaled { t.Fatalf("expected forced kill result %#v", result) }
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Signaled {
+			t.Fatalf("expected forced kill result %#v", result)
+		}
 		return
 	}
 }
@@ -89,7 +97,9 @@ func TestHealthRequestAndSessionNotFoundErrors(t *testing.T) {
 	defer conn.Close()
 
 	send(t, conn, protocol.TypeHealth, "", nil)
-	if msg := read(t, conn); msg.Type != protocol.TypeHealth { t.Fatalf("unexpected %#v", msg) }
+	if msg := read(t, conn); msg.Type != protocol.TypeHealth {
+		t.Fatalf("unexpected %#v", msg)
+	}
 	send(t, conn, protocol.TypeKill, "missing", nil)
 	assertProtocolError(t, read(t, conn), "session_not_found")
 	send(t, conn, protocol.TypeStdin, "missing", protocol.StreamData{Data: []byte("x")})
@@ -102,7 +112,9 @@ func TestMalformedPostHandshakeMessageFailsExplicitly(t *testing.T) {
 	_, httpServer := newTestRunner(t)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer conn.Close()
-	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"version":1,"type":"health"} trailing`)); err != nil { t.Fatal(err) }
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"version":2,"type":"health"} trailing`)); err != nil {
+		t.Fatal(err)
+	}
 	assertProtocolError(t, read(t, conn), "invalid_message")
 }
 
@@ -111,15 +123,21 @@ func TestHandshakeRequiresTextServerHelloAndSupportedVersion(t *testing.T) {
 
 	t.Run("binary", func(t *testing.T) {
 		conn, _, err := websocket.DefaultDialer.Dial(wsURL(httpServer.URL), nil)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer conn.Close()
-		if err := conn.WriteMessage(websocket.BinaryMessage, []byte("hello")); err != nil { t.Fatal(err) }
+		if err := conn.WriteMessage(websocket.BinaryMessage, []byte("hello")); err != nil {
+			t.Fatal(err)
+		}
 		assertProtocolError(t, read(t, conn), "invalid_handshake")
 	})
 
 	t.Run("wrong type", func(t *testing.T) {
 		conn, _, err := websocket.DefaultDialer.Dial(wsURL(httpServer.URL), nil)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer conn.Close()
 		send(t, conn, protocol.TypeHealth, "", nil)
 		assertProtocolError(t, read(t, conn), "invalid_handshake")
@@ -127,11 +145,72 @@ func TestHandshakeRequiresTextServerHelloAndSupportedVersion(t *testing.T) {
 
 	t.Run("no common version", func(t *testing.T) {
 		conn, _, err := websocket.DefaultDialer.Dial(wsURL(httpServer.URL), nil)
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		defer conn.Close()
-		send(t, conn, protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{2}})
+		send(t, conn, protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{1}})
 		assertProtocolError(t, read(t, conn), "unsupported_protocol_version")
 	})
+}
+
+func TestDisconnectReconnectDeliversRemainingOutputAndExit(t *testing.T) {
+	runner, httpServer := newTestRunner(t)
+	conn := dialAndHandshake(t, httpServer.URL, 1)
+
+	send(t, conn, protocol.TypeStart, "resume-output", protocol.StartRequest{
+		Command: []string{"sh", "-c", "printf before; sleep 0.3; printf after"},
+	})
+	if msg := read(t, conn); msg.Type != protocol.TypeSessionStarted {
+		t.Fatalf("unexpected %#v", msg)
+	}
+
+	var before string
+	for before != "before" {
+		msg := read(t, conn)
+		if msg.Type != protocol.TypeStdout {
+			t.Fatalf("unexpected message before disconnect %#v", msg)
+		}
+		stream, err := protocol.DecodePayload[protocol.StreamData](msg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before += string(stream.Data)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reconnected := dialAndHandshakeExpectHealth(t, httpServer.URL, 1, "resume-output")
+	defer reconnected.Close()
+
+	var after string
+	for {
+		msg := read(t, reconnected)
+		switch msg.Type {
+		case protocol.TypeStdout:
+			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			after += string(stream.Data)
+		case protocol.TypeExit:
+			result, err := protocol.DecodePayload[protocol.ExitResult](msg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after != "after" {
+				t.Fatalf("remaining output=%q, want after", after)
+			}
+			if result.ExitCode != 0 || result.Signaled {
+				t.Fatalf("unexpected exit %#v", result)
+			}
+			waitFor(t, time.Second, func() bool { return runner.manager.ActiveCount() == 0 })
+			return
+		case protocol.TypeError:
+			t.Fatalf("unexpected reconnect error %#v", msg)
+		}
+	}
 }
 
 func waitForExit(t *testing.T, conn *websocket.Conn, sessionID string) {
@@ -141,7 +220,11 @@ func waitForExit(t *testing.T, conn *websocket.Conn, sessionID string) {
 	}
 	for {
 		msg := read(t, conn)
-		if msg.Type == protocol.TypeExit && msg.SessionID == sessionID { return }
-		if msg.Type == protocol.TypeError { t.Fatalf("unexpected error %#v", msg) }
+		if msg.Type == protocol.TypeExit && msg.SessionID == sessionID {
+			return
+		}
+		if msg.Type == protocol.TypeError {
+			t.Fatalf("unexpected error %#v", msg)
+		}
 	}
 }

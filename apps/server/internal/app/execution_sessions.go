@@ -24,6 +24,7 @@ type ExecutionSessionStore interface {
 	GetRuntimeInstance(context.Context, string, string) (store.RuntimeInstance, error)
 	CreateExecutionSession(context.Context, store.ExecutionSession) (store.ExecutionSession, error)
 	GetExecutionSession(context.Context, string, string) (store.ExecutionSession, error)
+	ListExecutionSessionsByRunner(context.Context, string, []string) ([]store.ExecutionSession, error)
 	TransitionExecutionSession(context.Context, store.ExecutionSessionTransition) (store.ExecutionSession, error)
 	UpdateRuntimeInstanceRunnerStatus(context.Context, string, string, string) (store.RuntimeInstance, error)
 }
@@ -31,6 +32,21 @@ type ExecutionSessionStore interface {
 type RunnerConnectionManager interface {
 	Connect(context.Context, string, string) (runner.Client, error)
 	Reconcile(context.Context, string, string, string) (runner.ProcessSession, bool, error)
+}
+
+type RunnerRegistry interface {
+	Connect(context.Context, string, string) (runner.Client, error)
+	Reconcile(context.Context, string, string, string) (runner.ProcessSession, bool, error)
+}
+
+type noopRunnerRegistry struct{}
+
+func (noopRunnerRegistry) Connect(context.Context, string, string) (runner.Client, error) {
+	return nil, errors.New("runner registry is not configured")
+}
+
+func (noopRunnerRegistry) Reconcile(context.Context, string, string, string) (runner.ProcessSession, bool, error) {
+	return nil, false, errors.New("runner registry is not configured")
 }
 
 type ExecutionRequest struct {
@@ -41,18 +57,23 @@ type ExecutionRequest struct {
 }
 
 type ExecutionSessionService struct {
-	store   ExecutionSessionStore
-	runners RunnerConnectionManager
+	store    ExecutionSessionStore
+	runners  RunnerConnectionManager
+	registry RunnerRegistry
 
-	liveMu sync.RWMutex
-	live   map[string]*ExecutionProcess
+	reconnectTimeoutNanos atomic.Int64
+	liveMu                sync.RWMutex
+	live                  map[string]*ExecutionProcess
 }
 
-func NewExecutionSessionService(sessionStore ExecutionSessionStore, runners RunnerConnectionManager) (*ExecutionSessionService, error) {
+func NewExecutionSessionService(sessionStore ExecutionSessionStore, runners RunnerConnectionManager, registry RunnerRegistry) (*ExecutionSessionService, error) {
 	if sessionStore == nil || runners == nil {
 		return nil, fmt.Errorf("execution session store and runner manager are required")
 	}
-	return &ExecutionSessionService{store: sessionStore, runners: runners, live: make(map[string]*ExecutionProcess)}, nil
+	if registry == nil {
+		registry = noopRunnerRegistry{}
+	}
+	return &ExecutionSessionService{store: sessionStore, runners: runners, registry: registry, live: make(map[string]*ExecutionProcess)}, nil
 }
 
 func (s *ExecutionSessionService) Start(ctx context.Context, projectID, runID, runtimeInstanceID string, request ExecutionRequest) (*ExecutionProcess, error) {
@@ -134,6 +155,114 @@ func (s *ExecutionSessionService) Start(ctx context.Context, projectID, runID, r
 	return newExecutionProcess(s, session, transport), nil
 }
 
+func (s *ExecutionSessionService) CreateRunnerSession(ctx context.Context, projectID, runID, runnerID string) (store.ExecutionSession, error) {
+	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" || strings.TrimSpace(runnerID) == "" {
+		return store.ExecutionSession{}, NewError("invalid_argument", "projectId, runId and runnerId are required", store.ErrInvalidArgument)
+	}
+	if _, err := s.store.GetRun(ctx, projectID, runID); err != nil {
+		return store.ExecutionSession{}, translateStoreError(err, "run")
+	}
+	session, err := s.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: projectID, RunID: runID, RunnerID: runnerID,
+		Status: "PENDING", CWD: runtimepkg.WorkspaceTarget, CommandArgv: []byte("[]"),
+	})
+	if err != nil {
+		return store.ExecutionSession{}, translateStoreError(err, "execution_session")
+	}
+	return session, nil
+}
+
+func (s *ExecutionSessionService) StartPreparedOnRunner(ctx context.Context, projectID, sessionID string, request ExecutionRequest) (*ExecutionProcess, error) {
+	session, err := s.store.GetExecutionSession(ctx, projectID, sessionID)
+	if err != nil {
+		return nil, translateStoreError(err, "execution_session")
+	}
+	if session.RunnerID == "" {
+		return nil, NewError("invalid_argument", "execution session is not runner-owned", store.ErrInvalidArgument)
+	}
+	cwd, err := validateRunnerExecutionRequest(projectID, session.RunID, session.RunnerID, request)
+	if err != nil {
+		return nil, err
+	}
+	fromStatus := []string{"PENDING"}
+	switch session.Status {
+	case "PENDING":
+	case "COMPLETED":
+		fromStatus = []string{"COMPLETED"}
+	default:
+		return nil, NewError("execution_session_invalid_state", "Execution Session is not pending workspace transfer", store.ErrInvalidArgument)
+	}
+	argv, err := json.Marshal(request.Command)
+	if err != nil {
+		return nil, fmt.Errorf("encode execution command: %w", err)
+	}
+	return s.startRunnerSession(ctx, projectID, session, fromStatus, cwd, argv, request)
+}
+
+func (s *ExecutionSessionService) StartOnRunner(ctx context.Context, projectID, runID, runnerID string, request ExecutionRequest) (*ExecutionProcess, error) {
+	cwd, err := validateRunnerExecutionRequest(projectID, runID, runnerID, request)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.store.GetRun(ctx, projectID, runID); err != nil {
+		return nil, translateStoreError(err, "run")
+	}
+	argv, err := json.Marshal(request.Command)
+	if err != nil {
+		return nil, fmt.Errorf("encode execution command: %w", err)
+	}
+	session, err := s.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: projectID, RunID: runID, RunnerID: runnerID,
+		Status: "PENDING", CWD: cwd, CommandArgv: argv,
+	})
+	if err != nil {
+		return nil, translateStoreError(err, "execution_session")
+	}
+	return s.startRunnerSession(ctx, projectID, session, []string{"PENDING"}, cwd, argv, request)
+}
+
+func (s *ExecutionSessionService) startRunnerSession(ctx context.Context, projectID string, session store.ExecutionSession, fromStatus []string, cwd string, argv []byte, request ExecutionRequest) (*ExecutionProcess, error) {
+	previous := session
+	started, err := s.store.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
+		ProjectID: session.ProjectID, SessionID: session.ID, FromStatuses: fromStatus, Status: "STARTING", CommandArgv: argv,
+	})
+	if err != nil {
+		return nil, translateStoreError(err, "execution_session")
+	}
+	if started.RunID != previous.RunID || started.RuntimeInstanceID != previous.RuntimeInstanceID || started.RunnerID != previous.RunnerID {
+		return nil, fmt.Errorf("execution session immutable binding changed during transition")
+	}
+
+	client, err := s.registry.Connect(ctx, projectID, started.RunnerID)
+	if err != nil {
+		_, failErr := s.transition(ctx, started, []string{"STARTING"}, "FAILED", nil)
+		return nil, errors.Join(fmt.Errorf("connect runner: %w", err), failErr)
+	}
+	transport, err := client.Start(ctx, started.ID, runner.Request{
+		Command: append([]string(nil), request.Command...),
+		Dir:     cwd,
+		Env:     cloneMap(request.Env),
+		Secrets: cloneMap(request.Secrets),
+	})
+	if err != nil {
+		var protocolErr *runner.ProtocolError
+		if errors.As(err, &protocolErr) {
+			_, failErr := s.transition(ctx, started, []string{"STARTING"}, "FAILED", nil)
+			return nil, errors.Join(err, failErr)
+		}
+		if transport != nil {
+			s.retainExecutionProcess(started, transport)
+		}
+		return nil, NewError("execution_session_uncertain", "runner transport was interrupted while starting the Execution Session; reconciliation is required", err)
+	}
+	runningSession, transitionErr := s.transition(ctx, started, []string{"STARTING"}, "RUNNING", nil)
+	if transitionErr != nil {
+		s.retainExecutionProcess(started, transport)
+		return nil, NewError("execution_session_uncertain", "Execution Session started but durable RUNNING state could not be confirmed", transitionErr)
+	}
+	return newExecutionProcess(s, runningSession, transport), nil
+}
+
 func (s *ExecutionSessionService) retainExecutionProcess(session store.ExecutionSession, transport runner.ProcessSession) *ExecutionProcess {
 	process := newExecutionProcess(s, session, transport)
 	go func() { _, _ = io.Copy(io.Discard, process.Stdout()) }()
@@ -148,10 +277,21 @@ func (s *ExecutionSessionService) updateRunnerStatusRecovery(projectID, runtimeI
 	return err
 }
 
+func validateRunnerExecutionRequest(projectID, runID, runnerID string, request ExecutionRequest) (string, error) {
+	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" || strings.TrimSpace(runnerID) == "" {
+		return "", NewError("invalid_argument", "projectId, runId and runnerId are required", store.ErrInvalidArgument)
+	}
+	return validateExecutionCWD(request)
+}
+
 func validateExecutionRequest(projectID, runID, runtimeInstanceID string, request ExecutionRequest) (string, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" || strings.TrimSpace(runtimeInstanceID) == "" {
 		return "", NewError("invalid_argument", "projectId, runId and runtimeInstanceId are required", store.ErrInvalidArgument)
 	}
+	return validateExecutionCWD(request)
+}
+
+func validateExecutionCWD(request ExecutionRequest) (string, error) {
 	if len(request.Command) == 0 || strings.TrimSpace(request.Command[0]) == "" {
 		return "", NewError("invalid_argument", "execution command is required", store.ErrInvalidArgument)
 	}
@@ -184,7 +324,7 @@ func (s *ExecutionSessionService) transition(ctx context.Context, session store.
 	if err != nil {
 		return store.ExecutionSession{}, translateStoreError(err, "execution_session")
 	}
-	if updated.RunID != session.RunID || updated.RuntimeInstanceID != session.RuntimeInstanceID {
+	if updated.RunID != session.RunID || updated.RuntimeInstanceID != session.RuntimeInstanceID || updated.RunnerID != session.RunnerID {
 		return store.ExecutionSession{}, fmt.Errorf("execution session immutable binding changed during transition")
 	}
 	return updated, nil
@@ -316,7 +456,7 @@ func (p *ExecutionProcess) observe() {
 		}
 		finalErr = transitionErr
 	}
-	if record.Status == "COMPLETED" || record.Status == "FAILED" || record.Status == "CANCELLED" {
+	if record.RuntimeInstanceID != "" && (record.Status == "COMPLETED" || record.Status == "FAILED" || record.Status == "CANCELLED") {
 		if statusErr := p.service.updateRunnerStatusRecovery(record.ProjectID, record.RuntimeInstanceID, "READY"); statusErr != nil {
 			finalErr = errors.Join(finalErr, statusErr)
 		}

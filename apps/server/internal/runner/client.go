@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxMessageSize            = 1 << 20
+	maxMessageSize            = protocol.MaxMessageSize
 	writeTimeout              = 10 * time.Second
 	handshakeTimeout          = 10 * time.Second
 	runnerReadTimeout         = 90 * time.Second
@@ -46,6 +46,25 @@ type pendingSessionMessages struct {
 	bytes    int
 }
 
+type transferResult struct {
+	transferID string
+	payload    []byte
+	err        error
+}
+
+type incomingTransferState struct {
+	transferID    string
+	expected      int64
+	checksum      string
+	buffer        []byte
+	progressState transferProgressState
+}
+
+type transferWaiter struct {
+	result     chan transferResult
+	onProgress TransferProgressFunc
+}
+
 type Connection struct {
 	conn *websocket.Conn
 
@@ -54,6 +73,9 @@ type Connection struct {
 	sessions  map[string]*Session
 	pending   map[string]*pendingSessionMessages
 	connects  map[string]map[string]*sessionConn
+	transfers map[string]*incomingTransferState
+	transferWaiters map[string]*transferWaiter
+	transferDone    map[string]transferResult
 	health    protocol.Health
 	caps      protocol.Capabilities
 	err       error
@@ -76,12 +98,20 @@ func dialWith(ctx context.Context, dialer *websocket.Dialer, endpoint string, he
 		}
 		return nil, fmt.Errorf("dial runner: %w", err)
 	}
+	return acceptConnection(ctx, conn)
+}
+
+// acceptConnection binds the existing session transport to an upgraded socket.
+func acceptConnection(ctx context.Context, conn *websocket.Conn) (*Connection, error) {
 	c := &Connection{
-		conn:     conn,
-		sessions: make(map[string]*Session),
-		pending:  make(map[string]*pendingSessionMessages),
-		connects: make(map[string]map[string]*sessionConn),
-		done:     make(chan struct{}),
+		conn:            conn,
+		sessions:        make(map[string]*Session),
+		pending:         make(map[string]*pendingSessionMessages),
+		connects:        make(map[string]map[string]*sessionConn),
+		transfers:       make(map[string]*incomingTransferState),
+		transferWaiters: make(map[string]*transferWaiter),
+		transferDone:    make(map[string]transferResult),
+		done:            make(chan struct{}),
 	}
 	conn.SetReadLimit(maxMessageSize)
 	if err := c.handshake(ctx); err != nil {
@@ -106,7 +136,7 @@ func (c *Connection) handshake(ctx context.Context) error {
 	}
 	defer func() { _ = c.conn.SetReadDeadline(time.Time{}) }()
 
-	if err := c.write(protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{protocol.Version1}}); err != nil {
+	if err := c.write(protocol.TypeServerHello, "", protocol.ServerHello{SupportedVersions: []int{protocol.Version2}}); err != nil {
 		return fmt.Errorf("send runner hello: %w", err)
 	}
 	msg, err := c.readProtocolMessage()
@@ -123,7 +153,7 @@ func (c *Connection) handshake(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("%w: invalid runner hello: %v", ErrIncompatibleRunner, err)
 	}
-	if hello.Version != protocol.Version1 || hello.Capabilities.MaxActiveSessions < 1 {
+	if hello.Version != protocol.Version2 || hello.Capabilities.MaxActiveSessions < 1 {
 		return fmt.Errorf("%w: version=%d max_active_sessions=%d", ErrIncompatibleRunner, hello.Version, hello.Capabilities.MaxActiveSessions)
 	}
 	if err := validateFeatures(hello.Capabilities.Features); err != nil {
@@ -187,6 +217,7 @@ func (c *Connection) Capabilities() protocol.Capabilities {
 	defer c.mu.RUnlock()
 	caps := c.caps
 	caps.Features = append([]string(nil), caps.Features...)
+	caps.Engines = append([]string(nil), caps.Engines...)
 	return caps
 }
 
@@ -321,6 +352,9 @@ func (c *Connection) handleMessage(msg protocol.Message) error {
 	if msg.Type == protocol.TypeConnected || msg.Type == protocol.TypeConnectData || msg.Type == protocol.TypeConnectClose {
 		return c.handleConnectMessage(msg)
 	}
+	if msg.Type == protocol.TypeTransferBegin || msg.Type == protocol.TypeTransferChunk || msg.Type == protocol.TypeTransferEnd || msg.Type == protocol.TypeTransferFailed {
+		return c.handleTransferMessage(msg)
+	}
 
 	c.mu.Lock()
 	session := c.sessions[msg.SessionID]
@@ -421,7 +455,7 @@ func (c *Connection) readProtocolMessage() (protocol.Message, error) {
 }
 
 func (c *Connection) write(typ protocol.MessageType, sessionID string, payload any) error {
-	msg, err := protocol.NewMessage(protocol.Version1, typ, sessionID, payload)
+	msg, err := protocol.NewMessage(protocol.Version2, typ, sessionID, payload)
 	if err != nil {
 		return err
 	}

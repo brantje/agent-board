@@ -58,6 +58,7 @@ services:
       - ./apps/server:/src/apps/server
       - ./packages/redact:/src/packages/redact
       - ./packages/runnerprotocol:/src/packages/runnerprotocol
+      - ./packages/workspacegit:/src/packages/workspacegit
       - server-go-mod:/go/pkg/mod
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:3001/healthz"]

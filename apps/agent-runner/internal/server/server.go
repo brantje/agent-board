@@ -2,20 +2,22 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
-	"net/http"
+	"log/slog"
+	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/brantje/agent-board/apps/agent-runner/internal/protocol"
 	"github.com/brantje/agent-board/apps/agent-runner/internal/session"
+	shared "github.com/brantje/agent-board/packages/runnerprotocol"
 	"github.com/gorilla/websocket"
 )
 
 const (
-	maxMessageSize    = 1 << 20
+	maxMessageSize    = shared.MaxMessageSize
 	defaultPongWait   = 60 * time.Second
 	defaultPingPeriod = 45 * time.Second
 	pingWriteTimeout  = 5 * time.Second
@@ -28,9 +30,7 @@ type Config struct {
 }
 
 type Server struct {
-	manager  *session.Manager
-	upgrader websocket.Upgrader
-	mux      *http.ServeMux
+	manager *session.Manager
 
 	stdinMu    sync.RWMutex
 	stdinPumps map[string]*stdinPump
@@ -40,6 +40,8 @@ type Server struct {
 
 	connectMu  sync.Mutex
 	connectors map[string]map[string]*sessionConnector
+
+	transfers *transferState
 
 	shutdownCtx    context.Context
 	shutdownCancel context.CancelFunc
@@ -56,33 +58,18 @@ type Server struct {
 func New(config Config) *Server {
 	manager := session.NewManagerWithWorkspace(config.MaxActiveSessions, config.WorkspaceRoot)
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
-	s := &Server{
-		manager: manager,
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool { return r.Header.Get("Origin") == "" },
-		},
-		mux:            http.NewServeMux(),
+	return &Server{
+		manager:        manager,
 		stdinPumps:     make(map[string]*stdinPump),
 		deliveries:     make(map[string]*sessionDelivery),
 		connectors:     make(map[string]map[string]*sessionConnector),
+		transfers:      newTransferState(),
 		shutdownCtx:    shutdownCtx,
 		shutdownCancel: shutdownCancel,
 		connections:    make(map[*websocket.Conn]struct{}),
 		pongWait:       defaultPongWait,
 		pingPeriod:     defaultPingPeriod,
 	}
-	s.mux.HandleFunc("GET /healthz", s.handleHealth)
-	s.mux.HandleFunc("GET /v1/ws", s.handleWebSocket)
-	return s
-}
-
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	s.mux.ServeHTTP(w, r)
-}
-
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(s.health())
 }
 
 func (s *Server) health() protocol.Health {
@@ -90,24 +77,24 @@ func (s *Server) health() protocol.Health {
 	return protocol.Health{Status: "ok", ActiveSessions: len(ids), ActiveSessionIDs: ids}
 }
 
-func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := s.upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		return
-	}
+func (s *Server) serveConnection(conn *websocket.Conn) {
 	if !s.registerConnection(conn) {
 		_ = conn.Close()
 		return
 	}
 	defer s.unregisterConnection(conn)
 	defer conn.Close()
-	conn.SetReadLimit(maxMessageSize)
-	if err := s.configureConnectionLiveness(conn); err != nil {
-		return
-	}
 	writer := &connectionWriter{conn: conn}
 	defer s.detachDeliveries(writer)
 	defer s.detachConnectors(writer)
+	if !s.handshake(conn, writer) {
+		return
+	}
+	conn.SetReadLimit(maxMessageSize)
+	if err := s.configureConnectionLiveness(conn); err != nil {
+		slog.Warn("runner connection liveness setup failed", "error", err)
+		return
+	}
 	pingStop := make(chan struct{})
 	pingDone := make(chan struct{})
 	go func() {
@@ -119,9 +106,6 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		<-pingDone
 	}()
 
-	if !s.handshake(conn, writer) {
-		return
-	}
 	for {
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
@@ -178,9 +162,11 @@ func nextPingDeadline() time.Time {
 func (s *Server) handshake(conn *websocket.Conn, writer *connectionWriter) bool {
 	messageType, data, err := conn.ReadMessage()
 	if err != nil {
+		slog.Warn("runner handshake read failed", "error", err)
 		return false
 	}
 	if messageType != websocket.TextMessage {
+		slog.Warn("runner handshake expected text server hello", "message_type", messageType)
 		writer.sendError("invalid_handshake", "expected server hello", "")
 		return false
 	}
@@ -192,27 +178,41 @@ func (s *Server) handshake(conn *websocket.Conn, writer *connectionWriter) bool 
 			code = "unsupported_protocol_version"
 			message = "protocol version is not supported"
 		}
+		slog.Warn("runner handshake decode failed", "error", err)
 		writer.sendError(code, message, "")
 		return false
 	}
 	if msg.Type != protocol.TypeServerHello {
+		slog.Warn("runner handshake unexpected type", "type", string(msg.Type))
 		writer.sendError("invalid_handshake", "expected server hello", "")
 		return false
 	}
 	hello, err := protocol.DecodePayload[protocol.ServerHello](msg)
-	if err != nil || !containsVersion(hello.SupportedVersions, protocol.Version1) {
+	if err != nil || !containsVersion(hello.SupportedVersions, protocol.Version2) {
+		slog.Warn("runner handshake unsupported server hello", "error", err, "versions", hello.SupportedVersions)
 		writer.sendError("unsupported_protocol_version", "protocol version is not supported", "")
 		return false
 	}
 
-	_ = writer.send(protocol.TypeRunnerHello, "", protocol.RunnerHello{
-		Version: protocol.Version1,
+	err = writer.send(protocol.TypeRunnerHello, "", protocol.RunnerHello{
+		Version: protocol.Version2,
 		Capabilities: protocol.Capabilities{
+			RunnerVersion:     Version,
+			OS:                runtime.GOOS,
+			Architecture:      runtime.GOARCH,
+			Engines:           shared.DiscoverEngines(exec.LookPath),
 			MaxActiveSessions: s.manager.Capacity(),
 			Features:          []string{"stdin", "stdout", "stderr", "terminate", "kill", "health", "session_connect"},
 		},
 	})
-	_ = writer.send(protocol.TypeHealth, "", s.health())
+	if err != nil {
+		slog.Warn("runner handshake hello send failed", "error", err)
+		return false
+	}
+	if err := writer.send(protocol.TypeHealth, "", s.health()); err != nil {
+		slog.Warn("runner handshake health send failed", "error", err)
+		return false
+	}
 	s.attachDeliveries(writer)
 	return true
 }
@@ -237,6 +237,14 @@ func (s *Server) handleMessage(writer *connectionWriter, msg protocol.Message) {
 		s.handleConnectClose(writer, msg)
 	case protocol.TypeHealth:
 		_ = writer.send(protocol.TypeHealth, "", s.health())
+	case protocol.TypeTransferBegin:
+		s.handleTransferBegin(writer, msg)
+	case protocol.TypeTransferChunk:
+		s.handleTransferChunk(writer, msg)
+	case protocol.TypeTransferEnd:
+		s.handleTransferEnd(writer, msg)
+	case protocol.TypeTransferApplied:
+		s.handleTransferApplied(writer, msg)
 	default:
 		writer.sendError("invalid_direction", "message type is not accepted from server", msg.SessionID)
 	}
@@ -246,6 +254,10 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 	request, err := protocol.DecodePayload[protocol.StartRequest](msg)
 	if err != nil {
 		writer.sendError("invalid_start", "invalid start request", msg.SessionID)
+		return
+	}
+	if !s.transfers.waitReady(msg.SessionID, 30*time.Second) {
+		writer.sendError("start_failed", "workspace is not ready", msg.SessionID)
 		return
 	}
 	execution, stdin, err := s.startSession(msg.SessionID, session.Request{
@@ -409,6 +421,7 @@ func streamExecution(ctx context.Context, writer streamWriter, execution *sessio
 type streamWriter interface {
 	send(protocol.MessageType, string, any) error
 	sendError(string, string, string)
+	sendTransfer(context.Context, string, string, string, []byte) error
 }
 
 func pumpStream(writer streamWriter, typ protocol.MessageType, sessionID string, reader io.Reader) {
@@ -452,7 +465,7 @@ type connectionWriter struct {
 }
 
 func (w *connectionWriter) send(typ protocol.MessageType, sessionID string, payload any) error {
-	msg, err := protocol.NewMessage(protocol.Version1, typ, sessionID, payload)
+	msg, err := protocol.NewMessage(protocol.Version2, typ, sessionID, payload)
 	if err != nil {
 		return err
 	}

@@ -6,14 +6,24 @@ import { evidence } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
 describe('runAgentInfo', () => {
-  it('reads immutable agent, model, provider and runtime from provenance context', () => {
+  it('reads immutable agent, model, provider, runtime and runner from provenance context', () => {
     expect(runAgentInfo(evidence().provenance)).toEqual({
       name: 'Coder',
       engine: 'opencode',
       model: 'openai/gpt-test',
       provider: 'OpenRouter',
-      runtime: 'Docker'
+      runtime: 'Docker',
+      runner: 'lab-host'
     })
+  })
+
+  it('reads runner name from provenance context', () => {
+    expect(runAgentInfo({
+      context: {
+        agent: { name: 'Coder', engine: 'opencode' },
+        runner: { id: 'runner-1', name: 'build-host' }
+      }
+    })).toMatchObject({ name: 'Coder', runner: 'build-host' })
   })
 
   it('falls back to model name and provider kind when richer labels are absent', () => {
@@ -60,6 +70,8 @@ describe('RunAgentCard', () => {
     expect(wrapper.text()).toContain('openai/gpt-test')
     expect(wrapper.text()).toContain('OpenRouter')
     expect(wrapper.text()).toContain('Docker')
+    expect(wrapper.text()).toContain('Runner')
+    expect(wrapper.text()).toContain('lab-host')
     expect(wrapper.text()).not.toContain('agent-1')
   })
 

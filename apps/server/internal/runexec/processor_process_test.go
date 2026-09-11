@@ -95,14 +95,14 @@ type processTestRuntime struct {
 
 func (r *processTestRuntime) Create(_ context.Context, projectID, _, runtimeID string) (store.RuntimeInstance, error) {
 	r.created++
-	return store.RuntimeInstance{ID: "runtime-instance", ProjectID: projectID, RuntimeID: runtimeID, Status: string(runtimepkg.StateProvisioning)}, nil
+	return store.RuntimeInstance{ID: "runtime-instance", ProjectID: projectID, Status: string(runtimepkg.StateProvisioning)}, nil
 }
 func (r *processTestRuntime) Start(_ context.Context, projectID, id string) (store.RuntimeInstance, error) {
 	r.started++
 	if r.startErr != nil {
 		return store.RuntimeInstance{ID: id, ProjectID: projectID, Status: string(runtimepkg.StateStarting)}, r.startErr
 	}
-	return store.RuntimeInstance{ID: id, ProjectID: projectID, RuntimeID: "runtime", Status: string(runtimepkg.StateRunning)}, nil
+	return store.RuntimeInstance{ID: id, ProjectID: projectID, Status: string(runtimepkg.StateRunning)}, nil
 }
 func (r *processTestRuntime) Stop(_ context.Context, projectID, id string, _ runtimepkg.StopReason) (store.RuntimeInstance, error) {
 	r.stopped++
@@ -174,7 +174,7 @@ func TestProcessorProcessPersistsEvidenceAndCleansRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimes := &processTestRuntime{}
-	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil)
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestProcessorProcessAttachesLiveSessionWithoutRestarting(t *testing.T) {
 		t.Fatal(err)
 	}
 	runtimes := &processTestRuntime{}
-	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil)
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestProcessorProcessFailsWhenMultipleLiveSessionsExist(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, &processTestRuntime{}, processTestSessions{}, registry, recorder, output, candidate, nil)
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, &processTestRuntime{}, processTestSessions{}, registry, recorder, output, candidate, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,7 +363,7 @@ func TestProcessorProcessReturnsFailedResultForResolverAndRuntimeErrors(t *testi
 		if err != nil {
 			t.Fatal(err)
 		}
-		processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil)
+		processor, err := NewProcessor(evidenceStore, resolver, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -446,7 +446,7 @@ func newProcessorWithStore(t *testing.T, workspace string, safe executioncontext
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil)
+	processor, err := NewProcessor(evidenceStore, processTestResolver{resolved: executioncontext.Resolved{Safe: safe}}, runtimes, processTestSessions{}, registry, recorder, output, candidate, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,7 +454,7 @@ func newProcessorWithStore(t *testing.T, workspace string, safe executioncontext
 }
 
 func TestProcessorHelpersCoverFailureAndPayloadShapes(t *testing.T) {
-	if _, err := NewProcessor(nil, nil, nil, nil, nil, nil, nil, nil, nil); err == nil {
+	if _, err := NewProcessor(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil); err == nil {
 		t.Fatal("expected dependency validation error")
 	}
 	if got := safeFailure(nil); got != "execution failed" {
@@ -540,7 +540,7 @@ func processTestSafeContext(workspace string) executioncontext.SafeContext {
 		Model:     executioncontext.ModelContext{ID: "model", Name: "Model", Model: "model"},
 		Provider:  executioncontext.ProviderContext{ID: "provider", Name: "Provider", Kind: "test"},
 		Runtime:   executioncontext.RuntimeContext{ID: "runtime", Name: "Runtime", Kind: "docker", Image: "image"},
-		Workspace: executioncontext.WorkspaceContext{ID: "workspace", Path: workspace, WorkingBranch: "work"},
+		Workspace: executioncontext.WorkspaceContext{ID: "workspace", Path: workspace, WorkingBranch: "work", BootstrapStatus: "READY"},
 	}
 }
 
@@ -555,6 +555,22 @@ func processTestEvent(events []store.Event, eventType string) store.Event {
 		}
 	}
 	return store.Event{}
+}
+
+func TestProcessorRecordOmitsEmptyRuntimeInstanceID(t *testing.T) {
+	evidenceStore := &processTestStore{}
+	recorder, err := evidence.NewRecorder(evidenceStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor := &Processor{events: recorder}
+	empty := ""
+	if err := processor.record(context.Background(), processTestSafeContext(t.TempDir()), "agent.message", map[string]any{"message": "ok"}, &empty, &empty); err != nil {
+		t.Fatal(err)
+	}
+	if len(evidenceStore.events) != 1 || evidenceStore.events[0].RuntimeInstanceID != nil || evidenceStore.events[0].ParentEventID != nil {
+		t.Fatalf("empty ids must be omitted: %+v", evidenceStore.events)
+	}
 }
 
 var _ scheduler.Lifecycle = processTestLifecycle{}

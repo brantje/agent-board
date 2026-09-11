@@ -11,11 +11,13 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 const (
 	defaultBaseURL        = "http://opencode.local"
 	defaultSessionAddress = "127.0.0.1:4096"
+	jsonRequestTimeout    = 10 * time.Second
 	maxErrorBody          = 4 << 10
 )
 
@@ -70,9 +72,11 @@ func NewSession(dialer Dialer, address string) (*Client, error) {
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			return dialer.DialContext(ctx, network, address)
 		},
-		ForceAttemptHTTP2: false,
+		ForceAttemptHTTP2:  false,
+		DisableKeepAlives:  true,
+		DisableCompression: true,
 	}
-	return New(&http.Client{Transport: transport}, defaultBaseURL)
+	return New(&http.Client{Transport: transport}, "http://"+address)
 }
 
 func (c *Client) CloseIdleConnections() {
@@ -119,16 +123,20 @@ func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
 }
 
 func (c *Client) CreateSession(ctx context.Context, request CreateSessionRequest) (Session, error) {
-	if strings.TrimSpace(request.Directory) == "" || strings.TrimSpace(request.Model.ID) == "" || strings.TrimSpace(request.Model.ProviderID) == "" {
-		return Session{}, fmt.Errorf("opencode: session directory, provider and model are required")
+	if strings.TrimSpace(request.Model.ID) == "" || strings.TrimSpace(request.Model.ProviderID) == "" {
+		return Session{}, fmt.Errorf("opencode: session provider and model are required")
 	}
 	payload := struct {
 		Model    ModelRef `json:"model"`
-		Location struct {
+		Location *struct {
 			Directory string `json:"directory"`
-		} `json:"location"`
+		} `json:"location,omitempty"`
 	}{Model: request.Model}
-	payload.Location.Directory = request.Directory
+	if directory := strings.TrimSpace(request.Directory); directory != "" {
+		payload.Location = &struct {
+			Directory string `json:"directory"`
+		}{Directory: directory}
+	}
 	var response struct {
 		Data Session `json:"data"`
 	}
@@ -191,17 +199,22 @@ func (c *Client) SessionActive(ctx context.Context, sessionID string) (bool, err
 	var statuses map[string]status
 	if err := c.doJSON(ctx, http.MethodGet, "/session/status", nil, &statuses); err == nil {
 		current, ok := statuses[sessionID]
-		return ok && current.Type != "" && current.Type != "idle", nil
+		if ok {
+			return current.Type != "" && current.Type != "idle", nil
+		}
 	} else if !isNotFound(err) {
 		return false, err
 	}
 
 	// Compatibility fallback for OpenCode builds without the documented status
-	// endpoint. The pinned Runtime uses /session/status above.
+	// endpoint, and for V2-created sessions that are absent from /session/status.
 	var response struct {
 		Data map[string]json.RawMessage `json:"data"`
 	}
 	if err := c.doJSON(ctx, http.MethodGet, "/api/session/active", nil, &response); err != nil {
+		if isNotFound(err) {
+			return false, nil
+		}
 		return false, err
 	}
 	_, active := response.Data[sessionID]
@@ -307,6 +320,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, payload, outpu
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
+	ctx, cancel := context.WithTimeout(ctx, jsonRequestTimeout)
+	defer cancel()
+	req = req.WithContext(ctx)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("opencode: %s %s: %w", method, path, err)

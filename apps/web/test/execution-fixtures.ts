@@ -7,6 +7,7 @@ export const project: Project = {
   repositoryPath: '/repo',
   defaultBranch: 'main',
   workflowSettings: {},
+  allowInternalRunner: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z'
 }
@@ -55,7 +56,8 @@ export function evidence(overrides: Partial<RunEvidence> = {}): RunEvidence {
         agent: { id: 'agent-1', name: 'Coder', engine: 'opencode', roleInstructions: 'Ship maintainable code.' },
         model: { id: 'model-1', name: 'gpt-test', model: 'openai/gpt-test' },
         provider: { id: 'provider-1', name: 'OpenRouter', kind: 'openrouter' },
-        runtime: { id: 'runtime-1', name: 'Docker', kind: 'docker' }
+        runtime: { id: 'runtime-1', name: 'Docker', kind: 'docker' },
+        runner: { id: 'runner-1', name: 'lab-host', internal: false }
       }
     },
     runtimeInstances: [{

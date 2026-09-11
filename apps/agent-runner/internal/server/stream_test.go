@@ -25,12 +25,16 @@ func TestLargeOutputIsChunkedWithoutLosingChannelIdentity(t *testing.T) {
 		switch msg.Type {
 		case protocol.TypeStdout:
 			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			stdoutBytes += len(stream.Data)
 			stdoutMessages++
 		case protocol.TypeStderr:
 			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			stderr.Write(stream.Data)
 		case protocol.TypeExit:
 			if stdoutBytes != 200000 || stdoutMessages < 2 || stderr.String() != "stderr-marker" {
@@ -61,10 +65,14 @@ func TestStdinCloseIsIdempotent(t *testing.T) {
 		switch msg.Type {
 		case protocol.TypeStdout:
 			stream, err := protocol.DecodePayload[protocol.StreamData](msg)
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			output.Write(stream.Data)
 		case protocol.TypeExit:
-			if output.String() != "done" { t.Fatalf("unexpected stdout %q", output.String()) }
+			if output.String() != "done" {
+				t.Fatalf("unexpected stdout %q", output.String())
+			}
 			return
 		case protocol.TypeError:
 			t.Fatalf("duplicate stdin close returned error %#v", msg)

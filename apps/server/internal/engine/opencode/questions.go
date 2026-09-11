@@ -101,6 +101,9 @@ func (s *runState) handleQuestion(ctx context.Context, native *client.Client, re
 	}
 
 	if len(state.bindings) == 0 {
+		if err := s.flushPendingMessages(ctx); err != nil {
+			return err
+		}
 		openRequests := make([]engine.CorrelatedQuestionRequest, len(request.Questions))
 		bindings := make([]nativeQuestionBinding, len(request.Questions))
 		for index, nativeQuestion := range request.Questions {

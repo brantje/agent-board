@@ -8,6 +8,11 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+const executionSessionSelect = `
+		SELECT id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at`
+
+const executionSessionReturning = `id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at`
+
 var executionSessionStatuses = map[string]struct{}{
 	"PENDING":   {},
 	"STARTING":  {},
@@ -21,8 +26,7 @@ func (s *Store) GetExecutionSession(ctx context.Context, projectID, sessionID st
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(sessionID) == "" {
 		return store.ExecutionSession{}, store.ErrInvalidArgument
 	}
-	return scanExecutionSession(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
+	return scanExecutionSession(s.pool.QueryRow(ctx, executionSessionSelect+`
 		FROM execution_sessions
 		WHERE project_id = $1 AND id = $2
 	`, projectID, sessionID))
@@ -46,6 +50,39 @@ func (s *Store) ListExecutionSessionsByRuntimeInstance(ctx context.Context, proj
 	return s.listExecutionSessions(ctx, projectID, runtimeInstanceID, "", statuses)
 }
 
+func (s *Store) ListExecutionSessionsByRunner(ctx context.Context, runnerID string, statuses []string) ([]store.ExecutionSession, error) {
+	if strings.TrimSpace(runnerID) == "" {
+		return nil, store.ErrInvalidArgument
+	}
+	for _, status := range statuses {
+		if _, ok := executionSessionStatuses[status]; !ok {
+			return nil, store.ErrInvalidArgument
+		}
+	}
+	rows, err := s.pool.Query(ctx, executionSessionSelect+`
+		FROM execution_sessions
+		WHERE runner_id = $1
+		  AND (coalesce(cardinality($2::text[]), 0) = 0 OR status = ANY($2::text[]))
+		ORDER BY created_at, id
+	`, runnerID, statuses)
+	if err != nil {
+		return nil, notFound(err)
+	}
+	defer rows.Close()
+	sessions := make([]store.ExecutionSession, 0)
+	for rows.Next() {
+		session, err := scanExecutionSession(rows)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return sessions, nil
+}
+
 func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeInstanceID, runID string, statuses []string) ([]store.ExecutionSession, error) {
 	if strings.TrimSpace(projectID) == "" {
 		return nil, store.ErrInvalidArgument
@@ -55,8 +92,7 @@ func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeIns
 			return nil, store.ErrInvalidArgument
 		}
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
+	rows, err := s.pool.Query(ctx, executionSessionSelect+`
 		FROM execution_sessions
 		WHERE project_id = $1
 		  AND (nullif($2, '')::uuid IS NULL OR runtime_instance_id = nullif($2, '')::uuid)
@@ -98,13 +134,14 @@ func (s *Store) TransitionExecutionSession(ctx context.Context, transition store
 		UPDATE execution_sessions
 		SET status = $3,
 		    exit_code = CASE WHEN $4::integer IS NULL THEN exit_code ELSE $4 END,
+		    command_argv = CASE WHEN $6::jsonb IS NULL THEN command_argv ELSE $6 END,
 		    started_at = CASE WHEN $3 = 'RUNNING' AND started_at IS NULL THEN now() ELSE started_at END,
 		    completed_at = CASE WHEN $3 IN ('COMPLETED', 'FAILED', 'CANCELLED') AND completed_at IS NULL THEN now() ELSE completed_at END,
 		    updated_at = now()
 		WHERE project_id = $1 AND id = $2
 		  AND status = ANY($5::text[])
-		RETURNING id::text, project_id::text, run_id::text, runtime_instance_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
-	`, transition.ProjectID, transition.SessionID, transition.Status, transition.ExitCode, transition.FromStatuses))
+		RETURNING `+executionSessionReturning+`
+	`, transition.ProjectID, transition.SessionID, transition.Status, transition.ExitCode, transition.FromStatuses, commandArgvJSON(transition.CommandArgv)))
 	if err == nil {
 		return value, nil
 	}

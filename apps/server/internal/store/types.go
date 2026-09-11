@@ -8,14 +8,15 @@ import (
 var EmptyObject = json.RawMessage(`{}`)
 
 type Project struct {
-	ID               string
-	Name             string
-	IssuePrefix      string
-	RepositoryPath   string
-	DefaultBranch    string
-	WorkflowSettings json.RawMessage
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	AllowInternalRunner *bool
+	ID                  string
+	Name                string
+	IssuePrefix         string
+	RepositoryPath      string
+	DefaultBranch       string
+	WorkflowSettings    json.RawMessage
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type Issue struct {
@@ -100,7 +101,6 @@ type Agent struct {
 	RoleInstructions string
 	Engine           string
 	ModelProfileID   string
-	RuntimeID        string
 	EngineSettings   json.RawMessage
 	ConcurrencyLimit int
 	State            string
@@ -160,6 +160,7 @@ type ExecutionSession struct {
 	ProjectID         string
 	RunID             string
 	RuntimeInstanceID string
+	RunnerID          string
 	Status            string
 	CWD               string
 	CommandArgv       json.RawMessage
@@ -197,6 +198,7 @@ const (
 )
 
 type SchedulerAdmission struct {
+	RunnerID       string
 	Job            SchedulerJob
 	Lease          SchedulerLease
 	Run            Run

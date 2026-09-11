@@ -65,7 +65,7 @@ type acquiringRuntime struct {
 func (r *acquiringRuntime) Acquire(_ context.Context, projectID, _, runtimeID string) (store.RuntimeInstance, error) {
 	r.calls++
 	if r.instance.ID == "" {
-		r.instance = store.RuntimeInstance{ID: "acquired-runtime", ProjectID: projectID, RuntimeID: runtimeID, Status: "RUNNING"}
+		r.instance = store.RuntimeInstance{ID: "acquired-runtime", ProjectID: projectID, Status: "RUNNING"}
 	}
 	return r.instance, nil
 }

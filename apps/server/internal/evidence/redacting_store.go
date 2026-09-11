@@ -19,6 +19,14 @@ type runtimeRunnerGenerationStore interface {
 	UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(context.Context, string, string, string, int64, string) (store.RuntimeInstance, error)
 }
 
+type workspaceBootstrapLockStore interface {
+	AcquireWorkspaceBootstrapLock(context.Context, string) (store.WorkspaceBootstrapLock, error)
+}
+
+type runnerLookupStore interface {
+	GetRunner(context.Context, string) (store.Runner, error)
+}
+
 // RedactingStore keeps the full control-plane store contract while overriding
 // every current durable evidence write with a final server-side sanitizer.
 type RedactingStore struct {
@@ -130,4 +138,28 @@ func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx
 		return store.RuntimeInstance{}, fmt.Errorf("redacting store base does not support runner connection generations")
 	}
 	return base.UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx, projectID, instanceID, status, generation, expectedStatus)
+}
+
+func (s *RedactingStore) AcquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string) (store.WorkspaceBootstrapLock, error) {
+	base, ok := s.ControlPlaneStore.(workspaceBootstrapLockStore)
+	if !ok {
+		return nil, fmt.Errorf("redacting store base does not support workspace bootstrap locks")
+	}
+	return base.AcquireWorkspaceBootstrapLock(ctx, workspaceID)
+}
+
+func (s *RedactingStore) AcquireWorkspaceExecutionLock(ctx context.Context, workspaceID, executionSessionID string) (store.WorkspaceBootstrapLock, error) {
+	base, ok := s.ControlPlaneStore.(store.WorkspaceExecutionLockStore)
+	if !ok {
+		return nil, fmt.Errorf("redacting store base does not support workspace execution locks")
+	}
+	return base.AcquireWorkspaceExecutionLock(ctx, workspaceID, executionSessionID)
+}
+
+func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner, error) {
+	base, ok := s.ControlPlaneStore.(runnerLookupStore)
+	if !ok {
+		return store.Runner{}, fmt.Errorf("redacting store base does not support runners")
+	}
+	return base.GetRunner(ctx, id)
 }

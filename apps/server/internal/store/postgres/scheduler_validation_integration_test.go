@@ -13,10 +13,10 @@ func TestSchedulerAdmissionValidationAndEmptyQueue(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name     string
-		owner    string
-		lease    time.Duration
-		backoff  time.Duration
+		name    string
+		owner   string
+		lease   time.Duration
+		backoff time.Duration
 	}{
 		{name: "blank owner", owner: "", lease: time.Minute, backoff: time.Second},
 		{name: "zero lease", owner: "worker", lease: 0, backoff: time.Second},
@@ -56,7 +56,7 @@ func TestSchedulerTransitionValidationKeepsOwnership(t *testing.T) {
 	}); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("missing failure reason error=%v", err)
 	}
-	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 2)
+	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 3)
 }
 
 func TestSchedulerReconciliationValidationAndNoExpiredClaim(t *testing.T) {
@@ -96,7 +96,7 @@ func TestSchedulerReconciliationActiveKeepsOwnership(t *testing.T) {
 	if run.Status != "STARTING" {
 		t.Fatalf("run status=%s want STARTING", run.Status)
 	}
-	assertSchedulerOwnershipCounts(t, s, claim.Job.ID, 1, 2)
+	assertSchedulerOwnershipCounts(t, s, claim.Job.ID, 1, 3)
 }
 
 func TestSchedulerReconciliationCompletedAndCancelledReleaseOwnership(t *testing.T) {
@@ -166,7 +166,7 @@ func TestSchedulerReconciliationRejectsUnsafeOutcomes(t *testing.T) {
 			if !errors.Is(err, store.ErrInvalidArgument) {
 				t.Fatalf("error=%v want invalid argument", err)
 			}
-			assertSchedulerOwnershipCounts(t, s, claim.Job.ID, 1, 2)
+			assertSchedulerOwnershipCounts(t, s, claim.Job.ID, 1, 3)
 		})
 	}
 }

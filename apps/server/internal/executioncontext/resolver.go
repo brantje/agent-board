@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -17,7 +18,6 @@ type Store interface {
 	GetAgentInScope(context.Context, *string, string) (store.Agent, error)
 	GetModelProfile(context.Context, *string, string) (store.ModelProfile, error)
 	GetProvider(context.Context, *string, string) (store.Provider, error)
-	GetRuntime(context.Context, *string, string) (store.Runtime, error)
 }
 
 type Error struct {
@@ -94,33 +94,66 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 	if !provider.Enabled || !scopeAllows(provider.ProjectID, projectID) {
 		return Resolved{}, fail("execution_provider_unavailable", "Provider is not available for execution", nil)
 	}
-	runtime, err := r.store.GetRuntime(ctx, scope, agent.RuntimeID)
-	if err != nil {
-		return Resolved{}, fail("execution_runtime_unavailable", "Runtime configuration is unavailable", err)
-	}
-	if !runtime.Enabled || !scopeAllows(runtime.ProjectID, projectID) {
-		return Resolved{}, fail("execution_runtime_unavailable", "Runtime is not available for execution", nil)
-	}
 	reviewFeedback, err := resolveReviewFeedback(ctx, r.store, projectID, issue.ID, run)
 	if err != nil {
 		return Resolved{}, fail("execution_review_feedback_unavailable", "Review feedback is unavailable for the follow-up attempt", err)
 	}
 
+	safe := SafeContext{
+		Project:        ProjectContext{ID: project.ID, Name: project.Name, RepositoryPath: project.RepositoryPath, DefaultBranch: project.DefaultBranch, WorkflowSettings: cloneJSON(project.WorkflowSettings)},
+		Issue:          IssueContext{ID: issue.ID, Key: issue.Key, Title: issue.Title, Description: issue.Description, Status: issue.Status},
+		Run:            RunContext{ID: run.ID, Attempt: run.Attempt},
+		Agent:          AgentContext{ID: agent.ID, Name: agent.Name, RoleInstructions: agent.RoleInstructions, Engine: agent.Engine, EngineSettings: cloneJSON(agent.EngineSettings)},
+		Model:          ModelContext{ID: model.ID, Name: model.Name, Model: model.Model, Temperature: cloneFloat64(model.Temperature), MaxTokens: cloneInt(model.MaxTokens), GenerationSettings: cloneJSON(model.GenerationSettings)},
+		Provider:       ProviderContext{ID: provider.ID, Name: provider.Name, Kind: provider.Kind, BaseURL: cloneString(provider.BaseURL), SafeMetadata: cloneJSON(provider.SafeMetadata)},
+		Workspace:      WorkspaceContext{ID: workspace.ID, Path: workspace.Path, RepositoryPath: cloneString(workspace.RepositoryPath), BaseBranch: cloneString(workspace.BaseBranch), BaseRevision: cloneString(workspace.BaseRevision), WorkingBranch: workspace.WorkingBranch, BootstrapStatus: workspace.BootstrapStatus},
+		ReviewFeedback: reviewFeedback,
+	}
+	r.attachSelectedRunner(ctx, projectID, runID, &safe)
+
 	return Resolved{
-		Safe: SafeContext{
-			Project:        ProjectContext{ID: project.ID, Name: project.Name, RepositoryPath: project.RepositoryPath, DefaultBranch: project.DefaultBranch, WorkflowSettings: cloneJSON(project.WorkflowSettings)},
-			Issue:          IssueContext{ID: issue.ID, Key: issue.Key, Title: issue.Title, Description: issue.Description, Status: issue.Status},
-			Run:            RunContext{ID: run.ID, Attempt: run.Attempt},
-			Agent:          AgentContext{ID: agent.ID, Name: agent.Name, RoleInstructions: agent.RoleInstructions, Engine: agent.Engine, EngineSettings: cloneJSON(agent.EngineSettings)},
-			Model:          ModelContext{ID: model.ID, Name: model.Name, Model: model.Model, Temperature: cloneFloat64(model.Temperature), MaxTokens: cloneInt(model.MaxTokens), GenerationSettings: cloneJSON(model.GenerationSettings)},
-			Provider:       ProviderContext{ID: provider.ID, Name: provider.Name, Kind: provider.Kind, BaseURL: cloneString(provider.BaseURL), SafeMetadata: cloneJSON(provider.SafeMetadata)},
-			Runtime:        RuntimeContext{ID: runtime.ID, Name: runtime.Name, Kind: runtime.Kind, Image: runtime.Image, CPULimitMillis: cloneInt(runtime.CPULimitMillis), MemoryLimitBytes: cloneInt64(runtime.MemoryLimitBytes), PIDLimit: cloneInt(runtime.PIDLimit), TimeoutSeconds: cloneInt(runtime.TimeoutSeconds), NetworkPolicy: runtime.NetworkPolicy, WorkspacePolicy: runtime.WorkspacePolicy, Capabilities: cloneJSON(runtime.Capabilities)},
-			Workspace:      WorkspaceContext{ID: workspace.ID, Path: workspace.Path, RepositoryPath: cloneString(workspace.RepositoryPath), BaseBranch: cloneString(workspace.BaseBranch), BaseRevision: cloneString(workspace.BaseRevision), WorkingBranch: workspace.WorkingBranch, BootstrapStatus: workspace.BootstrapStatus},
-			ReviewFeedback: reviewFeedback,
-		},
+		Safe:                  safe,
 		ProviderCredentialRef: cloneString(provider.CredentialRef),
-		AllowedSecretRefs:     append([]string(nil), runtime.AllowedSecretRefs...),
 	}, nil
+}
+
+type runSessionLookup interface {
+	ListExecutionSessionsByRun(context.Context, string, string, []string) ([]store.ExecutionSession, error)
+}
+
+type runnerRecordLookup interface {
+	GetRunner(context.Context, string) (store.Runner, error)
+}
+
+func (r *Resolver) attachSelectedRunner(ctx context.Context, projectID, runID string, safe *SafeContext) {
+	if r == nil || safe == nil {
+		return
+	}
+	lookup, ok := r.store.(runSessionLookup)
+	if !ok {
+		return
+	}
+	sessions, err := lookup.ListExecutionSessionsByRun(ctx, projectID, runID, nil)
+	if err != nil {
+		return
+	}
+	runnerID := ""
+	for _, session := range sessions {
+		if strings.TrimSpace(session.RunnerID) != "" {
+			runnerID = session.RunnerID
+		}
+	}
+	if runnerID == "" {
+		return
+	}
+	runner := &RunnerContext{ID: runnerID}
+	if names, ok := r.store.(runnerRecordLookup); ok {
+		if record, err := names.GetRunner(ctx, runnerID); err == nil {
+			runner.Name = record.Name
+			runner.Internal = record.Internal
+		}
+	}
+	safe.Runner = runner
 }
 
 func scopeAllows(scope *string, projectID string) bool { return scope == nil || *scope == projectID }

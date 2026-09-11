@@ -148,10 +148,11 @@ See `source-control.md`.
 Runtime/runner contract and integration tests cover:
 
 - Runtime create/start/inspect/stop/destroy
-- runner starts from the official Runtime image
+- runner starts from the official Runtime image only for the legacy Docker path
+- external and internal runners connect outbound over protocol v2
 - versioned WebSocket handshake and incompatible-version failure
 - explicit Execution Session identity
-- one active session per runner in v0.1
+- default advertised Runner capacity of 5 concurrent sessions
 - multiple sequential sessions over one runner lifetime
 - stdout/stderr channel fidelity
 - stdin forwarding/close

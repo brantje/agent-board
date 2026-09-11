@@ -10,12 +10,24 @@ components:
     SecretWriteCapability:
       $ref: ./components/api-components.yaml#/securitySchemes/SecretWriteCapability
 paths:
+  /api/runners:
+    $ref: ./paths/runners.yaml#/collection
+  /api/runner/register:
+    $ref: ./paths/runners.yaml#/register
+  /api/runners/{resourceID}:
+    $ref: ./paths/runners.yaml#/resource
+  /api/runners/{resourceID}/rotate-token:
+    $ref: ./paths/runners.yaml#/rotate
+  /api/runners/{resourceID}/revoke:
+    $ref: ./paths/runners.yaml#/revoke
   /api/repository-settings:
     $ref: ./paths/repository-settings.yaml#/path1
   /api/projects:
     $ref: ./paths/projects.yaml#/path1
   /api/projects/{projectID}:
     $ref: ./paths/projects.yaml#/path2
+  /api/projects/{projectID}/runners:
+    $ref: ./paths/project-runners.yaml
   /api/secrets:
     $ref: ./paths/secrets.yaml#/path1
   /api/providers:
