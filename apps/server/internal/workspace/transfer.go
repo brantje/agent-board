@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	sharedworkspace "github.com/brantje/agent-board/packages/workspacegit"
 )
@@ -95,4 +96,14 @@ func (g *GitCLI) ApplyTransferBundle(ctx context.Context, repositoryPath string,
 		return fmt.Errorf("authoritative Issue Workspace is not clean after branch import")
 	}
 	return nil
+}
+
+func (g *GitCLI) deleteTransferRef(repositoryPath, ref string) {
+	timeout := g.commandTimeout
+	if timeout > 10*time.Second {
+		timeout = 10 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	_, _ = g.run(ctx, "-C", repositoryPath, "update-ref", "-d", ref)
 }

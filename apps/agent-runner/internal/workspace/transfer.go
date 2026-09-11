@@ -57,14 +57,16 @@ func MaterializeBranchBundle(ctx context.Context, repositoryPath string, bundle 
 		return CheckoutState{}, fmt.Errorf("initialize session repository: %w", err)
 	}
 	branchRef := "refs/heads/" + branch
-	if _, err := runGit(ctx, "-C", repositoryPath, "fetch", "--no-tags", "--no-write-fetch-head", name, branchRef+":"+branchRef); err != nil {
+	materializeRef := "refs/agent-board/materialize/" + revision
+	if _, err := runGit(ctx, "-C", repositoryPath, "fetch", "--no-tags", "--no-write-fetch-head", name, branchRef+":"+materializeRef); err != nil {
 		_ = os.RemoveAll(repositoryPath)
 		return CheckoutState{}, fmt.Errorf("materialize transfer branch: %w", err)
 	}
-	if _, err := runGit(ctx, "-C", repositoryPath, "checkout", "-q", branch); err != nil {
+	if _, err := runGit(ctx, "-C", repositoryPath, "checkout", "-q", "-B", branch, materializeRef); err != nil {
 		_ = os.RemoveAll(repositoryPath)
 		return CheckoutState{}, fmt.Errorf("checkout transferred branch: %w", err)
 	}
+	_, _ = runGit(context.Background(), "-C", repositoryPath, "update-ref", "-d", materializeRef)
 	actualBranch, err := sharedworkspace.CurrentBranch(ctx, repositoryPath, "git", commandTimeout)
 	if err != nil {
 		_ = os.RemoveAll(repositoryPath)
