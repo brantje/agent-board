@@ -274,16 +274,18 @@ type Decision struct {
 }
 
 type Review struct {
-	ID          string
-	ProjectID   string
-	IssueID     string
-	RunID       string
-	Status      string
-	DecisionID  *string
-	RequestedAt time.Time
-	DecidedAt   *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID             string
+	ProjectID      string
+	IssueID        string
+	RunID          string
+	Status         string
+	DecisionID     *string
+	BaseRevision   string
+	ReviewRevision string
+	RequestedAt    time.Time
+	DecidedAt      *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type Event struct {
