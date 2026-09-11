@@ -8,8 +8,8 @@ export function runnerEngines(runner: Runner): string[] {
 
 export function runnerSessionSummary(runner: Runner): string {
   const used = runner.connected
-    ? (runner.activeSessions ?? 0)
+    ? Math.max(runner.activeSessions ?? 0, runner.reservedSessions)
     : runner.reservedSessions
-  const mode = runner.connected ? 'active' : 'reserved'
+  const mode = runner.connected ? 'in use' : 'reserved'
   return `Sessions: ${used} / ${runner.maxActiveSessions} ${mode}`
 }

@@ -139,7 +139,7 @@ The existing scheduler chooses an eligible connected Runner. External Runners ar
 
 A Project may restrict external Runner eligibility with its Runner allowlist. Agents never select or configure a Runner.
 
-Runner, Execution Session and Run remain separate identities. Default Runner capacity is 10 concurrent Execution Sessions.
+Runner, Execution Session and Run remain separate identities. Default Runner capacity is 5 concurrent Execution Sessions.
 
 ### Legacy/internal managed compute
 

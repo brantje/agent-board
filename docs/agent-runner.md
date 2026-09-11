@@ -100,10 +100,10 @@ A newly authenticated connection claiming the same immutable `runner_id` does no
 Default advertised capacity is:
 
 ```text
-max active Execution Sessions per Runner = 10
+max active Execution Sessions per Runner = 5
 ```
 
-A Runner advertises `max_active_sessions` so capacity can change without changing the identity model or transport contract. Missing or zero advertised capacity is treated as 10.
+A Runner advertises `max_active_sessions` so capacity can change without changing the identity model or transport contract. Missing or zero advertised capacity is treated as 5.
 
 Workspace write safety remains separate from Runner transport concurrency. Supporting several protocol sessions does not imply that several authoritative writers may mutate one Workspace concurrently.
 

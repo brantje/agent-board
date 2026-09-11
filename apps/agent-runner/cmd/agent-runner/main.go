@@ -15,7 +15,7 @@ import (
 )
 
 const defaultWorkspaceRoot = "/var/lib/agent-runner/workspaces"
-const defaultMaxActiveSessions = 10
+const defaultMaxActiveSessions = 5
 
 type appConfig struct {
 	ServerURL         string

@@ -218,7 +218,7 @@ agent-board/
 - one Runtime Instance is bound to exactly one Workspace for its lifetime
 - runner, Runtime Instance, Execution Session and Run identities remain separate
 - a runner may execute many sequential sessions against its bound Workspace
-- Default Runner capacity is 10 concurrent Execution Sessions; the protocol remains capacity-extensible
+- Default Runner capacity is 5 concurrent Execution Sessions; the protocol remains capacity-extensible
 - Agents select Runtime directly
 - Engine adapters remain server-side
 - Engine processes execute inside the selected Runtime Instance through `agent-runner`

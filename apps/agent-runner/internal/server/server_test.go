@@ -28,6 +28,14 @@ func TestWebSocketExecutionLifecycle(t *testing.T) {
 	if started.Type != protocol.TypeSessionStarted || started.SessionID != "session-1" {
 		t.Fatalf("unexpected start response %#v", started)
 	}
+	health := read(t, conn)
+	if health.Type != protocol.TypeHealth {
+		t.Fatalf("expected health after start, got %#v", health)
+	}
+	payload, err := protocol.DecodePayload[protocol.Health](health)
+	if err != nil || payload.ActiveSessions != 1 || len(payload.ActiveSessionIDs) != 1 || payload.ActiveSessionIDs[0] != "session-1" {
+		t.Fatalf("health after start=%+v err=%v", payload, err)
+	}
 	send(t, conn, protocol.TypeStdin, "session-1", protocol.StreamData{Data: []byte("hello\n")})
 	send(t, conn, protocol.TypeStdinClose, "session-1", nil)
 

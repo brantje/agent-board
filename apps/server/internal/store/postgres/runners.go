@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	runnerconn "github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
 )
@@ -45,7 +46,23 @@ func (s *Store) ListRunners(ctx context.Context) ([]store.Runner, error) {
 }
 
 func (s *Store) RenameRunner(ctx context.Context, id, name string) (store.Runner, error) {
-	return scanRunner(s.pool.QueryRow(ctx, `UPDATE runners SET name=$2,updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND registered_at IS NOT NULL AND NOT internal RETURNING `+runnerColumns, id, name))
+	return s.UpdateRunner(ctx, id, name, nil)
+}
+
+func (s *Store) UpdateRunner(ctx context.Context, id, name string, maxActiveSessions *int) (store.Runner, error) {
+	r, err := s.GetRunner(ctx, id)
+	if err != nil {
+		return store.Runner{}, err
+	}
+	capabilities := r.Capabilities
+	if maxActiveSessions != nil {
+		capabilities = runnerconn.WithConfiguredMaxActiveSessions(capabilities, *maxActiveSessions)
+	}
+	return scanRunner(s.pool.QueryRow(ctx, `
+		UPDATE runners
+		SET name=$2,capabilities=$3,updated_at=now()
+		WHERE id=$1 AND deleted_at IS NULL AND registered_at IS NOT NULL AND NOT internal
+		RETURNING `+runnerColumns, id, name, capabilities))
 }
 
 func (s *Store) RotateRunnerCredential(ctx context.Context, id string, hash []byte) (store.Runner, error) {
@@ -64,6 +81,11 @@ func (s *Store) RevokeRunner(ctx context.Context, id string, deleted bool) (stor
 }
 
 func (s *Store) ObserveRunner(ctx context.Context, id string, capabilities json.RawMessage) error {
+	existing, err := s.GetRunner(ctx, id)
+	if err != nil {
+		return err
+	}
+	capabilities = runnerconn.MergeObservedCapabilities(existing.Capabilities, capabilities)
 	tag, err := s.pool.Exec(ctx, `UPDATE runners SET last_seen_at=now(),capabilities=$2,updated_at=now() WHERE id=$1 AND deleted_at IS NULL AND revoked_at IS NULL AND registered_at IS NOT NULL`, id, capabilities)
 	if err != nil {
 		return notFound(err)

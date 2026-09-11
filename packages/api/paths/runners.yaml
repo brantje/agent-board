@@ -8,6 +8,7 @@ nameInput:
         required: [name]
         properties:
           name: {type: string, minLength: 1}
+          maxActiveSessions: {type: integer, minimum: 1}
 registrationInput:
   required: true
   content:
@@ -115,7 +116,7 @@ resource:
       default:
         $ref: ../components/api-components.yaml#/responses/Error
   patch:
-    operationId: renameRunner
+    operationId: updateRunner
     requestBody:
       $ref: "#/nameInput"
     responses:

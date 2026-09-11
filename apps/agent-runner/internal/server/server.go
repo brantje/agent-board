@@ -77,6 +77,10 @@ func (s *Server) health() protocol.Health {
 	return protocol.Health{Status: "ok", ActiveSessions: len(ids), ActiveSessionIDs: ids}
 }
 
+func (s *Server) broadcastHealth(writer *connectionWriter) {
+	_ = writer.send(protocol.TypeHealth, "", s.health())
+}
+
 func (s *Server) serveConnection(conn *websocket.Conn) {
 	if !s.registerConnection(conn) {
 		_ = conn.Close()
@@ -283,10 +287,12 @@ func (s *Server) handleStart(writer *connectionWriter, msg protocol.Message) {
 	go s.cleanupStdinPump(msg.SessionID, execution, stdin)
 	delivery := s.registerDelivery(msg.SessionID, writer)
 	_ = writer.send(protocol.TypeSessionStarted, msg.SessionID, nil)
+	s.broadcastHealth(writer)
 	go func() {
 		defer s.streamWG.Done()
 		defer s.removeDelivery(msg.SessionID, delivery)
 		streamExecution(s.shutdownCtx, delivery, execution)
+		s.broadcastHealth(writer)
 	}()
 }
 

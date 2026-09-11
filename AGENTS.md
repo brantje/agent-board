@@ -82,7 +82,7 @@ After the answers, finalize the plan and proceed. Avoid extended question trees 
 - Runner, `agent-runner`, Execution Session and Run are separate identities.
 - One Runner may execute many Execution Sessions over time; each Runner Execution Session uses its own transferred Workspace materialization.
 - One Execution Session owns one process tree.
-- Default Runner capacity is 10 concurrent Execution Sessions; the protocol remains extensible beyond that.
+- Default Runner capacity is 5 concurrent Execution Sessions; the protocol remains extensible beyond that.
 - PostgreSQL is authoritative for structured state and scheduler ownership.
 - Browser/request lifetime never owns execution or continuation.
 - Engine adapters remain server-side; `agent-runner` stays Engine-neutral.

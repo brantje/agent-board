@@ -51,7 +51,7 @@ Capacity belongs to Model Profile, not Provider.
 
 ### Runner capacity
 
-A Runner advertises `max_active_sessions`. The default advertised capacity is 10 concurrent Execution Sessions per Runner. Missing or zero advertised capacity is treated as 10.
+A Runner advertises `max_active_sessions`. The default advertised capacity is 5 concurrent Execution Sessions per Runner. Missing or zero advertised capacity is treated as 5.
 
 The scheduler admits a Run only against a live authenticated Runner that advertises the Agent's Engine, satisfies Project runner policy, and is below active-session capacity. External persistent Runners are preferred. The server-managed internal Runner is fallback when `allow_internal_runner` is true. Persisted last-seen/capabilities never make a disconnected Runner eligible.
 

@@ -90,7 +90,7 @@ Requirements:
 - one process tree per Execution Session
 - restart/reconnect reconciliation that does not require process-local control-plane state
 
-Default Runner capacity is 10 concurrent Execution Sessions. A Runner may execute many sessions over its lifetime. Advertised `max_active_sessions` is the scheduler admission limit for that Runner.
+Default Runner capacity is 5 concurrent Execution Sessions. A Runner may execute many sessions over its lifetime. Advertised `max_active_sessions` is the scheduler admission limit for that Runner.
 
 For the legacy Runtime path only, durable Runtime Instance external identity remains sufficient to inspect/clean up managed compute after backend restart.
 

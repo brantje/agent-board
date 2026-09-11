@@ -76,7 +76,7 @@ HTTP handlers are adapters around separable application/domain/store/runtime log
 
 `agent-runner` is the Engine-neutral execution-plane binary. Production v0.1 prefers external persistent hosts; the server also supervises an internal runner. Both connect outbound to Agent Board over protocol v2 and use the same Runner/Execution Session path.
 
-Runner, Execution Session and Run are separate identities. One Runner may execute many sessions over time. Default advertised `max_active_sessions` is 10.
+Runner, Execution Session and Run are separate identities. One Runner may execute many sessions over time. Default advertised `max_active_sessions` is 5.
 
 See `agent-runner.md`.
 
@@ -225,7 +225,7 @@ Plugins are deliberately late roadmap work.
 3. Run identity is not Runner or Execution Session identity.
 4. Workspace lifetime is independent from Runner transport lifetime and any legacy Runtime Instance lifetime.
 5. One logical writer owns an Issue Workspace during an active Runner execution lifecycle.
-6. One Runner may execute many Execution Sessions over time; default advertised capacity is 10 concurrent sessions.
+6. One Runner may execute many Execution Sessions over time; default advertised capacity is 5 concurrent sessions.
 7. One Execution Session owns one process tree.
 8. Runner placement is scheduler-owned; Agents select Engine and Model Profile, not Runner or Runtime.
 9. Runtime/Runtime Instance are legacy internal managed-compute concepts, not canonical production placement.

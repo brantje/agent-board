@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
+	runnerconn "github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -64,7 +65,10 @@ func (s *runnerAPIStore) ListRunners(context.Context) ([]store.Runner, error) {
 	}
 	return []store.Runner{s.value}, nil
 }
-func (s *runnerAPIStore) RenameRunner(_ context.Context, id, name string) (store.Runner, error) {
+func (s *runnerAPIStore) RenameRunner(ctx context.Context, id, name string) (store.Runner, error) {
+	return s.UpdateRunner(ctx, id, name, nil)
+}
+func (s *runnerAPIStore) UpdateRunner(_ context.Context, id, name string, maxActiveSessions *int) (store.Runner, error) {
 	if s.err != nil {
 		return store.Runner{}, s.err
 	}
@@ -72,6 +76,9 @@ func (s *runnerAPIStore) RenameRunner(_ context.Context, id, name string) (store
 		return store.Runner{}, store.ErrNotFound
 	}
 	s.value.Name = name
+	if maxActiveSessions != nil {
+		s.value.Capabilities = runnerconn.WithConfiguredMaxActiveSessions(s.value.Capabilities, *maxActiveSessions)
+	}
 	return s.value, nil
 }
 func (s *runnerAPIStore) RotateRunnerCredential(_ context.Context, id string, hash []byte) (store.Runner, error) {
@@ -176,6 +183,11 @@ func TestRunnerAPIPublicLifecycle(t *testing.T) {
 	rename := runnerAPIRequest(router, http.MethodPatch, "/api/runners/"+otherID, `{"name":"Edge host"}`)
 	if rename.Code != http.StatusOK || !strings.Contains(rename.Body.String(), "Edge host") {
 		t.Fatalf("rename %d %s", rename.Code, rename.Body.String())
+	}
+
+	capacity := runnerAPIRequest(router, http.MethodPatch, "/api/runners/"+otherID, `{"name":"Edge host","maxActiveSessions":4}`)
+	if capacity.Code != http.StatusOK || !strings.Contains(capacity.Body.String(), `"maxActiveSessions":4`) {
+		t.Fatalf("capacity update %d %s", capacity.Code, capacity.Body.String())
 	}
 
 	rotate := runnerAPIRequest(router, http.MethodPost, "/api/runners/"+otherID+"/rotate-token", "")

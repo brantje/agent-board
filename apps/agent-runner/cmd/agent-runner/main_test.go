@@ -71,8 +71,8 @@ func TestConfigFromEnvDefaults(t *testing.T) {
 	if config.ServerURL != "" || config.RunnerID != "" || config.Token != "" || config.WorkspaceRoot != defaultWorkspaceRoot || config.MaxActiveSessions != defaultMaxActiveSessions {
 		t.Fatalf("unexpected defaults %#v", config)
 	}
-	if config.MaxActiveSessions != 10 {
-		t.Fatalf("default runner capacity=%d want 10", config.MaxActiveSessions)
+	if config.MaxActiveSessions != 5 {
+		t.Fatalf("default runner capacity=%d want 5", config.MaxActiveSessions)
 	}
 }
 

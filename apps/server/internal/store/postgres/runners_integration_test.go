@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	runnerconn "github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -72,6 +73,33 @@ func TestPendingRunnerCannotRenameOrRotate(t *testing.T) {
 	}
 	if _, err := s.RotateRunnerCredential(ctx, pending.ID, make([]byte, 32)); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("pending rotation: %v", err)
+	}
+}
+
+func TestRunnerUpdateConfiguredMaxActiveSessions(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	r, err := s.CreateRunner(ctx, store.Runner{Name: "Build host", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	capacity := 4
+	updated, err := s.UpdateRunner(ctx, r.ID, r.Name, &capacity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runnerconn.MaxActiveSessions(updated.Capabilities) != 4 {
+		t.Fatalf("updated capabilities=%s", updated.Capabilities)
+	}
+	if err := s.ObserveRunner(ctx, r.ID, []byte(`{"engines":["opencode"],"max_active_sessions":10,"os":"linux"}`)); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.GetRunner(ctx, r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runnerconn.MaxActiveSessions(stored.Capabilities) != 4 {
+		t.Fatalf("observed overwrite configured capacity: %s", stored.Capabilities)
 	}
 }
 

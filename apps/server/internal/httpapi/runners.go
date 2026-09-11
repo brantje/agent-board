@@ -52,8 +52,9 @@ func (a *api) runnerDTO(v store.Runner, reserved int) RunnerDTO {
 	return dto
 }
 
-type runnerNameRequest struct {
-	Name string `json:"name"`
+type runnerUpdateRequest struct {
+	Name              string `json:"name"`
+	MaxActiveSessions *int   `json:"maxActiveSessions"`
 }
 type runnerRegistrationRequest struct {
 	RegistrationToken string `json:"registrationToken"`
@@ -83,7 +84,7 @@ func (a *api) registerRunnerRoutes(r chi.Router) {
 	r.Get("/runners", a.listRunners)
 	r.Post("/runners", a.createRunner)
 	r.Get("/runners/{resourceID}", a.getRunner)
-	r.Patch("/runners/{resourceID}", a.renameRunner)
+	r.Patch("/runners/{resourceID}", a.updateRunner)
 	r.Post("/runners/{resourceID}/rotate-token", a.rotateRunner)
 	r.Post("/runners/{resourceID}/revoke", a.revokeRunner)
 	r.Delete("/runners/{resourceID}", a.deleteRunner)
@@ -189,16 +190,16 @@ func (a *api) getRunner(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, a.runnerDTO(v, reserved[v.ID]))
 }
-func (a *api) renameRunner(w http.ResponseWriter, r *http.Request) {
+func (a *api) updateRunner(w http.ResponseWriter, r *http.Request) {
 	id, ok := resourceID(w, r)
 	if !ok {
 		return
 	}
-	var req runnerNameRequest
+	var req runnerUpdateRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	v, err := a.service.Runners.Rename(r.Context(), id, req.Name)
+	v, err := a.service.Runners.Update(r.Context(), id, req.Name, req.MaxActiveSessions)
 	if err != nil {
 		writeAppError(w, err)
 		return

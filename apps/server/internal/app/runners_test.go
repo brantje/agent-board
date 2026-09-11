@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	runnerconn "github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -57,11 +58,17 @@ func (m *runnerMemory) ListProjectRunnerIDs(context.Context, string) ([]string, 
 	return []string{m.value.ID}, nil
 }
 func (m *runnerMemory) SetProjectRunnerIDs(context.Context, string, []string) error { return nil }
-func (m *runnerMemory) RenameRunner(_ context.Context, id, name string) (store.Runner, error) {
+func (m *runnerMemory) RenameRunner(ctx context.Context, id, name string) (store.Runner, error) {
+	return m.UpdateRunner(ctx, id, name, nil)
+}
+func (m *runnerMemory) UpdateRunner(_ context.Context, id, name string, maxActiveSessions *int) (store.Runner, error) {
 	if id != m.value.ID || m.value.RegisteredAt == nil || m.value.Internal {
 		return store.Runner{}, store.ErrNotFound
 	}
 	m.value.Name = name
+	if maxActiveSessions != nil {
+		m.value.Capabilities = runnerconn.WithConfiguredMaxActiveSessions(m.value.Capabilities, *maxActiveSessions)
+	}
 	return m.value, nil
 }
 func (m *runnerMemory) RevokeRunner(_ context.Context, id string, deleted bool) (store.Runner, error) {
@@ -196,6 +203,33 @@ func TestPendingRunnerRevokeAndDeleteInvalidateRegistration(t *testing.T) {
 		})
 	}
 }
+
+func TestRunnerServiceUpdateMaxActiveSessions(t *testing.T) {
+	ctx := context.Background()
+	memory := &runnerMemory{}
+	s := NewRunnerService(memory)
+	_, registrationToken, err := s.Create(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := s.Register(ctx, registrationToken, "Build host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capacity := 4
+	updated, err := s.Update(ctx, created.ID, created.Name, &capacity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runnerconn.MaxActiveSessions(updated.Capabilities) != 4 {
+		t.Fatalf("updated=%s", updated.Capabilities)
+	}
+	if _, err := s.Update(ctx, created.ID, created.Name, intPtr(0)); err == nil {
+		t.Fatal("zero capacity accepted")
+	}
+}
+
+func intPtr(v int) *int { return &v }
 
 func TestRunnerServiceListsRenamesAndScopesProjectRunners(t *testing.T) {
 	ctx := context.Background()

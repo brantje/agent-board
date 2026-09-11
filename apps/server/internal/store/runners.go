@@ -28,6 +28,7 @@ type RunnerStore interface {
 	GetRunner(context.Context, string) (Runner, error)
 	ListRunners(context.Context) ([]Runner, error)
 	RenameRunner(context.Context, string, string) (Runner, error)
+	UpdateRunner(context.Context, string, string, *int) (Runner, error)
 	RotateRunnerCredential(context.Context, string, []byte) (Runner, error)
 	RevokeRunner(context.Context, string, bool) (Runner, error)
 	ObserveRunner(context.Context, string, json.RawMessage) error

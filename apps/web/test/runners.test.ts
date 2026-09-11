@@ -15,7 +15,7 @@ const baseRunner: Runner = {
   capabilities: {},
   activeSessions: null,
   reservedSessions: 0,
-  maxActiveSessions: 10,
+  maxActiveSessions: 5,
   createdAt: '',
   updatedAt: ''
 }
@@ -33,22 +33,30 @@ describe('runner presentation helpers', () => {
     expect(runnerEngines({ ...baseRunner, capabilities: {} })).toEqual([])
   })
 
-  it('summarizes active sessions when connected and reserved sessions when offline', () => {
+  it('summarizes in-use sessions when connected and reserved sessions when offline', () => {
     expect(runnerSessionSummary({
       ...baseRunner,
       connected: true,
       activeSessions: 2,
       reservedSessions: 3,
-      maxActiveSessions: 10
-    })).toBe('Sessions: 2 / 10 active')
+      maxActiveSessions: 5
+    })).toBe('Sessions: 3 / 5 in use')
+
+    expect(runnerSessionSummary({
+      ...baseRunner,
+      connected: true,
+      activeSessions: 0,
+      reservedSessions: 1,
+      maxActiveSessions: 5
+    })).toBe('Sessions: 1 / 5 in use')
 
     expect(runnerSessionSummary({
       ...baseRunner,
       connected: false,
       activeSessions: null,
       reservedSessions: 3,
-      maxActiveSessions: 10
-    })).toBe('Sessions: 3 / 10 reserved')
+      maxActiveSessions: 5
+    })).toBe('Sessions: 3 / 5 reserved')
   })
 
   it('shows idle capacity for registered runners without load', () => {
@@ -57,7 +65,7 @@ describe('runner presentation helpers', () => {
       connected: true,
       activeSessions: 0,
       reservedSessions: 0,
-      maxActiveSessions: 10
-    })).toBe('Sessions: 0 / 10 active')
+      maxActiveSessions: 5
+    })).toBe('Sessions: 0 / 5 in use')
   })
 })

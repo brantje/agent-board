@@ -10,7 +10,7 @@ const registrationToken = ref('')
 const creating = ref(false)
 const createError = ref<Error>()
 const editing = ref<Runner>()
-const editState = reactive({ name: '' })
+const editState = reactive({ name: '', maxActiveSessions: 5 })
 const saving = ref(false)
 const saveError = ref<Error>()
 const deleting = ref('')
@@ -41,12 +41,14 @@ function edit(runner: Runner) {
   if (runner.internal || !runner.registeredAt) return
   editing.value = runner
   editState.name = runner.name ?? ''
+  editState.maxActiveSessions = runner.maxActiveSessions
   saveError.value = undefined
 }
 
 function resetEdit() {
   editing.value = undefined
   editState.name = ''
+  editState.maxActiveSessions = 5
   saveError.value = undefined
 }
 
@@ -54,14 +56,17 @@ function closeEdit() {
   if (!saving.value) resetEdit()
 }
 
-async function saveName() {
-  if (!editing.value || saving.value || !editState.name.trim()) return
+async function saveRunner() {
+  if (!editing.value || saving.value || !editState.name.trim() || editState.maxActiveSessions < 1) return
   saving.value = true
   saveError.value = undefined
   try {
     await apiRequest<Runner>(`/api/runners/${editing.value.id}`, {
       method: 'PATCH',
-      body: { name: editState.name.trim() }
+      body: {
+        name: editState.name.trim(),
+        maxActiveSessions: editState.maxActiveSessions
+      }
     })
     resetEdit()
     await refresh()
@@ -154,16 +159,19 @@ async function deleteRunner(runner: Runner) {
       </div>
     </AsyncState>
 
-    <UModal :open="!!editing" title="Edit runner" description="Change the display name for this registered runner." :dismissible="!saving" :close="!saving" @update:open="value => { if (!value) closeEdit() }">
+    <UModal :open="!!editing" title="Edit runner" description="Change the display name and scheduler session capacity for this registered runner." :dismissible="!saving" :close="!saving" @update:open="value => { if (!value) closeEdit() }">
       <template #body>
-        <UForm :state="editState" class="space-y-4" @submit="saveName">
-          <UAlert v-if="saveError" color="error" title="Unable to rename runner" :description="saveError.message" />
+        <UForm :state="editState" class="space-y-4" @submit="saveRunner">
+          <UAlert v-if="saveError" color="error" title="Unable to update runner" :description="saveError.message" />
           <UFormField label="Name" name="name" required>
             <UInput v-model="editState.name" class="w-full" :disabled="saving" autofocus />
           </UFormField>
+          <UFormField label="Maximum sessions" name="maxActiveSessions" description="Scheduler admission limit for concurrent execution sessions on this runner." required>
+            <UInput v-model.number="editState.maxActiveSessions" type="number" min="1" step="1" class="w-full" :disabled="saving" />
+          </UFormField>
           <div class="flex justify-end gap-2">
             <UButton label="Cancel" color="neutral" variant="outline" :disabled="saving" @click="closeEdit" />
-            <UButton label="Save runner" type="submit" :loading="saving" :disabled="!editState.name.trim()" />
+            <UButton label="Save runner" type="submit" :loading="saving" :disabled="!editState.name.trim() || editState.maxActiveSessions < 1" />
           </div>
         </UForm>
       </template>

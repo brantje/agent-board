@@ -101,11 +101,17 @@ func (s *RunnerService) CountReservations(ctx context.Context, ids []string) (ma
 	return s.store.CountRunnerReservations(ctx, ids)
 }
 func (s *RunnerService) Rename(ctx context.Context, id, name string) (store.Runner, error) {
+	return s.Update(ctx, id, name, nil)
+}
+func (s *RunnerService) Update(ctx context.Context, id, name string, maxActiveSessions *int) (store.Runner, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return store.Runner{}, invalid("runner name is required")
 	}
-	r, err := s.store.RenameRunner(ctx, id, name)
+	if maxActiveSessions != nil && *maxActiveSessions < 1 {
+		return store.Runner{}, invalid("max active sessions must be at least 1")
+	}
+	r, err := s.store.UpdateRunner(ctx, id, name, maxActiveSessions)
 	return r, translateStoreError(err, "runner")
 }
 func (s *RunnerService) Rotate(ctx context.Context, id string) (store.Runner, string, error) {

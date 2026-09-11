@@ -65,7 +65,7 @@ func TestSchedulerRunnerPreferencePolicyAndCapacity(t *testing.T) {
 func TestSchedulerAdmitsUpToDefaultRunnerCapacity(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
-	f := seedRunFixture(t, s, "runner-capacity-10")
+	f := seedRunFixture(t, s, "runner-capacity-5")
 	runner, err := s.CreateRunner(ctx, store.Runner{Name: "Shared", TokenHash: make([]byte, 32)})
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestSchedulerAdmitsUpToDefaultRunnerCapacity(t *testing.T) {
 		t.Fatal(err)
 	}
 	enqueueFixtureRun(t, s, f, f.run, "cap-0")
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 5; i++ {
 		if i > 0 {
 			next := createQueuedFixtureRun(t, s, f, fmt.Sprintf("cap-%d", i))
 			enqueueFixtureRun(t, s, f, next, fmt.Sprintf("cap-job-%d", i))
@@ -89,7 +89,7 @@ func TestSchedulerAdmitsUpToDefaultRunnerCapacity(t *testing.T) {
 	enqueueFixtureRun(t, s, f, overflow, "cap-overflow")
 	claim, err := s.AdmitNextJob(ctx, "worker", time.Minute, time.Millisecond)
 	if err != nil || claim != nil {
-		t.Fatalf("11th admit=%+v err=%v want runner_capacity wait", claim, err)
+		t.Fatalf("6th admit=%+v err=%v want runner_capacity wait", claim, err)
 	}
 }
 
