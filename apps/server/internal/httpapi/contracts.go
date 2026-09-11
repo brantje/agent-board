@@ -19,6 +19,9 @@ type ProjectDTO struct {
 	ID                  string          `json:"id"`
 	Name                string          `json:"name"`
 	IssuePrefix         string          `json:"issuePrefix"`
+	SourceType          string          `json:"sourceType"`
+	CloneURL            *string         `json:"cloneUrl"`
+	SourceRef           *string         `json:"sourceRef"`
 	RepositoryPath      string          `json:"repositoryPath"`
 	DefaultBranch       string          `json:"defaultBranch"`
 	WorkflowSettings    json.RawMessage `json:"workflowSettings"`
@@ -142,17 +145,42 @@ type CreateProjectRequest struct {
 	AllowInternalRunner *bool           `json:"allowInternalRunner,omitempty"`
 	Name                string          `json:"name"`
 	IssuePrefix         string          `json:"issuePrefix"`
+	SourceType          string          `json:"sourceType"`
+	CloneURL            *string         `json:"cloneUrl"`
+	SourceRef           *string         `json:"sourceRef"`
 	RepositoryPath      string          `json:"repositoryPath"`
 	DefaultBranch       string          `json:"defaultBranch"`
 	WorkflowSettings    json.RawMessage `json:"workflowSettings"`
 }
 
+type optionalNullableString struct {
+	Set   bool
+	Value *string
+}
+
+func (v *optionalNullableString) UnmarshalJSON(data []byte) error {
+	v.Set = true
+	if string(data) == "null" {
+		v.Value = nil
+		return nil
+	}
+	var value string
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	v.Value = &value
+	return nil
+}
+
 type UpdateProjectRequest struct {
-	AllowInternalRunner *bool            `json:"allowInternalRunner,omitempty"`
-	Name                *string          `json:"name"`
-	RepositoryPath      *string          `json:"repositoryPath"`
-	DefaultBranch       *string          `json:"defaultBranch"`
-	WorkflowSettings    *json.RawMessage `json:"workflowSettings"`
+	AllowInternalRunner *bool                  `json:"allowInternalRunner,omitempty"`
+	Name                *string                `json:"name"`
+	SourceType          *string                `json:"sourceType"`
+	CloneURL            *string                `json:"cloneUrl"`
+	SourceRef           optionalNullableString `json:"sourceRef"`
+	RepositoryPath      *string                `json:"repositoryPath"`
+	DefaultBranch       *string                `json:"defaultBranch"`
+	WorkflowSettings    *json.RawMessage       `json:"workflowSettings"`
 }
 
 type CreateIssueRequest struct {
