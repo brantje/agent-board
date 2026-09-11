@@ -479,7 +479,10 @@ func validateProject(v store.Project) error {
 		cloneURL := strings.TrimSpace(*v.CloneURL)
 		parsed, err := url.Parse(cloneURL)
 		if err == nil && parsed.User != nil {
-			return invalid("cloneUrl must not contain credentials")
+			_, hasPassword := parsed.User.Password()
+			if hasPassword || strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https") {
+				return invalid("cloneUrl must not contain credentials")
+			}
 		}
 	default:
 		return invalid("sourceType must be local or git")
