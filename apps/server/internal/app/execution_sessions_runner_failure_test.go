@@ -9,7 +9,7 @@ import (
 )
 
 func TestStartOnRunnerConnectFailureMarksSessionFailed(t *testing.T) {
-	service, storeFake, _ := runnerOwnedExecutionService(t)
+	service, storeFake, _, _ := runnerOwnedExecutionService(t)
 	service.registry = &fakeExecutionManager{err: errors.New("runner offline")}
 
 	_, err := service.StartOnRunner(t.Context(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"true"}})
@@ -22,7 +22,7 @@ func TestStartOnRunnerConnectFailureMarksSessionFailed(t *testing.T) {
 }
 
 func TestStartOnRunnerProtocolFailureMarksSessionFailed(t *testing.T) {
-	service, storeFake, transport := runnerOwnedExecutionService(t)
+	service, storeFake, transport, _ := runnerOwnedExecutionService(t)
 	protocolErr := &runner.ProtocolError{Code: "start_rejected", Message: "runner rejected session"}
 	service.registry = &fakeExecutionManager{client: &fakeExecutionClient{
 		transport: transport,
@@ -41,7 +41,7 @@ func TestStartOnRunnerProtocolFailureMarksSessionFailed(t *testing.T) {
 }
 
 func TestStartOnRunnerInterruptedStartRetainsSessionForReconciliation(t *testing.T) {
-	service, storeFake, transport := runnerOwnedExecutionService(t)
+	service, storeFake, transport, _ := runnerOwnedExecutionService(t)
 	service.registry = &fakeExecutionManager{client: &fakeExecutionClient{
 		transport: transport,
 		startErr:  errors.New("transport interrupted"),
