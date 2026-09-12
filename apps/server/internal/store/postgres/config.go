@@ -27,26 +27,6 @@ func (s *Store) CreateModelProfile(ctx context.Context, input store.ModelProfile
 	`, input.ProjectID, input.ProviderID, input.Name, input.Model, input.Temperature, input.MaxTokens, input.MaxConcurrent, objectJSON(input.GenerationSettings), input.Enabled))
 }
 
-func (s *Store) CreateRuntime(ctx context.Context, input store.Runtime) (store.Runtime, error) {
-	workspacePolicy := input.WorkspacePolicy
-	if workspacePolicy == "" {
-		workspacePolicy = "issue"
-	}
-	health := input.HealthStatus
-	if health == "" {
-		health = "UNKNOWN"
-	}
-	allowedSecretRefs := input.AllowedSecretRefs
-	if allowedSecretRefs == nil {
-		allowedSecretRefs = []string{}
-	}
-	return scanRuntime(s.pool.QueryRow(ctx, `
-		INSERT INTO runtimes (project_id, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		RETURNING id::text, project_id::text, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status, created_at, updated_at
-	`, input.ProjectID, input.Name, input.Kind, input.Image, input.CPULimitMillis, input.MemoryLimitBytes, input.PIDLimit, input.TimeoutSeconds, input.NetworkPolicy, workspacePolicy, allowedSecretRefs, objectJSON(input.Capabilities), input.Enabled, health))
-}
-
 func (s *Store) CreateAgent(ctx context.Context, input store.Agent) (store.Agent, error) {
 	limit := input.ConcurrencyLimit
 	if limit == 0 {
@@ -83,14 +63,6 @@ func scanModelProfile(row pgx.Row) (store.ModelProfile, error) {
 	var value store.ModelProfile
 	if err := row.Scan(&value.ID, &value.ProjectID, &value.ProviderID, &value.Name, &value.Model, &value.Temperature, &value.MaxTokens, &value.MaxConcurrent, &value.GenerationSettings, &value.Enabled, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.ModelProfile{}, notFound(err)
-	}
-	return value, nil
-}
-
-func scanRuntime(row pgx.Row) (store.Runtime, error) {
-	var value store.Runtime
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Kind, &value.Image, &value.CPULimitMillis, &value.MemoryLimitBytes, &value.PIDLimit, &value.TimeoutSeconds, &value.NetworkPolicy, &value.WorkspacePolicy, &value.AllowedSecretRefs, &value.Capabilities, &value.Enabled, &value.HealthStatus, &value.CreatedAt, &value.UpdatedAt); err != nil {
-		return store.Runtime{}, notFound(err)
 	}
 	return value, nil
 }
