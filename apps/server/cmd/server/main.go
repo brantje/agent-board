@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -244,6 +245,10 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, fmt.Errorf("repository roots: %w", err)
 	}
+	authSigningKey, err := configuredAuthSigningKey()
+	if err != nil {
+		return nil, err
+	}
 	git, err := workspace.NewGitCLI("")
 	if err != nil {
 		return nil, err
@@ -280,7 +285,7 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if dockerRuntime != nil {
 		implementations["docker"] = dockerRuntime
 	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, implementations, secretResolver)
+	services, err := app.NewServicesWithRuntimesAuthConfig(database, materializer, implementations, app.AuthServiceConfig{SigningKey: authSigningKey}, secretResolver)
 	if err != nil {
 		if dockerRuntime != nil {
 			_ = dockerRuntime.Close()
@@ -364,6 +369,21 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	}
 	services.Scheduler = coordinator
 	return nil
+}
+
+func configuredAuthSigningKey() ([]byte, error) {
+	rawKey := strings.TrimSpace(os.Getenv("AGENT_BOARD_AUTH_SIGNING_KEY"))
+	if rawKey == "" {
+		return nil, fmt.Errorf("AGENT_BOARD_AUTH_SIGNING_KEY is required")
+	}
+	key, err := base64.StdEncoding.DecodeString(rawKey)
+	if err != nil {
+		return nil, fmt.Errorf("auth signing key: decode base64: %w", err)
+	}
+	if len(key) < 32 {
+		return nil, fmt.Errorf("auth signing key must decode to at least 32 bytes")
+	}
+	return key, nil
 }
 
 func configuredSecretResolver(database *postgres.Store) (executioncontext.SecretResolver, error) {
