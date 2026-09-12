@@ -25,16 +25,16 @@ export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
     ]
   ]
   if (!projectId) {
-    groups.push([
-      { label: 'Execution', type: 'label' },
-      { label: 'Agents', to: '/settings/agents' }
-    ])
+    groups.push(
+      [
+        { label: 'Execution', type: 'label' },
+        { label: 'Agents', to: '/settings/agents' }
+      ],
+      [
+        { label: 'Infrastructure', type: 'label' },
+        { label: 'Runners', to: '/settings/runners' }
+      ]
+    )
   }
-  groups.push([
-    { label: 'Infrastructure', type: 'label' },
-    ...(!projectId
-      ? [{ label: 'Runners', to: '/settings/runners' }]
-      : [{ label: 'Runtimes', to: projectPath(projectId, 'runtimes') }])
-  ])
   return groups
 }
