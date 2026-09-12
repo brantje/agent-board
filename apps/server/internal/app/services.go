@@ -17,6 +17,7 @@ import (
 // server startup constructs one coherent application boundary.
 type Services struct {
 	ControlPlane      *Service
+	Auth              *AuthService
 	Questions         *QuestionService
 	Workspaces        *WorkspaceService
 	RuntimeInstances  *RuntimeInstanceService
@@ -42,6 +43,9 @@ func NewServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 		return nil, err
 	}
 	services := &Services{ControlPlane: controlPlane, Workspaces: workspaces}
+	if err := configureAuth(services, controlPlaneStore); err != nil {
+		return nil, err
+	}
 	if store.SupportsQuestionStore(controlPlaneStore) {
 		questions, err := NewQuestionService(controlPlaneStore.(store.QuestionStore))
 		if err != nil {
@@ -57,6 +61,13 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	securedStore := evidencepkg.NewRedactingStore(controlPlaneStore, registry)
 	services, err := NewServices(securedStore, materializer)
 	if err != nil {
+		return nil, err
+	}
+	// Authentication persistence is not execution evidence and the redacting
+	// decorator intentionally exposes only the control-plane store contract.
+	// Bind auth to the authoritative base store rather than duplicating dozens
+	// of auth forwarding methods on the evidence wrapper.
+	if err := configureAuth(services, controlPlaneStore); err != nil {
 		return nil, err
 	}
 	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
@@ -113,6 +124,19 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	services.ExecutionContext = resolver
 	services.Redaction = registry
 	return services, nil
+}
+
+func configureAuth(services *Services, candidate any) error {
+	authStore, ok := candidate.(store.AuthStore)
+	if !ok {
+		return nil
+	}
+	auth, err := NewAuthService(authStore, AuthServiceConfig{})
+	if err != nil {
+		return fmt.Errorf("configure authentication: %w", err)
+	}
+	services.Auth = auth
+	return nil
 }
 
 func (s *Services) Close() error {
