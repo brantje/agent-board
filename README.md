@@ -63,6 +63,8 @@ When `OPENROUTER_MODELS` is set to a comma-separated list of OpenRouter model ID
 
 When `LITELLM_ENDPOINT` and `LITELLM_API_KEY` are both set, the server creates a global Provider named **LiteLLM** (`openai-compatible`) on startup if one does not already exist, using the endpoint as its base URL. If that provider already exists but is missing its stored credential or base URL, startup completes the missing step. An existing provider with a credential and base URL is left unchanged. These env vars are creation/resume-only; rotate an existing key or change the endpoint from **Settings → Providers**. Recreate the server container after adding env vars so Compose injects them.
 
+When `LITELLM_MODELS` is set to a comma-separated list of model IDs, the server also creates global Model Profiles linked to the LiteLLM provider on startup if they do not already exist. Each profile uses the full model ID as its model field and a display name derived from the last path segment (for example `anthropic/claude-3.5-sonnet` becomes `claude-3.5-sonnet`). Existing profiles with the same name or model are left unchanged. `LITELLM_MODELS` requires an existing LiteLLM provider or `LITELLM_ENDPOINT` and `LITELLM_API_KEY` on the same startup.
+
 Save each Provider credential from **Settings → Providers**:
 
 1. Create or edit a Provider.

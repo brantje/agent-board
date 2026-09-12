@@ -19,6 +19,7 @@ const (
 
 	liteLLMEndpointEnvKey = "LITELLM_ENDPOINT"
 	liteLLMAPIKeyEnvKey   = "LITELLM_API_KEY"
+	liteLLMModelsEnvKey   = "LITELLM_MODELS"
 	liteLLMProviderName   = "LiteLLM"
 	liteLLMProviderKind   = "openai-compatible"
 )
@@ -52,7 +53,7 @@ func EnsureOpenRouterFromEnv(ctx context.Context, control *Service, secretStore 
 	if provider.ID == "" {
 		return fmt.Errorf("%s is set but OpenRouter provider does not exist", openRouterModelsEnvKey)
 	}
-	return ensureOpenRouterModelProfilesFromEnv(ctx, control, provider, models)
+	return ensureModelProfilesFromEnv(ctx, control, provider, models, "OpenRouter")
 }
 
 func EnsureLiteLLMFromEnv(ctx context.Context, control *Service, secretStore SecretStore, getenv func(string) string) error {
@@ -65,7 +66,8 @@ func EnsureLiteLLMFromEnv(ctx context.Context, control *Service, secretStore Sec
 
 	endpoint := strings.TrimSpace(getenv(liteLLMEndpointEnvKey))
 	apiKey := strings.TrimSpace(getenv(liteLLMAPIKeyEnvKey))
-	if endpoint == "" && apiKey == "" {
+	models := parseCommaSeparatedEnv(getenv(liteLLMModelsEnvKey))
+	if endpoint == "" && apiKey == "" && len(models) == 0 {
 		return nil
 	}
 
@@ -73,8 +75,17 @@ func EnsureLiteLLMFromEnv(ctx context.Context, control *Service, secretStore Sec
 	if err != nil {
 		return fmt.Errorf("list providers for env bootstrap: %w", err)
 	}
-	_, err = ensureLiteLLMProviderFromEnv(ctx, control, secretStore, endpoint, apiKey, providers)
-	return err
+	provider, err := ensureLiteLLMProviderFromEnv(ctx, control, secretStore, endpoint, apiKey, providers)
+	if err != nil {
+		return err
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	if provider.ID == "" {
+		return fmt.Errorf("%s is set but LiteLLM provider does not exist", liteLLMModelsEnvKey)
+	}
+	return ensureModelProfilesFromEnv(ctx, control, provider, models, "LiteLLM")
 }
 
 func ensureLiteLLMProviderFromEnv(ctx context.Context, control *Service, secretStore SecretStore, endpoint, apiKey string, providers []store.Provider) (store.Provider, error) {
@@ -82,6 +93,9 @@ func ensureLiteLLMProviderFromEnv(ctx context.Context, control *Service, secretS
 		return store.Provider{}, err
 	} else if found {
 		return reconcileLiteLLMProviderFromEnv(ctx, control, secretStore, endpoint, apiKey, provider)
+	}
+	if endpoint == "" && apiKey == "" {
+		return store.Provider{}, nil
 	}
 	if endpoint == "" || apiKey == "" {
 		return store.Provider{}, fmt.Errorf("%s and %s must both be set to create the LiteLLM provider", liteLLMEndpointEnvKey, liteLLMAPIKeyEnvKey)
@@ -265,18 +279,18 @@ func providerBaseURLConfigured(provider store.Provider) bool {
 	return provider.BaseURL != nil && strings.TrimSpace(*provider.BaseURL) != ""
 }
 
-func ensureOpenRouterModelProfilesFromEnv(ctx context.Context, control *Service, provider store.Provider, modelIDs []string) error {
+func ensureModelProfilesFromEnv(ctx context.Context, control *Service, provider store.Provider, modelIDs []string, label string) error {
 	existing, err := control.ListModelProfiles(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("list model profiles for env bootstrap: %w", err)
 	}
 
 	for _, modelID := range modelIDs {
-		name := deriveOpenRouterModelProfileName(modelID)
+		name := deriveEnvModelProfileName(modelID)
 		if name == "" {
 			continue
 		}
-		if globalOpenRouterModelProfileExists(existing, provider.ID, name, modelID) {
+		if globalEnvModelProfileExists(existing, provider.ID, name, modelID) {
 			continue
 		}
 
@@ -291,10 +305,10 @@ func ensureOpenRouterModelProfilesFromEnv(ctx context.Context, control *Service,
 			if errors.Is(err, store.ErrConflict) {
 				continue
 			}
-			return fmt.Errorf("create OpenRouter model profile %q: %w", modelID, err)
+			return fmt.Errorf("create %s model profile %q: %w", label, modelID, err)
 		}
 		existing = append(existing, created)
-		slog.Info("created OpenRouter model profile from env bootstrap", "name", name, "model", modelID)
+		slog.Info("created "+label+" model profile from env bootstrap", "name", name, "model", modelID)
 	}
 	return nil
 }
@@ -315,6 +329,10 @@ func parseCommaSeparatedEnv(value string) []string {
 }
 
 func deriveOpenRouterModelProfileName(modelID string) string {
+	return deriveEnvModelProfileName(modelID)
+}
+
+func deriveEnvModelProfileName(modelID string) string {
 	modelID = strings.TrimSpace(modelID)
 	if modelID == "" {
 		return ""
@@ -349,7 +367,7 @@ func findNamedProvider(providers []store.Provider, name, kind string) (store.Pro
 	return store.Provider{}, false, nil
 }
 
-func globalOpenRouterModelProfileExists(existing []store.ModelProfile, providerID, name, modelID string) bool {
+func globalEnvModelProfileExists(existing []store.ModelProfile, providerID, name, modelID string) bool {
 	for _, profile := range existing {
 		if profile.ProjectID != nil {
 			continue
