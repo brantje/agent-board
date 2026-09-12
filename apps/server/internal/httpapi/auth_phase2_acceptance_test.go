@@ -154,7 +154,7 @@ func TestAuthPhase2HTTPSelfPasswordSingleSessionRevokeAndSettingsDenial(t *testi
 		t.Fatalf("member settings update status=%d body=%s", response.Code, response.Body.String())
 	}
 
-	change := authHTTPRequest(t, handler, http.MethodPut, "/api/auth/me/password", `{"password":"self-service-password"}`, memberHeaders)
+	change := authHTTPRequest(t, handler, http.MethodPut, "/api/auth/me/password", `{"currentPassword":"member-long-password","newPassword":"self-service-password"}`, memberHeaders)
 	if change.Code != http.StatusOK || change.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("self password status=%d cache=%q body=%s", change.Code, change.Header().Get("Cache-Control"), change.Body.String())
 	}
