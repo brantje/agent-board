@@ -13,6 +13,9 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode"
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
+	"github.com/brantje/agent-board/apps/server/internal/repository"
+	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
 const openCodeGoldenAnswer = `package golden
@@ -43,7 +46,6 @@ func TestAnswer(t *testing.T) {
 func TestOpenCodeExternalRunnerGoldenPath(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
 	prepareOpenCodeGoldenRepository(t, fixture.ctx, fixture.repositoryPath)
-	initialRevision := integrationGitOutput(t, fixture.ctx, fixture.repositoryPath, "rev-parse", "HEAD")
 	assertOpenCodeGoldenRepositoryBeforeRun(t, fixture.ctx, fixture.repositoryPath)
 
 	if _, err := exec.LookPath("opencode"); err != nil {
@@ -84,6 +86,9 @@ func TestOpenCodeExternalRunnerGoldenPath(t *testing.T) {
 		title:            "Fix the deterministic failing test",
 		description:      "Fix Answer() so the existing tests pass. Do not modify the tests. Do not change any other files. Run go test ./... to verify the fix, then stop.",
 	})
+	approvalServices, projectWorkspace := newOpenCodeGoldenApprovalServices(t, fixture, project)
+	initialRevision := integrationGitOutput(t, fixture.ctx, projectWorkspace, "rev-parse", "HEAD")
+	assertOpenCodeGoldenAuthoritativeUnchanged(t, fixture.ctx, projectWorkspace)
 	fixture.startScheduler(t)
 
 	terminal := waitForScriptedRun(t, fixture.ctx, fixture.database, project.ID, run.ID)
@@ -104,10 +109,11 @@ func TestOpenCodeExternalRunnerGoldenPath(t *testing.T) {
 		t.Fatalf("review candidate modified answer_test.go:\n%s", candidateTest)
 	}
 
-	assertOpenCodeGoldenAuthoritativeUnchanged(t, fixture.ctx, fixture.repositoryPath)
+	assertOpenCodeGoldenAuthoritativeUnchanged(t, fixture.ctx, projectWorkspace)
+	assertOpenCodeGoldenBootstrapSourceUnchanged(t, fixture.ctx, fixture.repositoryPath)
 	assertOpenCodeGoldenSession(t, fixture.ctx, fixture, project.ID, run.ID, external.Runner.ID)
 
-	reviews := app.ReviewServiceFromServices(fixture.services)
+	reviews := app.ReviewServiceFromServices(approvalServices)
 	if reviews == nil {
 		t.Fatal("Review service is unavailable")
 	}
@@ -121,7 +127,48 @@ func TestOpenCodeExternalRunnerGoldenPath(t *testing.T) {
 
 	assertOpenCodeGoldenSession(t, fixture.ctx, fixture, project.ID, run.ID, external.Runner.ID)
 	waitForOpenCodeRunnerCandidate(t, fixture.ctx, fixture, external.Runner.ID)
-	assertOpenCodeGoldenAcceptedRepository(t, fixture.ctx, fixture.repositoryPath, initialRevision)
+	assertOpenCodeGoldenAcceptedRepository(t, fixture.ctx, projectWorkspace, initialRevision)
+	assertOpenCodeGoldenBootstrapSourceUnchanged(t, fixture.ctx, fixture.repositoryPath)
+}
+
+func newOpenCodeGoldenApprovalServices(t *testing.T, fixture *openCodeIntegrationFixture, project store.Project) (*app.Services, string) {
+	t.Helper()
+	policy, err := repository.NewPolicy([]string{filepath.Dir(fixture.repositoryPath)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	git, err := workspace.NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	provisioner, err := repository.NewProvisioner(policy, git)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Join(t.TempDir(), "approval-workspaces")
+	projectMaterializer, err := workspace.NewProjectMaterializer(fixture.database, provisioner, git, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueMaterializer, err := workspace.NewMaterializer(fixture.database, policy, git, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	materializer, err := workspace.NewProjectBackedMaterializer(issueMaterializer, projectMaterializer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaces, err := app.NewWorkspaceService(fixture.database, materializer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := projectMaterializer.EnsureProjectWorkspace(fixture.ctx, project)
+	if err != nil {
+		t.Fatalf("materialize authoritative Project Workspace: %v", err)
+	}
+	approvalServices := *fixture.services
+	approvalServices.Workspaces = workspaces
+	return &approvalServices, accepted.Path
 }
 
 func prepareOpenCodeGoldenRepository(t *testing.T, ctx context.Context, repositoryPath string) {
@@ -164,6 +211,15 @@ func assertOpenCodeGoldenAuthoritativeUnchanged(t *testing.T, ctx context.Contex
 	}
 	if output, err := runOpenCodeGoldenTests(ctx, repositoryPath); err == nil {
 		t.Fatalf("authoritative Project tests unexpectedly pass before approval:\n%s", output)
+	}
+}
+
+func assertOpenCodeGoldenBootstrapSourceUnchanged(t *testing.T, ctx context.Context, repositoryPath string) {
+	t.Helper()
+	assertFileContent(t, filepath.Join(repositoryPath, "answer.go"), openCodeGoldenAnswer)
+	assertFileContent(t, filepath.Join(repositoryPath, "answer_test.go"), openCodeGoldenTest)
+	if status := integrationGitOutput(t, ctx, repositoryPath, "status", "--short"); status != "" {
+		t.Fatalf("bootstrap repository was mutated by Project Workspace delivery:\n%s", status)
 	}
 }
 
