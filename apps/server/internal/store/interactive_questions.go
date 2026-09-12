@@ -24,10 +24,9 @@ type InteractiveQuestionBinding struct {
 }
 
 type OpenInteractiveQuestionCommand struct {
-	Question          Question
-	Engine            string
-	CorrelationKey    string
-	RuntimeInstanceID string
+	Question       Question
+	Engine         string
+	CorrelationKey string
 }
 
 type OpenInteractiveQuestionResult struct {
