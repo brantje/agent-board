@@ -23,12 +23,11 @@ type AuthorizedExecutionRequest struct {
 	CWD                   string
 	Env                   map[string]string
 	ProviderCredentialEnv string
-	RuntimeSecretRefs     map[string]string
 }
 
 // AuthorizedExecutionSessionService is the server-owned launch boundary. It
-// resolves immutable execution context and authorized secret references before
-// delegating the already-scoped request to the runner transport service.
+// resolves immutable execution context and provider credentials before
+// delegating the already-scoped request to the selected Runner.
 type AuthorizedExecutionSessionService struct {
 	sessions *ExecutionSessionService
 	preparer ExecutionPreparer
@@ -44,15 +43,8 @@ func NewAuthorizedExecutionSessionService(sessions *ExecutionSessionService, pre
 	return &AuthorizedExecutionSessionService{sessions: sessions, preparer: preparer}, nil
 }
 
-func (s *AuthorizedExecutionSessionService) Start(ctx context.Context, projectID, runID, runtimeInstanceID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
-	return s.start(ctx, projectID, runID, "", runtimeInstanceID, "", request)
-}
-
 func (s *AuthorizedExecutionSessionService) StartOnRunner(ctx context.Context, projectID, runID, runnerID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
-	if len(request.RuntimeSecretRefs) > 0 {
-		return nil, NewError("execution_secret_unavailable", "Runtime-only secret references are not available on the Runner execution path", store.ErrInvalidArgument)
-	}
-	return s.start(ctx, projectID, runID, runnerID, "", "", request)
+	return s.start(ctx, projectID, runID, runnerID, request)
 }
 
 func (s *AuthorizedExecutionSessionService) CreateRunnerSession(ctx context.Context, projectID, runID, runnerID string) (store.ExecutionSession, error) {
@@ -63,20 +55,15 @@ func (s *AuthorizedExecutionSessionService) CreateRunnerSession(ctx context.Cont
 }
 
 func (s *AuthorizedExecutionSessionService) StartPreparedOnRunner(ctx context.Context, projectID, sessionID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
-	if len(request.RuntimeSecretRefs) > 0 {
-		return nil, NewError("execution_secret_unavailable", "Runtime-only secret references are not available on the Runner execution path", store.ErrInvalidArgument)
+	if s == nil || s.sessions == nil {
+		return nil, NewError("execution_session_unavailable", "Execution Session service is unavailable", store.ErrInvalidArgument)
 	}
-	return s.startPrepared(ctx, projectID, sessionID, request)
-}
-
-func (s *AuthorizedExecutionSessionService) startPrepared(ctx context.Context, projectID, sessionID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
 	session, err := s.sessions.store.GetExecutionSession(ctx, projectID, sessionID)
 	if err != nil {
 		return nil, translateStoreError(err, "execution_session")
 	}
 	prepared, err := s.preparer.Prepare(ctx, projectID, session.RunID, executioncontext.SecretRequest{
 		ProviderCredentialEnv: request.ProviderCredentialEnv,
-		RuntimeSecretRefs:     cloneMap(request.RuntimeSecretRefs),
 	})
 	if err != nil {
 		return nil, translateExecutionPreparationError(err)
@@ -106,10 +93,9 @@ func (s *AuthorizedExecutionSessionService) startPrepared(ctx context.Context, p
 	return authorized, nil
 }
 
-func (s *AuthorizedExecutionSessionService) start(ctx context.Context, projectID, runID, runnerID, runtimeInstanceID, preparedSessionID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
+func (s *AuthorizedExecutionSessionService) start(ctx context.Context, projectID, runID, runnerID string, request AuthorizedExecutionRequest) (*AuthorizedExecutionProcess, error) {
 	prepared, err := s.preparer.Prepare(ctx, projectID, runID, executioncontext.SecretRequest{
 		ProviderCredentialEnv: request.ProviderCredentialEnv,
-		RuntimeSecretRefs:     cloneMap(request.RuntimeSecretRefs),
 	})
 	if err != nil {
 		return nil, translateExecutionPreparationError(err)
@@ -122,32 +108,12 @@ func (s *AuthorizedExecutionSessionService) start(ctx context.Context, projectID
 		}
 	}()
 
-	var process *ExecutionProcess
-	if preparedSessionID != "" {
-		process, err = s.sessions.StartPreparedOnRunner(ctx, projectID, preparedSessionID, ExecutionRequest{
-			Command: append([]string(nil), request.Command...),
-			CWD:     request.CWD,
-			Env:     cloneMap(request.Env),
-			Secrets: cloneMap(prepared.Secrets),
-		})
-	} else if runnerID != "" {
-		process, err = s.sessions.StartOnRunner(ctx, projectID, runID, runnerID, ExecutionRequest{
-			Command: append([]string(nil), request.Command...),
-			CWD:     request.CWD,
-			Env:     cloneMap(request.Env),
-			Secrets: cloneMap(prepared.Secrets),
-		})
-	} else {
-		if _, err = s.sessions.store.GetRuntimeInstance(ctx, projectID, runtimeInstanceID); err != nil {
-			return nil, translateStoreError(err, "runtime_instance")
-		}
-		process, err = s.sessions.Start(ctx, projectID, runID, runtimeInstanceID, ExecutionRequest{
-			Command: append([]string(nil), request.Command...),
-			CWD:     request.CWD,
-			Env:     cloneMap(request.Env),
-			Secrets: cloneMap(prepared.Secrets),
-		})
-	}
+	process, err := s.sessions.StartOnRunner(ctx, projectID, runID, runnerID, ExecutionRequest{
+		Command: append([]string(nil), request.Command...),
+		CWD:     request.CWD,
+		Env:     cloneMap(request.Env),
+		Secrets: cloneMap(prepared.Secrets),
+	})
 	if err != nil {
 		return nil, redaction.WrapError(err, prepared.RedactionValues)
 	}
@@ -180,12 +146,6 @@ func (s *AuthorizedExecutionSessionService) Attach(ctx context.Context, projectI
 			releaseRedaction()
 		}
 	}()
-
-	if session.RuntimeInstanceID != "" {
-		if _, err := s.sessions.store.GetRuntimeInstance(ctx, projectID, session.RuntimeInstanceID); err != nil {
-			return nil, translateStoreError(err, "runtime_instance")
-		}
-	}
 
 	process, err := s.sessions.Reconcile(ctx, projectID, sessionID)
 	if err != nil {
