@@ -82,26 +82,6 @@ type ModelProfile struct {
 	UpdatedAt          time.Time
 }
 
-type Runtime struct {
-	ID                string
-	ProjectID         *string
-	Name              string
-	Kind              string
-	Image             string
-	CPULimitMillis    *int
-	MemoryLimitBytes  *int64
-	PIDLimit          *int
-	TimeoutSeconds    *int
-	NetworkPolicy     string
-	WorkspacePolicy   string
-	AllowedSecretRefs []string
-	Capabilities      json.RawMessage
-	Enabled           bool
-	HealthStatus      string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-}
-
 type Agent struct {
 	ID               string
 	ProjectID        *string
@@ -148,35 +128,19 @@ type Run struct {
 	CurrentBranch *string
 }
 
-type RuntimeInstance struct {
-	ID                 string
-	ProjectID          string
-	WorkspaceID        string
-	RuntimeID          string
-	Status             string
-	ExternalID         *string
-	RunnerStatus       string
-	SafeHandleMetadata json.RawMessage
-	CreatedAt          time.Time
-	StartedAt          *time.Time
-	StoppedAt          *time.Time
-	UpdatedAt          time.Time
-}
-
 type ExecutionSession struct {
-	ID                string
-	ProjectID         string
-	RunID             string
-	RuntimeInstanceID string
-	RunnerID          string
-	Status            string
-	CWD               string
-	CommandArgv       json.RawMessage
-	ExitCode          *int
-	CreatedAt         time.Time
-	StartedAt         *time.Time
-	CompletedAt       *time.Time
-	UpdatedAt         time.Time
+	ID          string
+	ProjectID   string
+	RunID       string
+	RunnerID    string
+	Status      string
+	CWD         string
+	CommandArgv json.RawMessage
+	ExitCode    *int
+	CreatedAt   time.Time
+	StartedAt   *time.Time
+	CompletedAt *time.Time
+	UpdatedAt   time.Time
 }
 
 type SchedulerJob struct {
@@ -289,22 +253,21 @@ type Review struct {
 }
 
 type Event struct {
-	ID                string
-	SchemaVersion     int
-	Type              string
-	OccurredAt        time.Time
-	ProjectID         string
-	IssueID           *string
-	RunID             *string
-	AgentID           *string
-	WorkspaceID       *string
-	RuntimeInstanceID *string
-	CorrelationID     *string
-	ParentEventID     *string
-	Sequence          *int64
-	Actor             json.RawMessage
-	Payload           json.RawMessage
-	CreatedAt         time.Time
+	ID            string
+	SchemaVersion int
+	Type          string
+	OccurredAt    time.Time
+	ProjectID     string
+	IssueID       *string
+	RunID         *string
+	AgentID       *string
+	WorkspaceID   *string
+	CorrelationID *string
+	ParentEventID *string
+	Sequence      *int64
+	Actor         json.RawMessage
+	Payload       json.RawMessage
+	CreatedAt     time.Time
 }
 
 type Artifact struct {
