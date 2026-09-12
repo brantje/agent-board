@@ -174,14 +174,14 @@ func TestPublishRemoteGitWorkspaceRejectsUnsafePublication(t *testing.T) {
 	})
 
 	t.Run("empty published revision", func(t *testing.T) {
-		payload, err := json.Marshal(runnerprotocol.GitPublished{})
+		payload, err := json.Marshal(runnerprotocol.GitPublished{StartRevision: "0123456789012345678901234567890123456789"})
 		if err != nil {
 			t.Fatal(err)
 		}
 		client := &controlledGitClient{receiveID: "publish-result", receive: payload}
 		safe, base, processor := remoteGitFailureHarness(t, client)
 		processor.store = &failingRevisionRunStore{runnerSyncStore: base}
-		if err := processor.publishRemoteGitWorkspace(t.Context(), safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "published revision is empty") {
+		if err := processor.publishRemoteGitWorkspace(t.Context(), safe, "runner-1", "session-1"); err == nil || !strings.Contains(err.Error(), "published start/review revision is empty") {
 			t.Fatalf("publish error=%v", err)
 		}
 		if client.confirmed {
@@ -192,7 +192,10 @@ func TestPublishRemoteGitWorkspaceRejectsUnsafePublication(t *testing.T) {
 
 func TestPublishRemoteGitWorkspaceReportsTransportAndAckFailures(t *testing.T) {
 	published := "fedcba9876543210fedcba9876543210fedcba98"
-	payload, err := json.Marshal(runnerprotocol.GitPublished{Revision: published})
+	payload, err := json.Marshal(runnerprotocol.GitPublished{
+		StartRevision: "0123456789012345678901234567890123456789",
+		Revision:      published,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
