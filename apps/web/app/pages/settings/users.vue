@@ -83,8 +83,8 @@ onMounted(() => run(reload))
                 <td class="p-2">{{ user.deploymentRole }}</td><td class="p-2"><UBadge color="neutral" variant="soft">{{ user.status }}</UBadge></td>
                 <td class="p-2"><div class="flex flex-wrap gap-2">
                   <UButton v-if="user.status === 'pending'" size="xs" variant="soft" @click="issueToken(user, 'setup')">New setup token</UButton>
-                  <UButton size="xs" variant="soft" @click="issueToken(user, 'reset')">Reset token</UButton>
-                  <UButton size="xs" variant="soft" @click="passwordForm.userId = user.id">Set password</UButton>
+                  <UButton v-if="user.status !== 'pending'" size="xs" variant="soft" @click="issueToken(user, 'reset')">Reset token</UButton>
+                  <UButton v-if="user.status !== 'pending'" size="xs" variant="soft" @click="passwordForm.userId = user.id">Set password</UButton>
                   <UButton v-if="user.status !== 'pending'" size="xs" :color="user.status === 'disabled' ? 'success' : 'error'" variant="soft" @click="toggleDisabled(user)">{{ user.status === 'disabled' ? 'Re-enable' : 'Disable' }}</UButton>
                 </div></td>
               </tr></tbody>
