@@ -6,7 +6,7 @@ import (
 )
 
 func TestConfigureRunnerReconnectTimeoutUpdatesExecutionSessionService(t *testing.T) {
-	lowLevel, _, _ := runnerOwnedExecutionService(t)
+	lowLevel, _, _, _ := runnerOwnedExecutionService(t)
 	services := &Services{ExecutionSessions: &AuthorizedExecutionSessionService{sessions: lowLevel}}
 
 	if err := services.ConfigureRunnerReconnectTimeout(2 * time.Minute); err != nil {
@@ -27,7 +27,7 @@ func TestConfigureRunnerReconnectTimeoutRejectsUnavailableOrInvalidConfiguration
 	if err := (&Services{}).ConfigureRunnerReconnectTimeout(time.Minute); err == nil {
 		t.Fatal("missing execution session service unexpectedly accepted reconnect timeout")
 	}
-	lowLevel, _, _ := runnerOwnedExecutionService(t)
+	lowLevel, _, _, _ := runnerOwnedExecutionService(t)
 	services := &Services{ExecutionSessions: &AuthorizedExecutionSessionService{sessions: lowLevel}}
 	if err := services.ConfigureRunnerReconnectTimeout(0); err == nil {
 		t.Fatal("zero reconnect timeout unexpectedly accepted")
