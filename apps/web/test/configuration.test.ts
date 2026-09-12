@@ -46,8 +46,9 @@ describe('intentional configuration inputs', () => {
     expect(providerKindSelectValue('')).toBe('')
   })
 
-  it('validates provider kind for built-in and custom OpenCode ids', () => {
+  it('validates provider kind for built-in, custom and incomplete drafts', () => {
     expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', kind: '' }).map(error => error.name)).toContain('kind')
+    expect(validateDraft('providers', { name: 'P', safeMetadata: '{}' }).map(error => error.name)).toContain('kind')
     expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', kind: CUSTOM_PROVIDER_KIND }).map(error => error.name)).toContain('kind')
     expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', kind: ` ${CUSTOM_PROVIDER_KIND} ` }).map(error => error.name)).toContain('kind')
     expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', kind: 'anthropic' })).toEqual([])
