@@ -35,7 +35,7 @@ func persistedWorkspaceBranch(value store.Workspace) string {
 	return strings.TrimSpace(value.WorkingBranch)
 }
 
-func (o *branchObserver) observeIfChanged(ctx context.Context, safe executioncontext.SafeContext, runtimeInstanceID *string) {
+func (o *branchObserver) observeIfChanged(ctx context.Context, safe executioncontext.SafeContext) {
 	if o == nil || strings.TrimSpace(safe.Workspace.Path) == "" || safe.Workspace.BootstrapStatus != "READY" {
 		return
 	}
@@ -69,7 +69,7 @@ func (o *branchObserver) observeIfChanged(ctx context.Context, safe executioncon
 	if err != nil {
 		return
 	}
-	event := store.Event{
+	_, _ = o.events.Record(ctx, store.Event{
 		Type:        "git.branch_checked_out",
 		ProjectID:   safe.Project.ID,
 		IssueID:     &issueID,
@@ -78,20 +78,16 @@ func (o *branchObserver) observeIfChanged(ctx context.Context, safe executioncon
 		WorkspaceID: &workspaceID,
 		Actor:       store.EmptyObject,
 		Payload:     encoded,
-	}
-	if runtimeInstanceID != nil && strings.TrimSpace(*runtimeInstanceID) != "" {
-		event.RuntimeInstanceID = runtimeInstanceID
-	}
-	_, _ = o.events.Record(ctx, event)
+	})
 }
 
 func terminalToolEventTypes() map[string]struct{} {
 	return map[string]struct{}{
-		"tool.completed":  {},
-		"tool.failed":     {},
-		"tool.stopped":    {},
-		"test.completed":  {},
-		"test.failed":     {},
+		"tool.completed": {},
+		"tool.failed":    {},
+		"tool.stopped":   {},
+		"test.completed": {},
+		"test.failed":    {},
 	}
 }
 
