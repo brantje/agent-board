@@ -16,7 +16,6 @@ type fakeStore struct {
 	agent     store.Agent
 	model     store.ModelProfile
 	provider  store.Provider
-	runtime   store.Runtime
 }
 
 func (f fakeStore) GetProject(context.Context, string) (store.Project, error) { return f.project, nil }
@@ -36,9 +35,6 @@ func (f fakeStore) GetModelProfile(context.Context, *string, string) (store.Mode
 func (f fakeStore) GetProvider(context.Context, *string, string) (store.Provider, error) {
 	return f.provider, nil
 }
-func (f fakeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) {
-	return f.runtime, nil
-}
 
 func validStore() fakeStore {
 	projectID := "p1"
@@ -53,7 +49,6 @@ func validStore() fakeStore {
 		agent:     store.Agent{ID: agentID, ProjectID: &projectID, Name: "Coder", RoleInstructions: "Implement", Engine: "opencode", ModelProfileID: "m1", EngineSettings: json.RawMessage(`{}`), State: "ENABLED"},
 		model:     store.ModelProfile{ID: "m1", ProjectID: &projectID, ProviderID: "pr1", Name: "model", Model: "gpt", Enabled: true},
 		provider:  store.Provider{ID: "pr1", Name: "provider", Kind: "openai-compatible", BaseURL: &baseURL, CredentialRef: &credentialRef, Enabled: true},
-		runtime:   store.Runtime{ID: "rt1", ProjectID: &projectID, Name: "runtime", Kind: "docker", Image: "runtime:test", NetworkPolicy: "restricted", WorkspacePolicy: "issue", AllowedSecretRefs: []string{"runtime-token"}, Enabled: true},
 	}
 }
 
@@ -72,9 +67,6 @@ func TestResolveBuildsSafeImmutableContext(t *testing.T) {
 	}
 	if got.ProviderCredentialRef == nil || *got.ProviderCredentialRef != "provider-token" {
 		t.Fatalf("credential ref = %v", got.ProviderCredentialRef)
-	}
-	if len(got.AllowedSecretRefs) != 0 {
-		t.Fatalf("allowed secret refs = %v", got.AllowedSecretRefs)
 	}
 }
 
