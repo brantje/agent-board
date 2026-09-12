@@ -8,7 +8,7 @@ import { uiStubs } from './ui-stubs'
 
 const menuStub = {
   props: ['items'],
-  template: '<nav data-testid="settings-menu"><template v-for="group in items"><a v-for="item in group" :key="item.label" :href="item.to">{{ item.label }}</a></template></nav>'
+  template: '<nav data-testid="settings-menu"><template v-for="group in items"><a v-for="item in group" :key="item.label" :href="item.to" :data-active="String(Boolean(item.active))" :aria-current="item[\'aria-current\']">{{ item.label }}</a></template></nav>'
 }
 
 const collapsibleStub = {
@@ -69,6 +69,35 @@ describe('settings sidebar shell', () => {
     expect(wrapper.get('[data-testid="settings-secondary-nav"]').exists()).toBe(true)
     expect(wrapper.get('a[href="/settings/providers"]').text()).toBe('Providers')
     expect(wrapper.text()).not.toMatch(/back to/i)
+  })
+
+  it('keeps exact overview inactive while matching a nested settings section', () => {
+    vi.stubGlobal('useRoute', () => ({ path: '/settings/providers/details', params: {} }))
+    const wrapper = mount(SettingsSidebar, { global })
+    const overview = wrapper.get('a[href="/settings"]')
+    const providers = wrapper.get('a[href="/settings/providers"]')
+    expect(overview.attributes('data-active')).toBe('false')
+    expect(overview.attributes('aria-current')).toBeUndefined()
+    expect(providers.attributes('data-active')).toBe('true')
+    expect(providers.attributes('aria-current')).toBe('page')
+  })
+
+  it('falls back to overview for an unmatched route and renders expanded mobile state', () => {
+    vi.stubGlobal('useRoute', () => ({ path: '/unmatched', params: {} }))
+    const wrapper = mount(SettingsSidebar, {
+      global: {
+        stubs: {
+          ...global.stubs,
+          UCollapsible: {
+            template: '<div><slot :open="true" /><slot name="content" /></div>'
+          },
+          UButton: { template: '<button><slot /></button>' },
+          UIcon: { props: ['name'], template: '<span data-icon :data-name="name" />' }
+        }
+      }
+    })
+    expect(wrapper.text()).toContain('Settings · Overview')
+    expect(wrapper.get('[data-icon]').attributes('data-name')).toBe('i-lucide-chevron-up')
   })
 
   it('wraps settings pages so ConfigManager renders inside the shell', () => {
