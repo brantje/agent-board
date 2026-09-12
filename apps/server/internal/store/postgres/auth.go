@@ -223,6 +223,9 @@ func (s *Store) SetUserPassword(ctx context.Context, id, passwordHash string, fo
 	if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,now()) WHERE user_id=$1 AND revoked_at IS NULL`, id); err != nil {
 		return store.User{}, err
 	}
+	if err := revokeOutstandingPasswordTokens(ctx, tx, id); err != nil {
+		return store.User{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.User{}, err
 	}
@@ -358,10 +361,22 @@ func (s *Store) CompletePasswordToken(ctx context.Context, hash []byte, purpose,
 	if _, err := tx.Exec(ctx, `UPDATE auth_sessions SET revoked_at=COALESCE(revoked_at,$2) WHERE user_id=$1 AND revoked_at IS NULL`, userID, now); err != nil {
 		return store.User{}, err
 	}
+	if err := revokeOutstandingPasswordTokens(ctx, tx, userID); err != nil {
+		return store.User{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.User{}, err
 	}
 	return value, nil
+}
+
+func revokeOutstandingPasswordTokens(ctx context.Context, tx pgx.Tx, userID string) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE password_tokens
+		SET revoked_at=now()
+		WHERE user_id=$1 AND consumed_at IS NULL AND revoked_at IS NULL
+	`, userID)
+	return err
 }
 
 var _ store.AuthStore = (*Store)(nil)
