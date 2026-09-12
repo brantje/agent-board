@@ -78,6 +78,7 @@ describe('centralized auth composable', () => {
       requireSymbol: false
     }
     const pending = { ...user, id: '00000000-0000-0000-0000-000000000002', username: 'member', deploymentRole: 'member' as const, status: 'pending' as const }
+    const group = { id: '00000000-0000-0000-0000-000000000010', name: 'engineering', createdAt: '2026-09-12T12:00:00Z', updatedAt: '2026-09-12T12:00:00Z' }
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
       const method = init?.method ?? 'GET'
@@ -98,6 +99,13 @@ describe('centralized auth composable', () => {
       if (path.endsWith('/enable')) return json({ ...pending, status: 'active' })
       if (path === '/api/auth/settings' && method === 'GET') return json(settings)
       if (path === '/api/auth/settings' && method === 'PUT') return json({ ...settings, minimumPasswordLength: 14 })
+      if (path === '/api/groups' && method === 'GET') return json([group])
+      if (path === '/api/groups' && method === 'POST') return json(group, 201)
+      if (path === `/api/groups/${group.id}` && method === 'PATCH') return json({ ...group, name: 'platform' })
+      if (path === `/api/groups/${group.id}` && method === 'DELETE') return new Response(null, { status: 204 })
+      if (path === `/api/groups/${group.id}/members` && method === 'GET') return json([pending])
+      if (path === `/api/groups/${group.id}/members` && method === 'POST') return new Response(null, { status: 204 })
+      if (path === `/api/groups/${group.id}/members/${pending.id}` && method === 'DELETE') return new Response(null, { status: 204 })
       if (path === '/api/auth/logout') return new Response(null, { status: 204 })
       throw new Error(`unexpected fetch ${method} ${path}`)
     }))
@@ -121,6 +129,13 @@ describe('centralized auth composable', () => {
     expect((await auth.setUserDisabled(pending.id, false)).status).toBe('active')
     expect((await auth.settings()).minimumPasswordLength).toBe(12)
     expect((await auth.updateSettings(settings)).minimumPasswordLength).toBe(14)
+    expect((await auth.groups())[0]?.name).toBe('engineering')
+    expect((await auth.createGroup('Engineering')).id).toBe(group.id)
+    expect((await auth.updateGroup(group.id, 'Platform')).name).toBe('platform')
+    expect((await auth.groupMembers(group.id))[0]?.id).toBe(pending.id)
+    await auth.addGroupMember(group.id, pending.id)
+    await auth.removeGroupMember(group.id, pending.id)
+    await auth.deleteGroup(group.id)
 
     await auth.changePassword('test-password-updated')
     expect(auth.credentials.value).toBeNull()

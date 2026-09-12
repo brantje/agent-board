@@ -25,6 +25,7 @@ export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
       [
         { label: 'Identity', type: 'label' },
         { label: 'Users', to: '/settings/users' },
+        { label: 'Groups', to: '/settings/groups' },
         { label: 'Authentication / Security', to: '/settings/authentication' }
       ],
       [

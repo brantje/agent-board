@@ -49,6 +49,21 @@ CREATE TABLE users (
 CREATE UNIQUE INDEX users_username_uq ON users (username);
 CREATE UNIQUE INDEX users_email_uq ON users (email);
 
+CREATE TABLE groups (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL CHECK (btrim(name) <> '' AND name = lower(btrim(name))),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX groups_name_uq ON groups (name);
+
+CREATE TABLE group_members (
+    group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    PRIMARY KEY (group_id, user_id)
+);
+
 CREATE TABLE auth_settings (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     access_token_lifetime_seconds integer NOT NULL DEFAULT 3600 CHECK (access_token_lifetime_seconds BETWEEN 300 AND 86400),
