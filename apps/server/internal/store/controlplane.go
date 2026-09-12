@@ -8,7 +8,6 @@ type ControlPlaneStore interface {
 	ExecutionStore
 	SchedulerStore
 	EvidenceStore
-	RuntimeAcquisitionStore
 
 	ListProjects(context.Context) ([]Project, error)
 	UpdateProject(context.Context, Project) (Project, error)
@@ -27,10 +26,6 @@ type ControlPlaneStore interface {
 	ListModelProfiles(context.Context, *string) ([]ModelProfile, error)
 	GetModelProfile(context.Context, *string, string) (ModelProfile, error)
 	UpdateModelProfile(context.Context, *string, ModelProfile) (ModelProfile, error)
-
-	ListRuntimes(context.Context, *string) ([]Runtime, error)
-	GetRuntime(context.Context, *string, string) (Runtime, error)
-	UpdateRuntime(context.Context, *string, Runtime) (Runtime, error)
 
 	ListAgents(context.Context, *string) ([]Agent, error)
 	GetAgentInScope(context.Context, *string, string) (Agent, error)
