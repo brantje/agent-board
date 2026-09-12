@@ -183,22 +183,18 @@ func (s *AuthService) AdminSetDisabled(ctx context.Context, actor AuthenticatedU
 	if err := requireDeploymentAdmin(actor); err != nil {
 		return AuthenticatedUser{}, err
 	}
-	user, err := s.store.GetUser(ctx, userID)
+	extended, err := s.phase2Store()
 	if err != nil {
 		return AuthenticatedUser{}, err
 	}
-	status := store.UserStatusDisabled
-	if !disabled {
-		status = store.UserStatusActive
-		if user.PasswordHash == "" {
-			status = store.UserStatusPending
-		}
-	}
-	updated, err := s.SetStatus(ctx, userID, status)
+	user, err := extended.SetUserDisabled(ctx, userID, disabled)
 	if errors.Is(err, store.ErrConflict) {
 		return AuthenticatedUser{}, NewError("conflict", "at least one active deployment admin is required", err)
 	}
-	return updated, err
+	if err != nil {
+		return AuthenticatedUser{}, err
+	}
+	return publicUser(user), nil
 }
 
 func (s *AuthService) UpdateOwnProfile(ctx context.Context, actor AuthenticatedUser, input UserProfileUpdate) (AuthenticatedUser, error) {
@@ -227,12 +223,13 @@ func (s *AuthService) ChangeOwnPassword(ctx context.Context, actor Authenticated
 	if err := requireAuthenticatedUser(actor); err != nil {
 		return AuthenticatedUser{}, err
 	}
+	user, err := s.store.GetUser(ctx, actor.ID)
+	if err != nil {
+		return AuthenticatedUser{}, authFailure()
+	}
+	expectedAuthVersion := user.AuthVersion
 	if !actor.ForcePasswordChange {
 		if currentPassword == "" {
-			return AuthenticatedUser{}, authFailure()
-		}
-		user, err := s.store.GetUser(ctx, actor.ID)
-		if err != nil {
 			return AuthenticatedUser{}, authFailure()
 		}
 		valid, err := verifyPassword(user.PasswordHash, currentPassword)
@@ -240,7 +237,7 @@ func (s *AuthService) ChangeOwnPassword(ctx context.Context, actor Authenticated
 			return AuthenticatedUser{}, authFailure()
 		}
 	}
-	return s.SetPassword(ctx, actor.ID, newPassword, false)
+	return s.setPasswordIfAuthVersion(ctx, actor.ID, expectedAuthVersion, newPassword, false)
 }
 
 func (s *AuthService) ListOwnSessions(ctx context.Context, actor AuthenticatedUser) ([]AuthSessionInfo, error) {
