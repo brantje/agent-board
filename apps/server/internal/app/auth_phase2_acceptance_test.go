@@ -32,6 +32,12 @@ func TestPhase2UserLifecycleInvalidatesAuthenticationAndForcesAdminPasswordChang
 	if pending.User.Status != store.UserStatusPending || pending.Setup.Token == "" || pending.Setup.ExpiresAt.Sub(now) != passwordTokenTTL {
 		t.Fatalf("unexpected pending user: %+v", pending)
 	}
+	if _, err := service.AdminCreatePasswordToken(ctx, admin, pending.User.ID, store.PasswordTokenPurposeReset); err == nil {
+		t.Fatal("pending user received reset token before setup")
+	}
+	if _, err := service.AdminSetPassword(ctx, admin, pending.User.ID, "admin-assigned-password"); err == nil {
+		t.Fatal("pending user received direct password before setup")
+	}
 	if _, err := service.AdminSetDisabled(ctx, admin, pending.User.ID, true); err == nil {
 		t.Fatal("pending user was disabled before setup")
 	}
@@ -52,6 +58,9 @@ func TestPhase2UserLifecycleInvalidatesAuthenticationAndForcesAdminPasswordChang
 	}
 	if member.Status != store.UserStatusActive {
 		t.Fatalf("setup did not activate member: %+v", member)
+	}
+	if _, err := service.AdminCreatePasswordToken(ctx, admin, member.ID, store.PasswordTokenPurposeSetup); err == nil {
+		t.Fatal("active user received a setup token")
 	}
 
 	memberTokens, err := service.Login(ctx, "member", "member-long-password")
@@ -135,6 +144,10 @@ func TestPhase2SharedProfilePasswordSettingsAndSessionPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	member, err := service.CompletePasswordToken(ctx, pending.Setup.Token, store.PasswordTokenPurposeSetup, "member-long-password")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.UpdateOwnProfile(ctx, admin, UserProfileUpdate{
 		Username: " MEMBER ", Email: "other@example.com", DisplayName: "Conflict",
 	}); err == nil {
@@ -167,7 +180,7 @@ func TestPhase2SharedProfilePasswordSettingsAndSessionPolicy(t *testing.T) {
 	if stored.AccessTokenLifetime != 2*time.Hour || stored.RefreshTokenLifetime != 7*24*time.Hour {
 		t.Fatalf("settings not persisted: %+v", stored)
 	}
-	if _, err := service.AdminSetPassword(ctx, updated, pending.User.ID, "not-complex-enough"); err == nil {
+	if _, err := service.AdminSetPassword(ctx, updated, member.ID, "not-complex-enough"); err == nil {
 		t.Fatal("admin password path ignored shared password policy")
 	}
 	if _, err := service.ChangeOwnPassword(ctx, updated, "not-complex-enough"); err == nil {
@@ -209,7 +222,7 @@ func TestPhase2SharedProfilePasswordSettingsAndSessionPolicy(t *testing.T) {
 		t.Fatalf("logout-others revoked current session: %v", err)
 	}
 
-	memberActor := AuthenticatedUser{ID: pending.User.ID, DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive}
+	memberActor := AuthenticatedUser{ID: member.ID, DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive}
 	if _, err := service.UpdateAuthSettings(ctx, memberActor, settings); err == nil {
 		t.Fatal("deployment member updated authentication settings")
 	}
