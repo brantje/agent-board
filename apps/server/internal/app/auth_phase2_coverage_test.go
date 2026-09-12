@@ -2,11 +2,133 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
+
+type phase1OnlyAuthStore struct {
+	store.AuthStore
+}
+
+type phase2MutationErrorStore struct {
+	*phase2LifecycleMemory
+	settingsErr error
+	passwordErr error
+	disabledErr error
+}
+
+func (m *phase2MutationErrorStore) GetAuthSettings(ctx context.Context) (store.AuthSettings, error) {
+	if m.settingsErr != nil {
+		return store.AuthSettings{}, m.settingsErr
+	}
+	return m.phase2LifecycleMemory.GetAuthSettings(ctx)
+}
+
+func (m *phase2MutationErrorStore) SetUserPasswordIfAuthVersion(ctx context.Context, id string, expectedAuthVersion int64, passwordHash string, force bool) (store.User, error) {
+	if m.passwordErr != nil {
+		return store.User{}, m.passwordErr
+	}
+	return m.phase2LifecycleMemory.SetUserPasswordIfAuthVersion(ctx, id, expectedAuthVersion, passwordHash, force)
+}
+
+func (m *phase2MutationErrorStore) SetUserDisabled(ctx context.Context, id string, disabled bool) (store.User, error) {
+	if m.disabledErr != nil {
+		return store.User{}, m.disabledErr
+	}
+	return m.phase2LifecycleMemory.SetUserDisabled(ctx, id, disabled)
+}
+
+func TestPhase2PasswordMutationErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(100, 0).UTC()
+	memory := &phase2LifecycleMemory{authMemory: newAuthMemory()}
+	injected := errors.New("injected mutation failure")
+	wrapped := &phase2MutationErrorStore{phase2LifecycleMemory: memory}
+	service := phase2ReviewAuthTestService(t, wrapped, &now)
+
+	wrapped.settingsErr = injected
+	if _, err := service.setPasswordIfAuthVersion(ctx, "user", 1, "long-enough-password", false); !errors.Is(err, injected) {
+		t.Fatalf("settings failure = %v, want injected failure", err)
+	}
+	wrapped.settingsErr = nil
+
+	if _, err := service.setPasswordIfAuthVersion(ctx, "user", 1, "short", false); err == nil {
+		t.Fatal("expected password policy failure")
+	}
+
+	phase1Service := phase2ReviewAuthTestService(t, phase1OnlyAuthStore{AuthStore: memory}, &now)
+	if _, err := phase1Service.setPasswordIfAuthVersion(ctx, "user", 1, "long-enough-password", false); err == nil {
+		t.Fatal("expected phase 2 store requirement failure")
+	}
+
+	wrapped.passwordErr = injected
+	if _, err := service.setPasswordIfAuthVersion(ctx, "user", 1, "long-enough-password", false); !errors.Is(err, injected) {
+		t.Fatalf("password mutation failure = %v, want injected failure", err)
+	}
+}
+
+func TestPhase2PasswordChangeAuthenticationErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(100, 0).UTC()
+	memory := &phase2LifecycleMemory{authMemory: newAuthMemory()}
+	service := phase2ReviewAuthTestService(t, memory, &now)
+
+	passwordHash, err := service.hashPassword("current-long-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	memory.users["member"] = store.User{
+		ID: "member", Username: "member", Email: "member@example.com", DisplayName: "Member",
+		PasswordHash: passwordHash, DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive, AuthVersion: 3,
+	}
+	actor := AuthenticatedUser{ID: "member", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive}
+
+	if _, err := service.ChangeOwnPassword(ctx, actor, "", "replacement-long-password"); err == nil {
+		t.Fatal("expected missing current password to fail")
+	}
+	if _, err := service.ChangeOwnPassword(ctx, actor, "wrong-long-password", "replacement-long-password"); err == nil {
+		t.Fatal("expected wrong current password to fail")
+	}
+	missing := actor
+	missing.ID = "missing"
+	if _, err := service.ChangeOwnPassword(ctx, missing, "current-long-password", "replacement-long-password"); err == nil {
+		t.Fatal("expected missing user to fail")
+	}
+	forcedMissing := missing
+	forcedMissing.ForcePasswordChange = true
+	forcedMissing.AuthVersion = 0
+	if _, err := service.ChangeOwnPassword(ctx, forcedMissing, "", "replacement-long-password"); err == nil {
+		t.Fatal("expected forced-change fallback for missing user to fail")
+	}
+}
+
+func TestPhase2AdminDisabledMutationErrorPaths(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(100, 0).UTC()
+	memory := &phase2LifecycleMemory{authMemory: newAuthMemory()}
+	wrapped := &phase2MutationErrorStore{phase2LifecycleMemory: memory}
+	service := phase2ReviewAuthTestService(t, wrapped, &now)
+	admin := phase2Admin()
+
+	wrapped.disabledErr = store.ErrConflict
+	if _, err := service.AdminSetDisabled(ctx, admin, "user", true); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("last-admin conflict = %v, want conflict", err)
+	}
+
+	injected := errors.New("injected status failure")
+	wrapped.disabledErr = injected
+	if _, err := service.AdminSetDisabled(ctx, admin, "user", true); !errors.Is(err, injected) {
+		t.Fatalf("status mutation failure = %v, want injected failure", err)
+	}
+
+	phase1Service := phase2ReviewAuthTestService(t, phase1OnlyAuthStore{AuthStore: memory}, &now)
+	if _, err := phase1Service.AdminSetDisabled(ctx, admin, "user", true); err == nil {
+		t.Fatal("expected phase 2 store requirement failure")
+	}
+}
 
 func TestPhase2AdminPasswordAndStatusRules(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
