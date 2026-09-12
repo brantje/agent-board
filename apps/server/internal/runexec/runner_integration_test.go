@@ -60,7 +60,7 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, nil)
+	services, err := app.NewExecutionServices(database, materializer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,7 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 		t.Fatal(err)
 	}
 	runnerConnector := NewRegistryConnector(services.ControlPlane.Runners.Connections)
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, git, runnerConnector)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.ExecutionSessions, engines, recorder, output, git, runnerConnector)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 	runIntegrationCommand(t, ctx, workspaceRecord.Path, "git", "diff", "--cached", "--exit-code")
 
 	sessions, err := database.ListExecutionSessionsByRunner(ctx, runner.ID, []string{"COMPLETED", "FAILED"})
-	if err != nil || len(sessions) != 1 || sessions[0].RunnerID != runner.ID || sessions[0].RuntimeInstanceID != "" || sessions[0].Status != "COMPLETED" {
+	if err != nil || len(sessions) != 1 || sessions[0].RunnerID != runner.ID || sessions[0].Status != "COMPLETED" {
 		t.Fatalf("runner sessions=%+v err=%v", sessions, err)
 	}
 	events, err := database.ListRunEvents(ctx, project.ID, run.ID, 0, 80)
