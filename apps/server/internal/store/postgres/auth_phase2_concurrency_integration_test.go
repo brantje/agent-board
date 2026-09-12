@@ -158,6 +158,7 @@ func TestAuthPhase2AtomicEnableDerivesStatusFromCurrentPasswordState(t *testing.
 	}
 
 	passwordless := authUser("passwordless-disabled", "passwordless-disabled@example.com", store.UserStatusDisabled)
+	passwordless.PasswordHash = ""
 	passwordless, err := s.CreateUser(ctx, passwordless)
 	if err != nil {
 		t.Fatal(err)
