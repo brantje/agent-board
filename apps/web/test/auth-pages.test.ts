@@ -51,6 +51,8 @@ describe('authentication pages', () => {
 
     const wrapper = mount(AuthPage, { global })
     await flushPromises()
+    expect(wrapper.text()).toContain('Sign in')
+    expect(wrapper.text()).toContain('Stay logged in')
     const inputs = wrapper.findAll('input')
     await inputs[0]!.setValue('admin@example.com')
     await inputs[1]!.setValue('test-password-value')
@@ -60,6 +62,32 @@ describe('authentication pages', () => {
 
     expect(login).toHaveBeenCalledWith('admin@example.com', 'test-password-value', true)
     expect(navigateTo).toHaveBeenCalledWith('/account')
+  })
+
+  it('submits bootstrap registration through Nuxt UI AuthForm fields', async () => {
+    const register = vi.fn(async () => activeUser)
+    vi.stubGlobal('useRoute', () => ({ params: { mode: 'register' }, query: {} }))
+    vi.stubGlobal('useAuth', () => ({ register }))
+    const navigateTo = vi.fn(async () => undefined)
+    vi.stubGlobal('navigateTo', navigateTo)
+
+    const wrapper = mount(AuthPage, { global })
+    expect(wrapper.text()).toContain('Create first administrator')
+    const inputs = wrapper.findAll('input')
+    await inputs[0]!.setValue('Administrator')
+    await inputs[1]!.setValue('admin')
+    await inputs[2]!.setValue('admin@example.com')
+    await inputs[3]!.setValue('test-password-value')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(register).toHaveBeenCalledWith({
+      displayName: 'Administrator',
+      username: 'admin',
+      email: 'admin@example.com',
+      password: 'test-password-value'
+    })
+    expect(navigateTo).toHaveBeenCalledWith('/auth/login')
   })
 
   it('clears setup password plaintext after consuming a one-time token', async () => {
