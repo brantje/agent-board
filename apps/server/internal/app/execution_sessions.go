@@ -25,11 +25,6 @@ type ExecutionSessionStore interface {
 	TransitionExecutionSession(context.Context, store.ExecutionSessionTransition) (store.ExecutionSession, error)
 }
 
-type RunnerConnectionManager interface {
-	Connect(context.Context, string, string) (runner.Client, error)
-	Reconcile(context.Context, string, string, string) (runner.ProcessSession, bool, error)
-}
-
 type RunnerRegistry interface {
 	Connect(context.Context, string, string) (runner.Client, error)
 	Reconcile(context.Context, string, string, string) (runner.ProcessSession, bool, error)
@@ -61,12 +56,9 @@ type ExecutionSessionService struct {
 	live                  map[string]*ExecutionProcess
 }
 
-func NewExecutionSessionService(sessionStore ExecutionSessionStore, fallback RunnerConnectionManager, registry RunnerRegistry) (*ExecutionSessionService, error) {
+func NewExecutionSessionService(sessionStore ExecutionSessionStore, registry RunnerRegistry) (*ExecutionSessionService, error) {
 	if sessionStore == nil {
 		return nil, fmt.Errorf("execution session store is required")
-	}
-	if registry == nil && fallback != nil {
-		registry = fallback
 	}
 	if registry == nil {
 		registry = noopRunnerRegistry{}
