@@ -45,6 +45,7 @@ describe('settings navigation helper', () => {
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/settings/model-profiles')
     expect(links.find(item => item.label === 'Agents')?.to).toBe('/settings/agents')
     expect(links.find(item => item.label === 'Runners')?.to).toBe('/settings/runners')
+    expect(links.find(item => item.label === 'Runtimes')).toBeUndefined()
     expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
   })
 
@@ -54,7 +55,7 @@ describe('settings navigation helper', () => {
     expect(links.find(item => item.label === 'Project')?.to).toBe('/projects/p/settings')
     expect(links.find(item => item.label === 'Providers')?.to).toBe('/projects/p/settings/providers')
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/projects/p/settings/model-profiles')
-    expect(links.find(item => item.label === 'Runtimes')?.to).toBe('/projects/p/settings/runtimes')
+    expect(links.find(item => item.label === 'Runtimes')).toBeUndefined()
     expect(links.find(item => item.label === 'Agents')).toBeUndefined()
     expect(links.find(item => item.label === 'Runners')).toBeUndefined()
     expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
@@ -101,6 +102,7 @@ describe('settings route wiring', () => {
     vi.stubGlobal('useRoute', () => ({ params: { projectID: 'project-a' } }))
     const settingsPages = Object.entries(pages).filter(([path]) => path.includes('/settings/'))
     for (const [path, page] of settingsPages) {
+      expect(path).not.toContain('/settings/runtimes.vue')
       const wrapper = mount(page, {
         global: {
           stubs: {

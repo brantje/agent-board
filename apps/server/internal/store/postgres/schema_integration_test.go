@@ -13,9 +13,9 @@ func TestCanonicalSchemaCreatesRequiredTables(t *testing.T) {
 	ctx := context.Background()
 
 	required := []string{
-		"projects", "issues", "providers", "model_profiles", "runtimes",
+		"projects", "issues", "providers", "model_profiles",
 		"agents", "workspaces", "runs", "scheduler_jobs",
-		"scheduler_leases", "scheduler_capacity_reservations", "runtime_instances",
+		"scheduler_leases", "scheduler_capacity_reservations",
 		"execution_sessions", "questions", "decisions", "reviews", "run_provenance",
 		"events", "raw_output_chunks", "artifacts",
 	}
@@ -43,39 +43,37 @@ func TestCanonicalSchemaCreatesRequiredTables(t *testing.T) {
 			t.Errorf("required table %q is missing", name)
 		}
 	}
+	for _, name := range []string{"runtimes", "runtime_instances"} {
+		if seen[name] {
+			t.Errorf("removed Runtime table %q is still present", name)
+		}
+	}
 }
 
-func TestSchemaEnforcesWorkspaceAndRuntimeIdentity(t *testing.T) {
+func TestSchemaEnforcesWorkspaceIdentityAndRunnerOnlyExecution(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
 
 	projectID := insertProject(t, pool, "project-a")
 	issueID := insertIssue(t, pool, projectID, "Issue A")
-	workspaceID := insertWorkspace(t, pool, projectID, issueID)
+	_ = insertWorkspace(t, pool, projectID, issueID)
 
 	if _, err := pool.Exec(ctx, `INSERT INTO workspaces (project_id, issue_id, path, working_branch) VALUES ($1, $2, '/tmp/duplicate', 'issue/duplicate')`, projectID, issueID); err == nil {
 		t.Fatal("expected second Workspace for one Issue to be rejected")
 	}
 
-	runtimeID := insertRuntime(t, pool, nil, "global-runtime")
-	instanceID := insertRuntimeInstance(t, pool, projectID, workspaceID, runtimeID)
-	otherIssueID := insertIssue(t, pool, projectID, "Issue B")
-	otherWorkspaceID := insertWorkspace(t, pool, projectID, otherIssueID)
-
-	if _, err := pool.Exec(ctx, `UPDATE runtime_instances SET workspace_id = $1 WHERE id = $2`, otherWorkspaceID, instanceID); err == nil {
-		t.Fatal("expected Runtime Instance Workspace rebinding to be rejected")
-	}
-
-	var runIDColumnCount int
-	if err := pool.QueryRow(ctx, `
-		SELECT count(*)
-		FROM information_schema.columns
-		WHERE table_schema = 'public' AND table_name = 'runtime_instances' AND column_name = 'run_id'
-	`).Scan(&runIDColumnCount); err != nil {
-		t.Fatalf("inspect runtime_instances columns: %v", err)
-	}
-	if runIDColumnCount != 0 {
-		t.Fatal("runtime_instances must not durably bind to a Run")
+	for _, tableName := range []string{"execution_sessions", "events"} {
+		var count int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*)
+			FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = $1 AND column_name = 'runtime_instance_id'
+		`, tableName).Scan(&count); err != nil {
+			t.Fatalf("inspect %s columns: %v", tableName, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s must not contain runtime_instance_id", tableName)
+		}
 	}
 }
 
@@ -191,24 +189,6 @@ func insertWorkspace(t *testing.T, pool *pgxpool.Pool, projectID, issueID string
 	var id string
 	if err := pool.QueryRow(context.Background(), `INSERT INTO workspaces (project_id, issue_id, path, working_branch) VALUES ($1, $2, $3, $4) RETURNING id::text`, projectID, issueID, "/workspace/"+issueID, "issue/"+issueID).Scan(&id); err != nil {
 		t.Fatalf("insert Workspace: %v", err)
-	}
-	return id
-}
-
-func insertRuntime(t *testing.T, pool *pgxpool.Pool, projectID *string, name string) string {
-	t.Helper()
-	var id string
-	if err := pool.QueryRow(context.Background(), `INSERT INTO runtimes (project_id, name, kind, image, network_policy, workspace_policy, enabled) VALUES ($1, $2, 'docker', 'agent-board/runtime:test', 'restricted', 'issue', true) RETURNING id::text`, projectID, name).Scan(&id); err != nil {
-		t.Fatalf("insert Runtime: %v", err)
-	}
-	return id
-}
-
-func insertRuntimeInstance(t *testing.T, pool *pgxpool.Pool, projectID, workspaceID, runtimeID string) string {
-	t.Helper()
-	var id string
-	if err := pool.QueryRow(context.Background(), `INSERT INTO runtime_instances (project_id, workspace_id, runtime_id, status) VALUES ($1, $2, $3, 'PROVISIONING') RETURNING id::text`, projectID, workspaceID, runtimeID).Scan(&id); err != nil {
-		t.Fatalf("insert Runtime Instance: %v", err)
 	}
 	return id
 }
