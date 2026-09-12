@@ -89,12 +89,12 @@ func TestEnsureProvenanceRecordsRunnerIdentity(t *testing.T) {
 
 func TestEnsureProvenanceRejectsDifferentHistoricalContext(t *testing.T) {
 	evidence := &fakeProvenanceStore{}
-	first := SafeContext{Run: RunContext{ID: "run-1", Attempt: 1}, Runtime: RuntimeContext{Image: "runtime:v1"}}
+	first := SafeContext{Run: RunContext{ID: "run-1", Attempt: 1}, Provider: ProviderContext{ID: "provider-1", Name: "provider-v1"}}
 	if err := EnsureProvenance(context.Background(), evidence, "project-1", "run-1", first); err != nil {
 		t.Fatal(err)
 	}
 	second := first
-	second.Runtime.Image = "runtime:v2"
+	second.Provider.Name = "provider-v2"
 	err := EnsureProvenance(context.Background(), evidence, "project-1", "run-1", second)
 	apiErr, ok := AsError(err)
 	if !ok || apiErr.Code != "execution_provenance_conflict" || !errors.Is(err, store.ErrConflict) {
@@ -103,14 +103,14 @@ func TestEnsureProvenanceRejectsDifferentHistoricalContext(t *testing.T) {
 }
 
 func TestEnsureProvenancePreservesConflictFromConcurrentDifferentWriter(t *testing.T) {
-	winner := SafeContext{Run: RunContext{ID: "run-1", Attempt: 1}, Runtime: RuntimeContext{Image: "runtime:winner"}}
+	winner := SafeContext{Run: RunContext{ID: "run-1", Attempt: 1}, Runner: &RunnerContext{ID: "runner-winner", Name: "winner"}}
 	winnerSnapshot, err := json.Marshal(Provenance{SchemaVersion: ProvenanceSchemaVersion, Context: winner})
 	if err != nil {
 		t.Fatal(err)
 	}
 	evidence := &racingProvenanceStore{snapshot: winnerSnapshot}
 	loser := winner
-	loser.Runtime.Image = "runtime:loser"
+	loser.Runner = &RunnerContext{ID: "runner-loser", Name: "loser"}
 
 	err = EnsureProvenance(context.Background(), evidence, "project-1", "run-1", loser)
 	apiErr, ok := AsError(err)
