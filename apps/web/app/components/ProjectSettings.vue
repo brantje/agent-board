@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import type { Project } from '../types/api'
 import { apiPath } from '../utils/api'
 import { useResource } from '../composables/useResource'
+import ProjectAccessSettings from './ProjectAccessSettings.vue'
 import ProjectEditor from './ProjectEditor.vue'
 
 const props = defineProps<{ projectId: string }>()
@@ -31,7 +32,10 @@ function cancel() {
       empty-description="This Project is unavailable or belongs to another project scope."
       @retry="refresh"
     >
-      <ProjectEditor v-if="data" :key="editorKey" :project="data" @saved="savedProject" @cancel="cancel" />
+      <template v-if="data">
+        <ProjectEditor :key="editorKey" :project="data" @saved="savedProject" @cancel="cancel" />
+        <ProjectAccessSettings :project-id="projectId" />
+      </template>
     </AsyncState>
   </PageFrame>
 </template>

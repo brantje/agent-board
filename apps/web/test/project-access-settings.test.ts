@@ -36,8 +36,8 @@ describe('ProjectAccessSettings', () => {
   it('changes roles and surfaces the final-direct-admin conflict', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
       if (path.endsWith('/effective-role')) return json({ role: 'admin' })
-      if (path.endsWith('/access/users') && !options.method) return json([{ id: userId, username: 'alice', email: 'alice@example.com', displayName: 'Alice', status: 'active', role: 'admin' }])
-      if (path.endsWith('/access/groups') && !options.method) return json([])
+      if (path.endsWith('/access/users') && options.method === 'GET') return json([{ id: userId, username: 'alice', email: 'alice@example.com', displayName: 'Alice', status: 'active', role: 'admin' }])
+      if (path.endsWith('/access/groups') && options.method === 'GET') return json([])
       if (path.endsWith(`/access/users/${userId}`) && options.method === 'PUT') return json({ role: 'member' })
       if (path.endsWith(`/access/users/${userId}`) && options.method === 'DELETE') return json({ error: { code: 'last_project_admin' } }, 409)
       throw new Error(`unexpected ${path} ${options.method}`)
@@ -58,8 +58,8 @@ describe('ProjectAccessSettings', () => {
   it('searches active users and adds a selected role', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
       if (path.endsWith('/effective-role')) return json({ role: 'admin' })
-      if (path.endsWith('/access/users') && !options.method) return json([])
-      if (path.endsWith('/access/groups') && !options.method) return json([])
+      if (path.endsWith('/access/users') && options.method === 'GET') return json([])
+      if (path.endsWith('/access/groups') && options.method === 'GET') return json([])
       if (path.includes('/access/directory/users?q=bob')) return json([{ id: candidateId, username: 'bob', email: 'bob@example.com', displayName: 'Bob' }])
       if (path.endsWith(`/access/users/${candidateId}`) && options.method === 'PUT') return json({ role: 'viewer' })
       throw new Error(`unexpected ${path} ${options.method}`)
