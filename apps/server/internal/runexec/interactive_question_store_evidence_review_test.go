@@ -25,12 +25,11 @@ func TestInteractiveQuestionerOpenDoesNotDuplicateStoreOwnedEvidence(t *testing.
 		},
 	}}
 	q := &interactiveQuestioner{
-		store:             &interactiveQuestionReadStore{},
-		interactive:       lifecycle,
-		events:            recorder,
-		safe:              interactiveSafeContext(),
-		runtimeInstanceID: "runtime-instance-1",
-		engine:            "opencode",
+		store:       &interactiveQuestionReadStore{},
+		interactive: lifecycle,
+		events:      recorder,
+		safe:        interactiveSafeContext(),
+		engine:      "opencode",
 	}
 
 	opened, err := q.Open(context.Background(), "ses/req/0", engine.QuestionRequest{
@@ -47,7 +46,7 @@ func TestInteractiveQuestionerOpenDoesNotDuplicateStoreOwnedEvidence(t *testing.
 	if len(eventStore.events) != 0 {
 		t.Fatalf("store-owned lifecycle evidence was duplicated: %+v", eventStore.events)
 	}
-	if len(lifecycle.opened) != 1 || lifecycle.opened[0].RuntimeInstanceID != "runtime-instance-1" {
+	if len(lifecycle.opened) != 1 || lifecycle.opened[0].CorrelationKey != "ses/req/0" || lifecycle.opened[0].Engine != "opencode" {
 		t.Fatalf("open command=%+v", lifecycle.opened)
 	}
 }
@@ -71,12 +70,11 @@ func TestInteractiveQuestionerOpenBatchDoesNotDuplicateStoreOwnedEvidence(t *tes
 		},
 	}}
 	q := &interactiveQuestioner{
-		store:             &interactiveQuestionReadStore{},
-		interactive:       lifecycle,
-		events:            recorder,
-		safe:              interactiveSafeContext(),
-		runtimeInstanceID: "runtime-instance-1",
-		engine:            "opencode",
+		store:       &interactiveQuestionReadStore{},
+		interactive: lifecycle,
+		events:      recorder,
+		safe:        interactiveSafeContext(),
+		engine:      "opencode",
 	}
 
 	opened, err := q.OpenBatch(context.Background(), []engine.CorrelatedQuestionRequest{{
@@ -96,7 +94,7 @@ func TestInteractiveQuestionerOpenBatchDoesNotDuplicateStoreOwnedEvidence(t *tes
 	if len(eventStore.events) != 0 {
 		t.Fatalf("store-owned lifecycle evidence was duplicated: %+v", eventStore.events)
 	}
-	if len(lifecycle.batches) != 1 || len(lifecycle.batches[0]) != 1 || lifecycle.batches[0][0].RuntimeInstanceID != "runtime-instance-1" {
+	if len(lifecycle.batches) != 1 || len(lifecycle.batches[0]) != 1 || lifecycle.batches[0][0].CorrelationKey != "ses/req/0" || lifecycle.batches[0][0].Engine != "opencode" {
 		t.Fatalf("batch commands=%+v", lifecycle.batches)
 	}
 }
@@ -113,12 +111,11 @@ func TestInteractiveQuestionerOpenFallsBackToRecorderWhenStoreReturnsNoEvents(t 
 		EnteredWaiting: true,
 	}}
 	q := &interactiveQuestioner{
-		store:             &interactiveQuestionReadStore{},
-		interactive:       lifecycle,
-		events:            recorder,
-		safe:              interactiveSafeContext(),
-		runtimeInstanceID: "runtime-instance-1",
-		engine:            "opencode",
+		store:       &interactiveQuestionReadStore{},
+		interactive: lifecycle,
+		events:      recorder,
+		safe:        interactiveSafeContext(),
+		engine:      "opencode",
 	}
 
 	if _, err := q.Open(context.Background(), "ses/req/0", engine.QuestionRequest{
@@ -151,12 +148,11 @@ func TestInteractiveQuestionerOpenBatchFallsBackToRecorderWhenStoreReturnsNoEven
 		}},
 	}}
 	q := &interactiveQuestioner{
-		store:             &interactiveQuestionReadStore{},
-		interactive:       lifecycle,
-		events:            recorder,
-		safe:              interactiveSafeContext(),
-		runtimeInstanceID: "runtime-instance-1",
-		engine:            "opencode",
+		store:       &interactiveQuestionReadStore{},
+		interactive: lifecycle,
+		events:      recorder,
+		safe:        interactiveSafeContext(),
+		engine:      "opencode",
 	}
 
 	opened, err := q.OpenBatch(context.Background(), []engine.CorrelatedQuestionRequest{{
