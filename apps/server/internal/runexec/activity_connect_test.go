@@ -8,7 +8,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/runner"
@@ -21,11 +20,7 @@ func TestProcessLauncherRecordActivityPersistsOnlyCanonicalEngineEvents(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	launcher := &processLauncher{
-		events:            recorder,
-		safe:              interactiveSafeContext(),
-		runtimeInstanceID: "runtime-instance-1",
-	}
+	launcher := &processLauncher{events: recorder, safe: interactiveSafeContext()}
 	activity := engine.ActivityEvent{Type: "agent.message", Payload: map[string]any{"message": "visible progress", "source": "opencode"}}
 	if err := launcher.RecordActivity(context.Background(), activity); err != nil {
 		t.Fatalf("RecordActivity() error=%v", err)
@@ -39,21 +34,6 @@ func TestProcessLauncherRecordActivityPersistsOnlyCanonicalEngineEvents(t *testi
 	var unavailable *processLauncher
 	if err := unavailable.RecordActivity(context.Background(), activity); err == nil {
 		t.Fatal("nil activity sink unexpectedly accepted event")
-	}
-}
-
-func TestProcessLauncherOmitsEmptyRuntimeInstanceID(t *testing.T) {
-	events := &questionEventStore{}
-	recorder, err := evidence.NewRecorder(events, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	launcher := &processLauncher{events: recorder, safe: interactiveSafeContext()}
-	if err := launcher.RecordActivity(context.Background(), engine.ActivityEvent{Type: "agent.message", Payload: map[string]any{"message": "runner progress"}}); err != nil {
-		t.Fatal(err)
-	}
-	if len(events.events) != 1 || events.events[0].RuntimeInstanceID != nil {
-		t.Fatalf("empty runtime instance must be omitted, events=%+v", events.events)
 	}
 }
 
@@ -100,84 +80,6 @@ func (p *launcherDialTransport) Terminate(context.Context) error { p.finish(); r
 func (p *launcherDialTransport) Kill(context.Context) error      { p.finish(); return nil }
 func (p *launcherDialTransport) finish()                         { p.once.Do(func() { close(p.done) }) }
 
-func TestCapturingProcessDialsThroughItsOwningExecutionSession(t *testing.T) {
-	safe := processTestSafeContext(t.TempDir())
-	evidenceStore := &processTestStore{}
-	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder, err := evidence.NewRecorder(evidenceStore, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	output, err := evidence.NewOutputRecorder(evidenceStore, blobs, 16)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	sessionStore := &launcherSessionStore{
-		run:      store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
-		instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"},
-	}
-	local, remote := net.Pipe()
-	t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
-	client := &launcherDialClient{launcherClient: newLauncherClient("", "", 0, nil), conn: local}
-	transportSessions, err := newLauncherExecutionSessionService(sessionStore, client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	authorized, err := app.NewAuthorizedExecutionSessionService(transportSessions, launcherPreparer{runtimeID: safe.Runtime.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	launcher := &processLauncher{
-		sessions:          authorized,
-		events:            recorder,
-		output:            output,
-		safe:              safe,
-		runtimeInstanceID: "runtime-instance",
-		scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
-	}
-	process, err := launcher.Start(t.Context(), engine.ProcessRequest{Kind: "tool", Name: "opencode-server", Command: []string{"opencode", "serve"}, CWD: "/workspace"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	connector, ok := process.(engine.SessionConnector)
-	if !ok {
-		t.Fatal("capturing process does not expose session connector")
-	}
-	conn, err := connector.DialContext(t.Context(), "tcp", "127.0.0.1:4096")
-	if err != nil {
-		t.Fatalf("DialContext() error=%v", err)
-	}
-	if client.sessionID != process.ID() || client.network != "tcp" || client.address != "127.0.0.1:4096" {
-		t.Fatalf("dial forwarded session=%q network=%q address=%q process=%q", client.sessionID, client.network, client.address, process.ID())
-	}
-
-	writeDone := make(chan error, 1)
-	go func() {
-		_, writeErr := remote.Write([]byte("ok"))
-		writeDone <- writeErr
-	}()
-	buffer := make([]byte, 2)
-	if _, err := io.ReadFull(conn, buffer); err != nil || string(buffer) != "ok" {
-		t.Fatalf("session conn read=%q err=%v", buffer, err)
-	}
-	if err := <-writeDone; err != nil {
-		t.Fatalf("remote write error=%v", err)
-	}
-	_ = conn.Close()
-
-	if client.process == nil {
-		t.Fatal("dial transport process was not created")
-	}
-	client.process.finish()
-	if _, err := process.Wait(t.Context()); err != nil {
-		t.Fatalf("Wait() error=%v", err)
-	}
-}
-
 func TestCapturingProcessDialsRunnerOwnedSession(t *testing.T) {
 	safe := processTestSafeContext(t.TempDir())
 	evidenceStore := &processTestStore{}
@@ -194,17 +96,11 @@ func TestCapturingProcessDialsRunnerOwnedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sessionStore := &launcherSessionStore{
-		run: store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
-	}
+	sessionStore := &launcherSessionStore{run: store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID}}
 	local, remote := net.Pipe()
 	t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
 	client := &launcherDialClient{launcherClient: newLauncherClient("", "", 0, nil), conn: local}
-	transportSessions, err := newLauncherExecutionSessionService(sessionStore, client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	authorized, err := app.NewAuthorizedExecutionSessionService(transportSessions, launcherPreparer{})
+	authorized, err := newLauncherAuthorizedSessions(sessionStore, client)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +117,7 @@ func TestCapturingProcessDialsRunnerOwnedSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	record := process.(*capturingProcess).process.Record()
-	if record.RunnerID != "runner-1" || record.RuntimeInstanceID != "" {
+	if record.RunnerID != "runner-1" {
 		t.Fatalf("runner-owned session record=%+v", record)
 	}
 	connector, ok := process.(engine.SessionConnector)
