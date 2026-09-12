@@ -15,6 +15,18 @@ func (blockingRunnerEngine) Execute(context.Context, engine.Request) (engine.Res
 	return engine.Result{}, engine.ErrWaitingForInput
 }
 
+type runnerQuestionStore struct {
+	*orchestrationQuestionStore
+	open store.Question
+}
+
+func (s *runnerQuestionStore) GetOpenBlockingQuestion(context.Context, string, string) (store.Question, error) {
+	if s.open.ID == "" {
+		return store.Question{}, store.ErrNotFound
+	}
+	return s.open, nil
+}
+
 func TestRunEngineOnRunnerKeepsWorkspaceOwnedWhileWaitingForInput(t *testing.T) {
 	repo := initProcessTestRepository(t)
 	safe := processTestSafeContext(repo)
