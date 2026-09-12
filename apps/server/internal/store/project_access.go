@@ -71,4 +71,8 @@ type ProjectAccessStore interface {
 	ListProjectGroupAccess(context.Context, string) ([]ProjectGroupAccessView, error)
 	UpsertProjectGroupAccess(context.Context, ProjectGroupAccess) (ProjectGroupAccess, error)
 	DeleteProjectGroupAccess(context.Context, string, string) error
+
+	GetProjectAccessUser(context.Context, string) (User, error)
+	ListProjectAccessUsers(context.Context) ([]User, error)
+	ListProjectAccessGroups(context.Context) ([]Group, error)
 }
