@@ -17,5 +17,7 @@ describe('provider badges', () => {
     expect(providerModelsBadgeLabel(3, 3)).toBe('Models: 3 / 3')
     expect(providerModelCounts({ filteredModelCount: 2, totalModelCount: 2 })).toEqual({ filtered: 2, total: 2 })
     expect(providerModelCounts({ filteredModelCount: null, totalModelCount: 2 })).toBeUndefined()
+    expect(providerModelCounts({ filteredModelCount: 0, totalModelCount: 0 })).toEqual({ filtered: 0, total: 0 })
+    expect(providerHealthBadgeColor(undefined as unknown as string)).toBe('neutral')
   })
 })

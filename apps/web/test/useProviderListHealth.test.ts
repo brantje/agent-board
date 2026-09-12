@@ -86,6 +86,26 @@ describe('useProviderListHealth', () => {
     scope.stop()
   })
 
+  it('preserves prior overlay counts when a refresh probe fails transiently', async () => {
+    vi.mocked(apiRequest)
+      .mockResolvedValueOnce({ models: [{ id: 'a' }, { id: 'b' }], total: 4 })
+      .mockRejectedValueOnce(new ApiError(0, 'network', 'Unable to reach the Agent Board API.'))
+    const providers = ref([{ id: 'p1' }])
+    const scope = effectScope()
+    let overlays = ref<Record<string, ProviderHealthOverlay>>({})
+    let refresh = async () => {}
+    scope.run(() => {
+      const result = useProviderListHealth(providers)
+      overlays = result.overlays
+      refresh = result.refresh
+    })
+    await flushPromises()
+    await refresh()
+    await flushPromises()
+    expect(overlays.value.p1).toEqual({ checking: false, filtered: 2, total: 4, healthStatus: 'HEALTHY' })
+    scope.stop()
+  })
+
   it('aborts in-flight probes when the provider list changes', async () => {
     let resolveRequest: ((value: { models: Array<{ id: string }>; total: number }) => void) | undefined
     vi.mocked(apiRequest).mockImplementation(() => new Promise(resolve => {

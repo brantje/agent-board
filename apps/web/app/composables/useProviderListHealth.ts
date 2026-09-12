@@ -25,7 +25,7 @@ export function useProviderListHealth(providers: MaybeRefOrGetter<ConfigRecord[]
     const scope = toValue(projectId)
     const controller = new AbortController()
     controllers.set(id, controller)
-    overlays.value = { ...overlays.value, [id]: { checking: true } }
+    overlays.value = { ...overlays.value, [id]: { ...overlays.value[id], checking: true } }
     try {
       const result = await apiRequest<ProviderModelList>(providerModelsPath(id, scope), { signal: controller.signal })
       if (current !== generation) return
@@ -61,7 +61,7 @@ export function useProviderListHealth(providers: MaybeRefOrGetter<ConfigRecord[]
     const items = toValue(providers) ?? []
     const ids = items.map(item => String(item.id ?? '').trim()).filter(Boolean)
     const next: Record<string, ProviderHealthOverlay> = {}
-    for (const id of ids) next[id] = { checking: true }
+    for (const id of ids) next[id] = { ...overlays.value[id], checking: true }
     overlays.value = next
     await Promise.all(ids.map(id => probeProvider(id, current)))
   }
