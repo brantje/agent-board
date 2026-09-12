@@ -17,9 +17,6 @@ func coverageProvider() store.Provider {
 func coverageModel() store.ModelProfile {
 	return store.ModelProfile{ID: "model", ProjectID: coverageScope(), ProviderID: "provider", Name: "Model", Model: "model", GenerationSettings: store.EmptyObject, Enabled: true}
 }
-func coverageRuntime() store.Runtime {
-	return store.Runtime{ID: "runtime", ProjectID: coverageScope(), Name: "Runtime", Kind: "docker", Image: "image", NetworkPolicy: "none", WorkspacePolicy: "issue", Capabilities: store.EmptyObject, Enabled: true, HealthStatus: "UNKNOWN"}
-}
 func coverageAgent() store.Agent {
 	return store.Agent{ID: "agent", ProjectID: coverageScope(), Name: "Agent", Engine: "test", ModelProfileID: "model", EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"}
 }
@@ -64,18 +61,6 @@ func (f *fakeStore) GetModelProfile(context.Context, *string, string) (store.Mod
 func (f *fakeStore) UpdateModelProfile(_ context.Context, _ *string, v store.ModelProfile) (store.ModelProfile, error) {
 	return v, nil
 }
-func (f *fakeStore) ListRuntimes(context.Context, *string) ([]store.Runtime, error) {
-	return []store.Runtime{coverageRuntime()}, nil
-}
-func (f *fakeStore) CreateRuntime(_ context.Context, v store.Runtime) (store.Runtime, error) {
-	return v, nil
-}
-func (f *fakeStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) {
-	return coverageRuntime(), nil
-}
-func (f *fakeStore) UpdateRuntime(_ context.Context, _ *string, v store.Runtime) (store.Runtime, error) {
-	return v, nil
-}
 func (f *fakeStore) ListAgents(context.Context, *string) ([]store.Agent, error) {
 	return []store.Agent{f.agent}, nil
 }
@@ -115,14 +100,12 @@ func TestControlPlaneServiceHappyPaths(t *testing.T) {
 	p := f.project
 	provider := coverageProvider()
 	model := coverageModel()
-	runtime := coverageRuntime()
 	agent := f.agent
 	issue := coverageIssue()
 	calls := []func() error{
 		func() error { _, e := svc.ListProjects(ctx); return e }, func() error { _, e := svc.CreateProject(ctx, p); return e }, func() error { _, e := svc.GetProject(ctx, p.ID); return e }, func() error { _, e := svc.UpdateProject(ctx, p); return e },
 		func() error { _, e := svc.ListProviders(ctx, nil); return e }, func() error { _, e := svc.CreateProvider(ctx, provider); return e }, func() error { _, e := svc.GetProvider(ctx, nil, provider.ID); return e }, func() error { _, e := svc.UpdateProvider(ctx, nil, provider); return e }, func() error { _, e := svc.ListProviders(ctx, scope); return e }, func() error { _, e := svc.GetProvider(ctx, scope, provider.ID); return e }, func() error { _, e := svc.UpdateProvider(ctx, scope, provider); return e },
 		func() error { _, e := svc.ListModelProfiles(ctx, nil); return e }, func() error { _, e := svc.ListModelProfiles(ctx, scope); return e }, func() error { _, e := svc.GetModelProfile(ctx, scope, model.ID); return e }, func() error { _, e := svc.CreateModelProfile(ctx, model); return e }, func() error { _, e := svc.UpdateModelProfile(ctx, scope, model); return e },
-		func() error { _, e := svc.ListRuntimes(ctx, scope); return e }, func() error { _, e := svc.GetRuntime(ctx, scope, runtime.ID); return e }, func() error { _, e := svc.CreateRuntime(ctx, runtime); return e }, func() error { _, e := svc.UpdateRuntime(ctx, scope, runtime); return e },
 		func() error { _, e := svc.ListAgents(ctx, scope); return e }, func() error { _, e := svc.GetAgent(ctx, scope, agent.ID); return e }, func() error { _, e := svc.CreateAgent(ctx, agent); return e }, func() error { _, e := svc.UpdateAgent(ctx, scope, agent); return e },
 		func() error { _, e := svc.ListIssues(ctx, pid); return e }, func() error { _, e := svc.GetIssue(ctx, pid, issue.ID); return e }, func() error { _, e := svc.CreateIssue(ctx, issue); return e }, func() error { _, e := svc.UpdateIssue(ctx, issue); return e }, func() error { _, e := svc.ListRuns(ctx, pid); return e }, func() error { _, e := svc.GetRun(ctx, pid, "run"); return e }, func() error { _, _, e := svc.AssignIssue(ctx, pid, issue.ID, agent.ID); return e }, func() error { _, e := svc.ListProjectEventsAfter(ctx, pid, ""); return e },
 	}
@@ -145,7 +128,7 @@ func TestControlPlaneServiceScopeAndValidationErrors(t *testing.T) {
 	scope := &pid
 	svc := New(&missingProjectStore{})
 	scopeCalls := []func() error{
-		func() error { _, e := svc.ListProviders(ctx, scope); return e }, func() error { _, e := svc.ListModelProfiles(ctx, scope); return e }, func() error { _, e := svc.GetRuntime(ctx, scope, "runtime"); return e }, func() error { _, e := svc.GetAgent(ctx, scope, "agent"); return e }, func() error { _, e := svc.ListIssues(ctx, pid); return e }, func() error { _, e := svc.GetRun(ctx, pid, "run"); return e },
+		func() error { _, e := svc.ListProviders(ctx, scope); return e }, func() error { _, e := svc.ListModelProfiles(ctx, scope); return e }, func() error { _, e := svc.GetAgent(ctx, scope, "agent"); return e }, func() error { _, e := svc.ListIssues(ctx, pid); return e }, func() error { _, e := svc.GetRun(ctx, pid, "run"); return e },
 	}
 	for _, call := range scopeCalls {
 		err := call()
@@ -157,7 +140,7 @@ func TestControlPlaneServiceScopeAndValidationErrors(t *testing.T) {
 	good := &fakeStore{project: store.Project{ID: pid}, agent: store.Agent{ID: "agent"}}
 	s := New(good)
 	badCalls := []func() error{
-		func() error { _, e := s.CreateProject(ctx, store.Project{}); return e }, func() error { _, e := s.UpdateProject(ctx, store.Project{}); return e }, func() error { _, e := s.CreateProvider(ctx, store.Provider{}); return e }, func() error { _, e := s.UpdateProvider(ctx, nil, store.Provider{}); return e }, func() error { _, e := s.CreateModelProfile(ctx, store.ModelProfile{}); return e }, func() error { _, e := s.UpdateModelProfile(ctx, nil, store.ModelProfile{}); return e }, func() error { _, e := s.CreateRuntime(ctx, store.Runtime{}); return e }, func() error { _, e := s.UpdateRuntime(ctx, nil, store.Runtime{}); return e }, func() error { _, e := s.CreateAgent(ctx, store.Agent{}); return e }, func() error { _, e := s.UpdateAgent(ctx, nil, store.Agent{}); return e }, func() error { _, e := s.CreateIssue(ctx, store.Issue{ProjectID: pid}); return e }, func() error { _, e := s.UpdateIssue(ctx, store.Issue{ProjectID: pid}); return e },
+		func() error { _, e := s.CreateProject(ctx, store.Project{}); return e }, func() error { _, e := s.UpdateProject(ctx, store.Project{}); return e }, func() error { _, e := s.CreateProvider(ctx, store.Provider{}); return e }, func() error { _, e := s.UpdateProvider(ctx, nil, store.Provider{}); return e }, func() error { _, e := s.CreateModelProfile(ctx, store.ModelProfile{}); return e }, func() error { _, e := s.UpdateModelProfile(ctx, nil, store.ModelProfile{}); return e }, func() error { _, e := s.CreateAgent(ctx, store.Agent{}); return e }, func() error { _, e := s.UpdateAgent(ctx, nil, store.Agent{}); return e }, func() error { _, e := s.CreateIssue(ctx, store.Issue{ProjectID: pid}); return e }, func() error { _, e := s.UpdateIssue(ctx, store.Issue{ProjectID: pid}); return e },
 	}
 	for _, call := range badCalls {
 		ae, ok := AsError(call())
@@ -175,7 +158,6 @@ func TestValidatorsAndStoreErrorTranslation(t *testing.T) {
 		validateProject(store.Project{}), validateProject(store.Project{Name: "p", RepositoryPath: "/r", DefaultBranch: " ", WorkflowSettings: store.EmptyObject}), validateProject(store.Project{Name: "p", RepositoryPath: "/r", WorkflowSettings: json.RawMessage(`[]`)}),
 		validateProvider(store.Provider{}), validateProvider(store.Provider{Name: "p", Kind: "k", SafeMetadata: json.RawMessage(`[]`)}),
 		validateModelProfile(store.ModelProfile{}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", Temperature: &low}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", Temperature: &high}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", MaxTokens: &zero}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", MaxConcurrent: &zero}), validateModelProfile(store.ModelProfile{ProviderID: "p", Name: "m", Model: "m", GenerationSettings: json.RawMessage(`[]`)}),
-		validateRuntime(store.Runtime{}), validateRuntime(store.Runtime{Name: "r", Kind: "docker", Image: "i", NetworkPolicy: "bad"}), validateRuntime(store.Runtime{Name: "r", Kind: "docker", Image: "i", NetworkPolicy: "none", WorkspacePolicy: "bad"}), validateRuntime(store.Runtime{Name: "r", Kind: "docker", Image: "i", NetworkPolicy: "none", Capabilities: json.RawMessage(`[]`)}),
 		validateAgent(store.Agent{}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", EngineSettings: json.RawMessage(`[]`), ConcurrencyLimit: 1, State: "ENABLED"}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", EngineSettings: store.EmptyObject, ConcurrencyLimit: 0, State: "ENABLED"}), validateAgent(store.Agent{Name: "a", Engine: "e", ModelProfileID: "m", EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "BAD"}), validateIssue(store.Issue{Status: "TODO"}), validateIssue(store.Issue{Title: "i", Status: "BAD"}),
 	}
 	for _, err := range invalids {
