@@ -6,7 +6,6 @@ export interface ConfigRecord {
   enabled?: boolean
   state?: string
   healthStatus?: string
-  workspacePolicy?: string
   [key: string]: unknown
 }
 
@@ -127,24 +126,6 @@ export const definitions: Record<ConfigKind, Definition> = {
       enabled
     ]
   },
-  runtimes: {
-    title: 'Runtimes',
-    singular: 'Runtime',
-    emptyDescription: 'Define a Runtime image and execution policy for legacy internal managed compute.',
-    fields: [
-      name,
-      { key: 'kind', label: 'Kind', type: 'select', options: ['docker'], initial: 'docker' },
-      { key: 'image', label: 'Image', initial: 'agent-board-agent-runner:latest', required: true },
-      { key: 'networkPolicy', label: 'Network policy', type: 'select', options: ['none', 'restricted', 'outbound'], initial: 'none' },
-      { key: 'cpuLimitMillis', label: 'CPU limit (millicores)', type: 'number', min: 1 },
-      { key: 'memoryLimitBytes', label: 'Memory limit (bytes)', type: 'number', min: 1 },
-      { key: 'pidLimit', label: 'PID limit', type: 'number', min: 1 },
-      { key: 'timeoutSeconds', label: 'Timeout (seconds)', type: 'number', min: 1 },
-      { key: 'allowedSecretRefs', label: 'Allowed secret references', type: 'lines', help: 'One reference per line.' },
-      { key: 'capabilities', label: 'Capabilities', type: 'json', initial: '{}' },
-      enabled
-    ]
-  },
   agents: {
     title: 'Agents',
     singular: 'Agent',
@@ -161,7 +142,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   }
 }
 
-export type ConfigKind = 'projects'|'providers'|'model-profiles'|'runtimes'|'agents'
+export type ConfigKind = 'projects'|'providers'|'model-profiles'|'agents'
 export type Draft = Record<string, string|number|boolean>
 
 export function draftFor(kind: ConfigKind, source: Record<string, unknown> = {}): Draft {
