@@ -90,12 +90,25 @@ func waitForScriptedRun(t *testing.T, ctx context.Context, database *postgres.St
 				reason = *run.FailureReason
 			}
 			events, _ := database.ListRunEvents(context.Background(), projectID, runID, 0, 50)
-			types := make([]string, 0, len(events))
-			for _, event := range events {
-				types = append(types, event.Type)
-			}
-			t.Fatalf("timed out waiting for Run: %v status=%s failure=%s events=%v", ctx.Err(), run.Status, reason, types)
+			t.Fatalf("timed out waiting for Run: %v status=%s failure=%s events=%v", ctx.Err(), run.Status, reason, eventTypes(events))
 		case <-ticker.C:
 		}
 	}
+}
+
+func hasIntegrationEvent(events []store.Event, eventType string) bool {
+	for _, event := range events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func eventTypes(events []store.Event) []string {
+	out := make([]string, 0, len(events))
+	for _, event := range events {
+		out = append(out, event.Type)
+	}
+	return out
 }
