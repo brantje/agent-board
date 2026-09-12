@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/runner"
-	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -64,11 +63,8 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 	case "COMPLETED", "FAILED", "CANCELLED":
 		return nil, nil
 	case "PENDING":
-		if session.RunnerID != "" {
-			return nil, nil
-		}
-		_, err := s.transition(ctx, session, []string{"PENDING"}, "FAILED", nil)
-		return nil, err
+		// A PENDING runner-owned session is waiting for workspace preparation.
+		return nil, nil
 	case "STARTING", "RUNNING":
 	default:
 		return nil, fmt.Errorf("unsupported Execution Session state %q", session.Status)
@@ -76,20 +72,14 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 	if process, ok := s.liveProcess(projectID, sessionID); ok {
 		return process, nil
 	}
-	if session.RunnerID != "" {
-		return s.reconcileRunnerSession(ctx, session)
+	if session.RunnerID == "" {
+		return nil, NewError("execution_session_runner_missing", "Execution Session has no Runner binding", store.ErrInvalidArgument)
 	}
+	return s.reconcileRunnerSession(ctx, session)
+}
 
-	instance, err := s.store.GetRuntimeInstance(ctx, projectID, session.RuntimeInstanceID)
-	if err != nil {
-		return nil, translateStoreError(err, "runtime_instance")
-	}
-	if instance.Status != string(runtimepkg.StateRunning) {
-		_, err := s.transition(ctx, session, []string{"STARTING", "RUNNING"}, "FAILED", nil)
-		return nil, err
-	}
-
-	transport, active, err := s.runners.Reconcile(ctx, projectID, session.RuntimeInstanceID, session.ID)
+func (s *ExecutionSessionService) reconcileRunnerSession(ctx context.Context, session store.ExecutionSession) (*ExecutionProcess, error) {
+	transport, active, err := s.registry.Reconcile(ctx, session.ProjectID, session.RunnerID, session.ID)
 	if err != nil {
 		return nil, NewError("execution_session_uncertain", "Execution Session could not be reconciled with its runner", err)
 	}
@@ -104,10 +94,6 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 				return nil, err
 			}
 		}
-		if statusErr := s.updateRunnerStatusRecovery(projectID, session.RuntimeInstanceID, "BUSY"); statusErr != nil {
-			s.retainExecutionProcess(session, transport)
-			return nil, translateStoreError(statusErr, "runtime_instance")
-		}
 		return newExecutionProcess(s, session, transport), nil
 	}
 
@@ -121,28 +107,19 @@ func (s *ExecutionSessionService) Reconcile(ctx context.Context, projectID, sess
 	if waitErr == nil {
 		exitCode := result.ExitCode
 		_, err := s.transition(ctx, session, []string{"STARTING", "RUNNING"}, "COMPLETED", &exitCode)
-		if err == nil {
-			_, err = s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, session.RuntimeInstanceID, "READY")
-		}
 		return nil, err
 	}
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	if errors.Is(waitErr, runner.ErrDisconnected) || errors.Is(waitErr, runner.ErrClosed) || errors.Is(waitErr, runner.ErrManagerClosed) {
+	if errors.Is(waitErr, runner.ErrDisconnected) || errors.Is(waitErr, runner.ErrClosed) {
 		return nil, NewError("execution_session_uncertain", "runner disconnected while reconciling the Execution Session", waitErr)
 	}
 	if errors.Is(waitErr, context.DeadlineExceeded) {
 		_, err := s.transition(ctx, session, []string{"STARTING", "RUNNING"}, "FAILED", nil)
-		if err == nil {
-			_, err = s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, session.RuntimeInstanceID, "READY")
-		}
 		return nil, err
 	}
 	_, transitionErr := s.transition(ctx, session, []string{"STARTING", "RUNNING"}, "FAILED", nil)
-	if transitionErr == nil {
-		_, transitionErr = s.store.UpdateRuntimeInstanceRunnerStatus(ctx, projectID, session.RuntimeInstanceID, "READY")
-	}
 	return nil, errors.Join(waitErr, transitionErr)
 }
 
