@@ -82,12 +82,8 @@ func TestRemoteGitExternalRunnerLifecycleContinuesAcrossRunners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Remote preparation has no server-side checkout. Seed the durable Workspace
-	// baseline with the configured target SHA while leaving current_revision empty;
-	// the Runner publication remains authoritative for current_revision.
-	workspaceRecord, err = database.MarkWorkspaceBootstrapReady(ctx, project.ID, run1.IssueID, workspaceRecord.ID, workspaceRecord.Path, "", "main", targetRevision, workspaceRecord.WorkingBranch)
-	if err != nil {
-		t.Fatal(err)
+	if workspaceRecord.BootstrapStatus != "PENDING" || workspaceRecord.BaseRevision != nil {
+		t.Fatalf("new remote Workspace=%+v", workspaceRecord)
 	}
 
 	baseBlobs, err := evidence.NewFileBlobStore(filepath.Join(root, "evidence"), 8<<20)
@@ -120,6 +116,13 @@ func TestRemoteGitExternalRunnerLifecycleContinuesAcrossRunners(t *testing.T) {
 	persisted1, err := database.GetRun(ctx, project.ID, run1.ID)
 	if err != nil || persisted1.Status != "READY_FOR_REVIEW" {
 		t.Fatalf("first Run=%+v err=%v", persisted1, err)
+	}
+	workspaceRecord, err = database.GetWorkspace(ctx, project.ID, workspaceRecord.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspaceRecord.BootstrapStatus != "READY" || workspaceRecord.BaseRevision == nil || *workspaceRecord.BaseRevision != targetRevision {
+		t.Fatalf("remote Workspace bootstrap=%+v target=%q", workspaceRecord, targetRevision)
 	}
 	revision1, err := database.GetWorkspaceCurrentRevision(ctx, project.ID, workspaceRecord.ID)
 	if err != nil || revision1 == "" || revision1 == targetRevision {
