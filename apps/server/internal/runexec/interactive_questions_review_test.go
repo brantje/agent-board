@@ -51,12 +51,11 @@ func TestInteractiveQuestionerOpenBatchUsesAtomicStoreAndOrdersEvidence(t *testi
 		},
 	}}
 	q := &interactiveQuestioner{
-		store:             &interactiveQuestionReadStore{},
-		interactive:       lifecycle,
-		events:            recorder,
-		safe:              interactiveSafeContext(),
-		runtimeInstanceID: "runtime-instance-1",
-		engine:            "opencode",
+		store:       &interactiveQuestionReadStore{},
+		interactive: lifecycle,
+		events:      recorder,
+		safe:        interactiveSafeContext(),
+		engine:      "opencode",
 	}
 
 	opened, err := q.OpenBatch(context.Background(), []engine.CorrelatedQuestionRequest{
