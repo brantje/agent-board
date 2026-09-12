@@ -109,3 +109,96 @@ func TestAuthPhase2StoreUserSessionAndSettingsManagement(t *testing.T) {
 		t.Fatalf("settings were not persisted: got %+v want %+v", reloaded, stored)
 	}
 }
+
+func TestAuthPhase2StoreStatusAndPasswordChangesInvalidateCredentials(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	user, err := s.BootstrapUser(ctx, func() store.User {
+		value := authUser("admin", "admin@example.com", store.UserStatusActive)
+		value.DeploymentRole = store.DeploymentRoleAdmin
+		value.PasswordHash = "initial-hash"
+		return value
+	}())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Truncate(time.Second)
+	hash := func(marker byte) []byte {
+		value := make([]byte, 32)
+		value[0] = marker
+		return value
+	}
+
+	unchanged, err := s.SetUserStatus(ctx, user.ID, store.UserStatusActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unchanged.AuthVersion != user.AuthVersion {
+		t.Fatalf("no-op status change incremented auth version: got %d want %d", unchanged.AuthVersion, user.AuthVersion)
+	}
+
+	session, err := s.CreateAuthSession(ctx, store.AuthSession{UserID: user.ID, RefreshTokenHash: hash(41), ExpiresAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled, err := s.SetUserStatus(ctx, user.ID, store.UserStatusDisabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if disabled.Status != store.UserStatusDisabled || disabled.AuthVersion != user.AuthVersion+1 {
+		t.Fatalf("disabled user = %+v", disabled)
+	}
+	storedSession, err := s.GetAuthSessionByRefreshHash(ctx, session.RefreshTokenHash)
+	if err != nil || storedSession.RevokedAt == nil {
+		t.Fatalf("status change did not revoke session: %+v, %v", storedSession, err)
+	}
+	if _, err := s.SetUserStatus(ctx, "00000000-0000-0000-0000-000000000999", store.UserStatusDisabled); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing user status change = %v", err)
+	}
+
+	enabled, err := s.SetUserStatus(ctx, user.ID, store.UserStatusActive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enabled.AuthVersion != disabled.AuthVersion+1 {
+		t.Fatalf("re-enable auth version = %d want %d", enabled.AuthVersion, disabled.AuthVersion+1)
+	}
+
+	passwordSession, err := s.CreateAuthSession(ctx, store.AuthSession{UserID: user.ID, RefreshTokenHash: hash(42), ExpiresAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetToken, err := s.CreatePasswordToken(ctx, store.PasswordToken{UserID: user.ID, Purpose: store.PasswordTokenPurposeReset, TokenHash: hash(43), ExpiresAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := s.SetUserPassword(ctx, user.ID, "replacement-hash", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.PasswordHash != "replacement-hash" || !changed.ForcePasswordChange || changed.AuthVersion != enabled.AuthVersion+1 {
+		t.Fatalf("password change = %+v", changed)
+	}
+	storedPasswordSession, err := s.GetAuthSessionByRefreshHash(ctx, passwordSession.RefreshTokenHash)
+	if err != nil || storedPasswordSession.RevokedAt == nil {
+		t.Fatalf("password change did not revoke session: %+v, %v", storedPasswordSession, err)
+	}
+	if _, err := s.CompletePasswordToken(ctx, resetToken.TokenHash, store.PasswordTokenPurposeReset, "ignored", now.Add(time.Minute)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("password change did not revoke reset token: %v", err)
+	}
+
+	activeSession, err := s.CreateAuthSession(ctx, store.AuthSession{UserID: user.ID, RefreshTokenHash: hash(44), ExpiresAt: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RevokeUserAuthSessions(ctx, user.ID, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	revokedSession, err := s.GetAuthSessionByRefreshHash(ctx, activeSession.RefreshTokenHash)
+	if err != nil || revokedSession.RevokedAt == nil {
+		t.Fatalf("bulk revoke did not revoke session: %+v, %v", revokedSession, err)
+	}
+}
