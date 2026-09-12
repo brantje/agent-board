@@ -58,6 +58,7 @@ type RequestReviewChangesResult struct {
 
 type ReviewStore interface {
 	GetReview(context.Context, string, string) (Review, error)
+	GetReviewByRun(context.Context, string, string) (Review, error)
 	ListReviews(context.Context, string, ReviewFilter) ([]Review, error)
 	GetDecision(context.Context, string, string) (Decision, error)
 	BeginReviewApproval(context.Context, BeginReviewApprovalCommand) (BeginReviewApprovalResult, error)

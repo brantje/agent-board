@@ -34,6 +34,13 @@ func (s *Store) GetReview(ctx context.Context, projectID, reviewID string) (stor
 	`, projectID, reviewID))
 }
 
+func (s *Store) GetReviewByRun(ctx context.Context, projectID, runID string) (store.Review, error) {
+	return scanReview(s.pool.QueryRow(ctx, `
+		SELECT `+reviewSelectColumns+`
+		FROM reviews WHERE project_id=$1 AND run_id=$2
+	`, projectID, runID))
+}
+
 func (s *Store) ListReviews(ctx context.Context, projectID string, filter store.ReviewFilter) ([]store.Review, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+reviewSelectColumns+`

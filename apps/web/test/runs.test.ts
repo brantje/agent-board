@@ -2,6 +2,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import RunList from '../app/components/RunList.vue'
 import RunAgentCard from '../app/components/RunAgentCard.vue'
+import RunChangedFilesCard from '../app/components/RunChangedFilesCard.vue'
 import RunDetail from '../app/components/RunDetail.vue'
 import RunStatus from '../app/components/RunStatus.vue'
 import QuestionPanel from '../app/components/QuestionPanel.vue'
@@ -17,7 +18,7 @@ const global = {
     ActivityTimeline: { props: ['events'], template: '<ol><li v-for="item in events" :key="item.id">{{item.type}} {{item.payload?.kind}} {{item.payload?.message}}</li></ol>' },
     RunUsageCard: { props: ['usage'], template: '<section data-run-usage>Usage</section>' }
   },
-  components: { RunStatus, RunAgentCard }
+  components: { RunStatus, RunAgentCard, RunChangedFilesCard }
 }
 
 afterEach(() => {
@@ -191,6 +192,10 @@ describe('RunDetail', () => {
     expect(sidebar.text().indexOf('Coder')).toBeLessThan(sidebar.text().indexOf('Usage'))
     expect(sidebar.text().indexOf('Usage')).toBeLessThan(sidebar.text().indexOf('Properties'))
     expect(sidebar.text()).toContain('Properties')
+    expect(sidebar.get('[data-changed-files]').text()).toContain('Changed files 1')
+    expect(sidebar.get('[data-changed-files]').text()).toContain('README.md')
+    expect(sidebar.text().indexOf('Properties')).toBeLessThan(sidebar.text().indexOf('Changed files'))
+    expect(sidebar.text().indexOf('Changed files')).toBeLessThan(sidebar.text().indexOf('Runtime instances'))
     expect(sidebar.text()).toContain('Runtime instances')
     expect(sidebar.text()).toContain('Provenance')
     expect(sidebar.text()).toContain('Artifacts')

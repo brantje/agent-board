@@ -37,6 +37,12 @@ func (s *reviewServiceStore) GetProject(context.Context, string) (store.Project,
 func (s *reviewServiceStore) GetReview(context.Context, string, string) (store.Review, error) {
 	return s.review, nil
 }
+func (s *reviewServiceStore) GetReviewByRun(_ context.Context, projectID, runID string) (store.Review, error) {
+	if s.review.ProjectID != projectID || s.review.RunID != runID {
+		return store.Review{}, store.ErrNotFound
+	}
+	return s.review, nil
+}
 func (s *reviewServiceStore) ListReviews(context.Context, string, store.ReviewFilter) ([]store.Review, error) {
 	return append([]store.Review(nil), s.list...), nil
 }

@@ -139,6 +139,24 @@ func TestRunnerConnectionReconcileFencesDurableSessionOwnership(t *testing.T) {
 	}
 }
 
+func TestRunnerConnectionReconcileAllowsMultipleConcurrentSessions(t *testing.T) {
+	storeFake := &executionSessionStoreFake{sessionsByRunner: []store.ExecutionSession{
+		{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RunnerID: "runner-1", Status: "RUNNING"},
+		{ID: "session-2", ProjectID: "project-1", RunID: "run-2", RunnerID: "runner-1", Status: "RUNNING"},
+	}}
+	service, err := NewExecutionSessionService(storeFake, &reconcileExecutionManager{}, &runnerReconcileRegistryFake{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := protocol.Health{Status: "ok", ActiveSessions: 2, ActiveSessionIDs: []string{"session-1", "session-2"}}
+	if err := service.ReconcileRunnerConnection(context.Background(), "runner-1", current, current); err != nil {
+		t.Fatalf("matching concurrent sessions rejected: %v", err)
+	}
+	if err := service.ReconcileRunnerConnection(context.Background(), "runner-1", current, protocol.Health{Status: "ok", ActiveSessions: 1, ActiveSessionIDs: []string{"session-1"}}); err == nil {
+		t.Fatal("replacement missing durable active session accepted")
+	}
+}
+
 func TestRunnerReconnectTimeoutValidation(t *testing.T) {
 	service, err := NewExecutionSessionService(runnerOwnedSessionStore("RUNNING"), &reconcileExecutionManager{}, &runnerReconcileRegistryFake{})
 	if err != nil {

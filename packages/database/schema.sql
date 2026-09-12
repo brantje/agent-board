@@ -333,9 +333,6 @@ CREATE INDEX execution_sessions_runner_idx ON execution_sessions (runner_id, cre
 CREATE UNIQUE INDEX execution_sessions_one_active_per_instance_uq
     ON execution_sessions (runtime_instance_id)
     WHERE status IN ('PENDING', 'STARTING', 'RUNNING') AND runtime_instance_id IS NOT NULL;
-CREATE UNIQUE INDEX execution_sessions_one_active_per_runner_uq
-    ON execution_sessions (runner_id)
-    WHERE status IN ('PENDING', 'STARTING', 'RUNNING') AND runner_id IS NOT NULL;
 
 CREATE TABLE questions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

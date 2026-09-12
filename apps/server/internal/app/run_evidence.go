@@ -28,8 +28,10 @@ type RunEvidenceStore interface {
 }
 
 type RunEvidenceService struct {
-	store RunEvidenceStore
-	blobs evidence.BlobStore
+	store       RunEvidenceStore
+	blobs       evidence.BlobStore
+	reviewStore RunEvidenceReviewStore
+	reviewGit   reviewGitDiff
 }
 
 type RunEvidence struct {
@@ -72,6 +74,7 @@ func (s *RunEvidenceService) Inspect(ctx context.Context, projectID, runID strin
 	if err != nil {
 		return RunEvidence{}, err
 	}
+	events = s.enrichReviewFileChanges(ctx, run, events)
 	usage := runUsageFromEvents(events)
 	rawOutput, err := s.store.ListRawOutputChunks(ctx, projectID, runID)
 	if err != nil {

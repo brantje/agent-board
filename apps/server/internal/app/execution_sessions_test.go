@@ -16,10 +16,11 @@ import (
 )
 
 type executionSessionStoreFake struct {
-	mu       sync.Mutex
-	run      store.Run
-	instance store.RuntimeInstance
-	session  store.ExecutionSession
+	mu               sync.Mutex
+	run              store.Run
+	instance         store.RuntimeInstance
+	session          store.ExecutionSession
+	sessionsByRunner []store.ExecutionSession
 }
 
 func (s *executionSessionStoreFake) GetRun(context.Context, string, string) (store.Run, error) {
@@ -43,6 +44,25 @@ func (s *executionSessionStoreFake) GetExecutionSession(context.Context, string,
 func (s *executionSessionStoreFake) ListExecutionSessionsByRunner(_ context.Context, runnerID string, statuses []string) ([]store.ExecutionSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if len(s.sessionsByRunner) > 0 {
+		sessions := make([]store.ExecutionSession, 0, len(s.sessionsByRunner))
+		for _, session := range s.sessionsByRunner {
+			if runnerID == "" || session.RunnerID != runnerID {
+				continue
+			}
+			if len(statuses) == 0 {
+				sessions = append(sessions, session)
+				continue
+			}
+			for _, status := range statuses {
+				if session.Status == status {
+					sessions = append(sessions, session)
+					break
+				}
+			}
+		}
+		return sessions, nil
+	}
 	if runnerID == "" || s.session.RunnerID != runnerID {
 		return nil, nil
 	}

@@ -40,6 +40,13 @@ func (s *httpReviewStore) GetReview(_ context.Context, pid, id string) (store.Re
 	return store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "PENDING", DecisionID: s.decisionID, BaseRevision: reviewBaseRevision, ReviewRevision: reviewHeadRevision}, nil
 }
 
+func (s *httpReviewStore) GetReviewByRun(_ context.Context, pid, id string) (store.Review, error) {
+	if pid != projectID || id != runID {
+		return store.Review{}, store.ErrNotFound
+	}
+	return s.GetReview(context.Background(), pid, reviewID)
+}
+
 func (s *httpReviewStore) ListReviews(_ context.Context, pid string, _ store.ReviewFilter) ([]store.Review, error) {
 	if pid != projectID {
 		return nil, store.ErrNotFound
