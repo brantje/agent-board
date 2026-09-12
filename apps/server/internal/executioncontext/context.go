@@ -9,7 +9,6 @@ type SafeContext struct {
 	Agent          AgentContext           `json:"agent"`
 	Model          ModelContext           `json:"model"`
 	Provider       ProviderContext        `json:"provider"`
-	Runtime        RuntimeContext         `json:"runtime"`
 	Runner         *RunnerContext         `json:"runner,omitempty"`
 	Workspace      WorkspaceContext       `json:"workspace"`
 	ReviewFeedback *ReviewFeedbackContext `json:"reviewFeedback,omitempty"`
@@ -64,20 +63,6 @@ type ProviderContext struct {
 	SafeMetadata json.RawMessage `json:"safeMetadata,omitempty"`
 }
 
-type RuntimeContext struct {
-	ID               string          `json:"id"`
-	Name             string          `json:"name"`
-	Kind             string          `json:"kind"`
-	Image            string          `json:"image"`
-	CPULimitMillis   *int            `json:"cpuLimitMillis,omitempty"`
-	MemoryLimitBytes *int64          `json:"memoryLimitBytes,omitempty"`
-	PIDLimit         *int            `json:"pidLimit,omitempty"`
-	TimeoutSeconds   *int            `json:"timeoutSeconds,omitempty"`
-	NetworkPolicy    string          `json:"networkPolicy"`
-	WorkspacePolicy  string          `json:"workspacePolicy"`
-	Capabilities     json.RawMessage `json:"capabilities,omitempty"`
-}
-
 type RunnerContext struct {
 	ID       string `json:"id"`
 	Name     string `json:"name"`
@@ -104,5 +89,4 @@ type ReviewFeedbackContext struct {
 type Resolved struct {
 	Safe                  SafeContext
 	ProviderCredentialRef *string
-	AllowedSecretRefs     []string
 }
