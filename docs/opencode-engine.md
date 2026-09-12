@@ -11,7 +11,7 @@ For an OpenCode Run, the server-side adapter:
 1. starts `opencode serve` through the generic Execution Session launcher on a deterministic Run-scoped address inside Linux `127/8`, using a high Run-scoped port so multiple OpenCode services can coexist on the same Runner host without sharing a listener;
 2. sets `OPENCODE_DB=:memory:` for that child process so concurrent OpenCode services do not share OpenCode's global SQLite state; Agent Board's durable Run, Execution Session, Question and evidence stores remain authoritative;
 3. opens HTTP connections to that loopback service through the Engine-neutral, session-scoped runner connection capability;
-4. creates one native OpenCode session in the Execution Session working directory so host runners and Docker share the same OpenCode project as `opencode serve` (a hardcoded `/workspace` path is a different OpenCode project on persistent hosts);
+4. creates one native OpenCode session in the Execution Session working directory so host runners and containerized runners share the same OpenCode project as `opencode serve`;
 5. sends the issue/agent/review context once as the initial native prompt;
 6. consumes OpenCode's SSE event stream and maps explicitly visible activity into canonical Agent Board evidence;
 7. reconciles pending native Questions from OpenCode's queryable Question endpoint after an SSE disconnect;
@@ -58,43 +58,32 @@ All structured activity still passes through Agent Board's centralized Run-scope
 
 The deterministic unit/integration tests run without provider credentials and cover protocol framing, session-local connectivity, native Question mapping, same-session reply behavior, reconnect reconciliation, stale answers, audit-event ordering, Run-scoped OpenCode endpoints, and process-local database isolation.
 
-Credential-gated tests prove a real model-backed OpenCode path through Agent Board's scheduler. Both Docker Runtime and persistent Runner variants reset the PostgreSQL `public` schema. They refuse to do so unless the database is named `agent_board_test` and `AGENT_BOARD_TEST_DATABASE_RESET=1` is set. Never point them at a development or production database.
+The credential-gated suite in `apps/server/internal/runexec/opencode_integration_test.go` proves the real model-backed path through the scheduler and a connected `agent-runner`. The scheduler selects that Runner, creates Runner-bound Execution Sessions, starts OpenCode there, communicates with the provider, persists evidence, and handles native Questions without a second execution-host identity.
 
-`TestOpenCodeRunnerNormalCodingRun` in `apps/server/internal/runexec/opencode_runner_integration_test.go` is the preferred v0.1 path: scheduler selects a live `agent-runner`, transfers the Issue Workspace, starts OpenCode on that runner, talks to OpenRouter, and syncs untracked results back without a Runtime Instance. `TestOpenCodeInternalRunnerNormalCodingRun` covers the same coding path through `SuperviseInternalRunner`. `opencode` must be on the runner host `$PATH`. `AGENT_BOARD_TEST_OPENCODE_API_KEY` / `AGENT_BOARD_TEST_OPENCODE_MODEL` may fall back to `OPENROUTER_API_KEY` / the first `OPENROUTER_MODELS` entry.
+The suite resets the PostgreSQL `public` schema. It refuses to do so unless the database is named `agent_board_test` and `AGENT_BOARD_TEST_DATABASE_RESET=1` is set. Never point it at a development or production database.
 
-`TestOpenCodeConcurrentRunnerSessionsNormalAndQuestions` is the concurrency regression. It starts three real capacity-1 host-process Runners, holds two real OpenCode Runs simultaneously in `WAITING_FOR_INPUT` on separate native Questions, requires a third normal coding Run to finish while those Questions remain blocked, then answers both Questions concurrently. The test verifies distinct Runner ownership, zero Question leakage into the normal Run, correct Workspace results for each Question answer, and the expected durable Question lifecycle for both sessions.
+The four live tests cover:
 
-```sh
-cd apps/server
+- `TestOpenCodeRunnerContainerNormalCodingRun` — normal coding and Workspace result synchronization;
+- `TestOpenCodeRunnerContainerInteractiveQuestionRoundTrip` — a real native single-choice Question, human answer, and same-session continuation;
+- `TestOpenCodeRunnerContainerInvalidCredentialsFailWithoutSecretLeak` — provider authentication failure and durable secret redaction;
+- `TestOpenCodeRunnerContainerCancelWhileWaitingForQuestion` — cancellation while a native Question is open, including rejection of a stale later answer.
 
-AGENT_BOARD_TEST_OPENCODE=1 \
-AGENT_BOARD_TEST_DATABASE_RESET=1 \
-AGENT_BOARD_TEST_DATABASE_URL='postgres://agent_board:agent_board@127.0.0.1:5432/agent_board_test?sslmode=disable' \
-AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND='openrouter' \
-AGENT_BOARD_TEST_OPENCODE_MODEL='<model-id>' \
-AGENT_BOARD_TEST_OPENCODE_API_KEY='<provider-api-key>' \
-go test -count=1 -timeout 6m -run '^TestOpenCodeRunnerNormalCodingRun$' -v ./internal/runexec
-```
+### Build the Runner image
 
-The Docker-backed tests remain for Runtime isolation:
-
-`TestOpenCodeDockerInteractiveQuestionRoundTrip` in `apps/server/internal/runexec/opencode_integration_test.go`.
-
-### 1. Build the Runtime image
-
-When the test server runs directly on the host, align the non-root Runtime user with the host workspace owner so the bind-mounted `/workspace` remains writable:
+When the test server runs directly on the host, align the non-root Runner user with the host workspace owner so the bind-mounted `/workspace` remains writable:
 
 ```sh
 docker build \
   --build-arg AGENT_BOARD_UID="$(id -u)" \
   --file apps/agent-runner/Dockerfile \
-  --tag agent-board-opencode-runtime:manual \
+  --tag agent-board-opencode-runner:manual \
   .
 ```
 
 The UID build argument is optional; normal Compose builds retain the image's existing non-root default identity.
 
-### 2. Provide a disposable PostgreSQL test database
+### Provide a disposable PostgreSQL test database
 
 For example:
 
@@ -108,7 +97,7 @@ docker run --rm --detach \
   pgvector/pgvector:pg18
 ```
 
-### 3. Run the gated test
+### Run the gated suite
 
 Set the provider values to a model/provider that your OpenCode installation supports. `AGENT_BOARD_TEST_OPENCODE_BASE_URL` is optional for compatible/custom provider endpoints.
 
@@ -119,11 +108,11 @@ AGENT_BOARD_TEST_OPENCODE=1 \
 AGENT_BOARD_TEST_DOCKER=1 \
 AGENT_BOARD_TEST_DATABASE_RESET=1 \
 AGENT_BOARD_TEST_DATABASE_URL='postgres://agent_board:agent_board@127.0.0.1:5432/agent_board_test?sslmode=disable' \
-AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE='agent-board-opencode-runtime:manual' \
-AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND='anthropic' \
+AGENT_BOARD_TEST_OPENCODE_RUNNER_IMAGE='agent-board-opencode-runner:manual' \
+AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND='openrouter' \
 AGENT_BOARD_TEST_OPENCODE_MODEL='<model-id>' \
 AGENT_BOARD_TEST_OPENCODE_API_KEY='<provider-api-key>' \
-go test -count=1 -run '^TestOpenCodeDockerInteractiveQuestionRoundTrip$' -v ./internal/runexec
+go test -count=1 -timeout 8m -run '^TestOpenCodeRunnerContainer(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)$' -v ./internal/runexec
 ```
 
 For a custom endpoint, also set:
@@ -132,11 +121,6 @@ For a custom endpoint, also set:
 AGENT_BOARD_TEST_OPENCODE_BASE_URL='https://provider.example/v1'
 ```
 
-The test instructs the real OpenCode execution to ask one single-choice native Question before editing. It waits until Agent Board has a durable open Question and the Run is `WAITING_FOR_INPUT`, answers `beta` through `QuestionService`, and then requires:
+For the interactive Question case, the test waits until Agent Board has a durable open Question and the Run is `WAITING_FOR_INPUT`, answers `beta` through `QuestionService`, and then requires the same in-flight Run to continue to `READY_FOR_REVIEW`, exactly one OpenCode service Execution Session for the attempt, the expected Workspace result, and `question.created < run.waiting_for_input < question.answered < run.resumed` in the persisted Run Event stream.
 
-- the same in-flight Run to continue to `READY_FOR_REVIEW`;
-- exactly one OpenCode service Execution Session for the attempt;
-- `opencode-result.txt` to contain `beta` followed by a newline;
-- `question.created < run.waiting_for_input < question.answered < run.resumed` in the persisted Run Event stream.
-
-The complementary deterministic test `TestEngineAnswersNativeQuestionWithoutSecondPrompt` counts native prompt calls and requires exactly one. Together, the Docker Question test and that unit test prove that a real OpenCode Question round trip works and that Agent Board answers it through OpenCode's native reply operation rather than paying for a synthetic continuation prompt.
+The complementary deterministic test `TestEngineAnswersNativeQuestionWithoutSecondPrompt` counts native prompt calls and requires exactly one. Together these checks prove that Agent Board answers a real OpenCode Question through OpenCode's native reply operation rather than paying for a synthetic continuation prompt.
