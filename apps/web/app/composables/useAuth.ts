@@ -3,6 +3,8 @@ import { ApiError, apiRequest } from '../utils/api'
 import { clearAuthStorage, readAuthStorage, writeAuthStorage } from '../utils/auth-storage'
 import type { AuthSession, AuthSettings, AuthTokens, AuthUser, PasswordTokenResult, PendingUserResult, StoredAuth } from '../types/auth'
 
+type RefreshOutcome = 'success' | 'rejected' | 'retryable' | 'stale'
+
 function storedFrom(tokens: AuthTokens): StoredAuth {
   return {
     accessToken: tokens.accessToken,
@@ -17,7 +19,7 @@ export function useAuth() {
   const credentials = useState<StoredAuth | null>('auth-credentials', () => null)
   const persistent = useState('auth-persistent', () => false)
   const initialized = useState('auth-initialized', () => false)
-  const refreshing = useState<Promise<boolean> | null>('auth-refreshing', () => null)
+  const refreshing = useState<Promise<RefreshOutcome> | null>('auth-refreshing', () => null)
   const generation = useState('auth-generation', () => 0)
 
   function store(tokens: AuthTokens, remember: boolean) {
@@ -42,9 +44,9 @@ export function useAuth() {
     }
   }
 
-  async function refresh() {
+  async function refreshOutcome(): Promise<RefreshOutcome> {
     const refreshToken = credentials.value?.refreshToken
-    if (!refreshToken) return false
+    if (!refreshToken) return 'rejected'
     if (refreshing.value) return refreshing.value
     const refreshGeneration = generation.value
     refreshing.value = (async () => {
@@ -54,18 +56,25 @@ export function useAuth() {
         })
         if (generation.value !== refreshGeneration) {
           await revokeRefreshToken(tokens.refreshToken)
-          return false
+          return 'stale'
         }
         store(tokens, persistent.value)
-        return true
-      } catch {
-        if (generation.value === refreshGeneration) clear()
-        return false
+        return 'success'
+      } catch (error) {
+        if (generation.value === refreshGeneration && error instanceof ApiError && error.status === 401) {
+          clear()
+          return 'rejected'
+        }
+        return 'retryable'
       } finally {
         refreshing.value = null
       }
     })()
     return refreshing.value
+  }
+
+  async function refresh() {
+    return await refreshOutcome() === 'success'
   }
 
   async function request<T>(path: string, options: { method?: string; body?: unknown } = {}, retry = true): Promise<T> {
@@ -93,7 +102,12 @@ export function useAuth() {
     try {
       user.value = await request<AuthUser>('/api/auth/me', {}, false)
     } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 401 || !await refresh()) clear()
+      if (error instanceof ApiError && error.status === 401) {
+        const outcome = await refreshOutcome()
+        if (outcome === 'retryable') initialized.value = false
+        return
+      }
+      initialized.value = false
     }
   }
 
@@ -142,8 +156,10 @@ export function useAuth() {
     return updated
   }
 
-  async function changePassword(password: string) {
-    const updated = await request<AuthUser>('/api/auth/me/password', { method: 'PUT', body: { password } })
+  async function changePassword(currentPassword: string | undefined, newPassword: string) {
+    const updated = await request<AuthUser>('/api/auth/me/password', {
+      method: 'PUT', body: { currentPassword, newPassword }
+    })
     clear()
     return updated
   }
