@@ -90,26 +90,6 @@ type ModelProfileDTO struct {
 	UpdatedAt          time.Time       `json:"updatedAt"`
 }
 
-type RuntimeDTO struct {
-	ID                string          `json:"id"`
-	ProjectID         *string         `json:"projectId"`
-	Name              string          `json:"name"`
-	Kind              string          `json:"kind"`
-	Image             string          `json:"image"`
-	CPULimitMillis    *int            `json:"cpuLimitMillis"`
-	MemoryLimitBytes  *int64          `json:"memoryLimitBytes"`
-	PIDLimit          *int            `json:"pidLimit"`
-	TimeoutSeconds    *int            `json:"timeoutSeconds"`
-	NetworkPolicy     string          `json:"networkPolicy"`
-	WorkspacePolicy   string          `json:"workspacePolicy"`
-	AllowedSecretRefs []string        `json:"allowedSecretRefs"`
-	Capabilities      json.RawMessage `json:"capabilities"`
-	Enabled           bool            `json:"enabled"`
-	HealthStatus      string          `json:"healthStatus"`
-	CreatedAt         time.Time       `json:"createdAt"`
-	UpdatedAt         time.Time       `json:"updatedAt"`
-}
-
 type AgentDTO struct {
 	ID               string          `json:"id"`
 	ProjectID        *string         `json:"projectId"`
@@ -230,20 +210,6 @@ type CreateModelProfileRequest struct {
 	MaxConcurrent      *int            `json:"maxConcurrent"`
 	GenerationSettings json.RawMessage `json:"generationSettings"`
 	Enabled            *bool           `json:"enabled"`
-}
-
-type CreateRuntimeRequest struct {
-	Name              string          `json:"name"`
-	Kind              string          `json:"kind"`
-	Image             string          `json:"image"`
-	CPULimitMillis    *int            `json:"cpuLimitMillis"`
-	MemoryLimitBytes  *int64          `json:"memoryLimitBytes"`
-	PIDLimit          *int            `json:"pidLimit"`
-	TimeoutSeconds    *int            `json:"timeoutSeconds"`
-	NetworkPolicy     string          `json:"networkPolicy"`
-	AllowedSecretRefs []string        `json:"allowedSecretRefs"`
-	Capabilities      json.RawMessage `json:"capabilities"`
-	Enabled           *bool           `json:"enabled"`
 }
 
 type CreateAgentRequest struct {
