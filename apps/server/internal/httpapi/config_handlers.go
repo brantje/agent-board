@@ -31,10 +31,6 @@ func (a *api) registerGlobalConfig(r chi.Router) {
 	r.Post("/model-profiles", a.createGlobalModelProfile)
 	r.Get("/model-profiles/{resourceID}", a.getGlobalModelProfile)
 	r.Put("/model-profiles/{resourceID}", a.updateGlobalModelProfile)
-	r.Get("/runtimes", a.listGlobalRuntimes)
-	r.Post("/runtimes", a.createGlobalRuntime)
-	r.Get("/runtimes/{resourceID}", a.getGlobalRuntime)
-	r.Put("/runtimes/{resourceID}", a.updateGlobalRuntime)
 	r.Get("/agents", a.listGlobalAgents)
 	r.Post("/agents", a.createGlobalAgent)
 	r.Get("/agents/{resourceID}", a.getGlobalAgent)
@@ -51,10 +47,6 @@ func (a *api) registerScopedConfig(r chi.Router) {
 	r.Post("/projects/{projectID}/model-profiles", a.createProjectModelProfile)
 	r.Get("/projects/{projectID}/model-profiles/{resourceID}", a.getProjectModelProfile)
 	r.Put("/projects/{projectID}/model-profiles/{resourceID}", a.updateProjectModelProfile)
-	r.Get("/projects/{projectID}/runtimes", a.listProjectRuntimes)
-	r.Post("/projects/{projectID}/runtimes", a.createProjectRuntime)
-	r.Get("/projects/{projectID}/runtimes/{resourceID}", a.getProjectRuntime)
-	r.Put("/projects/{projectID}/runtimes/{resourceID}", a.updateProjectRuntime)
 	r.Get("/projects/{projectID}/agents", a.listProjectAgents)
 	r.Post("/projects/{projectID}/agents", a.createProjectAgent)
 	r.Get("/projects/{projectID}/agents/{resourceID}", a.getProjectAgent)
@@ -444,103 +436,6 @@ func (a *api) updateProjectModelProfile(w http.ResponseWriter, r *http.Request) 
 	s, ok := scopeFromProject(w, r)
 	if ok {
 		a.updateModelProfile(w, r, s)
-	}
-}
-
-func (a *api) listRuntimes(w http.ResponseWriter, r *http.Request, scope *string) {
-	values, err := a.service.ListRuntimes(r.Context(), scope)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	out := make([]RuntimeDTO, 0, len(values))
-	for _, v := range values {
-		out = append(out, runtimeDTO(v))
-	}
-	writeJSON(w, 200, out)
-}
-func (a *api) createRuntime(w http.ResponseWriter, r *http.Request, scope *string) {
-	var req CreateRuntimeRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	v, err := a.service.CreateRuntime(r.Context(), store.Runtime{ProjectID: scope, Name: req.Name, Kind: req.Kind, Image: req.Image, CPULimitMillis: req.CPULimitMillis, MemoryLimitBytes: req.MemoryLimitBytes, PIDLimit: req.PIDLimit, TimeoutSeconds: req.TimeoutSeconds, NetworkPolicy: req.NetworkPolicy, WorkspacePolicy: "issue", AllowedSecretRefs: req.AllowedSecretRefs, Capabilities: req.Capabilities, Enabled: boolDefault(req.Enabled, true)})
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	writeJSON(w, 201, runtimeDTO(v))
-}
-func (a *api) getRuntime(w http.ResponseWriter, r *http.Request, scope *string) {
-	id, ok := resourceID(w, r)
-	if !ok {
-		return
-	}
-	v, err := a.service.GetRuntime(r.Context(), scope, id)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	writeJSON(w, 200, runtimeDTO(v))
-}
-func (a *api) updateRuntime(w http.ResponseWriter, r *http.Request, scope *string) {
-	id, ok := resourceID(w, r)
-	if !ok {
-		return
-	}
-	var req CreateRuntimeRequest
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	current, err := a.service.GetRuntime(r.Context(), scope, id)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	current.Name = req.Name
-	current.Kind = req.Kind
-	current.Image = req.Image
-	current.CPULimitMillis = req.CPULimitMillis
-	current.MemoryLimitBytes = req.MemoryLimitBytes
-	current.PIDLimit = req.PIDLimit
-	current.TimeoutSeconds = req.TimeoutSeconds
-	current.NetworkPolicy = req.NetworkPolicy
-	current.AllowedSecretRefs = req.AllowedSecretRefs
-	current.Capabilities = req.Capabilities
-	current.Enabled = boolDefault(req.Enabled, current.Enabled)
-	v, err := a.service.UpdateRuntime(r.Context(), scope, current)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
-	writeJSON(w, 200, runtimeDTO(v))
-}
-func (a *api) listGlobalRuntimes(w http.ResponseWriter, r *http.Request)  { a.listRuntimes(w, r, nil) }
-func (a *api) createGlobalRuntime(w http.ResponseWriter, r *http.Request) { a.createRuntime(w, r, nil) }
-func (a *api) getGlobalRuntime(w http.ResponseWriter, r *http.Request)    { a.getRuntime(w, r, nil) }
-func (a *api) updateGlobalRuntime(w http.ResponseWriter, r *http.Request) { a.updateRuntime(w, r, nil) }
-func (a *api) listProjectRuntimes(w http.ResponseWriter, r *http.Request) {
-	s, ok := scopeFromProject(w, r)
-	if ok {
-		a.listRuntimes(w, r, s)
-	}
-}
-func (a *api) createProjectRuntime(w http.ResponseWriter, r *http.Request) {
-	s, ok := scopeFromProject(w, r)
-	if ok {
-		a.createRuntime(w, r, s)
-	}
-}
-func (a *api) getProjectRuntime(w http.ResponseWriter, r *http.Request) {
-	s, ok := scopeFromProject(w, r)
-	if ok {
-		a.getRuntime(w, r, s)
-	}
-}
-func (a *api) updateProjectRuntime(w http.ResponseWriter, r *http.Request) {
-	s, ok := scopeFromProject(w, r)
-	if ok {
-		a.updateRuntime(w, r, s)
 	}
 }
 
