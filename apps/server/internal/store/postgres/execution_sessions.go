@@ -9,9 +9,9 @@ import (
 )
 
 const executionSessionSelect = `
-		SELECT id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at`
+		SELECT id::text, project_id::text, run_id::text, runner_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at`
 
-const executionSessionReturning = `id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at`
+const executionSessionReturning = `id::text, project_id::text, run_id::text, runner_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at`
 
 var executionSessionStatuses = map[string]struct{}{
 	"PENDING":   {},
@@ -33,31 +33,22 @@ func (s *Store) GetExecutionSession(ctx context.Context, projectID, sessionID st
 }
 
 func (s *Store) ListExecutionSessions(ctx context.Context, projectID string, statuses []string) ([]store.ExecutionSession, error) {
-	return s.listExecutionSessions(ctx, projectID, "", "", statuses)
+	return s.listExecutionSessions(ctx, projectID, "", statuses)
 }
 
 func (s *Store) ListExecutionSessionsByRun(ctx context.Context, projectID, runID string, statuses []string) ([]store.ExecutionSession, error) {
 	if strings.TrimSpace(runID) == "" {
 		return nil, store.ErrInvalidArgument
 	}
-	return s.listExecutionSessions(ctx, projectID, "", runID, statuses)
-}
-
-func (s *Store) ListExecutionSessionsByRuntimeInstance(ctx context.Context, projectID, runtimeInstanceID string, statuses []string) ([]store.ExecutionSession, error) {
-	if strings.TrimSpace(runtimeInstanceID) == "" {
-		return nil, store.ErrInvalidArgument
-	}
-	return s.listExecutionSessions(ctx, projectID, runtimeInstanceID, "", statuses)
+	return s.listExecutionSessions(ctx, projectID, runID, statuses)
 }
 
 func (s *Store) ListExecutionSessionsByRunner(ctx context.Context, runnerID string, statuses []string) ([]store.ExecutionSession, error) {
 	if strings.TrimSpace(runnerID) == "" {
 		return nil, store.ErrInvalidArgument
 	}
-	for _, status := range statuses {
-		if _, ok := executionSessionStatuses[status]; !ok {
-			return nil, store.ErrInvalidArgument
-		}
+	if err := validateExecutionSessionStatuses(statuses); err != nil {
+		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, executionSessionSelect+`
 		FROM execution_sessions
@@ -69,41 +60,44 @@ func (s *Store) ListExecutionSessionsByRunner(ctx context.Context, runnerID stri
 		return nil, notFound(err)
 	}
 	defer rows.Close()
-	sessions := make([]store.ExecutionSession, 0)
-	for rows.Next() {
-		session, err := scanExecutionSession(rows)
-		if err != nil {
-			return nil, err
-		}
-		sessions = append(sessions, session)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return sessions, nil
+	return scanExecutionSessions(rows)
 }
 
-func (s *Store) listExecutionSessions(ctx context.Context, projectID, runtimeInstanceID, runID string, statuses []string) ([]store.ExecutionSession, error) {
+func (s *Store) listExecutionSessions(ctx context.Context, projectID, runID string, statuses []string) ([]store.ExecutionSession, error) {
 	if strings.TrimSpace(projectID) == "" {
 		return nil, store.ErrInvalidArgument
 	}
-	for _, status := range statuses {
-		if _, ok := executionSessionStatuses[status]; !ok {
-			return nil, store.ErrInvalidArgument
-		}
+	if err := validateExecutionSessionStatuses(statuses); err != nil {
+		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, executionSessionSelect+`
 		FROM execution_sessions
 		WHERE project_id = $1
-		  AND (nullif($2, '')::uuid IS NULL OR runtime_instance_id = nullif($2, '')::uuid)
-		  AND (nullif($3, '')::uuid IS NULL OR run_id = nullif($3, '')::uuid)
-		  AND (coalesce(cardinality($4::text[]), 0) = 0 OR status = ANY($4::text[]))
+		  AND (nullif($2, '')::uuid IS NULL OR run_id = nullif($2, '')::uuid)
+		  AND (coalesce(cardinality($3::text[]), 0) = 0 OR status = ANY($3::text[]))
 		ORDER BY created_at, id
-	`, projectID, runtimeInstanceID, runID, statuses)
+	`, projectID, runID, statuses)
 	if err != nil {
 		return nil, notFound(err)
 	}
 	defer rows.Close()
+	return scanExecutionSessions(rows)
+}
+
+func validateExecutionSessionStatuses(statuses []string) error {
+	for _, status := range statuses {
+		if _, ok := executionSessionStatuses[status]; !ok {
+			return store.ErrInvalidArgument
+		}
+	}
+	return nil
+}
+
+func scanExecutionSessions(rows interface {
+	Next() bool
+	Scan(...any) error
+	Err() error
+}) ([]store.ExecutionSession, error) {
 	sessions := make([]store.ExecutionSession, 0)
 	for rows.Next() {
 		session, err := scanExecutionSession(rows)
@@ -125,10 +119,8 @@ func (s *Store) TransitionExecutionSession(ctx context.Context, transition store
 	if _, ok := executionSessionStatuses[transition.Status]; !ok {
 		return store.ExecutionSession{}, store.ErrInvalidArgument
 	}
-	for _, status := range transition.FromStatuses {
-		if _, ok := executionSessionStatuses[status]; !ok {
-			return store.ExecutionSession{}, store.ErrInvalidArgument
-		}
+	if err := validateExecutionSessionStatuses(transition.FromStatuses); err != nil {
+		return store.ExecutionSession{}, err
 	}
 	value, err := scanExecutionSession(s.pool.QueryRow(ctx, `
 		UPDATE execution_sessions
