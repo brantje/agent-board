@@ -6,6 +6,21 @@ export const uiStubs = {
   UButton: {props:['label','to','disabled','loading','type'],emits:['click'],template:'<button :type="type || \'button\'" :disabled="disabled || loading" @click="$emit(\'click\')">{{label}}<slot/></button>'},
   UAlert: {props:['title','description'],template:'<div role="alert">{{title}} {{description}}</div>'},
   UBadge: {props:['label','icon','color','variant','size','trailingIcon'],template:'<span :data-color="color" :data-variant="variant" :data-icon="icon">{{label}}<slot/><slot name="trailing"/></span>'},
+  UTable: defineComponent({
+    props: ['data', 'columns'],
+    setup(props, { slots }) {
+      return () => h('table', [
+        h('tbody', ((props.data ?? []) as Array<Record<string, unknown>>).map((item) => h('tr',
+          ((props.columns ?? []) as Array<{ id?: string, accessorKey?: string }>).map((column) => {
+            const key = column.id ?? column.accessorKey ?? ''
+            const slot = slots[`${key}-cell`]
+            const fallback = column.accessorKey ? String(item[column.accessorKey] ?? '') : ''
+            return h('td', slot ? slot({ row: { original: item } }) : fallback)
+          })
+        )))
+      ])
+    }
+  }),
   UAvatar: {props:['alt','text','size'],template:'<span :aria-label="alt">{{text || alt}}</span>'},
   UModal: {props:['open','title'],template:'<div v-if="open" role="dialog"><h2>{{title}}</h2><slot name="body"/></div>'},
   UForm: {props:['state','validate'],emits:['submit'],template:'<form @submit.prevent="$emit(\'submit\')"><slot/></form>'},
