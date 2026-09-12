@@ -12,18 +12,38 @@ import (
 
 const maxReviewFeedbackCharacters = 32 << 10
 
+const reviewSelectColumns = `
+	id::text,
+	project_id::text,
+	issue_id::text,
+	run_id::text,
+	status,
+	decision_id::text,
+	COALESCE(base_revision, ''),
+	COALESCE(review_revision, ''),
+	requested_at,
+	decided_at,
+	created_at,
+	updated_at
+`
+
 func (s *Store) GetReview(ctx context.Context, projectID, reviewID string) (store.Review, error) {
 	return scanReview(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text,
-		       requested_at, decided_at, created_at, updated_at
+		SELECT `+reviewSelectColumns+`
 		FROM reviews WHERE project_id=$1 AND id=$2
 	`, projectID, reviewID))
 }
 
+func (s *Store) GetReviewByRun(ctx context.Context, projectID, runID string) (store.Review, error) {
+	return scanReview(s.pool.QueryRow(ctx, `
+		SELECT `+reviewSelectColumns+`
+		FROM reviews WHERE project_id=$1 AND run_id=$2
+	`, projectID, runID))
+}
+
 func (s *Store) ListReviews(ctx context.Context, projectID string, filter store.ReviewFilter) ([]store.Review, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text,
-		       requested_at, decided_at, created_at, updated_at
+		SELECT `+reviewSelectColumns+`
 		FROM reviews
 		WHERE project_id=$1
 		  AND ($2::uuid IS NULL OR issue_id=$2)
@@ -106,8 +126,7 @@ func (s *Store) BeginReviewApproval(ctx context.Context, input store.BeginReview
 	review, err = scanReview(tx.QueryRow(ctx, `
 		UPDATE reviews SET decision_id=$3, updated_at=now()
 		WHERE project_id=$1 AND id=$2 AND status='PENDING'
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text,
-		          requested_at, decided_at, created_at, updated_at
+		RETURNING `+reviewSelectColumns+`
 	`, review.ProjectID, review.ID, decision.ID))
 	if err != nil {
 		return store.BeginReviewApprovalResult{}, err
@@ -133,7 +152,14 @@ func (s *Store) CompleteReviewApproval(ctx context.Context, input store.Complete
 		return store.CompleteReviewApprovalResult{}, err
 	}
 	if review.Status == "APPROVED" {
-		if review.DecisionID == nil || run.Status != "COMPLETED" || issue.Status != "DONE" {
+		if review.DecisionID == nil {
+			return store.CompleteReviewApprovalResult{}, store.ErrConflict
+		}
+		if input.DeliveryComplete {
+			if run.Status != "COMPLETED" || issue.Status != "DONE" {
+				return store.CompleteReviewApprovalResult{}, store.ErrConflict
+			}
+		} else if run.Status != "READY_FOR_REVIEW" || issue.Status != "REVIEW" {
 			return store.CompleteReviewApprovalResult{}, store.ErrConflict
 		}
 		decision, err := decisionByIDTx(ctx, tx, review.ProjectID, *review.DecisionID)
@@ -162,7 +188,10 @@ func (s *Store) CompleteReviewApproval(ctx context.Context, input store.Complete
 		return store.CompleteReviewApprovalResult{}, store.ErrConflict
 	}
 
-	details, err := json.Marshal(map[string]string{"acceptedRevision": input.AcceptedRevision})
+	details, err := json.Marshal(map[string]any{
+		"acceptedRevision": input.AcceptedRevision,
+		"deliveryComplete": input.DeliveryComplete,
+	})
 	if err != nil {
 		return store.CompleteReviewApprovalResult{}, err
 	}
@@ -179,29 +208,30 @@ func (s *Store) CompleteReviewApproval(ctx context.Context, input store.Complete
 		UPDATE reviews
 		SET status='APPROVED', decision_id=$3, decided_at=now(), updated_at=now()
 		WHERE project_id=$1 AND id=$2 AND status='PENDING'
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text,
-		          requested_at, decided_at, created_at, updated_at
+		RETURNING `+reviewSelectColumns+`
 	`, review.ProjectID, review.ID, decision.ID))
 	if err != nil {
 		return store.CompleteReviewApprovalResult{}, err
 	}
-	run, err = scanRun(tx.QueryRow(ctx, `
-		UPDATE runs SET status='COMPLETED', completed_at=now(), updated_at=now()
-		WHERE project_id=$1 AND id=$2 AND status='READY_FOR_REVIEW'
-		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
-		          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-	`, run.ProjectID, run.ID))
-	if err != nil {
-		return store.CompleteReviewApprovalResult{}, err
-	}
-	issue, err = scanIssueJoined(tx.QueryRow(ctx, `
-		UPDATE issues AS i SET status='DONE', updated_at=now()
-		FROM projects AS p
-		WHERE i.project_id=$1 AND i.id=$2 AND i.status='REVIEW' AND p.id=i.project_id
-		RETURNING `+issueSelectColumns+`
-	`, issue.ProjectID, issue.ID))
-	if err != nil {
-		return store.CompleteReviewApprovalResult{}, err
+	if input.DeliveryComplete {
+		run, err = scanRun(tx.QueryRow(ctx, `
+			UPDATE runs SET status='COMPLETED', completed_at=now(), updated_at=now()
+			WHERE project_id=$1 AND id=$2 AND status='READY_FOR_REVIEW'
+			RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+			          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+		`, run.ProjectID, run.ID))
+		if err != nil {
+			return store.CompleteReviewApprovalResult{}, err
+		}
+		issue, err = scanIssueJoined(tx.QueryRow(ctx, `
+			UPDATE issues AS i SET status='DONE', updated_at=now()
+			FROM projects AS p
+			WHERE i.project_id=$1 AND i.id=$2 AND i.status='REVIEW' AND p.id=i.project_id
+			RETURNING `+issueSelectColumns+`
+		`, issue.ProjectID, issue.ID))
+		if err != nil {
+			return store.CompleteReviewApprovalResult{}, err
+		}
 	}
 	events, err := appendReviewDecisionEvents(ctx, tx, run, review, decision, "review.approved")
 	if err != nil {
@@ -254,8 +284,7 @@ func (s *Store) FailReviewApproval(ctx context.Context, input store.FailReviewAp
 	review, err = scanReview(tx.QueryRow(ctx, `
 		UPDATE reviews SET decision_id=$3, updated_at=now()
 		WHERE project_id=$1 AND id=$2 AND status='PENDING'
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text,
-		          requested_at, decided_at, created_at, updated_at
+		RETURNING `+reviewSelectColumns+`
 	`, review.ProjectID, review.ID, failed.ID))
 	if err != nil {
 		return store.Review{}, err
@@ -324,8 +353,7 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 		UPDATE reviews
 		SET status='CHANGES_REQUESTED', decision_id=$3, decided_at=now(), updated_at=now()
 		WHERE project_id=$1 AND id=$2 AND status='PENDING'
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text,
-		          requested_at, decided_at, created_at, updated_at
+		RETURNING `+reviewSelectColumns+`
 	`, review.ProjectID, review.ID, decision.ID))
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
@@ -370,8 +398,7 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 
 func lockReviewCommandState(ctx context.Context, tx pgx.Tx, projectID, reviewID string) (store.Review, store.Run, store.Issue, error) {
 	initial, err := scanReview(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text,
-		       requested_at, decided_at, created_at, updated_at
+		SELECT `+reviewSelectColumns+`
 		FROM reviews WHERE project_id=$1 AND id=$2
 	`, projectID, reviewID))
 	if err != nil {
@@ -386,8 +413,7 @@ func lockReviewCommandState(ctx context.Context, tx pgx.Tx, projectID, reviewID 
 		return store.Review{}, store.Run{}, store.Issue{}, err
 	}
 	review, err := scanReview(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text,
-		       requested_at, decided_at, created_at, updated_at
+		SELECT `+reviewSelectColumns+`
 		FROM reviews WHERE project_id=$1 AND id=$2 FOR UPDATE
 	`, projectID, reviewID))
 	if err != nil {

@@ -51,7 +51,7 @@ func TestReviewApprovalIntentAndCompletionAreDurableAndIdempotent(t *testing.T) 
 	}
 
 	completed, err := s.CompleteReviewApproval(ctx, store.CompleteReviewApprovalCommand{
-		ProjectID: f.project.ID, ReviewID: review.ID, AcceptedRevision: "accepted-sha",
+		ProjectID: f.project.ID, ReviewID: review.ID, AcceptedRevision: "accepted-sha", DeliveryComplete: true,
 	})
 	if err != nil {
 		t.Fatalf("CompleteReviewApproval() error=%v", err)
@@ -60,7 +60,7 @@ func TestReviewApprovalIntentAndCompletionAreDurableAndIdempotent(t *testing.T) 
 		t.Fatalf("completed approval=%+v", completed)
 	}
 	retry, err := s.CompleteReviewApproval(ctx, store.CompleteReviewApprovalCommand{
-		ProjectID: f.project.ID, ReviewID: review.ID, AcceptedRevision: "accepted-sha",
+		ProjectID: f.project.ID, ReviewID: review.ID, AcceptedRevision: "accepted-sha", DeliveryComplete: true,
 	})
 	if err != nil || retry.Decision.ID != completed.Decision.ID {
 		t.Fatalf("idempotent completion=%+v err=%v", retry, err)

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
-	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -67,23 +66,5 @@ func TestReconcileDoesNotBlindlyReplayExistingExecution(t *testing.T) {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestCandidateEventType(t *testing.T) {
-	cases := []struct {
-		change evidence.CandidateChange
-		want   string
-	}{
-		{change: evidence.CandidateChange{Untracked: true}, want: "file.created"},
-		{change: evidence.CandidateChange{StagedStatus: "renamed"}, want: "file.renamed"},
-		{change: evidence.CandidateChange{UnstagedStatus: "deleted"}, want: "file.deleted"},
-		{change: evidence.CandidateChange{StagedStatus: "created"}, want: "file.created"},
-		{change: evidence.CandidateChange{UnstagedStatus: "modified"}, want: "file.modified"},
-	}
-	for _, tc := range cases {
-		if got := candidateEventType(tc.change); got != tc.want {
-			t.Fatalf("got %q want %q for %+v", got, tc.want, tc.change)
-		}
 	}
 }

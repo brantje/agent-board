@@ -8,11 +8,11 @@ import (
 )
 
 func createExternalRunnerCredential(ctx context.Context, control *app.Service) (store.Runner, string, error) {
-	_, registrationToken, err := control.Runners.Create(ctx)
+	created, registrationToken, err := control.Runners.Create(ctx)
 	if err != nil {
 		return store.Runner{}, "", err
 	}
-	runner, token, err := control.Runners.Register(ctx, registrationToken, "External integration host")
+	runner, token, err := control.Runners.Register(ctx, registrationToken, "External integration host "+created.ID)
 	if err != nil {
 		return store.Runner{}, "", err
 	}

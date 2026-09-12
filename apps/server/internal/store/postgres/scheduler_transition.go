@@ -112,11 +112,26 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 }
 
 func createPendingReview(ctx context.Context, tx pgx.Tx, run store.Run) error {
+	var baseRevision, reviewRevision string
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(base_revision, ''), COALESCE(current_revision, '')
+		FROM workspaces
+		WHERE project_id=$1 AND issue_id=$2 AND id=$3
+		FOR SHARE
+	`, run.ProjectID, run.IssueID, run.WorkspaceID).Scan(&baseRevision, &reviewRevision); err != nil {
+		return notFound(err)
+	}
+	baseRevision = strings.TrimSpace(baseRevision)
+	reviewRevision = strings.TrimSpace(reviewRevision)
+	if baseRevision == "" || reviewRevision == "" {
+		return store.ErrConflict
+	}
+
 	command, err := tx.Exec(ctx, `
-		INSERT INTO reviews (project_id, issue_id, run_id, status)
-		VALUES ($1, $2, $3, 'PENDING')
+		INSERT INTO reviews (project_id, issue_id, run_id, status, base_revision, review_revision)
+		VALUES ($1, $2, $3, 'PENDING', $4, $5)
 		ON CONFLICT (run_id) DO NOTHING
-	`, run.ProjectID, run.IssueID, run.ID)
+	`, run.ProjectID, run.IssueID, run.ID, baseRevision, reviewRevision)
 	if err != nil {
 		return err
 	}
@@ -124,15 +139,17 @@ func createPendingReview(ctx context.Context, tx pgx.Tx, run store.Run) error {
 		return nil
 	}
 
-	var projectID, issueID, status string
+	var projectID, issueID, status, persistedBaseRevision, persistedReviewRevision string
 	if err := tx.QueryRow(ctx, `
-		SELECT project_id::text, issue_id::text, status
+		SELECT project_id::text, issue_id::text, status,
+		       COALESCE(base_revision, ''), COALESCE(review_revision, '')
 		FROM reviews
 		WHERE run_id=$1
-	`, run.ID).Scan(&projectID, &issueID, &status); err != nil {
+	`, run.ID).Scan(&projectID, &issueID, &status, &persistedBaseRevision, &persistedReviewRevision); err != nil {
 		return notFound(err)
 	}
-	if projectID != run.ProjectID || issueID != run.IssueID || status != "PENDING" {
+	if projectID != run.ProjectID || issueID != run.IssueID || status != "PENDING" ||
+		persistedBaseRevision != baseRevision || persistedReviewRevision != reviewRevision {
 		return store.ErrConflict
 	}
 	return nil

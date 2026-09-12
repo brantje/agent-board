@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"context"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,9 +22,7 @@ func (s *reviewProjectBackedStore) AcquireWorkspaceBootstrapLock(context.Context
 	return memoryLock{mu: &s.mu}, nil
 }
 
-type gitWithoutCandidateCapability struct{ Git }
-
-func TestProjectBackedMaterializerAppliesReviewedCandidate(t *testing.T) {
+func TestProjectBackedMaterializerAppliesReviewedRevision(t *testing.T) {
 	git := requireGit(t)
 	parent := t.TempDir()
 	sourceRoot := filepath.Join(parent, "sources")
@@ -41,27 +38,57 @@ func TestProjectBackedMaterializerAppliesReviewedCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	project := store.Project{ID: "project-1", RepositoryPath: source, DefaultBranch: "main"}
+	project := store.Project{ID: "project-1", SourceType: store.ProjectSourceLocal, RepositoryPath: source, DefaultBranch: "main"}
 	accepted, err := projectMaterializer.EnsureProjectWorkspace(t.Context(), project)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	state := &reviewProjectBackedStore{memoryStateStore: &memoryStateStore{workspace: fixtureWorkspace(source)}}
-	legacy, err := NewMaterializer(state, policy, git, filepath.Join(parent, "issues"))
+	issuePath := filepath.Join(parent, "issue-workspace")
+	if err := git.GitCLI.Clone(t.Context(), source, issuePath, "main"); err != nil {
+		t.Fatal(err)
+	}
+	baseRevision, err := git.GitCLI.HeadRevision(t.Context(), issuePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	backed, err := NewProjectBackedMaterializer(legacy, staticProjectWorkspaceSource{value: accepted})
+	workingBranch := "agent-board/AB-1"
+	if err := git.GitCLI.CheckoutNewBranch(t.Context(), issuePath, workingBranch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(issuePath, "reviewed.txt"), []byte("reviewed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.GitCLI.run(t.Context(), "-C", issuePath, "add", "--", "reviewed.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.GitCLI.run(t.Context(), "-C", issuePath, "-c", "user.name=Agent Board", "-c", "user.email=agent-board@localhost", "commit", "-m", "Reviewed change"); err != nil {
+		t.Fatal(err)
+	}
+	reviewRevision, err := git.GitCLI.HeadRevision(t.Context(), issuePath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate := AcceptedCandidate{Files: []CandidateFileSource{{Path: "reviewed.txt", Chunks: []CandidateBlobSource{func(context.Context) (io.ReadCloser, error) {
-		return io.NopCloser(strings.NewReader("reviewed\n")), nil
-	}}}}}
-	revision, err := backed.ApplyReviewedCandidate(t.Context(), project, "review-backed", candidate)
+
+	state := &reviewProjectBackedStore{memoryStateStore: &memoryStateStore{workspace: store.Workspace{
+		ProjectID:       project.ID,
+		IssueID:         "issue-1",
+		Path:            issuePath,
+		WorkingBranch:   workingBranch,
+		BootstrapStatus: "READY",
+	}}}
+	issueMaterializer, err := NewMaterializer(state, policy, git.GitCLI, filepath.Join(parent, "issues"))
 	if err != nil {
-		t.Fatalf("ApplyReviewedCandidate() error=%v", err)
+		t.Fatal(err)
+	}
+	backed, err := NewProjectBackedMaterializer(issueMaterializer, staticProjectWorkspaceSource{value: accepted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review := store.Review{ID: "review-1", ProjectID: project.ID, IssueID: "issue-1", BaseRevision: baseRevision, ReviewRevision: reviewRevision}
+	revision, err := backed.ApplyReviewedRevision(t.Context(), project, review)
+	if err != nil {
+		t.Fatalf("ApplyReviewedRevision() error=%v", err)
 	}
 	if revision == accepted.AcceptedRevision {
 		t.Fatalf("accepted revision did not advance: %q", revision)
@@ -70,26 +97,41 @@ func TestProjectBackedMaterializerAppliesReviewedCandidate(t *testing.T) {
 	if err != nil || string(content) != "reviewed\n" {
 		t.Fatalf("reviewed content=%q err=%v", content, err)
 	}
+	branch, err := git.GitCLI.CurrentBranch(t.Context(), accepted.Path)
+	if err != nil || branch != "main" {
+		t.Fatalf("accepted branch=%q err=%v", branch, err)
+	}
+	if _, err := git.GitCLI.run(t.Context(), "-C", accepted.Path, "merge-base", "--is-ancestor", reviewRevision, revision); err != nil {
+		t.Fatalf("review revision is not contained by delivered revision: %v", err)
+	}
 }
 
-func TestProjectBackedMaterializerReviewDeliveryValidatesDependencies(t *testing.T) {
+func TestProjectBackedMaterializerReviewRevisionValidatesMetadata(t *testing.T) {
 	var nilMaterializer *ProjectBackedMaterializer
-	if _, err := nilMaterializer.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", AcceptedCandidate{}); err == nil {
+	if _, err := nilMaterializer.ApplyReviewedRevision(t.Context(), store.Project{SourceType: store.ProjectSourceLocal}, store.Review{}); err == nil {
 		t.Fatal("nil materializer should fail")
 	}
 
 	git := requireGit(t)
-	policy, _ := repository.NewPolicy([]string{t.TempDir()})
-	state := &memoryStateStore{}
-	legacy, err := NewMaterializer(state, policy, gitWithoutCandidateCapability{Git: git}, t.TempDir())
+	root := t.TempDir()
+	policy, err := repository.NewPolicy([]string{root})
 	if err != nil {
 		t.Fatal(err)
 	}
-	backed, err := NewProjectBackedMaterializer(legacy, staticProjectWorkspaceSource{})
+	state := &reviewProjectBackedStore{memoryStateStore: &memoryStateStore{}}
+	issueMaterializer, err := NewMaterializer(state, policy, git.GitCLI, filepath.Join(root, "issues"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := backed.ApplyReviewedCandidate(t.Context(), store.Project{}, "review", AcceptedCandidate{}); err == nil || !strings.Contains(err.Error(), "candidate capability") {
-		t.Fatalf("materializer without candidate Git capability error=%v", err)
+	backed, err := NewProjectBackedMaterializer(issueMaterializer, staticProjectWorkspaceSource{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	completeReview := store.Review{ID: "review", IssueID: "issue", BaseRevision: strings.Repeat("a", 40), ReviewRevision: strings.Repeat("b", 40)}
+	if _, err := backed.ApplyReviewedRevision(t.Context(), store.Project{SourceType: store.ProjectSourceGit}, completeReview); err == nil {
+		t.Fatal("remote Project delivery should fail")
+	}
+	if _, err := backed.ApplyReviewedRevision(t.Context(), store.Project{SourceType: store.ProjectSourceLocal}, store.Review{ID: "review"}); err == nil {
+		t.Fatal("incomplete Review Git identity should fail")
 	}
 }

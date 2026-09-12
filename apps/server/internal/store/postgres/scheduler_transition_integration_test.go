@@ -162,6 +162,7 @@ func TestCreatePendingReviewIsIdempotentAndRejectsConflictingExistingReview(t *t
 	s := New(testPool(t))
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "pending-review-idempotency")
+	prepareFixtureWorkspaceRevisions(t, s, f.workspace.ID, "pending-review-idempotency")
 
 	create := func() error {
 		t.Helper()

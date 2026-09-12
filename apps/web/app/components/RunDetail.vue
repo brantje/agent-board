@@ -181,6 +181,7 @@ function provenanceText() {
               </div>
             </dl>
           </UCard>
+          <RunChangedFilesCard :project-id="projectId" :evidence="evidence" />
           <UCard>
             <h2 class="section-label mb-3">Runtime instances</h2>
             <div v-for="instance in evidence?.runtimeInstances" :key="instance.id" class="mb-3 text-sm">

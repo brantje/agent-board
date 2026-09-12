@@ -24,7 +24,6 @@ const testStatus = computed(() => data.value?.testStatus)
 const candidateArtifacts = computed(() => (evidence.value?.artifacts || []).filter(artifact =>
   ['candidate-staged.patch', 'candidate-unstaged.patch', 'candidate-manifest.json'].includes(artifact.name) || artifact.kind === 'candidate_file'
 ))
-const deletedOrRenamed = computed(() => (evidence.value?.fileChanges || []).filter(event => event.type === 'file.deleted' || event.type === 'file.renamed'))
 const agentMessages = computed(() => (evidence.value?.events || []).filter(event => event.type === 'agent.message'))
 
 function artifactHref(artifact: ArtifactEvidence) {
@@ -98,10 +97,6 @@ function provenanceText() {
                 <span class="text-muted"> · {{ artifact.kind.replaceAll('_', ' ') }}</span>
               </li>
             </ul>
-            <div v-if="deletedOrRenamed.length" class="mt-4 space-y-1 text-sm">
-              <h3 class="section-label">Deleted and renamed</h3>
-              <p v-for="event in deletedOrRenamed" :key="event.id">{{ eventDescription(event) }}</p>
-            </div>
           </UCard>
 
           <UCard>
@@ -123,6 +118,7 @@ function provenanceText() {
           </UCard>
         </section>
         <aside class="space-y-4">
+          <RunChangedFilesCard :project-id="projectId" :evidence="evidence" />
           <UCard>
             <h2 class="section-label mb-3">Decision</h2>
             <p class="mb-3 text-sm">{{ statusLabel(review?.status || '') }}</p>

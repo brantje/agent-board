@@ -12,15 +12,17 @@ import (
 )
 
 type ReviewDTO struct {
-	ID          string     `json:"id"`
-	ProjectID   string     `json:"projectId"`
-	IssueID     string     `json:"issueId"`
-	RunID       string     `json:"runId"`
-	Status      string     `json:"status"`
-	RequestedAt time.Time  `json:"requestedAt"`
-	DecidedAt   *time.Time `json:"decidedAt"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	ID             string     `json:"id"`
+	ProjectID      string     `json:"projectId"`
+	IssueID        string     `json:"issueId"`
+	RunID          string     `json:"runId"`
+	Status         string     `json:"status"`
+	BaseRevision   string     `json:"baseRevision"`
+	ReviewRevision string     `json:"reviewRevision"`
+	RequestedAt    time.Time  `json:"requestedAt"`
+	DecidedAt      *time.Time `json:"decidedAt"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
 }
 
 type ReviewDecisionDTO struct {
@@ -199,7 +201,8 @@ func reviewPath(w http.ResponseWriter, r *http.Request) (string, string, bool) {
 func reviewDTO(value store.Review, issueKeys map[string]string) ReviewDTO {
 	return ReviewDTO{
 		ID: value.ID, ProjectID: value.ProjectID, IssueID: issueKeyForUUID(issueKeys, value.IssueID), RunID: value.RunID,
-		Status: value.Status, RequestedAt: value.RequestedAt, DecidedAt: value.DecidedAt,
+		Status: value.Status, BaseRevision: value.BaseRevision, ReviewRevision: value.ReviewRevision,
+		RequestedAt: value.RequestedAt, DecidedAt: value.DecidedAt,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
 }

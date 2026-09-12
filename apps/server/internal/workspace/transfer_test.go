@@ -7,108 +7,128 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	sharedworkspace "github.com/brantje/agent-board/packages/workspacegit"
 )
 
-func TestApplyTransferBundlePreservesAuthoritativeGitState(t *testing.T) {
+func TestApplyTransferBundleFastForwardsIssueBranch(t *testing.T) {
 	ctx := context.Background()
 	git, err := NewGitCLI("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := initTransferRepository(t)
-	destination := cloneRepository(t, source)
-
-	// This staging existed before Runner execution and remains server-owned.
-	writeTransferFile(t, filepath.Join(source, "preexisting.txt"), "staged before runner\n")
-	runTransferGit(t, source, "add", "preexisting.txt")
-	writeTransferFile(t, filepath.Join(destination, "preexisting.txt"), "staged before runner\n")
-	runTransferGit(t, destination, "add", "preexisting.txt")
-	headBefore := gitOutput(t, destination, "rev-parse", "HEAD")
-	stagedBefore := gitOutput(t, destination, "diff", "--cached", "--binary")
-
-	// Runner-owned filesystem changes may include staging, but Runner staging is
-	// transport input and must not replace the authoritative server index.
-	writeTransferFile(t, filepath.Join(source, "tracked.txt"), "runner changed\n")
-	runTransferGit(t, source, "add", "tracked.txt")
-	if err := os.Remove(filepath.Join(source, "deleted.txt")); err != nil {
+	authoritative := initBranchTransferRepository(t, "agent-board/AB-12")
+	runner := cloneBranchTransferRepository(t, authoritative)
+	start := branchTransferOutput(t, runner, "rev-parse", "HEAD")
+	writeBranchTransferFile(t, filepath.Join(runner, "agent.txt"), "agent commit\n", 0o644)
+	runBranchTransferGit(t, runner, "add", "agent.txt")
+	runBranchTransferGit(t, runner, "-c", "user.name=Agent", "-c", "user.email=agent@example.invalid", "commit", "-qm", "agent commit")
+	writeBranchTransferFile(t, filepath.Join(runner, "leftover.txt"), "leftover\n", 0o755)
+	if _, err := sharedworkspace.FinalizeCheckout(ctx, runner, start, "git", 30*time.Second); err != nil {
 		t.Fatal(err)
 	}
-	writeTransferFile(t, filepath.Join(source, "new.txt"), "runner new\n")
-
-	payload, err := git.TransferSnapshot(ctx, source, "sync")
+	returnedHead := branchTransferOutput(t, runner, "rev-parse", "HEAD")
+	payload, err := sharedworkspace.BranchBundle(ctx, runner, "return", "git", 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := git.ApplyTransferBundle(ctx, destination, payload); err != nil {
+	if err := git.ApplyTransferBundle(ctx, authoritative, payload); err != nil {
 		t.Fatal(err)
 	}
-
-	if got := gitOutput(t, destination, "rev-parse", "HEAD"); got != headBefore {
-		t.Fatalf("sync-back advanced authoritative HEAD: before=%s after=%s", headBefore, got)
+	if got := branchTransferOutput(t, authoritative, "rev-parse", "HEAD"); got != returnedHead {
+		t.Fatalf("authoritative head=%s want=%s", got, returnedHead)
 	}
-	if got := gitOutput(t, destination, "diff", "--cached", "--binary"); got != stagedBefore {
-		t.Fatalf("sync-back changed authoritative staging\nwant=%s\ngot=%s", stagedBefore, got)
+	if body, err := os.ReadFile(filepath.Join(authoritative, "agent.txt")); err != nil || string(body) != "agent commit\n" {
+		t.Fatalf("agent commit missing: %q %v", body, err)
 	}
-	if body, err := os.ReadFile(filepath.Join(destination, "tracked.txt")); err != nil || string(body) != "runner changed\n" {
-		t.Fatalf("tracked Runner change missing: %q %v", body, err)
-	}
-	if body, err := os.ReadFile(filepath.Join(destination, "new.txt")); err != nil || string(body) != "runner new\n" {
-		t.Fatalf("untracked Runner change missing: %q %v", body, err)
-	}
-	if _, err := os.Stat(filepath.Join(destination, "deleted.txt")); !os.IsNotExist(err) {
-		t.Fatalf("Runner deletion missing: %v", err)
+	if mode := branchTransferOutput(t, authoritative, "ls-tree", "HEAD", "leftover.txt"); !strings.HasPrefix(mode, "100755 ") {
+		t.Fatalf("fallback commit lost executable mode: %s", mode)
 	}
 }
 
-func TestApplyTransferBundleRejectsDifferentAuthoritativeHEAD(t *testing.T) {
+func TestApplyTransferBundleRejectsHistoryRewritePastAuthoritativeHead(t *testing.T) {
 	ctx := context.Background()
 	git, err := NewGitCLI("")
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := initTransferRepository(t)
-	payload, err := git.TransferSnapshot(ctx, source, "stale-baseline")
+	authoritative := initBranchTransferRepository(t, "agent-board/AB-12")
+	runner := cloneBranchTransferRepository(t, authoritative)
+	parent := branchTransferOutput(t, runner, "rev-parse", "HEAD^")
+	runBranchTransferGit(t, runner, "reset", "--hard", parent)
+	writeBranchTransferFile(t, filepath.Join(runner, "rewrite.txt"), "rewrite\n", 0o644)
+	runBranchTransferGit(t, runner, "add", ".")
+	runBranchTransferGit(t, runner, "-c", "user.name=Agent", "-c", "user.email=agent@example.invalid", "commit", "-qm", "rewrite")
+	payload, err := sharedworkspace.BranchBundle(ctx, runner, "return", "git", 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	destination := cloneRepository(t, source)
-	writeTransferFile(t, filepath.Join(destination, "server-only.txt"), "concurrent\n")
-	runTransferGit(t, destination, "add", "server-only.txt")
-	runTransferGit(t, destination, "commit", "-qm", "concurrent server commit")
-
-	if err := git.ApplyTransferBundle(ctx, destination, payload); err == nil {
-		t.Fatal("sync-back accepted a transfer from a different authoritative HEAD")
+	before := branchTransferOutput(t, authoritative, "rev-parse", "HEAD")
+	if err := git.ApplyTransferBundle(ctx, authoritative, payload); err == nil {
+		t.Fatal("rewritten runner history was accepted")
+	}
+	if got := branchTransferOutput(t, authoritative, "rev-parse", "HEAD"); got != before {
+		t.Fatalf("rejected import moved authoritative branch: before=%s after=%s", before, got)
 	}
 }
 
-func initTransferRepository(t *testing.T) string {
+func TestApplyTransferBundleRejectsWrongIssueBranch(t *testing.T) {
+	ctx := context.Background()
+	git, err := NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authoritative := initBranchTransferRepository(t, "agent-board/AB-12")
+	runner := cloneBranchTransferRepository(t, authoritative)
+	runBranchTransferGit(t, runner, "checkout", "-qb", "agent-board/AB-99")
+	payload, err := sharedworkspace.BranchBundle(ctx, runner, "return", "git", 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := git.ApplyTransferBundle(ctx, authoritative, payload); err == nil {
+		t.Fatal("wrong Issue branch was accepted")
+	}
+}
+
+func TestTransferSnapshotRequiresCleanIssueBoundary(t *testing.T) {
+	git, err := NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := initBranchTransferRepository(t, "agent-board/AB-12")
+	writeBranchTransferFile(t, filepath.Join(repo, "dirty.txt"), "dirty\n", 0o644)
+	if _, err := git.TransferSnapshot(context.Background(), repo, "outbound"); err == nil {
+		t.Fatal("dirty Issue Workspace was transferred")
+	}
+}
+
+func initBranchTransferRepository(t *testing.T, branch string) string {
 	t.Helper()
 	repository := t.TempDir()
-	runTransferGit(t, repository, "init", "-q")
-	runTransferGit(t, repository, "config", "user.email", "test@example.invalid")
-	runTransferGit(t, repository, "config", "user.name", "Agent Board Test")
-	writeTransferFile(t, filepath.Join(repository, "tracked.txt"), "base\n")
-	writeTransferFile(t, filepath.Join(repository, "deleted.txt"), "delete me\n")
-	writeTransferFile(t, filepath.Join(repository, "preexisting.txt"), "base\n")
-	runTransferGit(t, repository, "add", ".")
-	runTransferGit(t, repository, "commit", "-qm", "baseline")
+	runBranchTransferGit(t, repository, "init", "-q")
+	writeBranchTransferFile(t, filepath.Join(repository, "tracked.txt"), "base\n", 0o644)
+	writeBranchTransferFile(t, filepath.Join(repository, "base.txt"), "base\n", 0o644)
+	runBranchTransferGit(t, repository, "add", ".")
+	runBranchTransferGit(t, repository, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "base")
+	writeBranchTransferFile(t, filepath.Join(repository, "second.txt"), "second\n", 0o644)
+	runBranchTransferGit(t, repository, "add", ".")
+	runBranchTransferGit(t, repository, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "second")
+	runBranchTransferGit(t, repository, "checkout", "-qb", branch)
 	return repository
 }
 
-func cloneRepository(t *testing.T, source string) string {
+func cloneBranchTransferRepository(t *testing.T, source string) string {
 	t.Helper()
 	destination := filepath.Join(t.TempDir(), "clone")
 	cmd := exec.Command("git", "clone", "-q", source, destination)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("clone repository: %v\n%s", err, output)
 	}
-	runTransferGit(t, destination, "config", "user.email", "test@example.invalid")
-	runTransferGit(t, destination, "config", "user.name", "Agent Board Test")
 	return destination
 }
 
-func runTransferGit(t *testing.T, dir string, args ...string) {
+func runBranchTransferGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -117,7 +137,7 @@ func runTransferGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func gitOutput(t *testing.T, dir string, args ...string) string {
+func branchTransferOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
@@ -128,9 +148,12 @@ func gitOutput(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(output))
 }
 
-func writeTransferFile(t *testing.T, path, contents string) {
+func writeBranchTransferFile(t *testing.T, path, contents string, mode os.FileMode) {
 	t.Helper()
-	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(contents), mode); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, mode); err != nil {
 		t.Fatal(err)
 	}
 }

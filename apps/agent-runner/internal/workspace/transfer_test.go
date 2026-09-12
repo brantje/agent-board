@@ -9,125 +9,116 @@ import (
 	"testing"
 )
 
-func TestMaterializeAndSnapshotBundleRoundTrip(t *testing.T) {
+func TestMaterializeBranchBundleUsesAdvertisedBranchAndHead(t *testing.T) {
 	ctx := context.Background()
-	source := t.TempDir()
-	runGitCLI(t, "-C", source, "init")
-	for path, content := range map[string]string{
-		".gitignore":  "ignored.txt\n",
-		"README.md":   "hello\n",
-		"staged.txt":  "before\n",
-		"deleted.txt": "delete me\n",
-	} {
-		if err := os.WriteFile(filepath.Join(source, path), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	runGitCLI(t, "-C", source, "add", ".")
-	runGitCLI(t, "-C", source, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init")
-
-	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("changed\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "staged.txt"), []byte("staged change\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGitCLI(t, "-C", source, "add", "staged.txt")
-	if err := os.Remove(filepath.Join(source, "deleted.txt")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "untracked.txt"), []byte("new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(source, "ignored.txt"), []byte("local only\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	wantStatus := strings.TrimSpace(gitOutput(t, source, "status", "--porcelain=v1"))
-
+	source := initRunnerTransferRepository(t)
 	payload, err := SnapshotBundle(ctx, source, "transfer-1")
 	if err != nil {
 		t.Fatal(err)
 	}
 	destination := filepath.Join(t.TempDir(), "session")
-	if err := MaterializeBundle(ctx, destination, payload); err != nil {
+	state, err := MaterializeBranchBundle(ctx, destination, payload)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSpace(gitOutput(t, destination, "status", "--porcelain=v1")); got != wantStatus {
-		t.Fatalf("materialized status mismatch\nwant=%s\ngot=%s", wantStatus, got)
+	if state.Branch != "agent-board/AB-12" {
+		t.Fatalf("branch=%q", state.Branch)
 	}
-	if _, err := os.Stat(filepath.Join(destination, "ignored.txt")); !os.IsNotExist(err) {
-		t.Fatalf("ignored file transferred to runner Workspace: %v", err)
+	if got := runnerTransferOutput(t, destination, "symbolic-ref", "--short", "HEAD"); got != state.Branch {
+		t.Fatalf("checked out branch=%q want=%q", got, state.Branch)
 	}
+	if got := runnerTransferOutput(t, destination, "rev-parse", "HEAD"); got != state.StartRevision {
+		t.Fatalf("head=%q want=%q", got, state.StartRevision)
+	}
+}
 
+func TestFinalizeCheckoutCommitsRunnerLeftoversBeforeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	source := initRunnerTransferRepository(t)
+	payload, err := SnapshotBundle(ctx, source, "transfer-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "session")
+	state, err := MaterializeBranchBundle(ctx, destination, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(filepath.Join(destination, "runner.txt"), []byte("runner change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	syncPayload, err := SnapshotBundle(ctx, destination, "transfer-2")
-	if err != nil || len(syncPayload) == 0 {
-		t.Fatalf("snapshot len=%d err=%v", len(syncPayload), err)
-	}
-	if !IsRepository(ctx, destination) {
-		t.Fatal("materialized Workspace is not a Git repository")
-	}
-
-	roundTrip := filepath.Join(t.TempDir(), "round-trip")
-	if err := MaterializeBundle(ctx, roundTrip, syncPayload); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(filepath.Join(roundTrip, "runner.txt")); err != nil {
-		t.Fatalf("runner change missing from round trip: %v", err)
-	}
-}
-
-func TestMaterializeBundleCreatesEmptyWorkspaceWithoutSnapshot(t *testing.T) {
-	destination := filepath.Join(t.TempDir(), "session", "workspace")
-	if err := MaterializeBundle(context.Background(), destination, nil); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(destination)
-	if err != nil || !info.IsDir() {
-		t.Fatalf("empty Workspace was not created: info=%v err=%v", info, err)
-	}
-	if IsRepository(context.Background(), destination) {
-		t.Fatal("empty Workspace unexpectedly became a Git repository")
-	}
-}
-
-func TestMaterializeBundleRejectsInvalidPayloadWithoutLeavingStaleWorkspace(t *testing.T) {
-	destination := filepath.Join(t.TempDir(), "session")
-	if err := os.MkdirAll(destination, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(destination, "stale.txt"), []byte("must not survive\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	err := MaterializeBundle(context.Background(), destination, []byte("not a git bundle"))
-	if err == nil || !strings.Contains(err.Error(), "verify transfer bundle") {
-		t.Fatalf("MaterializeBundle() error=%v, want invalid bundle rejection", err)
-	}
-	if _, err := os.Stat(filepath.Join(destination, "stale.txt")); !os.IsNotExist(err) {
-		t.Fatalf("stale Workspace content survived invalid transfer: %v", err)
-	}
-	if IsRepository(context.Background(), destination) {
-		t.Fatal("invalid transfer left an executable Git Workspace")
-	}
-}
-
-func gitOutput(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	out, err := cmd.CombinedOutput()
+	head, err := FinalizeCheckout(ctx, destination, state)
 	if err != nil {
-		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		t.Fatal(err)
 	}
-	return string(out)
+	if head == state.StartRevision {
+		t.Fatal("leftover change did not create a commit")
+	}
+	if got := runnerTransferOutput(t, destination, "status", "--porcelain=v1", "--untracked-files=all"); got != "" {
+		t.Fatalf("finalized status=%q", got)
+	}
+	if _, err := SnapshotBundle(ctx, destination, "transfer-2"); err != nil {
+		t.Fatal(err)
+	}
 }
 
-func runGitCLI(t *testing.T, args ...string) {
+func TestFinalizeCheckoutRejectsBranchSwitch(t *testing.T) {
+	ctx := context.Background()
+	source := initRunnerTransferRepository(t)
+	payload, err := SnapshotBundle(ctx, source, "transfer-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	destination := filepath.Join(t.TempDir(), "session")
+	state, err := MaterializeBranchBundle(ctx, destination, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runRunnerTransferGit(t, destination, "checkout", "-qb", "other")
+	if _, err := FinalizeCheckout(ctx, destination, state); err == nil {
+		t.Fatal("branch switch was accepted")
+	}
+}
+
+func TestMaterializeBranchBundleRejectsInvalidOrEmptyPayload(t *testing.T) {
+	for name, payload := range map[string][]byte{"empty": nil, "invalid": []byte("not a git bundle")} {
+		t.Run(name, func(t *testing.T) {
+			destination := filepath.Join(t.TempDir(), "session")
+			if _, err := MaterializeBranchBundle(context.Background(), destination, payload); err == nil {
+				t.Fatal("invalid payload accepted")
+			}
+			if IsRepository(context.Background(), destination) {
+				t.Fatal("invalid payload left a Git checkout")
+			}
+		})
+	}
+}
+
+func initRunnerTransferRepository(t *testing.T) string {
+	t.Helper()
+	repo := t.TempDir()
+	runRunnerTransferGit(t, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runRunnerTransferGit(t, repo, "add", ".")
+	runRunnerTransferGit(t, repo, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-qm", "init")
+	runRunnerTransferGit(t, repo, "checkout", "-qb", "agent-board/AB-12")
+	return repo
+}
+
+func runnerTransferOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v failed: %v\n%s", args, err, out)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+	return strings.TrimSpace(string(out))
+}
+
+func runRunnerTransferGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	_ = runnerTransferOutput(t, dir, args...)
 }

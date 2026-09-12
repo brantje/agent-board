@@ -11,7 +11,10 @@ import (
 func TestReviewServiceListAndDecisionProjection(t *testing.T) {
 	run := store.Run{ID: "run-1", ProjectID: "project-1", IssueID: "issue-1"}
 	decisionID := "decision-1"
-	review := store.Review{ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: run.ID, Status: "APPROVED", DecisionID: &decisionID}
+	review := store.Review{
+		ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: run.ID, Status: "APPROVED", DecisionID: &decisionID,
+		BaseRevision: "base-revision", ReviewRevision: "review-revision",
+	}
 	s := &reviewServiceStore{
 		run:      run,
 		review:   review,
@@ -20,7 +23,7 @@ func TestReviewServiceListAndDecisionProjection(t *testing.T) {
 	}
 	service := newReviewServiceForTest(t, s, &reviewBlobStore{values: map[string][]byte{}}, &reviewCandidateApplierFake{})
 	values, err := service.List(context.Background(), "project-1", store.ReviewFilter{Statuses: []string{"APPROVED"}})
-	if err != nil || len(values) != 1 || values[0].ID != review.ID {
+	if err != nil || len(values) != 1 || values[0].ID != review.ID || values[0].ReviewRevision != "review-revision" {
 		t.Fatalf("List()=%+v err=%v", values, err)
 	}
 	inspection, err := service.Get(context.Background(), "project-1", review.ID)
@@ -62,9 +65,11 @@ func TestReviewServiceValidatesCommandIdentifiers(t *testing.T) {
 
 func TestReviewServiceApprovalFailuresRemainRecoverable(t *testing.T) {
 	run := store.Run{ID: "run-1", ProjectID: "project-1", IssueID: "issue-1"}
-	review := store.Review{ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: run.ID, Status: "PENDING"}
-	manifest := store.Artifact{ID: "manifest", ProjectID: "project-1", RunID: run.ID, Kind: "candidate_manifest", StorageRef: "manifest"}
-	blobs := &reviewBlobStore{values: map[string][]byte{"manifest": []byte(`{}`)}}
+	review := store.Review{
+		ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: run.ID, Status: "PENDING",
+		BaseRevision: "base-revision", ReviewRevision: "review-revision",
+	}
+	blobs := &reviewBlobStore{values: map[string][]byte{}}
 
 	t.Run("begin persistence failure", func(t *testing.T) {
 		s := &reviewServiceStore{run: run, review: review, beginErr: store.ErrConflict}
@@ -76,11 +81,10 @@ func TestReviewServiceApprovalFailuresRemainRecoverable(t *testing.T) {
 
 	t.Run("apply failure records retryable failure", func(t *testing.T) {
 		s := &reviewServiceStore{
-			project:   store.Project{ID: "project-1"},
-			run:       run,
-			review:    review,
-			begin:     store.BeginReviewApprovalResult{Review: review, Run: run},
-			artifacts: []store.Artifact{manifest},
+			project: store.Project{ID: "project-1", SourceType: store.ProjectSourceLocal},
+			run:     run,
+			review:  review,
+			begin:   store.BeginReviewApprovalResult{Review: review, Run: run},
 		}
 		service := newReviewServiceForTest(t, s, blobs, &reviewCandidateApplierFake{err: errors.New("apply failed")})
 		if _, err := service.Approve(context.Background(), "project-1", review.ID, nil); err == nil {
@@ -93,11 +97,10 @@ func TestReviewServiceApprovalFailuresRemainRecoverable(t *testing.T) {
 
 	t.Run("post-apply completion failure leaves intent recoverable", func(t *testing.T) {
 		s := &reviewServiceStore{
-			project:     store.Project{ID: "project-1"},
+			project:     store.Project{ID: "project-1", SourceType: store.ProjectSourceLocal},
 			run:         run,
 			review:      review,
 			begin:       store.BeginReviewApprovalResult{Review: review, Run: run},
-			artifacts:   []store.Artifact{manifest},
 			completeErr: store.ErrConflict,
 		}
 		service := newReviewServiceForTest(t, s, blobs, &reviewCandidateApplierFake{revision: "accepted"})

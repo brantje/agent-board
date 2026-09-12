@@ -2,7 +2,7 @@
 
 `agent-runner` is the Engine-neutral execution-plane binary between the trusted Go control plane and coding Engine processes such as OpenCode.
 
-Production v0.1 prefers **external persistent Runner hosts**: a user-managed Linux machine runs a versioned standalone `agent-runner` binary as a systemd service and connects outbound to Agent Board over protocol v2. The server-managed internal Runner uses the same protocol and Workspace-transfer path; it is not a second execution topology.
+Production v0.1 prefers **external persistent Runner hosts**: a user-managed Linux machine runs a versioned standalone `agent-runner` binary as a systemd service and connects outbound to Agent Board over protocol v2. The server-managed internal Runner uses the same protocol; it is not a second execution topology.
 
 The Runner is part of the v0.1 execution architecture. It is not an Agent, Run, Runtime, Runtime Instance or future Worker.
 
@@ -17,12 +17,29 @@ Issue
  -> Run
  -> existing scheduler
  -> selected connected Runner
- -> transferred Issue Workspace
+ -> source-aware Issue checkout
  -> server-side Engine adapter
  -> Execution Session
  -> coding CLI on Runner host
- -> Workspace sync-back
- -> candidate / Review
+ -> Git finalization/publication or branch return
+ -> Review pinned to Git SHAs
+```
+
+The source synchronization edge depends on the Project source:
+
+```text
+local Project
+  server-owned agent-board/<issue-key> branch
+   -> #71 branch-only transfer
+   -> Runner checkout
+   -> branch-only return + server apply acknowledgement
+
+remote Git Project
+  Runner bare repository cache
+   -> refs/remotes/origin/* source refs
+   -> refs/heads/agent-board/* Issue branches
+   -> per-Run worktree
+   -> normal non-force Issue-branch push
 ```
 
 External Runner execution does not create a placeholder Runtime Instance. Legacy managed Runtime support remains separate compatibility code; Agents do not select Runtimes directly.
@@ -50,29 +67,81 @@ The server-managed internal Runner continues to use the same ordinary permanent 
 Required relationships:
 
 - one Runner may execute many Execution Sessions over time
-- one active Runner Execution Session owns one process tree and one transferred Workspace copy
+- one active Runner Execution Session owns one process tree and one Issue checkout/worktree
 - one Run may use Execution Sessions over its lifetime, but a blocking native Question continues the same live Runner Execution Session
-- the durable Issue Workspace remains server-authoritative
-- one logical writer owns an Issue Workspace during a Runner execution lifecycle
+- one logical writer owns an Issue checkout during an active Runner execution lifecycle
+- local Issue branch authority remains server-side; remote Issue branch authority is the published Git branch plus the durably recorded Workspace revision
 - a Runtime Instance, where legacy managed compute is used, remains bound to exactly one Workspace for its lifetime
 
-## Workspace ownership and transfer
+## Git-native Workspace ownership
 
-The durable Issue Workspace on the server is authoritative and outlives Runner processes and connections.
+Every Issue uses one deterministic durable branch:
 
-Before Runner execution, Agent Board snapshots the complete non-ignored Git state and transfers it to the selected Runner. Snapshotting must not mutate the authoritative `HEAD`, Git index, staging state or visible refs/history. The transfer preserves staged, unstaged and untracked non-ignored files, deletions, executable bits and symlinks so the Runner starts from the same filesystem state.
+```text
+agent-board/<issue-key>
+```
 
-From transfer through execution, blocking Questions, recovery sync-back, candidate capture and final transition, the Run's Runner Execution Session is the logical Workspace writer. Generic server-side Workspace mutation is fenced during that lifecycle. The durable ownership record does not require a PostgreSQL connection to remain checked out while an Engine runs or waits for human input; database/advisory locks are used only for bounded filesystem critical sections.
+The branch and Git commits are the durable code state. The Runner does not create candidate snapshots, Review filesystem snapshots or synthetic Base/Index/Worktree state.
 
-On completion, failure or cancellation, the Runner returns a Workspace bundle. The server verifies it and applies the Runner's filesystem delta to the authoritative working tree **without replacing the authoritative Git index and without manufacturing a commit**. Runner staging is transport input, not permission to alter server staging. Existing authoritative staging therefore remains intact while Runner-created file contents/deletions/untracked files become visible to candidate collection.
+### Shared finalization invariant
 
-Ignored files are not transferred. Transport-only commits and refs used to encode Git state are implementation details and must never become user-visible history.
+Both server-runtime and Runner execution use the same shared Git finalization rules. At a real hand-back boundary the checkout must:
 
-The Runner keeps its session Workspace until the server has successfully verified and applied the returned bundle and explicitly acknowledges that apply. Apply failure, missing acknowledgement or transport loss preserves the Runner Workspace for recovery.
+1. still be on the expected `agent-board/<issue-key>` branch
+2. have no unresolved conflicts
+3. still contain the recorded execution-start revision in its history
+4. preserve any commits created by the Engine
+5. commit remaining tracked changes, deletions and non-ignored untracked files with the controlled Agent Board fallback identity when needed
+6. finish as a clean checkout
+
+A branch switch, history rewrite past the recorded start revision or unresolved conflict fails finalization. Agent Board retains recoverable state instead of persisting the wrong revision.
+
+Ignored untracked files remain excluded.
+
+### Local Project transfer
+
+For `source_type=local`, the server owns the persistent Issue Workspace and exact Issue branch HEAD. Before Runner execution, Agent Board transfers that branch history through the existing #71 bounded/checksummed transfer protocol. The Runner checks out the exact transferred branch and revision.
+
+This is a branch transfer, not a filesystem-state snapshot. The old staging-preservation contract and synthetic Base -> Index -> Worktree transport commits are superseded. A clean Git commit is the execution boundary.
+
+After finalization, the Runner returns the finalized Issue branch. The server verifies/imports it and durably records the returned revision before sending `transfer_applied`. Missing acknowledgement or unsafe import leaves the Runner Workspace available for recovery.
+
+### Remote Git Project checkout
+
+For `source_type=git`, the Runner reaches `clone_url` with the Git authentication already configured on that host. Agent Board does not forward provider credentials and does not use provider-specific APIs in this path.
+
+The Runner owns an execution-side bare cache per repository identity and creates a per-Run worktree. Source refs and Issue refs are deliberately separate:
+
+```text
+refs/remotes/origin/*     fetched remote source branches
+refs/heads/agent-board/*  Agent Board Issue branches
+```
+
+The cache fetch mapping is equivalent to:
+
+```text
++refs/heads/*:refs/remotes/origin/*
+```
+
+Remote heads are not fetched into local `refs/heads/*`. The configured Project ref is used when present; otherwise the Runner refreshes and follows `refs/remotes/origin/HEAD`.
+
+Mutations of one bare cache are serialized. Different repository caches can mutate concurrently. Distinct Issue branches use distinct worktrees, so one Issue execution does not reset or rebase another Issue branch.
+
+On later Runs the Runner fetches and continues the durable remote Issue branch. The recorded Workspace revision must match or be provably contained in the expected Agent Board branch history. Unexpected remote advancement or rewrites fail closed.
+
+### Remote publication and acknowledgement
+
+Remote finalization publishes only the Issue branch and always uses a normal non-force push. Publishing `agent-board/<issue-key>` is not the same thing as merging the remote target branch.
+
+The Runner keeps the finalized worktree until the server durably records the published revision and sends the existing apply acknowledgement. This retained session is also the recovery authority if a push succeeds but its response, database write or acknowledgement is lost. The server may retry publication against the same retained Execution Session; pushing the same clean branch HEAD again is idempotent and remains non-force.
+
+Only after durable persistence and acknowledgement does the Runner clean up the worktree. A later Runner can then fetch and continue the Issue from the recorded/published revision.
+
+Arbitrary remote advancement is not accepted as recovery. If another actor moves the Issue branch, normal push/continuation ownership checks still reject it.
 
 ## Transport
 
-The server and Runner communicate over one outbound WebSocket initiated by the Runner. Protocol v2 is the only supported Runner protocol after the #68 migration.
+The server and Runner communicate over one outbound WebSocket initiated by the Runner. Protocol v2 is the supported Runner protocol after the #68 migration.
 
 Every execution message is scoped to a server-issued Execution Session identity. The wire protocol supports multiple sessions over the lifetime of one Runner connection even when the configured concurrency limit is one.
 
@@ -81,8 +150,9 @@ The protocol supports at least:
 - Runner handshake and protocol-version negotiation
 - Runner capability advertisement
 - session start
-- Workspace transfer in both directions with bounded chunks/checksums
-- explicit server acknowledgement after returned Workspace apply
+- local branch transfer in both directions with bounded chunks/checksums
+- remote Git prepare/publish control messages
+- explicit server acknowledgement after durable returned/published revision persistence
 - stdin streaming and stdin close
 - stdout/stderr streaming with channel identity
 - exit/result reporting
@@ -93,7 +163,7 @@ The protocol supports at least:
 
 A WebSocket disconnect is an infrastructure signal, not by itself durable proof that a Run or Engine process failed. The reconnect grace period starts when the live Runner connection is actually lost. Its server deployment setting is `AGENT_BOARD_RUNNER_RECONNECT_TIMEOUT`, which defaults to `5m` and accepts a positive Go duration. If the Runner reconnects within the grace period, Agent Board may reattach to the same active Execution Session; unresolved sessions fail only after that grace expires.
 
-A newly authenticated connection claiming the same immutable `runner_id` does not blindly evict a live transport. The server compares the old/new Runner health claims with durable active Execution Session ownership. Matching claims for the same durable session permit safe replacement/reattachment. Missing, mismatched or unexpected active-session claims are rejected/fail-closed so a takeover cannot discard ownership or enable duplicate Engine execution.
+A newly authenticated connection claiming the same immutable `runner_id` does not blindly evict a live transport. The server compares old/new Runner health claims with durable active Execution Session ownership. Matching claims for the same durable session permit safe replacement/reattachment. Missing, mismatched or unexpected active-session claims are rejected/fail-closed so a takeover cannot discard ownership or enable duplicate Engine execution.
 
 ## Concurrency and future fleets
 
@@ -105,7 +175,7 @@ max active Execution Sessions per Runner = 5
 
 A Runner advertises `max_active_sessions` so capacity can change without changing the identity model or transport contract. Missing or zero advertised capacity is treated as 5.
 
-Workspace write safety remains separate from Runner transport concurrency. Supporting several protocol sessions does not imply that several authoritative writers may mutate one Workspace concurrently.
+Workspace write safety remains separate from Runner transport concurrency. Supporting several protocol sessions does not imply that several writers may mutate one Issue branch concurrently. Repository-cache mutation is serialized per repository, while unrelated caches are independent.
 
 ## Engine ownership
 
@@ -118,7 +188,7 @@ Engine adapters own:
 - Model Profile/Provider configuration materialization
 - mapping visible Engine activity into canonical Agent Board evidence
 
-`agent-runner` stays Engine-neutral. It receives an authorized execution request and starts/supervises that process inside the Execution Session's transferred Workspace on the selected host.
+`agent-runner` stays Engine-neutral. It receives an authorized execution request and starts/supervises that process inside the Execution Session's prepared Issue checkout on the selected host.
 
 ## Runner responsibilities
 
@@ -128,14 +198,16 @@ The Runner owns only execution-plane behavior:
 - advertise versioned capabilities
 - accept authorized session requests
 - enforce the provided Workspace-bounded working directory
+- prepare local transferred branches or remote Git worktrees
 - start and supervise one process tree per Execution Session
 - apply execution-scoped environment/secret values passed by the trusted server
 - stream stdin/stdout/stderr
 - report exit status/result
 - propagate cancellation and graceful termination
 - force-kill the process tree when required
-- retain session Workspace state until successful apply acknowledgement
-- isolate session state between executions
+- finalize the owned Issue branch at real hand-back boundaries
+- retain session Workspace/worktree state until successful durable acknowledgement
+- isolate session state and Issue branches between executions
 
 The Runner does not own:
 
@@ -146,7 +218,7 @@ The Runner does not own:
 - Provider credential storage/decryption
 - Review decisions
 - durable Event/evidence persistence
-- control-plane Git history
+- remote target-branch integration
 
 ## Security boundary
 
@@ -161,6 +233,8 @@ The Runner must never receive:
 - Docker socket or daemon credentials from the control plane
 - broad control-plane credentials
 - arbitrary server filesystem access
+
+Remote Git authentication is the Runner host's own Git configuration; Agent Board does not inject provider tokens into clone URLs for #72.
 
 Secret values remain ephemeral. They must not be echoed in Runner protocol responses and must be redacted before every durable server-side sink.
 
@@ -183,11 +257,11 @@ apps/
 
 ## Questions and resume
 
-Question/Decision/resume state remains durable on the server. The Runner has no durable product-state responsibility.
+Question/Decision/resume state remains durable on the server. The Runner has no durable product-state responsibility beyond retaining its owned execution checkout until acknowledgement.
 
-When OpenCode raises a blocking native Question, Agent Board persists that Question before the Run enters `WAITING_FOR_INPUT`. The same live Runner Execution Session and the same Runner Workspace remain attached while waiting; Agent Board does not sync the Workspace back, start a replacement Engine session or pay for a synthetic continuation prompt merely because human input is pending.
+When OpenCode raises a blocking native Question, Agent Board persists that Question before the Run enters `WAITING_FOR_INPUT`. The same live Runner Execution Session, native Engine session and checkout remain attached while waiting. Agent Board does not finalize, return/push the branch, create a replacement Engine session or pay for a synthetic continuation prompt merely because human input is pending.
 
-After the Decision is persisted, the Run resumes against that same native Engine session and Workspace. Cancellation while waiting terminates the process tree and performs the same bounded recovery sync-back used for other cancellation/failure paths.
+After the Decision is persisted, the Run resumes against that same native Engine session and checkout. Cancellation while waiting terminates the process tree and then uses the same bounded Git finalization/recovery path as other cancellation/failure boundaries.
 
 ## Future Worker pools
 

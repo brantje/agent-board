@@ -243,8 +243,8 @@ func (s *Store) CreateReview(ctx context.Context, input store.Review) (store.Rev
 		status = "PENDING"
 	}
 	return scanReview(s.pool.QueryRow(ctx, `
-		INSERT INTO reviews (project_id, issue_id, run_id, status, decision_id)
-		SELECT $1, run.issue_id, run.id, $4, $5
+		INSERT INTO reviews (project_id, issue_id, run_id, status, decision_id, base_revision, review_revision)
+		SELECT $1, run.issue_id, run.id, $4, $5, NULLIF($6, ''), NULLIF($7, '')
 		FROM runs AS run
 		WHERE run.project_id = $1
 		  AND run.id = $3
@@ -256,8 +256,9 @@ func (s *Store) CreateReview(ctx context.Context, input store.Review) (store.Rev
 			  AND (decision.issue_id IS NULL OR decision.issue_id = run.issue_id)
 			  AND (decision.run_id IS NULL OR decision.run_id = run.id)
 		  ))
-		RETURNING id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text, requested_at, decided_at, created_at, updated_at
-	`, input.ProjectID, input.IssueID, input.RunID, status, input.DecisionID))
+		RETURNING id::text, project_id::text, issue_id::text, run_id::text, status, decision_id::text,
+		          COALESCE(base_revision, ''), COALESCE(review_revision, ''), requested_at, decided_at, created_at, updated_at
+	`, input.ProjectID, input.IssueID, input.RunID, status, input.DecisionID, strings.TrimSpace(input.BaseRevision), strings.TrimSpace(input.ReviewRevision)))
 }
 
 func scanWorkspace(row pgx.Row) (store.Workspace, error) {
@@ -318,7 +319,7 @@ func scanDecision(row pgx.Row) (store.Decision, error) {
 
 func scanReview(row pgx.Row) (store.Review, error) {
 	var value store.Review
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.IssueID, &value.RunID, &value.Status, &value.DecisionID, &value.RequestedAt, &value.DecidedAt, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.IssueID, &value.RunID, &value.Status, &value.DecisionID, &value.BaseRevision, &value.ReviewRevision, &value.RequestedAt, &value.DecidedAt, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Review{}, notFound(err)
 	}
 	return value, nil

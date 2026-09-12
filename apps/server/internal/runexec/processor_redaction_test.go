@@ -34,10 +34,6 @@ func TestProcessorReleasesRunRedactionLeaseOnExit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), evidenceStore, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	registry, err := engine.NewRegistry(processTestEngine{})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +47,6 @@ func TestProcessorReleasesRunRedactionLeaseOnExit(t *testing.T) {
 		registry,
 		recorder,
 		output,
-		candidate,
 		nil,
 		nil,
 	)

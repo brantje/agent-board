@@ -51,22 +51,8 @@ func TestEncodePayloadCoversEmptyAndStructuredValues(t *testing.T) {
 	}
 }
 
-func TestEvidenceConstructorsAndCandidatePathValidation(t *testing.T) {
+func TestEvidenceRecorderRejectsMissingStore(t *testing.T) {
 	if _, err := NewRecorder(nil, nil); err == nil {
 		t.Fatal("expected nil event store to fail")
-	}
-	if _, err := NewCandidateSnapshotter(nil, nil, nil); err == nil {
-		t.Fatal("expected incomplete candidate snapshotter dependencies to fail")
-	}
-	workspace := t.TempDir()
-	if _, err := candidateFilePath(workspace, "../outside"); err == nil {
-		t.Fatal("expected candidate path escape to fail")
-	}
-	for input, want := range map[string]string{
-		"A": "created", "M": "modified", "D": "deleted", "R100": "renamed", "C100": "copied", "T": "type_changed", "X": "x", "": "",
-	} {
-		if got := normalizeStatus(input); got != want {
-			t.Fatalf("normalizeStatus(%q)=%q want %q", input, got, want)
-		}
 	}
 }

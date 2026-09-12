@@ -199,6 +199,7 @@ CREATE TABLE workspaces (
     base_revision text,
     working_branch text NOT NULL CHECK (btrim(working_branch) <> ''),
     current_branch text CHECK (current_branch IS NULL OR btrim(current_branch) <> ''),
+    current_revision text CHECK (current_revision IS NULL OR btrim(current_revision) <> ''),
     bootstrap_status text NOT NULL DEFAULT 'PENDING' CHECK (bootstrap_status IN ('PENDING', 'READY', 'FAILED')),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -332,9 +333,6 @@ CREATE INDEX execution_sessions_runner_idx ON execution_sessions (runner_id, cre
 CREATE UNIQUE INDEX execution_sessions_one_active_per_instance_uq
     ON execution_sessions (runtime_instance_id)
     WHERE status IN ('PENDING', 'STARTING', 'RUNNING') AND runtime_instance_id IS NOT NULL;
-CREATE UNIQUE INDEX execution_sessions_one_active_per_runner_uq
-    ON execution_sessions (runner_id)
-    WHERE status IN ('PENDING', 'STARTING', 'RUNNING') AND runner_id IS NOT NULL;
 
 CREATE TABLE questions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -403,12 +401,15 @@ CREATE TABLE reviews (
     run_id uuid NOT NULL,
     status text NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'CHANGES_REQUESTED', 'CANCELLED')),
     decision_id uuid REFERENCES decisions(id) ON DELETE SET NULL,
+    base_revision text CHECK (base_revision IS NULL OR btrim(base_revision) <> ''),
+    review_revision text CHECK (review_revision IS NULL OR btrim(review_revision) <> ''),
     requested_at timestamptz NOT NULL DEFAULT now(),
     decided_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT reviews_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
     CONSTRAINT reviews_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
+    CHECK ((base_revision IS NULL) = (review_revision IS NULL)),
     UNIQUE (run_id),
     UNIQUE (project_id, id)
 );

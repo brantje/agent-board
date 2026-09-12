@@ -115,10 +115,6 @@ func newRunnerSyncProcessor(t *testing.T, repo string, safe executioncontext.Saf
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), storeFake, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	engines, err := engine.NewRegistry(processTestEngine{workspace: repo})
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +131,6 @@ func newRunnerSyncProcessor(t *testing.T, repo string, safe executioncontext.Saf
 		engines,
 		recorder,
 		output,
-		candidate,
 		git,
 		runnerSyncConnector{client: client},
 	)
@@ -154,6 +149,12 @@ func runnerTransferPayload(t *testing.T, authoritative string) []byte {
 	}
 	if err := os.WriteFile(filepath.Join(runnerRepo, "returned.txt"), []byte("from runner\n"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=Agent Board Test", "-c", "user.email=test@example.invalid", "commit", "-q", "-m", "runner result"}} {
+		cmd := exec.Command("git", append([]string{"-C", runnerRepo}, args...)...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
 	}
 	git, err := workspace.NewGitCLI("")
 	if err != nil {

@@ -45,11 +45,8 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	if !ok {
 		t.Fatalf("handler type = %T, want *applicationHandler", handler)
 	}
-	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.ReviewCandidates == nil || application.services.ExecutionStore == nil || application.services.ExecutionContext == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil || application.services.EventHub == nil || application.services.Events == nil {
+	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.ExecutionStore == nil || application.services.ExecutionContext == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil || application.services.EventHub == nil || application.services.Events == nil {
 		t.Fatalf("application services were not fully wired: %+v", application.services)
-	}
-	if got := configuredReviewCandidateRoot(); got != filepath.Join(workspaceRoot, ".review-candidates") {
-		t.Fatalf("configuredReviewCandidateRoot()=%q", got)
 	}
 	if application.services.ControlPlane.Runners == nil {
 		t.Fatal("runner service was not wired")
@@ -103,15 +100,6 @@ func TestConfiguredEvidenceRoot(t *testing.T) {
 	t.Setenv("AGENT_BOARD_EVIDENCE_ROOT", root)
 	if got := configuredEvidenceRoot(); got != root {
 		t.Fatalf("configuredEvidenceRoot()=%q want %q", got, root)
-	}
-}
-
-func TestConfiguredReviewCandidateRootUsesWorkspaceRoot(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "workspaces")
-	t.Setenv("AGENT_BOARD_WORKSPACE_ROOT", root)
-	want := filepath.Join(root, ".review-candidates")
-	if got := configuredReviewCandidateRoot(); got != want {
-		t.Fatalf("configuredReviewCandidateRoot()=%q want %q", got, want)
 	}
 }
 

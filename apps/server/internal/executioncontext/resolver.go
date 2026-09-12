@@ -100,7 +100,12 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 	}
 
 	safe := SafeContext{
-		Project:        ProjectContext{ID: project.ID, Name: project.Name, RepositoryPath: project.RepositoryPath, DefaultBranch: project.DefaultBranch, WorkflowSettings: cloneJSON(project.WorkflowSettings)},
+		Project: ProjectContext{
+			ID: project.ID, Name: project.Name, SourceType: project.SourceType,
+			CloneURL: cloneString(project.CloneURL), SourceRef: cloneString(project.SourceRef),
+			RepositoryPath: project.RepositoryPath, DefaultBranch: project.DefaultBranch,
+			WorkflowSettings: cloneJSON(project.WorkflowSettings),
+		},
 		Issue:          IssueContext{ID: issue.ID, Key: issue.Key, Title: issue.Title, Description: issue.Description, Status: issue.Status},
 		Run:            RunContext{ID: run.ID, Attempt: run.Attempt},
 		Agent:          AgentContext{ID: agent.ID, Name: agent.Name, RoleInstructions: agent.RoleInstructions, Engine: agent.Engine, EngineSettings: cloneJSON(agent.EngineSettings)},

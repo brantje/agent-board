@@ -87,15 +87,11 @@ func TestScriptedEngineDockerWalkingSkeleton(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), services.ExecutionStore, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	engines, err := engine.NewRegistry(scripted.New())
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, nil, nil)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,24 +273,9 @@ func waitForScriptedRun(t *testing.T, ctx context.Context, database *postgres.St
 			for _, event := range events {
 				types = append(types, event.Type)
 			}
-			t.Fatalf("timed out waiting for Run: %v status=%s failure=%s events=%v", ctx.Err(), run.Status, reason, types)
+				t.Fatalf("timed out waiting for Run: %v status=%s failure=%s events=%v", ctx.Err(), run.Status, reason, types)
 		case <-ticker.C:
 		}
-	}
-}
-
-func assertCandidateStatuses(t *testing.T, candidate evidence.Candidate) {
-	t.Helper()
-	var staged, unstaged, untracked, deleted, renamed bool
-	for _, change := range candidate.Changes {
-		staged = staged || change.StagedStatus != ""
-		unstaged = unstaged || change.UnstagedStatus != ""
-		untracked = untracked || change.Untracked
-		deleted = deleted || change.StagedStatus == "deleted" || change.UnstagedStatus == "deleted"
-		renamed = renamed || change.StagedStatus == "renamed" || change.UnstagedStatus == "renamed"
-	}
-	if !staged || !unstaged || !untracked || !deleted || !renamed {
-		t.Fatalf("candidate statuses staged=%v unstaged=%v untracked=%v deleted=%v renamed=%v: %+v", staged, unstaged, untracked, deleted, renamed, candidate.Changes)
 	}
 }
 

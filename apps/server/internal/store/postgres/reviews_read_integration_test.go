@@ -18,6 +18,13 @@ func TestReviewReadsReturnDurableReviewAndDecision(t *testing.T) {
 	if review.ID != pending.ID || review.RunID != fixture.run.ID || review.Status != "PENDING" {
 		t.Fatalf("GetReview()=%+v", review)
 	}
+	byRun, err := s.GetReviewByRun(ctx, fixture.project.ID, fixture.run.ID)
+	if err != nil {
+		t.Fatalf("GetReviewByRun() error=%v", err)
+	}
+	if byRun.ID != review.ID {
+		t.Fatalf("GetReviewByRun()=%+v", byRun)
+	}
 
 	begin, err := s.BeginReviewApproval(ctx, store.BeginReviewApprovalCommand{ProjectID: fixture.project.ID, ReviewID: pending.ID})
 	if err != nil {

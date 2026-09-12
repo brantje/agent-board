@@ -23,6 +23,10 @@ func (s *reviewForwardStore) GetReview(context.Context, string, string) (store.R
 	s.calls = append(s.calls, "get")
 	return s.review, nil
 }
+func (s *reviewForwardStore) GetReviewByRun(context.Context, string, string) (store.Review, error) {
+	s.calls = append(s.calls, "get-by-run")
+	return s.review, nil
+}
 func (s *reviewForwardStore) ListReviews(context.Context, string, store.ReviewFilter) ([]store.Review, error) {
 	s.calls = append(s.calls, "list")
 	return []store.Review{s.review}, nil
@@ -65,6 +69,9 @@ func TestRedactingStorePreservesReviewCapabilityAndForwardsCommands(t *testing.T
 	if got, err := wrapped.GetReview(ctx, "project", "review"); err != nil || got.ID != "review" {
 		t.Fatalf("GetReview()=%+v err=%v", got, err)
 	}
+	if got, err := wrapped.GetReviewByRun(ctx, "project", "run"); err != nil || got.ID != "review" {
+		t.Fatalf("GetReviewByRun()=%+v err=%v", got, err)
+	}
 	if got, err := wrapped.ListReviews(ctx, "project", store.ReviewFilter{}); err != nil || len(got) != 1 {
 		t.Fatalf("ListReviews()=%+v err=%v", got, err)
 	}
@@ -83,7 +90,7 @@ func TestRedactingStorePreservesReviewCapabilityAndForwardsCommands(t *testing.T
 	if got, err := wrapped.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{ProjectID: "project", ReviewID: "review", Feedback: "fix"}); err != nil || got.Review.Status != "CHANGES_REQUESTED" {
 		t.Fatalf("RequestReviewChanges()=%+v err=%v", got, err)
 	}
-	if len(base.calls) != 7 {
+	if len(base.calls) != 8 {
 		t.Fatalf("forwarded calls=%v", base.calls)
 	}
 }

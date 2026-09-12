@@ -2,9 +2,11 @@
 
 Trustworthy execution evidence is part of the v0.1 critical path. A Run remains independently understandable after configuration changes, Runner reconnects and later attempts.
 
+Evidence describes execution. Git commits and branches are the authoritative code state; evidence does not duplicate that state as a candidate or Review filesystem snapshot.
+
 ## Immutable Run provenance
 
-Before/at execution ownership, persist a safe immutable snapshot of what the Run actually used.
+Before/at execution ownership, persist a safe immutable record of what the Run actually used.
 
 Include where applicable:
 
@@ -16,7 +18,8 @@ Include where applicable:
 - selected Runner identity/name and advertised version/capability metadata relevant to the attempt
 - Workspace identity
 - repository/base/working branch
-- Source Connection identity without credentials
+- exact execution-start revision where applicable
+- Source Connection identity without credentials when that feature exists
 - relevant workflow/config revision metadata
 - Runtime ID/name/kind/image/effective policy and Runtime Instance identity only when the legacy internal managed-compute path was actually used
 
@@ -48,11 +51,13 @@ Metadata includes at least:
 
 Artifacts are listable/readable/downloadable through Project-scoped APIs.
 
+Artifacts may contain test reports, generated files or other useful outputs, but they are not the authoritative representation of the Issue's reviewed source tree.
+
 ## Event relationship
 
 Events remain the durable activity timeline. Events may reference raw-output ranges and Artifact IDs, but Event payloads are not the blob store or Artifact database.
 
-Runner transport/Workspace transfer progress Events are normalized, redacted execution evidence. Live connection state itself remains ephemeral; persisted Events/provenance describe what happened without making `last_seen` equivalent to scheduler eligibility.
+Runner transport/Git publication progress Events are normalized, redacted execution evidence. Live connection state itself remains ephemeral; persisted Events/provenance describe what happened without making `last_seen` equivalent to scheduler eligibility.
 
 ## Run inspection
 
@@ -65,7 +70,7 @@ Show:
 - queue/wait/failure reason
 - timeline/messages
 - commands/tool calls and exit state
-- file/change evidence
+- Git branch/change evidence
 - tests/checks
 - selected Runner and Execution Session diagnostics/provenance
 - legacy Runtime/Runtime Instance lifecycle only for attempts that actually used internal managed compute
@@ -75,49 +80,54 @@ Show:
 
 Unknown Events remain visible through a safe diagnostic fallback.
 
-## Complete candidate evidence
+## Git-native Review identity
 
-Review and Run inspection share one canonical public evidence/read-model path.
+Review and Run inspection share one canonical evidence/read-model path, but Review code identity comes from Git.
 
-The candidate includes all relevant authoritative Issue Workspace changes:
+Every Review pins:
 
-- unstaged tracked modifications
-- staged/index changes
-- new/untracked candidate files
-- deleted files
-- renamed files
+- `base_revision` — the exact Issue base commit
+- `review_revision` — the exact durable Issue branch HEAD selected for that Review
 
-Ordinary unstaged-only `git diff` is not a complete candidate representation.
+The reviewed source diff is reproducible from those immutable identities:
 
-Ignored/runtime-private/transport-private files are not automatically deliverable candidate content. Runner transfer refs/commits and Runner-local checkout internals must not appear as product-visible candidate history.
+```bash
+git diff <base_revision>..<review_revision>
+```
 
-### Trusted Review delivery snapshot
+The invariant is:
 
-Public Review evidence and the bytes used for approval have different trust requirements.
+```text
+what the reviewer sees
+==
+tree(review_revision)
+==
+what local delivery later integrates
+```
 
-Candidate Artifacts exposed through Run/Review inspection are always redacted before persistence. Approval must therefore **never** reconstruct source changes from those public Artifacts: redaction can legitimately replace byte sequences that match registered secret values, and applying those transformed bytes would no longer apply the exact reviewed candidate.
+There is no backend-only Review delivery filesystem snapshot, candidate snapshot, staged/unstaged patch archive or other competing representation of reviewed source code. Public redaction therefore cannot accidentally become delivery input: local approval integrates the pinned Git commit, not bytes reconstructed from public evidence.
 
-For a Review-ready Run, Agent Board captures one backend-only **Review delivery snapshot** before publishing candidate evidence. The snapshot contains:
+### Change evidence
 
-- the exact staged binary patch
-- the exact unstaged binary patch
-- exact new/untracked file bytes
-- executable intent for new/untracked files
-- the candidate change manifest binding those values to the Run
+The UI/API may derive safe file/change summaries from the Git diff between the pinned revisions and may show commands, tests, messages and Artifacts from the Run. These are evidence about the reviewed commit range.
 
-The delivery snapshot is immutable for that Run. Public candidate Artifacts are generated as a redacted projection of this pinned snapshot. If candidate evidence publication is retried after an interruption, Agent Board reuses the existing private snapshot instead of rereading the mutable Issue Workspace. This prevents public Review evidence and approval delivery from silently describing different candidate states.
+Ignored/runtime-private/transport-private files are not part of the reviewed Git tree. Runner transfer refs, bare-cache internals and temporary worktree paths must not appear as product-visible source history.
 
-The private delivery snapshot is trusted backend Workspace state, not an Artifact. It is stored under the durable Workspace root with restricted permissions, is never transferred into an active Runner session, and is not exposed through Artifact, raw-output, Run-evidence or Review APIs. Because it must preserve exact source bytes, it may contain byte sequences that are also registered for redaction; those bytes remain confined to this backend-only approval boundary.
-
-Approval consumes this pinned private snapshot, never the current mutable Issue Workspace and never redacted public Artifacts.
+If evidence generation is retried, the Review SHAs stay immutable. A retry may regenerate a safe projection from the same Git identities; it must not silently move to a later Issue branch HEAD.
 
 ## Runner Workspace and recovery evidence
 
-The backend-owned Issue Workspace remains authoritative. Runner-local Workspace state is temporary execution materialization.
+For local Projects, the server-owned Issue branch is authoritative and a Runner checkout is a temporary materialization of that branch. For remote Git Projects, the durable remote `agent-board/<issue-key>` branch plus the Workspace's recorded revision is the authoritative unmerged Issue state; the selected Runner's retained worktree is recovery authority only until durable acknowledgement.
 
-Workspace transfer evidence should make meaningful progress/failure/recovery visible without exposing transport-only Git refs, bundle internals or secrets. Sync-back after non-zero exit/cancellation is attempted where technically possible. A Run cannot be represented as successful if returned Runner work could not be verified/applied to the authoritative Workspace.
+Workspace transfer/publication evidence should make meaningful progress, failure and recovery visible without exposing transport-only Git refs, bundle internals or secrets. Finalization after normal completion, non-zero exit or cancellation is attempted where technically safe. A Run cannot be represented as successfully handed back if the finalized branch revision could not be verified and durably returned/published.
 
-The Runner retains its session Workspace until the server has successfully applied the returned state and sent the explicit apply acknowledgement. That retained Workspace is recovery material, not authoritative product history.
+The Runner retains its session checkout until the server has durably imported or recorded the finalized revision and sent the explicit apply acknowledgement. If a remote push succeeds but the response, database persistence or acknowledgement is lost, retry uses that same retained checkout/session and republishes the same clean branch HEAD with a normal non-force push. This retained state is recovery material, not a second product code history.
+
+## Questions and live state
+
+A blocking Question is evidence and workflow state, not a Git finalization boundary. `WAITING_FOR_INPUT` keeps the same Runner, Execution Session, native Engine session and checkout. No Review revision is created merely because a Question is open.
+
+After the Decision is persisted, execution continues in the same live state. Finalization occurs only at a real completion/failure/cancellation hand-back boundary.
 
 ## Tests/checks
 
@@ -132,22 +142,26 @@ Missing test evidence is never presented as success.
 
 ## Review history
 
-Each Review targets an exact attempt. Later attempts may reuse and modify the same Issue Workspace, while prior Review evidence remains historically inspectable.
+Each Review targets an exact Run attempt and exact pair of Git revisions. Later attempts continue the same durable Issue branch and may advance its HEAD, while prior Review evidence remains historically inspectable because prior SHAs do not change.
 
-Request changes links the next attempt without overwriting prior evidence.
+Request Changes links the next attempt without overwriting prior evidence.
 
 ## Security and isolation
 
 - Project isolation applies to provenance/logs/Artifacts/evidence.
 - secret values never appear in Events, raw output, Artifacts, provenance or public API responses.
-- the backend-only Review delivery snapshot is not public evidence and is protected like trusted Workspace source state.
+- Review source identity is Git SHA-based; public evidence is never replayed as source changes.
 - filenames/download metadata are sanitized appropriately.
 - large public reads/uploads are bounded/streamed.
-- trusted delivery patch/file captures are bounded and validated before approval use.
 - Runner identity/capability evidence is safe diagnostic metadata, not a credential or authorization substitute.
+- remote Git credentials stay in the Runner host's Git configuration and are not copied into evidence.
 
 ## Retention
 
-Blob/log/Artifact retention is explicit and independent from the durable Issue Workspace. Cleanup does not delete Workspace state or leave historical metadata falsely claiming content remains available.
+Blob/log/Artifact retention is explicit and independent from durable Issue Git state. Cleanup of evidence blobs does not delete Issue branches or change the pinned Review SHAs, and historical metadata must not falsely claim an Artifact remains available after its retention period.
 
-The private Review delivery snapshot must remain available for as long as its Review can still be approved or approval recovery can still require the exact candidate. In v0.1 it lives with durable backend Workspace state rather than public evidence retention. A later cleanup policy must not remove it while a pending/recoverable Review still depends on it.
+Git history required by a pending/recoverable Review must remain available through the authoritative local Issue Workspace or published remote Issue branch. There is no separate Review filesystem archive to retain.
+
+## Superseded evidence assumptions
+
+Earlier #15-era documentation treated staged/unstaged/untracked filesystem capture and a private Review delivery snapshot as authoritative candidate code state. #72 supersedes that model. Those snapshot/staging assumptions are no longer authoritative; Git revisions are the only durable reviewed code identity.

@@ -214,7 +214,7 @@ func TestIncomingTransferIgnoresStaleTransferFrames(t *testing.T) {
 func createGitBundlePayload(t *testing.T) []byte {
 	t.Helper()
 	source := t.TempDir()
-	runGit(t, "-C", source, "init")
+	runGit(t, "-C", source, "init", "-b", "agent-board/AB-1")
 	if err := os.WriteFile(filepath.Join(source, "README.md"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

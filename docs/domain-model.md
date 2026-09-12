@@ -11,16 +11,24 @@ Top-level work, repository and policy boundary.
 Owns or scopes:
 
 - Board/Issues
-- local v0.1 repository configuration
-- later Source Connection binding
+- repository source configuration
+  - `local` -> server-accessible repository path/default branch
+  - `git` -> clone URL and optional source ref
 - workflow/delivery policy
 - Project-scoped Agents/configuration where supported
+- later Source Connection/provider-action binding without replacing the source model
 
 ### Issue
 
 The durable unit of work.
 
-An Issue owns one authoritative Workspace in v0.1 and may have multiple execution attempts (Runs).
+An Issue owns one durable Workspace identity and one deterministic Git branch:
+
+```text
+agent-board/<issue-key>
+```
+
+It may have multiple execution attempts (Runs), all continuing that branch unless the lifecycle explicitly fails closed.
 
 Core Issue fields include title, description, durable Board status, priority and optional assigned Agent.
 
@@ -86,11 +94,13 @@ Contains implementation kind, image, resources, timeout, network policy, Workspa
 
 Deployment-global execution capacity. External hosts and the server-managed internal runner authenticate outbound over protocol v2. Live connectivity is ephemeral; persisted last-seen/capabilities never make a Runner scheduler-eligible.
 
+For remote Git Projects, a Runner also owns execution-side bare repository caches and per-Run worktrees. Those are execution materialization/recovery state, not new product/domain code-state objects.
+
 ### Runtime Instance
 
 Disposable compute/session materialized from a Runtime for execution.
 
-Runtime Instance identity is not Agent or Run identity. Destroying an instance never destroys the Issue Workspace.
+Runtime Instance identity is not Agent or Run identity. Destroying an instance never destroys the Issue's durable Git state.
 
 ### Run
 
@@ -98,17 +108,29 @@ One durable execution attempt for an Issue by an Agent.
 
 A Run records status, attempt identity, scheduler ownership, immutable execution provenance, execution evidence and relationships to Workspace/selected Runner (and Runtime Instances only on the legacy managed-compute path).
 
-Later attempts reuse the Issue Workspace.
+Later attempts continue the Issue's durable Git branch. A blocking Question may keep the exact same live Runner/Execution Session/Engine session and checkout rather than creating a new attempt.
 
 ### Workspace
 
-Durable repository state owned by an Issue.
+Durable Issue repository identity and Git continuity record.
 
-v0.1 uses exactly one authoritative Workspace per Issue. It survives Runtime Instance destruction and is reused by later attempts/Review changes.
+Each Issue has one Workspace identity. It records the deterministic working branch, exact base revision and current accepted/published Issue revision required to prove continuity.
+
+For a local Project, the Workspace also points at the durable server-owned Issue checkout. For a remote Git Project, the durable code state is the published remote `agent-board/<issue-key>` branch plus the Workspace's recorded revision; per-Run Runner worktrees are temporary execution/recovery materialization.
+
+Workspace lifetime is independent from Runner connection/process lifetime and Runtime Instance lifetime.
+
+### Project Workspace
+
+For local Projects only, the backend-owned checkout representing the current accepted target-branch state. It is the local integration target used by Review approval and is not mounted into an agent execution environment.
+
+Remote Issue branch publication does not create an equivalent remote target-integration object and does not mean the remote target branch was merged.
 
 ### Question
 
 Structured request for human input. A blocking Question may place the Run in `WAITING_FOR_INPUT` and the Issue in `BLOCKED`.
+
+`WAITING_FOR_INPUT` is not a Git finalization boundary. The same live execution checkout may remain dirty while waiting.
 
 ### Decision
 
@@ -120,11 +142,22 @@ Append-only structured execution/audit history. Persist before live publication.
 
 ### Artifact
 
-First-class durable Run output stored outside oversized Event payloads.
+First-class durable Run output stored outside oversized Event payloads. Artifact/evidence storage is not an alternate representation of reviewed source code.
 
 ### Review
 
-Human/default delivery-gate decision over an exact candidate/attempt. Review evidence includes the complete candidate, tests and relevant execution evidence.
+Human/default delivery-gate decision over an exact Run attempt and exact Git identity.
+
+A Review pins:
+
+```text
+base_revision
+review_revision
+```
+
+The reviewed code is `tree(review_revision)` and the Review diff is reproducible as `git diff base_revision..review_revision`. Tests, commands, messages, Artifacts, usage and provenance are supporting evidence, not a second candidate/source snapshot.
+
+Request Changes advances the same Issue branch; prior Reviews remain immutable because their pinned SHAs do not change.
 
 Later Project delivery policy may allow explicit autonomous PR/MR delivery without making auto-merge/deploy implicit.
 
@@ -146,13 +179,16 @@ Run != Runtime Instance
 Run != Runner
 Runtime != Runtime Instance
 Workspace != Runtime Instance
+Workspace != Runner worktree
+Review != filesystem snapshot
 ```
 
 - Issue survives all attempts.
-- Workspace survives Runtime Instances and is reused per Issue.
+- Workspace survives Runner sessions and Runtime Instances and is reused per Issue.
+- Git commits/branches are the durable code state.
 - Runtime is reusable configuration; Runtime Instance is disposable compute.
-- A Run may use replacement Runtime Instances during recovery/resume.
-- Historical Run truth comes from immutable provenance rather than current mutable configuration.
+- A Run may use replacement Runtime Instances during legacy managed-compute recovery.
+- Historical Run truth comes from immutable provenance plus pinned Git identities rather than current mutable configuration.
 
 ## Scheduler invariants
 
@@ -160,14 +196,23 @@ Workspace != Runtime Instance
 - Agent concurrency and Model Profile capacity are independent admission constraints.
 - capacity-only waits remain `QUEUED`; they do not make an Issue `BLOCKED`.
 - continuation work required after Question/Review decisions is durably recorded before success returns.
+- Runner selection does not alter the Issue branch identity.
 
 ## Repository invariants
 
-The first v0.1 source is a local Git repository accessible to the trusted backend and constrained to deployment-authorized roots.
+- every Issue branch is deterministically `agent-board/<issue-key>`.
+- server-runtime and Runner hand-back use the same branch-ownership, ancestry, conflict and commit-leftovers finalization rules.
+- an Engine-created commit is preserved; uncommitted non-ignored leftovers are committed at a true hand-back boundary.
+- local Runner synchronization transfers branch history rather than preserving arbitrary Base/Index/Worktree filesystem state.
+- remote Runner caches fetch source refs into `refs/remotes/origin/*` and keep Agent Board Issue branches in `refs/heads/agent-board/*`.
+- remote Issue publication is a normal non-force push.
+- an unexpected remote Issue-branch advance/rewrite is rejected rather than silently adopted.
+- a retained Runner worktree/session remains recovery authority until the server durably records the returned/published revision and acknowledges it.
+- different repository caches may mutate concurrently; same-repository cache mutation is serialized.
+- one Issue branch must not reset/rebase/mutate another Issue branch.
+- Review identity is SHA-based; there is no duplicate Review filesystem delivery snapshot.
 
-Project repository configuration materializes the durable Issue Workspace automatically. Bootstrap failure never silently falls back to an unrelated empty repository.
-
-Authenticated remote Source Connections are layered on later without replacing Workspace identity/lifecycle.
+Local repository paths are constrained to deployment-authorized roots. Bootstrap failure never silently falls back to an unrelated empty repository.
 
 ## Security invariants
 
@@ -177,11 +222,14 @@ Authenticated remote Source Connections are layered on later without replacing W
 - credentials/secrets are resolved in trusted code and injected ephemerally.
 - secret plaintext is excluded from Events, raw logs, Artifacts, provenance and public API responses.
 - caller-controlled headers cannot grant trusted actor identity.
+- remote Git uses the Runner host's configured Git authentication; #72 does not introduce provider credential forwarding.
 
 ## Collaboration extensions
 
-Planning, Automations, Agent-created Issues, delegation, Squads and worker topology reuse the same Issue/Run/scheduler/Workspace model rather than creating parallel execution systems.
+Planning, Automations, Agent-created Issues, delegation, Squads and worker topology reuse the same Issue/Run/scheduler/Workspace/Git-branch model rather than creating parallel execution systems.
 
 Delegation is a subtask within the current Issue; Agent-created follow-up work creates a real new Issue. Squads layer reusable leader/member configuration on delegation.
 
 Users/groups/roles/permissions are later product administration work and are not yet fully specified. Plugin expansion comes later still.
+
+Earlier #15 candidate snapshot/staging assumptions are superseded wherever they conflict with these Git-native domain invariants.

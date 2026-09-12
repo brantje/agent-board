@@ -6,12 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"strings"
 	"testing"
 
 	evidencepkg "github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/store"
-	workspacepkg "github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
 type reviewServiceStore struct {
@@ -39,8 +37,25 @@ func (s *reviewServiceStore) GetProject(context.Context, string) (store.Project,
 func (s *reviewServiceStore) GetReview(context.Context, string, string) (store.Review, error) {
 	return s.review, nil
 }
+func (s *reviewServiceStore) GetReviewByRun(_ context.Context, projectID, runID string) (store.Review, error) {
+	if s.review.ProjectID != projectID || s.review.RunID != runID {
+		return store.Review{}, store.ErrNotFound
+	}
+	return s.review, nil
+}
 func (s *reviewServiceStore) ListReviews(context.Context, string, store.ReviewFilter) ([]store.Review, error) {
 	return append([]store.Review(nil), s.list...), nil
+}
+func (s *reviewServiceStore) GetReviewRevisions(_ context.Context, _, reviewID string) (string, string, error) {
+	if s.review.ID == reviewID {
+		return s.review.BaseRevision, s.review.ReviewRevision, nil
+	}
+	for _, review := range s.list {
+		if review.ID == reviewID {
+			return review.BaseRevision, review.ReviewRevision, nil
+		}
+	}
+	return "", "", store.ErrNotFound
 }
 func (s *reviewServiceStore) GetDecision(context.Context, string, string) (store.Decision, error) {
 	return s.decision, nil
@@ -122,43 +137,16 @@ func (s *reviewBlobStore) Open(_ context.Context, ref string) (io.ReadCloser, er
 
 type reviewCandidateApplierFake struct {
 	revision string
-	staged   string
-	files    map[string]string
+	review   store.Review
+	calls    int
 	err      error
 }
 
-func (a *reviewCandidateApplierFake) ApplyReviewedCandidate(ctx context.Context, _ store.Project, _ string, candidate workspacepkg.AcceptedCandidate) (string, error) {
+func (a *reviewCandidateApplierFake) ApplyReviewedRevision(_ context.Context, _ store.Project, review store.Review) (string, error) {
+	a.calls++
+	a.review = review
 	if a.err != nil {
 		return "", a.err
-	}
-	if candidate.StagedPatch != nil {
-		reader, err := candidate.StagedPatch(ctx)
-		if err != nil {
-			return "", err
-		}
-		data, err := io.ReadAll(reader)
-		_ = reader.Close()
-		if err != nil {
-			return "", err
-		}
-		a.staged = string(data)
-	}
-	a.files = map[string]string{}
-	for _, file := range candidate.Files {
-		var content strings.Builder
-		for _, chunk := range file.Chunks {
-			reader, err := chunk(ctx)
-			if err != nil {
-				return "", err
-			}
-			data, err := io.ReadAll(reader)
-			_ = reader.Close()
-			if err != nil {
-				return "", err
-			}
-			content.Write(data)
-		}
-		a.files[file.Path] = content.String()
 	}
 	return a.revision, nil
 }
@@ -178,15 +166,18 @@ func newReviewServiceForTest(t *testing.T, s *reviewServiceStore, blobs *reviewB
 
 func TestReviewServiceGetUsesPinnedEvidenceAndExplicitTestStatus(t *testing.T) {
 	s := &reviewServiceStore{
-		run:    store.Run{ID: "run-1", ProjectID: "project-1", IssueID: "issue-1"},
-		review: store.Review{ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: "run-1", Status: "PENDING"},
+		run: store.Run{ID: "run-1", ProjectID: "project-1", IssueID: "issue-1"},
+		review: store.Review{
+			ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: "run-1", Status: "PENDING",
+			BaseRevision: "base-revision", ReviewRevision: "review-revision",
+		},
 	}
 	service := newReviewServiceForTest(t, s, &reviewBlobStore{values: map[string][]byte{}}, &reviewCandidateApplierFake{})
 	inspection, err := service.Get(context.Background(), "project-1", "review-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if inspection.Evidence.Run.ID != "run-1" || inspection.TestStatus != ReviewTestsNotRun {
+	if inspection.Evidence.Run.ID != "run-1" || inspection.TestStatus != ReviewTestsNotRun || inspection.Review.ReviewRevision != "review-revision" {
 		t.Fatalf("inspection=%+v", inspection)
 	}
 
@@ -207,19 +198,17 @@ func TestReviewServiceGetUsesPinnedEvidenceAndExplicitTestStatus(t *testing.T) {
 	}
 }
 
-func TestReviewServiceApproveAppliesStoredCandidateBeforeFinalizing(t *testing.T) {
-	manifest := store.Artifact{ID: "manifest", ProjectID: "project-1", RunID: "run-1", Kind: "candidate_manifest", StorageRef: "manifest"}
-	staged := store.Artifact{ID: "staged", ProjectID: "project-1", RunID: "run-1", Name: "candidate-staged.patch", Kind: "candidate_patch", StorageRef: "staged"}
-	fileMetadata, _ := json.Marshal(map[string]string{"path": "new.txt"})
-	file := store.Artifact{ID: "file", ProjectID: "project-1", RunID: "run-1", Kind: "candidate_file", StorageRef: "file", SafeMetadata: fileMetadata}
+func TestReviewServiceApproveIntegratesPinnedRevisionForLocalProject(t *testing.T) {
 	run := store.Run{ID: "run-1", ProjectID: "project-1", IssueID: "issue-1"}
-	review := store.Review{ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: run.ID, Status: "PENDING"}
+	review := store.Review{
+		ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: run.ID, Status: "PENDING",
+		BaseRevision: "base-revision", ReviewRevision: "review-revision",
+	}
 	s := &reviewServiceStore{
-		project:   store.Project{ID: "project-1", RepositoryPath: "/repo", DefaultBranch: "main"},
-		run:       run,
-		review:    review,
-		artifacts: []store.Artifact{manifest, staged, file},
-		begin:     store.BeginReviewApprovalResult{Review: review, Run: run},
+		project: store.Project{ID: "project-1", SourceType: store.ProjectSourceLocal, RepositoryPath: "/repo", DefaultBranch: "main"},
+		run:     run,
+		review:  review,
+		begin:   store.BeginReviewApprovalResult{Review: review, Run: run},
 		complete: store.CompleteReviewApprovalResult{
 			Review:   store.Review{ID: review.ID, Status: "APPROVED"},
 			Decision: store.Decision{ID: "decision", Kind: "REVIEW", Outcome: "APPROVED"},
@@ -227,22 +216,49 @@ func TestReviewServiceApproveAppliesStoredCandidateBeforeFinalizing(t *testing.T
 			Issue:    store.Issue{ID: "issue-1", Status: "DONE"},
 		},
 	}
-	blobs := &reviewBlobStore{values: map[string][]byte{"manifest": []byte(`{}`), "staged": []byte("patch"), "file": []byte("content")}}
 	applier := &reviewCandidateApplierFake{revision: "accepted-revision"}
-	service := newReviewServiceForTest(t, s, blobs, applier)
+	service := newReviewServiceForTest(t, s, &reviewBlobStore{values: map[string][]byte{}}, applier)
 	result, err := service.Approve(context.Background(), "project-1", "review-1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Issue.Status != "DONE" || applier.staged != "patch" || applier.files["new.txt"] != "content" {
+	if result.Issue.Status != "DONE" || applier.calls != 1 || applier.review.ReviewRevision != "review-revision" {
 		t.Fatalf("result=%+v applier=%+v", result, applier)
 	}
-	if s.completeCommand.AcceptedRevision != "accepted-revision" {
+	if s.completeCommand.AcceptedRevision != "accepted-revision" || !s.completeCommand.DeliveryComplete {
 		t.Fatalf("complete command=%+v", s.completeCommand)
 	}
 }
 
-func TestReviewServiceApproveMarksDeterministicEvidenceFailureRetryable(t *testing.T) {
+func TestReviewServiceApproveRemotePinsRevisionWithoutDelivery(t *testing.T) {
+	run := store.Run{ID: "run-1", ProjectID: "project-1", IssueID: "issue-1", Status: "READY_FOR_REVIEW"}
+	review := store.Review{
+		ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: run.ID, Status: "PENDING",
+		BaseRevision: "base-revision", ReviewRevision: "review-revision",
+	}
+	s := &reviewServiceStore{
+		project: store.Project{ID: "project-1", SourceType: store.ProjectSourceGit},
+		run: run, review: review, begin: store.BeginReviewApprovalResult{Review: review, Run: run},
+		complete: store.CompleteReviewApprovalResult{
+			Review: store.Review{ID: review.ID, Status: "APPROVED"},
+			Run: run, Issue: store.Issue{ID: "issue-1", Status: "REVIEW"},
+		},
+	}
+	applier := &reviewCandidateApplierFake{revision: "should-not-be-used"}
+	service := newReviewServiceForTest(t, s, &reviewBlobStore{values: map[string][]byte{}}, applier)
+	result, err := service.Approve(context.Background(), "project-1", "review-1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applier.calls != 0 || s.completeCommand.AcceptedRevision != "review-revision" || s.completeCommand.DeliveryComplete {
+		t.Fatalf("applier=%+v command=%+v", applier, s.completeCommand)
+	}
+	if result.Run.Status != "READY_FOR_REVIEW" || result.Issue.Status != "REVIEW" {
+		t.Fatalf("remote approval pretended delivery completed: %+v", result)
+	}
+}
+
+func TestReviewServiceApproveMarksMissingGitIdentityRetryable(t *testing.T) {
 	run := store.Run{ID: "run-1", ProjectID: "project-1", IssueID: "issue-1"}
 	review := store.Review{ID: "review-1", ProjectID: "project-1", IssueID: "issue-1", RunID: run.ID, Status: "PENDING"}
 	s := &reviewServiceStore{project: store.Project{ID: "project-1"}, run: run, review: review, begin: store.BeginReviewApprovalResult{Review: review, Run: run}}

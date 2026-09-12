@@ -4,10 +4,10 @@ This document defines the user-facing v0.1 product. The primary goal is one comp
 
 ## v0.1 success condition
 
-A user configures a local Project Git repository and runnable Agent, assigns an Issue, closes the browser, and later reviews real repository changes produced by a real coding Engine on a selected Runner.
+A user configures a Project Git source and runnable Agent, assigns an Issue, closes the browser, and later reviews real repository changes produced by a real coding Engine on a selected Runner.
 
 ```text
-Local Project repository
+Project source (local or git)
   -> Issue
   -> Agent
        -> Engine
@@ -15,16 +15,16 @@ Local Project repository
   -> QUEUED Run
   -> durable scheduler
   -> selected connected Runner
-  -> durable Issue Workspace
-  -> Workspace transfer
+  -> deterministic agent-board/<issue-key> branch
+  -> source-aware checkout/worktree
   -> Execution Session
   -> coding Engine
-  -> commands / files / tests / Artifacts
-  -> Workspace sync-back
+  -> commands / Git changes / tests / Artifacts
+  -> Git finalization + branch return/publication
   -> Question / resume when needed
-  -> Review
+  -> Review pinned to Git SHAs
   -> Approve
-  -> Done
+  -> Done / delivery according to source semantics
 ```
 
 The scripted Engine is a walking-skeleton/test tool; it is not the v0.1 destination.
@@ -55,7 +55,7 @@ Shared/global or Project-scoped product configuration:
 - Providers
 - Model Profiles
 
-Project repository configuration belongs to Project. Project Runner allowlisting is execution policy, not Agent configuration; full Runner management and the Project Runner picker are follow-up work in #69.
+Project source configuration belongs to Project. Project Runner allowlisting is execution policy, not Agent configuration.
 
 Legacy Runtime configuration remains only for internal managed-compute code that still uses it. It is not part of normal v0.1 Agent configuration or the preferred production execution path.
 
@@ -100,19 +100,25 @@ Plugins are not part of the v0.1 critical path.
 
 A Project owns the Board plus repository context used by its Issues.
 
-The first v0.1 repository source is a local Git repository accessible to the backend deployment:
+Source configuration is:
 
 ```text
-Local repository path/source
-Default/base branch
-Issue prefix (immutable, globally unique; forms public Issue keys such as AB-12)
+local
+  -> local/server-visible repository path
+  -> default/base branch
+
+git
+  -> clone URL
+  -> optional source ref
 ```
 
-The source path is validated against deployment-authorized repository roots; Project configuration is not arbitrary filesystem access.
+Issue prefix is immutable and globally unique and forms public Issue keys such as `AB-12`.
 
-When an Issue first executes, Agent Board automatically materializes the configured repository into its durable Workspace.
+Local source paths are validated against deployment-authorized repository roots; Project configuration is not arbitrary filesystem access.
 
-Authenticated remote repositories and Source Connections are implemented after the first complete local-repository coding flow is proven.
+A remote Git source is saved provider-neutrally. The Runner uses its host Git authentication to fetch/push; v0.1 does not require a GitHub/GitLab/etc. Source Connection merely to execute a remote Git Project.
+
+Every Issue uses a deterministic branch `agent-board/<issue-key>` and continues that branch across attempts.
 
 ## Provider and Model Profile
 
@@ -140,6 +146,8 @@ The existing scheduler chooses an eligible connected Runner. External Runners ar
 A Project may restrict external Runner eligibility with its Runner allowlist. Agents never select or configure a Runner.
 
 Runner, Execution Session and Run remain separate identities. Default Runner capacity is 5 concurrent Execution Sessions.
+
+For local Projects, the Runner receives/returns the Issue branch using the existing bounded #71 transfer. For remote Git Projects, the Runner uses a bare repository cache plus a per-Run worktree and publishes the Issue branch with a normal non-force push.
 
 ### Legacy/internal managed compute
 
@@ -176,7 +184,7 @@ Issue priority uses one numeric v0.1 vocabulary: `0`, `1`, `2`, `3`, `4`. `0` is
 
 Assigning a runnable Agent normally creates/schedules a Run and moves the Issue into active work. The request returns after durable scheduling; execution continues server-side.
 
-Changing assignee during active work cancels the current attempt and starts a new attempt on the same Issue Workspace.
+Changing assignee during active work cancels the current attempt and starts a new attempt on the same Issue branch/Workspace identity.
 
 Done Issues cannot start Runs. Reopen returns Done -> Todo without auto-starting.
 
@@ -220,7 +228,9 @@ Questions are answered from Issue detail. Inbox contains blocking Questions, Rev
 
 Any continuation required by a Question answer is durable before the answer command returns success.
 
-The Runner owns no durable Question/resume state. For native OpenCode Questions, the same live Runner Execution Session and Runner Workspace remain attached through `WAITING_FOR_INPUT`; answering continues that same native session. Recovery after an actual Runner/transport failure reconciles that durable session rather than starting duplicate work.
+The Runner owns no durable Question/resume product state. For native OpenCode Questions, the same live Runner Execution Session, native Engine session and checkout remain attached through `WAITING_FOR_INPUT`; answering continues that same native session. Agent Board does not finalize or publish/return the Issue branch merely because input is pending.
+
+Recovery after an actual Runner/transport failure reconciles that durable session rather than starting duplicate work.
 
 ## Runs
 
@@ -232,7 +242,7 @@ Run detail is first-class and exposes persisted evidence:
 - queue/wait reason
 - timeline/messages
 - commands/tools
-- complete changed-file evidence/diff
+- Git branch/change evidence and diff
 - tests/checks
 - selected Runner and Execution Session diagnostics/provenance
 - legacy Runtime/Runtime Instance lifecycle only when internal managed compute was actually used
@@ -242,35 +252,60 @@ Run detail is first-class and exposes persisted evidence:
 
 Raw Event JSON is diagnostic fallback, not the primary UX.
 
+## Git-native execution result
+
+At a real completion/failure/cancellation hand-back boundary Agent Board requires the checkout to still be on the expected `agent-board/<issue-key>` branch and to retain the recorded execution-start revision in history. Engine-created commits are preserved. Remaining non-ignored changes are committed when necessary so the boundary is a clean Git HEAD.
+
+Local Runner execution returns that branch to the server and waits for apply acknowledgement. Remote Git execution publishes that branch normally/non-force and retains the worktree until the server durably records the revision and acknowledges it.
+
+A successful remote push whose response/database write/ack is lost can be retried from the same retained session without rerunning the Engine. Arbitrary external advancement is still rejected.
+
 ## Review
 
 Human Review is the v0.1 delivery gate.
 
-Review shows the complete candidate produced by the attempt, including staged, unstaged and new/untracked files where applicable, plus tests, Artifacts and relevant execution evidence.
+Review pins the exact Issue base and reviewed Issue branch HEAD:
 
-Approve -> Done. Request changes may create a new attempt on the same Issue Workspace according to Project policy.
+```text
+base_revision
+review_revision
+```
 
-Automatic external delivery is not required for the first v0.1 proof.
+The reviewed source change is reproducible with:
+
+```bash
+git diff <base_revision>..<review_revision>
+```
+
+Review also shows tests, Artifacts and relevant execution evidence. Those evidence objects do not form a duplicate filesystem/candidate snapshot used for delivery.
+
+Request Changes continues the same Issue branch. Prior Reviews remain immutable because their pinned SHAs do not change.
+
+For a local Project, Approve integrates the exact pinned reviewed commit into the current local Project Workspace target state and then completes the Issue when durable approval finalization succeeds. A real target conflict is explicit and does not silently discard either side.
+
+For a remote Git Project, publishing the Issue branch is **not** remote target integration. v0.1 does not pretend that internal Review approval merged a remote target branch. Provider PR/MR actions remain later Source Connection work.
 
 ## Future Project delivery policy
 
-After remote Source Connections/source-provider actions exist, a Project may choose an explicit delivery policy.
+After Source Connections/source-provider actions exist, a Project may choose an explicit delivery policy.
 
-The safe default remains human-gated delivery. A later autonomous policy may automatically create or update a pull/merge request after a successful verified candidate without requiring Agent Board's internal approval first.
+The safe default remains human-gated delivery. A later autonomous policy may automatically create or update a pull/merge request after a successful verified Review without requiring Agent Board's internal approval first.
 
 Automatic merge/deploy is a separate, stronger permission and must not be implied by PR/MR creation.
 
 ## Execution preflight
 
-The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Engine, Model Profile/Provider credentials/health, live Runner protocol compatibility/availability and local Project repository prerequisites.
+The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Engine, Model Profile/Provider credentials/health, live Runner protocol compatibility/availability and Project source prerequisites.
+
+For remote Git sources, runtime Git authentication failures are explicit; Agent Board does not silently fall back to local transfer.
 
 ## Explicitly after the v0.1 flow
 
 - planning strategy: Auto / Always plan / Skip planning
 - scheduled Automations creating normal Issues
 - Agent-created follow-up Issues
-- authenticated remote Source Connections
-- Project delivery policy and source-provider PR/MR actions
+- authenticated Source Connections and provider-specific repository actions
+- Project PR/MR delivery policy
 - Agent delegation
 - Squads
 - worker pools / warm / spot execution
@@ -283,15 +318,17 @@ The product distinguishes `configured` from `runnable`. Preflight evaluates Agen
 
 1. Agent Engine + Model Profile configuration (no Agent Runtime/Runner selection)
 2. durable async scheduler/restart-safe continuation with live Runner admission
-3. local repository-backed Issue Workspaces
+3. Project source configuration and Git-native Issue branches
 4. external and internal `agent-runner` hosts over protocol v2
-5. Git-native Workspace transfer and sync-back
+5. local branch-only transfer and remote Runner Git cache/worktree execution
 6. canonical execution context + secure Provider credentials
 7. immutable Runner provenance + durable raw logs/Artifacts
-8. complete Run/Review evidence
+8. SHA-pinned Run/Review evidence
 9. operational preflight/Runner-availability truthfulness
 10. first real coding Engine (OpenCode first)
-11. prove local repository -> Run -> Runner -> Execution Session -> Engine -> changes -> Review end to end
-12. only then broaden repository integrations and the roadmap
+11. prove Project source -> Run -> Runner -> Execution Session -> Engine -> Git changes -> Review end to end
+12. only then broaden provider-specific repository integrations and the roadmap
 
 Frontend implementation uses Nuxt 4 + Nuxt UI v4 and remains within this v0.1 product scope. Plugin work is deliberately last, including after future users/groups/permissions work unless explicitly reprioritized.
+
+Earlier #15 candidate snapshot/staging assumptions are superseded by this Git-native source/Review model.

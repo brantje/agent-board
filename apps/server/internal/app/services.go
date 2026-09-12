@@ -23,7 +23,6 @@ type Services struct {
 	RunnerConnections *runner.Manager
 	ExecutionSessions *AuthorizedExecutionSessionService
 	RunEvidence       *RunEvidenceService
-	ReviewCandidates  evidencepkg.ReviewCandidateReader
 	ExecutionStore    store.ControlPlaneStore
 	ExecutionContext  *executioncontext.Resolver
 	Scheduler         *scheduler.Coordinator

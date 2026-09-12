@@ -11,13 +11,14 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/store"
-	workspacepkg "github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
 const reviewID = "12121212-1212-4212-8212-121212121212"
 const reviewDecisionID = "13131313-1313-4313-8313-131313131313"
 const reviewJobID = "14141414-1414-4414-8414-141414141414"
 const reviewNextRunID = "15151515-1515-4515-8515-151515151515"
+const reviewBaseRevision = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+const reviewHeadRevision = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 
 type httpReviewStore struct {
 	*httpRunEvidenceStore
@@ -29,14 +30,21 @@ func (s *httpReviewStore) GetProject(_ context.Context, id string) (store.Projec
 	if id != projectID {
 		return store.Project{}, store.ErrNotFound
 	}
-	return store.Project{ID: projectID, Name: "Project", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, nil
+	return store.Project{ID: projectID, Name: "Project", SourceType: store.ProjectSourceLocal, RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, nil
 }
 
 func (s *httpReviewStore) GetReview(_ context.Context, pid, id string) (store.Review, error) {
 	if pid != projectID || id != reviewID {
 		return store.Review{}, store.ErrNotFound
 	}
-	return store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "PENDING", DecisionID: s.decisionID}, nil
+	return store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "PENDING", DecisionID: s.decisionID, BaseRevision: reviewBaseRevision, ReviewRevision: reviewHeadRevision}, nil
+}
+
+func (s *httpReviewStore) GetReviewByRun(_ context.Context, pid, id string) (store.Review, error) {
+	if pid != projectID || id != runID {
+		return store.Review{}, store.ErrNotFound
+	}
+	return s.GetReview(context.Background(), pid, reviewID)
 }
 
 func (s *httpReviewStore) ListReviews(_ context.Context, pid string, _ store.ReviewFilter) ([]store.Review, error) {
@@ -45,6 +53,14 @@ func (s *httpReviewStore) ListReviews(_ context.Context, pid string, _ store.Rev
 	}
 	review, _ := s.GetReview(context.Background(), projectID, reviewID)
 	return []store.Review{review}, nil
+}
+
+func (s *httpReviewStore) GetReviewRevisions(_ context.Context, pid, id string) (string, string, error) {
+	review, err := s.GetReview(context.Background(), pid, id)
+	if err != nil {
+		return "", "", err
+	}
+	return review.BaseRevision, review.ReviewRevision, nil
 }
 
 func (s *httpReviewStore) GetDecision(_ context.Context, pid, id string) (store.Decision, error) {
@@ -69,7 +85,7 @@ func (s *httpReviewStore) BeginReviewApproval(ctx context.Context, command store
 func (s *httpReviewStore) CompleteReviewApproval(_ context.Context, command store.CompleteReviewApprovalCommand) (store.CompleteReviewApprovalResult, error) {
 	decision := store.Decision{ID: reviewDecisionID, ProjectID: projectID, Kind: "REVIEW", Outcome: "APPROVED", ActorType: "HUMAN", SafeDetails: json.RawMessage(`{"acceptedRevision":"` + command.AcceptedRevision + `"}`)}
 	return store.CompleteReviewApprovalResult{
-		Review:   store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "APPROVED", DecisionID: &decision.ID},
+		Review:   store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "APPROVED", DecisionID: &decision.ID, BaseRevision: reviewBaseRevision, ReviewRevision: reviewHeadRevision},
 		Decision: decision,
 		Run:      store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, Status: "COMPLETED"},
 		Issue:    store.Issue{ID: issueID, ProjectID: projectID, Key: issueKey, Number: 1, Status: "DONE"},
@@ -91,7 +107,7 @@ func (s *httpReviewStore) RequestReviewChanges(_ context.Context, command store.
 	s.feedback = feedback
 	decision := store.Decision{ID: reviewDecisionID, ProjectID: projectID, Kind: "REVIEW", Outcome: "CHANGES_REQUESTED", ActorType: "HUMAN", SafeDetails: json.RawMessage(`{"feedback":"add regression coverage"}`)}
 	return store.RequestReviewChangesResult{
-		Review:   store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "CHANGES_REQUESTED", DecisionID: &decision.ID},
+		Review:   store.Review{ID: reviewID, ProjectID: projectID, IssueID: issueID, RunID: runID, Status: "CHANGES_REQUESTED", DecisionID: &decision.ID, BaseRevision: reviewBaseRevision, ReviewRevision: reviewHeadRevision},
 		Decision: decision,
 		Run:      store.Run{ID: reviewNextRunID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, Attempt: 2, Status: "QUEUED"},
 		Issue:    store.Issue{ID: issueID, ProjectID: projectID, Key: issueKey, Number: 1, Status: "IN_PROGRESS"},
@@ -101,7 +117,7 @@ func (s *httpReviewStore) RequestReviewChanges(_ context.Context, command store.
 
 type httpReviewApplier struct{ revision string }
 
-func (a *httpReviewApplier) ApplyReviewedCandidate(context.Context, store.Project, string, workspacepkg.AcceptedCandidate) (string, error) {
+func (a *httpReviewApplier) ApplyReviewedRevision(context.Context, store.Project, store.Review) (string, error) {
 	return a.revision, nil
 }
 
@@ -134,7 +150,7 @@ func TestReviewRoutesExposeEvidenceAndCommands(t *testing.T) {
 		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/api/projects/"+projectID+"/reviews?status=PENDING", nil)
 		rec := httptest.NewRecorder()
 		router.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), reviewID) {
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), reviewID) || !strings.Contains(rec.Body.String(), reviewHeadRevision) {
 			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 		}
 	})
@@ -156,7 +172,7 @@ func TestReviewRoutesExposeEvidenceAndCommands(t *testing.T) {
 			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 		}
 		body := rec.Body.String()
-		for _, want := range []string{reviewID, runID, `"testStatus":"PASSED"`, `"evidence"`} {
+		for _, want := range []string{reviewID, runID, reviewBaseRevision, reviewHeadRevision, `"testStatus":"PASSED"`, `"evidence"`} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("detail missing %s: %s", want, body)
 			}

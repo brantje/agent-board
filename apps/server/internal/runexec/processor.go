@@ -82,7 +82,6 @@ type Processor struct {
 	engines    *engine.Registry
 	events     *evidence.Recorder
 	output     *evidence.OutputRecorder
-	candidate  *evidence.CandidateSnapshotter
 	branches   *branchObserver
 	git        workspace.Git
 	workspaces IssueWorkspaceEnsurer
@@ -96,16 +95,15 @@ func NewProcessor(
 	engines *engine.Registry,
 	events *evidence.Recorder,
 	output *evidence.OutputRecorder,
-	candidate *evidence.CandidateSnapshotter,
 	git workspace.Git,
 	runners RunnerConnector,
 ) (*Processor, error) {
-	if store == nil || resolver == nil || sessions == nil || engines == nil || events == nil || output == nil || candidate == nil {
+	if store == nil || resolver == nil || sessions == nil || engines == nil || events == nil || output == nil {
 		return nil, fmt.Errorf("run execution: all processor dependencies are required")
 	}
 	return &Processor{
 		store: store, resolver: resolver, runtimes: runtimes, runners: runners, sessions: sessions, engines: engines,
-		events: events, output: output, candidate: candidate, branches: newBranchObserver(store, git, events), git: git,
+		events: events, output: output, branches: newBranchObserver(store, git, events), git: git,
 	}, nil
 }
 
@@ -152,11 +150,13 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 
 	runnerID := strings.TrimSpace(claim.RunnerID)
 	if runnerID != "" {
-		ready, err := p.ensureRunnerWorkspace(ctx, run, safe)
-		if err != nil {
-			return failed(err), nil
+		if !isRemoteGitProject(safe) {
+			ready, err := p.ensureRunnerWorkspace(ctx, run, safe)
+			if err != nil {
+				return failed(err), nil
+			}
+			safe = ready
 		}
-		safe = ready
 		preparer, ok := p.sessions.(runnerSessionPreparer)
 		if !ok {
 			return failed(fmt.Errorf("runner session preparer is unavailable")), nil
@@ -225,9 +225,8 @@ func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, 
 
 func (p *Processor) materializeExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance) (store.RuntimeInstance, executioncontext.SafeContext, error) {
 	// Runtime creation is also the boundary that materializes a placeholder
-	// Issue Workspace. Resolve again after that boundary so immutable provenance,
-	// Engine context and candidate collection all refer to the same durable
-	// Workspace that is actually mounted into the Runtime.
+	// Issue Workspace. Resolve again after that boundary so immutable provenance
+	// and Engine context refer to the same durable Workspace that is mounted.
 	materialized, err := p.resolver.Resolve(ctx, run.ProjectID, run.ID)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
@@ -271,11 +270,10 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 		return p.finishWaitingForInput(ctx, safe, instance)
 	}
 
-	snapshot, snapshotErr := p.candidate.Snapshot(ctx, launcher.scope, safe.Workspace.Path)
-	if snapshotErr == nil {
-		snapshotErr = p.recordCandidate(ctx, safe, instance.ID, snapshot)
-	}
-	if engineErr == nil && snapshotErr == nil && engineResult.Summary != "" {
+	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	_, finalizeErr := p.finalizeServerWorkspace(finalizeCtx, safe)
+	cancelFinalize()
+	if engineErr == nil && finalizeErr == nil && engineResult.Summary != "" {
 		engineErr = p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, &instance.ID, nil)
 	}
 
@@ -283,12 +281,12 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
 	}
-	if combined := errors.Join(engineErr, snapshotErr, cleanupErr); combined != nil {
+	if combined := errors.Join(engineErr, finalizeErr, cleanupErr); combined != nil {
 		reason := safeFailure(combined)
 		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, &instance.ID, nil)
 		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
 	}
-	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"candidateManifestArtifactId": snapshot.Manifest.ID}, &instance.ID, nil); err != nil {
+	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, &instance.ID, nil); err != nil {
 		return scheduler.Result{}, err
 	}
 	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
@@ -368,50 +366,6 @@ func (p *Processor) cleanupRuntime(parent context.Context, safe executioncontext
 		}
 	}
 	return errors.Join(errs...)
-}
-
-func (p *Processor) recordCandidate(ctx context.Context, safe executioncontext.SafeContext, runtimeInstanceID string, snapshot evidence.CandidateSnapshot) error {
-	artifacts := append([]store.Artifact{snapshot.Manifest}, snapshot.Artifacts...)
-	fileArtifacts := make(map[string]string)
-	for _, artifact := range artifacts {
-		if artifact.Kind == "candidate_file" {
-			fileArtifacts[artifact.Name] = artifact.ID
-		}
-		if err := p.record(ctx, safe, "artifact.created", evidence.ArtifactPayload{ArtifactID: artifact.ID, Name: artifact.Name, Kind: artifact.Kind}, &runtimeInstanceID, nil); err != nil {
-			return err
-		}
-	}
-	for _, change := range snapshot.Candidate.Changes {
-		eventType := candidateEventType(change)
-		payload := evidence.FilePayload{Path: change.Path, OldPath: change.OldPath, Staged: change.StagedStatus != "", Unstaged: change.UnstagedStatus != "" || change.Untracked, ArtifactID: fileArtifacts[change.Path]}
-		if err := p.record(ctx, safe, eventType, payload, &runtimeInstanceID, nil); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func candidateEventType(change evidence.CandidateChange) string {
-	statuses := []string{change.StagedStatus, change.UnstagedStatus}
-	if change.Untracked {
-		return "file.created"
-	}
-	for _, status := range statuses {
-		if status == "renamed" {
-			return "file.renamed"
-		}
-	}
-	for _, status := range statuses {
-		if status == "deleted" {
-			return "file.deleted"
-		}
-	}
-	for _, status := range statuses {
-		if status == "created" {
-			return "file.created"
-		}
-	}
-	return "file.modified"
 }
 
 func (p *Processor) record(ctx context.Context, safe executioncontext.SafeContext, eventType string, payload any, runtimeInstanceID *string, parentEventID *string) error {
@@ -811,6 +765,9 @@ func (p *Processor) ensureRunnerWorkspace(ctx context.Context, run store.Run, sa
 }
 
 func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
+	if isRemoteGitProject(safe) {
+		return p.prepareRemoteGitWorkspace(ctx, safe, runnerID, sessionID)
+	}
 	if p.runners == nil {
 		return fmt.Errorf("runner connector is unavailable")
 	}
@@ -878,29 +835,17 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
 	}
-	if engineErr != nil {
-		reason := safeFailure(errors.Join(engineErr, syncErr))
-		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
-		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
-	}
-	if syncErr != nil {
-		reason := safeFailure(syncErr)
-		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
-		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
-	}
-	snapshot, snapshotErr := p.candidate.Snapshot(ctx, launcher.scope, safe.Workspace.Path)
-	if snapshotErr == nil {
-		snapshotErr = p.recordCandidate(ctx, safe, "", snapshot)
-	}
-	if engineErr == nil && snapshotErr == nil && engineResult.Summary != "" {
-		engineErr = p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, nil, nil)
-	}
-	if combined := errors.Join(engineErr, snapshotErr); combined != nil {
+	if combined := errors.Join(engineErr, syncErr); combined != nil {
 		reason := safeFailure(combined)
 		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
 		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
 	}
-	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"candidateManifestArtifactId": snapshot.Manifest.ID}, nil, nil); err != nil {
+	if engineResult.Summary != "" {
+		if err := p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, nil, nil); err != nil {
+			return scheduler.Result{}, err
+		}
+	}
+	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, nil, nil); err != nil {
 		return scheduler.Result{}, err
 	}
 	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
@@ -915,6 +860,9 @@ func (p *Processor) transferProgressRecorder(ctx context.Context, safe execution
 }
 
 func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
+	if isRemoteGitProject(safe) {
+		return p.publishRemoteGitWorkspace(ctx, safe, runnerID, sessionID)
+	}
 	if sessionID == "" || p.runners == nil {
 		return fmt.Errorf("workspace sync requires a prepared runner execution session")
 	}
@@ -955,6 +903,10 @@ func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executionc
 	}
 	defer func() { _ = lock.Release() }()
 	if err := gitCLI.ApplyTransferBundle(ctx, safe.Workspace.Path, payload); err != nil {
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{"reason": err.Error()}), nil, nil)
+		return err
+	}
+	if err := p.persistLocalWorkspaceRevision(ctx, safe); err != nil {
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{"reason": err.Error()}), nil, nil)
 		return err
 	}

@@ -23,6 +23,10 @@ type workspaceBootstrapLockStore interface {
 	AcquireWorkspaceBootstrapLock(context.Context, string) (store.WorkspaceBootstrapLock, error)
 }
 
+type workspaceBootstrapReadyStore interface {
+	MarkWorkspaceBootstrapReady(context.Context, string, string, string, string, string, string, string, string) (store.Workspace, error)
+}
+
 type runnerLookupStore interface {
 	GetRunner(context.Context, string) (store.Runner, error)
 }
@@ -104,10 +108,6 @@ func (s *RedactingStore) CreateArtifact(ctx context.Context, input store.Artifac
 	return s.ControlPlaneStore.CreateArtifact(ctx, input)
 }
 
-// The runner ownership methods are intentionally not part of ControlPlaneStore:
-// they are optional capabilities used by RuntimeInstanceService for connection
-// fencing. Explicit forwarding keeps those capabilities visible through this
-// decorator without widening the store contract for unrelated implementations.
 func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusIfStatus(ctx context.Context, projectID, instanceID, status, expectedStatus string) (store.RuntimeInstance, error) {
 	base, ok := s.ControlPlaneStore.(runtimeRunnerStatusStore)
 	if !ok {
@@ -148,12 +148,36 @@ func (s *RedactingStore) AcquireWorkspaceBootstrapLock(ctx context.Context, work
 	return base.AcquireWorkspaceBootstrapLock(ctx, workspaceID)
 }
 
+func (s *RedactingStore) MarkWorkspaceBootstrapReady(ctx context.Context, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, baseRevision, workingBranch string) (store.Workspace, error) {
+	base, ok := s.ControlPlaneStore.(workspaceBootstrapReadyStore)
+	if !ok {
+		return store.Workspace{}, fmt.Errorf("redacting store base does not support workspace ready transitions")
+	}
+	return base.MarkWorkspaceBootstrapReady(ctx, projectID, issueID, workspaceID, path, repositoryPath, baseBranch, baseRevision, workingBranch)
+}
+
 func (s *RedactingStore) AcquireWorkspaceExecutionLock(ctx context.Context, workspaceID, executionSessionID string) (store.WorkspaceBootstrapLock, error) {
 	base, ok := s.ControlPlaneStore.(store.WorkspaceExecutionLockStore)
 	if !ok {
 		return nil, fmt.Errorf("redacting store base does not support workspace execution locks")
 	}
 	return base.AcquireWorkspaceExecutionLock(ctx, workspaceID, executionSessionID)
+}
+
+func (s *RedactingStore) GetWorkspaceCurrentRevision(ctx context.Context, projectID, workspaceID string) (string, error) {
+	base, ok := s.ControlPlaneStore.(store.WorkspaceRevisionStore)
+	if !ok {
+		return "", fmt.Errorf("redacting store base does not support workspace revision persistence")
+	}
+	return base.GetWorkspaceCurrentRevision(ctx, projectID, workspaceID)
+}
+
+func (s *RedactingStore) UpdateWorkspaceCurrentRevision(ctx context.Context, projectID, workspaceID, revision string) (string, error) {
+	base, ok := s.ControlPlaneStore.(store.WorkspaceRevisionStore)
+	if !ok {
+		return "", fmt.Errorf("redacting store base does not support workspace revision persistence")
+	}
+	return base.UpdateWorkspaceCurrentRevision(ctx, projectID, workspaceID, revision)
 }
 
 func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner, error) {
@@ -163,3 +187,5 @@ func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner
 	}
 	return base.GetRunner(ctx, id)
 }
+
+var _ store.WorkspaceRevisionStore = (*RedactingStore)(nil)

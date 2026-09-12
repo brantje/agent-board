@@ -103,7 +103,7 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("live registry did not advertise the connected runner for the scripted engine")
-admitted:
+ admitted:
 	project, run := createRunnerScriptedIntegrationRun(t, ctx, services.ControlPlane, repositoryPath)
 	baseBlobs, err := evidence.NewFileBlobStore(filepath.Join(t.TempDir(), "evidence"), 8<<20)
 	if err != nil {
@@ -121,16 +121,12 @@ admitted:
 	if err != nil {
 		t.Fatal(err)
 	}
-	candidate, err := evidence.NewCandidateSnapshotter(evidence.NewCandidateCollector(), services.ExecutionStore, blobs)
-	if err != nil {
-		t.Fatal(err)
-	}
 	engines, err := engine.NewRegistry(scripted.New())
 	if err != nil {
 		t.Fatal(err)
 	}
 	runnerConnector := NewRegistryConnector(services.ControlPlane.Runners.Connections)
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, candidate, git, runnerConnector)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, git, runnerConnector)
 	if err != nil {
 		t.Fatal(err)
 	}

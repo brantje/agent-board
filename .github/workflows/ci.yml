@@ -105,12 +105,12 @@ jobs:
           AGENT_BOARD_TEST_DOCKER: "1"
           AGENT_BOARD_TEST_RUNNER_IMAGE: agent-board-agent-runner:ci
         run: go test -count=1 -run '^TestDockerRunnerIntegration$' -v ./internal/runner
-      - name: Run external runner scripted walking skeleton
+      - name: Run external runner source-control lifecycles
         working-directory: apps/server
         env:
           AGENT_BOARD_TEST_RUNNER: "1"
           AGENT_BOARD_TEST_DATABASE_RESET: "1"
-        run: go test -count=1 -run '^TestScriptedEngineExternalRunnerWalkingSkeleton$' -v ./internal/runexec
+        run: go test -count=1 -run '^(TestScriptedEngineExternalRunnerWalkingSkeleton|TestLocalSourceExternalRunnerReviewLifecycle|TestRemoteGitExternalRunnerLifecycleContinuesAcrossRunners)$' -v ./internal/runexec
       - name: Run scripted Engine walking skeleton
         working-directory: apps/server
         env:
@@ -151,6 +151,9 @@ jobs:
         run: go test ./... && go vet ./... && go build ./...
       - name: Test shared redaction
         working-directory: packages/redact
+        run: go test ./... && go vet ./... && go build ./...
+      - name: Test shared workspace Git
+        working-directory: packages/workspacegit
         run: go test ./... && go vet ./... && go build ./...
       - name: Test and enforce coverage
         working-directory: apps/agent-runner
