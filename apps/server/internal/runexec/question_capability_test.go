@@ -11,7 +11,7 @@ func (*disabledQuestionExecutionStore) SupportsQuestionStore() bool { return fal
 func TestEngineRequestHonorsExplicitQuestionCapability(t *testing.T) {
 	base := &orchestrationQuestionStore{processTestStore: &processTestStore{}}
 	processor := &Processor{store: &disabledQuestionExecutionStore{orchestrationQuestionStore: base}}
-	request, err := processor.engineRequest(t.Context(), continuationSafeContext(), nil, "runtime-instance-1")
+	request, err := processor.engineRequest(t.Context(), continuationSafeContext(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
