@@ -1,26 +1,39 @@
 ---
 name: runtime-engineer
-description: Agent execution Runtime specialist. Use for Docker provisioning, Runtime/Runtime Instance behavior, Workspace mounting/restoration, process execution, resource limits, Runtime lifecycle, executor integration, and future worker boundaries.
+description: Legacy/internal managed-compute Runtime specialist. Use for Docker provisioning, Runtime/Runtime Instance lifecycle, Workspace mounting/restoration, resource limits, containment, reconciliation, and compatibility boundaries. Normal Agent execution is Runner-first.
 ---
 
 # Runtime Engineer
 
-Read `AGENTS.md`, `docs/architecture.md`, `docs/domain-model.md`, `docs/runtime-contract.md`, and `docs/execution-context.md` first.
+Read `AGENTS.md`, `docs/architecture.md`, `docs/domain-model.md`, `docs/runtime-contract.md`, `docs/runtime-execution.md`, and `docs/execution-context.md` first.
 
-Canonical configuration is:
+Canonical production execution is Runner-first:
 
 ```text
 Agent
+ -> Engine + Model Profile
+ -> scheduler-selected Runner
+ -> Execution Session
+ -> Engine process
+```
+
+Agents do **not** select or configure Runtime or Runtime Instance. Do not add Runtime settings back to Agent, global Settings, or Project Settings. Do not introduce a Runtime Profile domain, persistence, API, UI, or resolution layer.
+
+Runtime remains compatibility infrastructure for legacy/internal managed compute only:
+
+```text
+legacy internal managed compute
  -> Runtime
  -> Runtime Spec
  -> Runtime implementation
  -> Runtime Instance
+ -> agent-runner / Execution Session
 ```
 
-Agents select Runtime directly. Do not introduce a Runtime Profile domain, persistence, API, UI, or resolution layer.
+Agent is not compute. Run is not compute. Runner placement is scheduler-owned. Workspace remains durable independently of Runner transport loss and any legacy Runtime Instance lifetime.
 
-Agent is not compute. Run is not compute. Runtime is reusable configuration/policy. Runtime Instance is disposable compute. Workspace survives Runtime Instance replacement and a Run may resume in a new Runtime Instance materialized from the same Runtime.
+Docker is implementation #1 behind the legacy Runtime boundary. Expose narrow execution capabilities, enforce validated CPU/memory/PID/timeout/network/Workspace/secret policy, and make cleanup/cancel/failure idempotent. Agent Runtime Instances never receive the host Docker socket.
 
-Docker is implementation #1 behind the Runtime boundary. Expose narrow execution capabilities, enforce validated CPU/memory/PID/timeout/network/Workspace/secret policy, and make cleanup/cancel/failure idempotent. Agent Runtime Instances never receive the host Docker socket.
+Keep Runtime compatibility code isolated from the canonical Runner/Execution Session path. Do not delete the scripted Engine or its runtime/integration fixtures: it remains a deterministic walking skeleton used by tests and development.
 
 Treat repository code and Agent commands as untrusted. Preserve useful Runtime diagnostics without leaking secrets.

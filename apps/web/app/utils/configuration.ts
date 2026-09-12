@@ -6,14 +6,13 @@ export interface ConfigRecord {
   enabled?: boolean
   state?: string
   healthStatus?: string
-  workspacePolicy?: string
   [key: string]: unknown
 }
 
 export interface Field {
   key: string
   label: string
-  type?: 'number'|'select'|'textarea'|'checkbox'|'json'|'lines'|'provider-model'
+  type?: 'number'|'select'|'textarea'|'checkbox'|'json'|'provider-model'
   required?: boolean
   options?: string[]
   selectItems?: Array<{ label: string; value: string }>
@@ -70,7 +69,7 @@ export function isBuiltInProviderKind(kind: string) {
 }
 
 export function providerKindSelectValue(kind: string) {
-  const trimmed = String(kind ?? '').trim()
+  const trimmed = kind.trim()
   if (!trimmed) return ''
   return isBuiltInProviderKind(trimmed) ? trimmed : CUSTOM_PROVIDER_KIND
 }
@@ -127,24 +126,6 @@ export const definitions: Record<ConfigKind, Definition> = {
       enabled
     ]
   },
-  runtimes: {
-    title: 'Runtimes',
-    singular: 'Runtime',
-    emptyDescription: 'Define a Runtime image and execution policy for legacy internal managed compute.',
-    fields: [
-      name,
-      { key: 'kind', label: 'Kind', type: 'select', options: ['docker'], initial: 'docker' },
-      { key: 'image', label: 'Image', initial: 'agent-board-agent-runner:latest', required: true },
-      { key: 'networkPolicy', label: 'Network policy', type: 'select', options: ['none', 'restricted', 'outbound'], initial: 'none' },
-      { key: 'cpuLimitMillis', label: 'CPU limit (millicores)', type: 'number', min: 1 },
-      { key: 'memoryLimitBytes', label: 'Memory limit (bytes)', type: 'number', min: 1 },
-      { key: 'pidLimit', label: 'PID limit', type: 'number', min: 1 },
-      { key: 'timeoutSeconds', label: 'Timeout (seconds)', type: 'number', min: 1 },
-      { key: 'allowedSecretRefs', label: 'Allowed secret references', type: 'lines', help: 'One reference per line.' },
-      { key: 'capabilities', label: 'Capabilities', type: 'json', initial: '{}' },
-      enabled
-    ]
-  },
   agents: {
     title: 'Agents',
     singular: 'Agent',
@@ -161,7 +142,7 @@ export const definitions: Record<ConfigKind, Definition> = {
   }
 }
 
-export type ConfigKind = 'projects'|'providers'|'model-profiles'|'runtimes'|'agents'
+export type ConfigKind = 'projects'|'providers'|'model-profiles'|'agents'
 export type Draft = Record<string, string|number|boolean>
 
 export function draftFor(kind: ConfigKind, source: Record<string, unknown> = {}): Draft {
@@ -171,9 +152,7 @@ export function draftFor(kind: ConfigKind, source: Record<string, unknown> = {})
       ? field.initial ?? ''
       : field.type === 'json'
         ? JSON.stringify(value, null, 2)
-        : field.type === 'lines'
-          ? (value as string[]).join('\n')
-          : value]
+        : value]
   })) as Draft
 }
 
@@ -187,10 +166,8 @@ export function payloadFor(kind: ConfigKind, draft: Draft, options?: { editing?:
           ? value === '' ? null : Number(value)
           : field.type === 'json'
             ? JSON.parse(String(value))
-            : field.type === 'lines'
-              ? String(value).split('\n').map(item => item.trim()).filter(Boolean)
-              : field.key === 'issuePrefix'
-                ? String(value).trim().toUpperCase()
+            : field.key === 'issuePrefix'
+              ? String(value).trim().toUpperCase()
               : typeof value === 'string' ? value.trim() : value]
     }))
 }

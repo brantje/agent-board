@@ -7,7 +7,6 @@ function projectPath(projectId: string, segment: string) {
 export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
   const providers = projectId ? projectPath(projectId, 'providers') : '/settings/providers'
   const modelProfiles = projectId ? projectPath(projectId, 'model-profiles') : '/settings/model-profiles'
-  const runtimes = projectId ? projectPath(projectId, 'runtimes') : '/settings/runtimes'
   const overview = projectId ? projectPath(projectId, '') : '/settings'
 
   const groups: NavigationMenuItem[][] = [
@@ -26,15 +25,16 @@ export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
     ]
   ]
   if (!projectId) {
-    groups.push([
-      { label: 'Execution', type: 'label' },
-      { label: 'Agents', to: '/settings/agents' }
-    ])
+    groups.push(
+      [
+        { label: 'Execution', type: 'label' },
+        { label: 'Agents', to: '/settings/agents' }
+      ],
+      [
+        { label: 'Infrastructure', type: 'label' },
+        { label: 'Runners', to: '/settings/runners' }
+      ]
+    )
   }
-  groups.push([
-    { label: 'Infrastructure', type: 'label' },
-    ...(!projectId ? [{ label: 'Runners', to: '/settings/runners' }] : []),
-    { label: 'Runtimes', to: runtimes }
-  ])
   return groups
 }

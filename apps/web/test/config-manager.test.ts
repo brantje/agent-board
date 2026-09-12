@@ -21,9 +21,6 @@ describe('configuration screens', () => {
       repositoryPath: '/repo',
       defaultBranch: 'main',
       issuePrefix: 'AB',
-      image: 'runner',
-      networkPolicy: 'none',
-      workspacePolicy: 'issue',
       safeMetadata: {},
       generationSettings: {}
     }]
@@ -82,21 +79,6 @@ describe('configuration screens', () => {
     await flushPromises()
     expect(fetch.mock.calls.some(([, options]) => options.method === (kind === 'projects' ? 'PATCH' : 'PUT'))).toBe(true)
     wrapper.unmount()
-  })
-
-  it('shows Runtime configured health and server-owned workspace policy without relying on color', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([{ id: 'r', name: 'Docker', projectId: 'p', enabled: false, healthStatus: 'UNHEALTHY', kind: 'docker', image: 'runner:latest', networkPolicy: 'restricted', workspacePolicy: 'issue', capabilities: { git: true }, cpuLimitMillis: 1000, memoryLimitBytes: 256, pidLimit: 128, timeoutSeconds: 60 }]))))
-    const wrapper = mount(ConfigManager, { props: { kind: 'runtimes', projectId: 'p' }, global })
-    await flushPromises()
-    expect(wrapper.text()).toContain('Configuration: Disabled')
-    expect(wrapper.text()).toContain('Health: Unhealthy')
-    expect(wrapper.text()).toContain('Network: Restricted · Workspace: Issue')
-    expect(wrapper.text()).toContain('Identity')
-    expect(wrapper.text()).toContain('r')
-    expect(wrapper.text()).toContain('Kind')
-    expect(wrapper.text()).toContain('Capabilities')
-    await button(wrapper, 'Edit').trigger('click')
-    expect(wrapper.text()).toContain('server-controlled')
   })
 
   it('shows reference errors, retries, distinguishes scope, and disables shared edits in project scope', async () => {

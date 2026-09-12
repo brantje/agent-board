@@ -2,7 +2,7 @@
 
 Agent Board is a genuinely free and open-source, self-hosted work board for autonomous software agents.
 
-It is built around durable Issues, server-owned execution, isolated Runtimes, persistent repository-backed Workspaces, structured human input, complete execution evidence, and configurable delivery policy.
+It is built around durable Issues, server-owned execution, persistent repository-backed Workspaces, Runner-based execution, structured human input, complete execution evidence, and configurable delivery policy.
 
 ## Priority: reach the complete v0.1 flow first
 
@@ -14,11 +14,9 @@ Local Project repository
   -> Agent
        -> Engine
        -> Model Profile -> Provider
-       -> Runtime
   -> durable scheduler
-  -> durable Issue Workspace
-  -> Runtime Instance
-  -> agent-runner
+  -> selected connected Runner
+  -> durable Issue Workspace transfer/materialization
   -> Execution Session
   -> coding Engine
   -> commands / files / tests / Artifacts
@@ -27,6 +25,8 @@ Local Project repository
   -> human approval
   -> Done
 ```
+
+External persistent Runners are preferred for normal execution. The server-managed internal Runner uses the same Runner/Execution Session protocol path. Runtime/Runtime Instance support remains only for legacy internal managed compute and is not normal Agent configuration.
 
 Work that does not directly prove or harden this flow must not delay it.
 
@@ -47,19 +47,11 @@ Open:
 
 On a fresh PostgreSQL volume, Compose initializes `packages/database/schema.sql`.
 
-### Docker Runtime prerequisites
+### Legacy Docker Runtime compatibility
 
-The v0.1 self-hosted deployment uses the host Docker daemon for Runtime Instances. The trusted Go backend may access Docker; Agent Runtime Instances never receive the Docker socket or equivalent daemon credentials.
+Normal Runner-based execution does not require users to create or select a Runtime. The repository still contains Docker Runtime/Runtime Instance support for legacy internal managed compute and integration coverage.
 
-Before `docker compose up`, set `AGENT_BOARD_DOCKER_GID` in `.env` to the host Docker group GID:
-
-```bash
-stat -c '%g' /var/run/docker.sock
-```
-
-When the server runs in Compose, Runtime Instances must join the same Docker network so the control plane can reach `agent-runner`. The default Compose setup uses `agent-board_default` via `AGENT_BOARD_DOCKER_NETWORK`.
-
-Runtime Workspaces must be visible to the host Docker daemon at the same absolute path used by the server. The default Compose setup uses `/var/lib/agent-board/workspaces`.
+Where that legacy path is used, the trusted Go backend may access Docker; Agent Runtime Instances never receive the Docker socket or equivalent daemon credentials. Runtime Workspaces must be visible to the host Docker daemon at the same absolute path used by the server.
 
 ### Provider credentials for OpenCode
 
@@ -77,19 +69,17 @@ Save each Provider credential from **Settings → Providers**:
 
 The API key is encrypted server-side and never shown again after save.
 
-Official v0.1 Runtime images include `agent-runner`, which communicates with the server over a versioned WebSocket protocol and executes Engine process sessions inside the Runtime Instance.
-
 ### Create a runnable Agent
 
 1. In **Settings**, create a **Provider** and **Model Profile**.
-2. Create a **Runtime**.
-3. Create and enable an **Agent**, selecting an Engine, Model Profile, and Runtime.
-4. Create a **Project** and configure its local Git repository/default branch.
+2. Create and enable an **Agent**, selecting an Engine and Model Profile.
+3. Ensure an eligible Runner is connected; the server-managed internal Runner is the fallback when allowed by policy.
+4. Create a **Project** and configure its repository/default branch.
 5. Create an Issue and assign the Agent.
-6. Agent Board creates/reuses the Issue Workspace and schedules a Run.
+6. Agent Board creates/reuses the Issue Workspace and schedules a Run onto an eligible Runner.
 7. Inspect the Run, answer Questions if needed, then Review the result.
 
-The scripted Engine is a deterministic walking skeleton. v0.1 is complete only when a real coding Engine can modify a real Project repository inside the selected Runtime and produce trustworthy Review evidence.
+The scripted Engine remains a deterministic walking skeleton used by tests and development. Normal coding work uses a real coding Engine such as OpenCode through the same Runner/Execution Session boundary.
 
 ## Issue flow
 
@@ -101,7 +91,7 @@ BACKLOG / TODO
 IN_PROGRESS + QUEUED Run
       |
       v
-scheduler -> Workspace -> Runtime -> Runtime Instance -> agent-runner -> Engine
+scheduler -> Runner -> Workspace materialization -> Execution Session -> Engine
       |
       +--> success -----------------------> REVIEW
       |                                     |
@@ -126,25 +116,28 @@ scheduler -> Workspace -> Runtime -> Runtime Instance -> agent-runner -> Engine
 | --- | --- |
 | **Project / Board** | Top-level work and repository boundary. |
 | **Issue** | Durable unit of work. |
-| **Agent** | Durable worker identity/configuration, including Engine, Model Profile and Runtime. |
+| **Agent** | Durable worker identity/configuration, including Engine and Model Profile. |
 | **Run** | One execution attempt for an Issue by an Agent. |
 | **Provider** | Configured model connection and credentials. |
 | **Model Profile** | Reusable model selection/settings and optional capacity. |
-| **Runtime** | Reusable execution environment and complete execution policy. |
+| **Runner** | Connected execution host selected by the scheduler. |
 | **Workspace** | Durable repository state owned by an Issue. |
-| **Runtime Instance** | Disposable compute materialized from Runtime and bound to one Workspace. |
 | **Execution Session** | One runner-supervised process-tree execution. |
+| **Runtime** | Legacy reusable execution policy for internal managed compute only. |
+| **Runtime Instance** | Legacy disposable compute materialized from a Runtime and bound to one Workspace. |
 | **Question** | Structured request for human input. |
 | **Decision** | Durable human/product outcome. |
 | **Event** | Append-only execution/audit history. |
 | **Artifact** | First-class Run output stored outside oversized Event payloads. |
 
-Canonical configuration:
+Canonical Agent configuration:
 
 ```text
 Provider -> Model Profile
-Engine + Model Profile + Runtime -> Agent
+Engine + Model Profile -> Agent
 ```
+
+Runner placement is scheduler-owned rather than Agent configuration.
 
 ## Architecture
 
@@ -157,10 +150,7 @@ Go backend (apps/server)
    +--> PostgreSQL durable state + scheduling
    +--> blob/output storage
    +--> Workspace/Git services
-   +--> Runtime implementations
-             |
-             v
-        Runtime Instance
+   +--> Runner selection / protocol-v2 transport
              |
              v
         agent-runner
@@ -170,9 +160,12 @@ Go backend (apps/server)
              |
              v
            Engine
+
+Legacy compatibility only:
+Go backend -> Runtime implementation -> Runtime Instance -> agent-runner
 ```
 
-Runtime Instance, runner, Execution Session and Run are separate identities. A Runtime Instance is bound to one Workspace for its lifetime; its runner may execute many sequential sessions against that Workspace.
+Runner, Execution Session and Run are separate identities. Legacy Runtime Instance identity remains separate where the compatibility path is used.
 
 The browser never owns long-running execution. PostgreSQL is authoritative for durable state and scheduler ownership.
 
@@ -185,8 +178,9 @@ Agent runner     Go
 HTTP             chi
 Database         PostgreSQL + pgvector
 Live updates     Server-Sent Events
-Runtime          Docker first
-Runner transport WebSocket
+Execution        connected agent-runner hosts
+Legacy compute   Docker Runtime/Runtime Instance compatibility
+Runner transport WebSocket protocol v2
 API contracts    OpenAPI + intentional frontend types
 Blob storage     local filesystem first; S3-compatible later
 ```
@@ -215,20 +209,20 @@ agent-board/
 - scheduler claims are race-safe and restart-safe
 - Model Profile capacity and Agent concurrency are scheduler constraints
 - one durable Workspace is reused across Issue attempts
-- one Runtime Instance is bound to exactly one Workspace for its lifetime
-- runner, Runtime Instance, Execution Session and Run identities remain separate
-- a runner may execute many sequential sessions against its bound Workspace
-- Default Runner capacity is 5 concurrent Execution Sessions; the protocol remains capacity-extensible
-- Agents select Runtime directly
+- scheduler placement selects an eligible live Runner rather than an Agent-selected Runtime
+- one Runner may execute multiple concurrent Execution Sessions up to advertised capacity
+- one Execution Session owns one process tree
+- external persistent Runners are preferred; the server-managed internal Runner uses the same protocol path
 - Engine adapters remain server-side
-- Engine processes execute inside the selected Runtime Instance through `agent-runner`
-- runner/server transport is versioned WebSocket
+- Engine processes execute through `agent-runner`
+- runner/server transport is versioned WebSocket protocol v2
 - secrets are resolved only in trusted code and injected ephemerally
 - Events are persisted before live publication
 - large raw output and Artifacts use durable output storage
 - Runs retain immutable safe execution provenance
 - Review shows the complete candidate, including staged and new/untracked files
 - human Review is the default v0.1 delivery gate
+- legacy Runtime/Runtime Instance containment remains isolated compatibility behavior and is not exposed as normal Agent settings
 
 ## Planned product depth
 
@@ -261,7 +255,7 @@ go vet ./...
 go build ./...
 ```
 
-Runner (once implemented):
+Runner:
 
 ```bash
 cd apps/agent-runner
@@ -291,9 +285,9 @@ Read `AGENTS.md`, [`docs/testing.md`](./docs/testing.md), [`docs/frontend-implem
 - [`docs/source-control.md`](./docs/source-control.md) — local v0.1 repositories and later Source Connections
 - [`docs/execution-context.md`](./docs/execution-context.md) — resolved execution context and secrets
 - [`docs/execution-evidence.md`](./docs/execution-evidence.md) — provenance, logs, Artifacts and Review evidence
-- [`docs/runtime-contract.md`](./docs/runtime-contract.md) — Runtime boundary and security
-- [`docs/runtime-execution.md`](./docs/runtime-execution.md) — Engine execution through Runtime/runner sessions
-- [`docs/agent-runner.md`](./docs/agent-runner.md) — runner identity, WebSocket protocol, session lifecycle and same-Workspace reuse
+- [`docs/runtime-contract.md`](./docs/runtime-contract.md) — legacy/internal Runtime boundary and security
+- [`docs/runtime-execution.md`](./docs/runtime-execution.md) — Runner-first Engine execution with legacy Runtime compatibility
+- [`docs/agent-runner.md`](./docs/agent-runner.md) — runner identity, WebSocket protocol, session lifecycle and Workspace transfer
 - [`docs/frontend-implementation.md`](./docs/frontend-implementation.md) — clean-room Nuxt/Nuxt UI implementation rules
 - [`docs/frontend-theme.md`](./docs/frontend-theme.md) — component and theme rules
 - [`docs/automations.md`](./docs/automations.md) — scheduled work and Agent-created Issues
