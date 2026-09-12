@@ -223,19 +223,31 @@ func (s *AuthService) ChangeOwnPassword(ctx context.Context, actor Authenticated
 	if err := requireAuthenticatedUser(actor); err != nil {
 		return AuthenticatedUser{}, err
 	}
-	user, err := s.store.GetUser(ctx, actor.ID)
-	if err != nil {
-		return AuthenticatedUser{}, authFailure()
-	}
-	expectedAuthVersion := user.AuthVersion
-	if !actor.ForcePasswordChange {
+
+	expectedAuthVersion := actor.AuthVersion
+	if actor.ForcePasswordChange {
+		// Real authenticated actors carry the auth version from the access token.
+		// Keep a fallback for focused unit-test actors constructed without one.
+		if expectedAuthVersion < 1 {
+			user, err := s.store.GetUser(ctx, actor.ID)
+			if err != nil {
+				return AuthenticatedUser{}, authFailure()
+			}
+			expectedAuthVersion = user.AuthVersion
+		}
+	} else {
 		if currentPassword == "" {
+			return AuthenticatedUser{}, authFailure()
+		}
+		user, err := s.store.GetUser(ctx, actor.ID)
+		if err != nil {
 			return AuthenticatedUser{}, authFailure()
 		}
 		valid, err := verifyPassword(user.PasswordHash, currentPassword)
 		if err != nil || !valid {
 			return AuthenticatedUser{}, authFailure()
 		}
+		expectedAuthVersion = user.AuthVersion
 	}
 	return s.setPasswordIfAuthVersion(ctx, actor.ID, expectedAuthVersion, newPassword, false)
 }
