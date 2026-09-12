@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -122,7 +121,7 @@ func TestAuthServiceConcurrentRefreshAllowsExactlyOneRotation(t *testing.T) {
 		t.Fatalf("concurrent refresh results successes=%d failures=%d", successes, failures)
 	}
 	if rotated.RefreshToken == "" || rotated.RefreshToken == initial.RefreshToken {
-		t.Fatalf("winning refresh did not rotate the token")
+		t.Fatal("winning refresh did not rotate the token")
 	}
 	if _, err := service.Refresh(ctx, rotated.RefreshToken); err != nil {
 		t.Fatalf("winning rotated refresh token is not usable: %v", err)
@@ -265,8 +264,6 @@ func TestResetTokenReuseFailsExplicitly(t *testing.T) {
 		t.Fatal("second reset completion unexpectedly succeeded")
 	}
 
-	// Keep the test clock-independent while still proving the first completion
-	// mutated durable auth state.
 	stored, err := s.GetUser(ctx, user.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -275,5 +272,3 @@ func TestResetTokenReuseFailsExplicitly(t *testing.T) {
 		t.Fatalf("reset did not update durable auth state: %#v", stored)
 	}
 }
-
-var _ = time.Second
