@@ -16,6 +16,7 @@ Owns or scopes:
   - `git` -> clone URL and optional source ref
 - workflow/delivery policy
 - Project-scoped Agents/configuration where supported
+- Runner eligibility policy
 - later Source Connection/provider-action binding without replacing the source model
 
 ### Issue
@@ -84,29 +85,17 @@ Configured model/inference connection and credential boundary. Shared (instance-
 
 Reusable model selection and inference settings associated with a Provider. May define scheduler capacity.
 
-### Runtime
-
-Reusable configured execution environment and complete execution policy for **legacy internal managed compute only**. External runner hosts do not require a Runtime or Runtime Instance.
-
-Contains implementation kind, image, resources, timeout, network policy, Workspace policy, allowed secret references, tooling/capabilities, enabled state and health/preflight information.
-
 ### Runner
 
-Deployment-global execution capacity. External hosts and the server-managed internal runner authenticate outbound over protocol v2. Live connectivity is ephemeral; persisted last-seen/capabilities never make a Runner scheduler-eligible.
+Deployment-global execution capacity. External hosts and the server-managed internal Runner authenticate outbound over protocol v2. Live connectivity is ephemeral; persisted last-seen/capabilities never make a Runner scheduler-eligible.
 
 For remote Git Projects, a Runner also owns execution-side bare repository caches and per-Run worktrees. Those are execution materialization/recovery state, not new product/domain code-state objects.
-
-### Runtime Instance
-
-Disposable compute/session materialized from a Runtime for execution.
-
-Runtime Instance identity is not Agent or Run identity. Destroying an instance never destroys the Issue's durable Git state.
 
 ### Run
 
 One durable execution attempt for an Issue by an Agent.
 
-A Run records status, attempt identity, scheduler ownership, immutable execution provenance, execution evidence and relationships to Workspace/selected Runner (and Runtime Instances only on the legacy managed-compute path).
+A Run records status, attempt identity, scheduler ownership, immutable execution provenance, execution evidence and relationships to Workspace and selected Runner.
 
 Later attempts continue the Issue's durable Git branch. A blocking Question may keep the exact same live Runner/Execution Session/Engine session and checkout rather than creating a new attempt.
 
@@ -118,13 +107,19 @@ Each Issue has one Workspace identity. It records the deterministic working bran
 
 For a local Project, the Workspace also points at the durable server-owned Issue checkout. For a remote Git Project, the durable code state is the published remote `agent-board/<issue-key>` branch plus the Workspace's recorded revision; per-Run Runner worktrees are temporary execution/recovery materialization.
 
-Workspace lifetime is independent from Runner connection/process lifetime and Runtime Instance lifetime.
+Workspace lifetime is independent from Runner connection/process lifetime.
 
 ### Project Workspace
 
-For local Projects only, the backend-owned checkout representing the current accepted target-branch state. It is the local integration target used by Review approval and is not mounted into an agent execution environment.
+For local Projects only, the backend-owned checkout representing the current accepted target-branch state. It is the local integration target used by Review approval and is not an agent execution environment.
 
 Remote Issue branch publication does not create an equivalent remote target-integration object and does not mean the remote target branch was merged.
+
+### Execution Session
+
+A durable process-execution identity bound directly and immutably to one selected Runner.
+
+One Execution Session owns one process tree. A Runner may own many sessions over time and may execute multiple sessions concurrently up to advertised capacity. Session ownership survives control-plane transport loss and is reconciled before replacement work can start.
 
 ### Question
 
@@ -168,32 +163,31 @@ Provider -> Model Profile
 Engine + Model Profile -> Agent
 ```
 
-There is no Runtime Profile, Executor Profile or Runner Profile layer. The scheduler selects an eligible Runner.
+There is no Executor Profile or Runner Profile layer. The scheduler selects an eligible Runner.
 
 ## Identity and lifetime invariants
 
 ```text
 Issue != Run
 Agent != process
-Run != Runtime Instance
 Run != Runner
-Runtime != Runtime Instance
-Workspace != Runtime Instance
+Run != Execution Session
+Runner != Execution Session
 Workspace != Runner worktree
 Review != filesystem snapshot
 ```
 
 - Issue survives all attempts.
-- Workspace survives Runner sessions and Runtime Instances and is reused per Issue.
+- Workspace survives Runner sessions and is reused per Issue.
 - Git commits/branches are the durable code state.
-- Runtime is reusable configuration; Runtime Instance is disposable compute.
-- A Run may use replacement Runtime Instances during legacy managed-compute recovery.
+- One Execution Session has one immutable Runner binding and owns one process tree.
 - Historical Run truth comes from immutable provenance plus pinned Git identities rather than current mutable configuration.
 
 ## Scheduler invariants
 
 - PostgreSQL owns durable scheduling/claim state.
 - Agent concurrency and Model Profile capacity are independent admission constraints.
+- Runner eligibility and advertised capacity are execution admission constraints.
 - capacity-only waits remain `QUEUED`; they do not make an Issue `BLOCKED`.
 - continuation work required after Question/Review decisions is durably recorded before success returns.
 - Runner selection does not alter the Issue branch identity.
@@ -201,7 +195,7 @@ Review != filesystem snapshot
 ## Repository invariants
 
 - every Issue branch is deterministically `agent-board/<issue-key>`.
-- server-runtime and Runner hand-back use the same branch-ownership, ancestry, conflict and commit-leftovers finalization rules.
+- local and remote Runner hand-back use the same branch-ownership, ancestry, conflict and commit-leftovers finalization rules.
 - an Engine-created commit is preserved; uncommitted non-ignored leftovers are committed at a true hand-back boundary.
 - local Runner synchronization transfers branch history rather than preserving arbitrary Base/Index/Worktree filesystem state.
 - remote Runner caches fetch source refs into `refs/remotes/origin/*` and keep Agent Board Issue branches in `refs/heads/agent-board/*`.
@@ -217,8 +211,8 @@ Local repository paths are constrained to deployment-authorized roots. Bootstrap
 ## Security invariants
 
 - Project IDs are not authorization; ownership/scope is verified.
-- Agent Runtime code is untrusted.
-- Agent Runtime Instances never receive Docker daemon credentials/socket access.
+- Agent-executed code is untrusted.
+- Agent Board never provides Docker daemon credentials/socket access through the Runner protocol.
 - credentials/secrets are resolved in trusted code and injected ephemerally.
 - secret plaintext is excluded from Events, raw logs, Artifacts, provenance and public API responses.
 - caller-controlled headers cannot grant trusted actor identity.
