@@ -23,6 +23,17 @@ func TestAuthOpenAPIContractsAreIntentional(t *testing.T) {
 		"/api/auth/setup/complete:",
 		"/api/auth/reset/complete:",
 		"/api/auth/me:",
+		"/api/auth/users:",
+		"/api/auth/users/{userID}/setup-token:",
+		"/api/auth/users/{userID}/reset-token:",
+		"/api/auth/users/{userID}/password:",
+		"/api/auth/users/{userID}/disable:",
+		"/api/auth/users/{userID}/enable:",
+		"/api/auth/me/password:",
+		"/api/auth/me/sessions:",
+		"/api/auth/me/sessions/{sessionID}:",
+		"/api/auth/me/sessions/logout-others:",
+		"/api/auth/settings:",
 	} {
 		if !strings.Contains(openAPI, route) {
 			t.Fatalf("OpenAPI missing auth route %s", route)
@@ -49,8 +60,13 @@ func TestAuthOpenAPIContractsAreIntentional(t *testing.T) {
 	if !strings.Contains(paths, "Cache-Control:") || !strings.Contains(paths, "const: no-store") {
 		t.Fatal("token responses must document Cache-Control: no-store")
 	}
-	if !strings.Contains(paths, "- BearerAuth: []") {
-		t.Fatal("current-user endpoint must require bearer authentication")
+	if !strings.Contains(paths, "security: [{BearerAuth: []}]") {
+		t.Fatal("authenticated phase 2 endpoints must require bearer authentication")
+	}
+	for _, operation := range []string{"updateAuthenticatedUser", "listDeploymentUsers", "changeAuthenticatedUserPassword", "listAuthenticatedUserSessions", "updateAuthenticationSettings"} {
+		if !strings.Contains(paths, "operationId: "+operation) {
+			t.Fatalf("auth OpenAPI missing phase 2 operation %s", operation)
+		}
 	}
 
 	schemaData, err := os.ReadFile(filepath.Join(root, "schemas", "auth.yaml"))
@@ -58,8 +74,10 @@ func TestAuthOpenAPIContractsAreIntentional(t *testing.T) {
 		t.Fatal(err)
 	}
 	schema := string(schemaData)
-	if !strings.Contains(schema, "forcePasswordChange: {type: boolean}") {
-		t.Fatal("auth user schema must expose forced-password-change state")
+	for _, field := range []string{"forcePasswordChange: {type: boolean}", "AuthSession:", "AuthSettings:", "PendingUserSecret:", "PasswordTokenSecret:"} {
+		if !strings.Contains(schema, field) {
+			t.Fatalf("auth schema missing %s", field)
+		}
 	}
 	if strings.Contains(schema, "passwordHash") || strings.Contains(schema, "refreshTokenHash") || strings.Contains(schema, "tokenHash") {
 		t.Fatal("auth response schemas must not expose credential hashes")

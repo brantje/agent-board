@@ -30,6 +30,28 @@ paths:
     $ref: ./paths/auth.yaml#/resetComplete
   /api/auth/me:
     $ref: ./paths/auth.yaml#/me
+  /api/auth/users:
+    $ref: ./paths/auth.yaml#/users
+  /api/auth/users/{userID}/setup-token:
+    $ref: ./paths/auth.yaml#/userSetupToken
+  /api/auth/users/{userID}/reset-token:
+    $ref: ./paths/auth.yaml#/userResetToken
+  /api/auth/users/{userID}/password:
+    $ref: ./paths/auth.yaml#/userPassword
+  /api/auth/users/{userID}/disable:
+    $ref: ./paths/auth.yaml#/userDisable
+  /api/auth/users/{userID}/enable:
+    $ref: ./paths/auth.yaml#/userEnable
+  /api/auth/me/password:
+    $ref: ./paths/auth.yaml#/mePassword
+  /api/auth/me/sessions:
+    $ref: ./paths/auth.yaml#/meSessions
+  /api/auth/me/sessions/{sessionID}:
+    $ref: ./paths/auth.yaml#/meSession
+  /api/auth/me/sessions/logout-others:
+    $ref: ./paths/auth.yaml#/meLogoutOthers
+  /api/auth/settings:
+    $ref: ./paths/auth.yaml#/authSettings
   /api/runners:
     $ref: ./paths/runners.yaml#/collection
   /api/runner/register:

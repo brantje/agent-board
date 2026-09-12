@@ -43,12 +43,48 @@ passwordCompletionInput:
         properties:
           token: {type: string, minLength: 1, writeOnly: true}
           password: {type: string, minLength: 1, writeOnly: true}
+profileInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [username, email, displayName]
+        properties:
+          username: {type: string, minLength: 1}
+          email: {type: string, format: email}
+          displayName: {type: string, minLength: 1}
+passwordInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [password]
+        properties:
+          password: {type: string, minLength: 1, writeOnly: true}
+authSettingsInput:
+  required: true
+  content:
+    application/json:
+      schema: {$ref: ../schemas/auth.yaml#/AuthSettings}
+userIdParameter:
+  name: userID
+  in: path
+  required: true
+  schema: {type: string, format: uuid}
+sessionIdParameter:
+  name: sessionID
+  in: path
+  required: true
+  schema: {type: string, format: uuid}
 userResponse:
   description: Trusted deployment user identity.
   content:
     application/json:
-      schema:
-        $ref: ../schemas/auth.yaml#/AuthUser
+      schema: {$ref: ../schemas/auth.yaml#/AuthUser}
 tokensResponse:
   description: Short-lived access token and rotating opaque refresh token.
   headers:
@@ -56,8 +92,15 @@ tokensResponse:
       schema: {type: string, const: no-store}
   content:
     application/json:
-      schema:
-        $ref: ../schemas/auth.yaml#/AuthTokens
+      schema: {$ref: ../schemas/auth.yaml#/AuthTokens}
+passwordTokenResponse:
+  description: One-time password token. The plaintext token is never retrievable again.
+  headers:
+    Cache-Control:
+      schema: {type: string, const: no-store}
+  content:
+    application/json:
+      schema: {$ref: ../schemas/auth.yaml#/PasswordTokenSecret}
 bootstrapStatus:
   get:
     operationId: getAuthBootstrapStatus
@@ -66,77 +109,187 @@ bootstrapStatus:
         description: Whether first-user bootstrap registration is still available.
         content:
           application/json:
-            schema:
-              $ref: ../schemas/auth.yaml#/BootstrapStatus
-      default:
-        $ref: ../components/api-components.yaml#/responses/Error
+            schema: {$ref: ../schemas/auth.yaml#/BootstrapStatus}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
 bootstrapRegister:
   post:
     operationId: registerBootstrapAdmin
-    requestBody:
-      $ref: '#/bootstrapRegistrationInput'
+    requestBody: {$ref: '#/bootstrapRegistrationInput'}
     responses:
-      '201':
-        $ref: '#/userResponse'
-      default:
-        $ref: ../components/api-components.yaml#/responses/Error
+      '201': {$ref: '#/userResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
 login:
   post:
     operationId: login
-    requestBody:
-      $ref: '#/loginInput'
+    requestBody: {$ref: '#/loginInput'}
     responses:
-      '200':
-        $ref: '#/tokensResponse'
-      default:
-        $ref: ../components/api-components.yaml#/responses/Error
+      '200': {$ref: '#/tokensResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
 refresh:
   post:
     operationId: refreshAuthentication
-    requestBody:
-      $ref: '#/refreshInput'
+    requestBody: {$ref: '#/refreshInput'}
     responses:
-      '200':
-        $ref: '#/tokensResponse'
-      default:
-        $ref: ../components/api-components.yaml#/responses/Error
+      '200': {$ref: '#/tokensResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
 logout:
   post:
     operationId: logout
-    requestBody:
-      $ref: '#/refreshInput'
+    requestBody: {$ref: '#/refreshInput'}
     responses:
-      '204':
-        description: The supplied refresh session is revoked or was already unavailable.
-      default:
-        $ref: ../components/api-components.yaml#/responses/Error
+      '204': {description: The supplied refresh session is revoked or was already unavailable.}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
 setupComplete:
   post:
     operationId: completeUserSetup
-    requestBody:
-      $ref: '#/passwordCompletionInput'
+    requestBody: {$ref: '#/passwordCompletionInput'}
     responses:
-      '200':
-        $ref: '#/userResponse'
-      default:
-        $ref: ../components/api-components.yaml#/responses/Error
+      '200': {$ref: '#/userResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
 resetComplete:
   post:
     operationId: completePasswordReset
-    requestBody:
-      $ref: '#/passwordCompletionInput'
+    requestBody: {$ref: '#/passwordCompletionInput'}
     responses:
-      '200':
-        $ref: '#/userResponse'
-      default:
-        $ref: ../components/api-components.yaml#/responses/Error
+      '200': {$ref: '#/userResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
 me:
   get:
     operationId: getAuthenticatedUser
-    security:
-    - BearerAuth: []
+    security: [{BearerAuth: []}]
+    responses:
+      '200': {$ref: '#/userResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  patch:
+    operationId: updateAuthenticatedUser
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/profileInput'}
+    responses:
+      '200': {$ref: '#/userResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+users:
+  get:
+    operationId: listDeploymentUsers
+    security: [{BearerAuth: []}]
     responses:
       '200':
-        $ref: '#/userResponse'
-      default:
-        $ref: ../components/api-components.yaml#/responses/Error
+        description: Deployment users visible to a deployment admin.
+        content:
+          application/json:
+            schema: {type: array, items: {$ref: ../schemas/auth.yaml#/AuthUser}}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  post:
+    operationId: createPendingDeploymentUser
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/profileInput'}
+    responses:
+      '201':
+        description: Pending user and one-time setup token.
+        headers:
+          Cache-Control:
+            schema: {type: string, const: no-store}
+        content:
+          application/json:
+            schema: {$ref: ../schemas/auth.yaml#/PendingUserSecret}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+userSetupToken:
+  post:
+    operationId: regenerateUserSetupToken
+    security: [{BearerAuth: []}]
+    parameters: [{$ref: '#/userIdParameter'}]
+    responses:
+      '201': {$ref: '#/passwordTokenResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+userResetToken:
+  post:
+    operationId: createUserResetToken
+    security: [{BearerAuth: []}]
+    parameters: [{$ref: '#/userIdParameter'}]
+    responses:
+      '201': {$ref: '#/passwordTokenResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+userPassword:
+  put:
+    operationId: assignUserPassword
+    security: [{BearerAuth: []}]
+    parameters: [{$ref: '#/userIdParameter'}]
+    requestBody: {$ref: '#/passwordInput'}
+    responses:
+      '200': {$ref: '#/userResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+userDisable:
+  post:
+    operationId: disableDeploymentUser
+    security: [{BearerAuth: []}]
+    parameters: [{$ref: '#/userIdParameter'}]
+    responses:
+      '200': {$ref: '#/userResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+userEnable:
+  post:
+    operationId: enableDeploymentUser
+    security: [{BearerAuth: []}]
+    parameters: [{$ref: '#/userIdParameter'}]
+    responses:
+      '200': {$ref: '#/userResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+mePassword:
+  put:
+    operationId: changeAuthenticatedUserPassword
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/passwordInput'}
+    responses:
+      '200': {$ref: '#/userResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+meSessions:
+  get:
+    operationId: listAuthenticatedUserSessions
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Active refresh sessions belonging to the current user.
+        headers:
+          Cache-Control:
+            schema: {type: string, const: no-store}
+        content:
+          application/json:
+            schema: {type: array, items: {$ref: ../schemas/auth.yaml#/AuthSession}}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+meSession:
+  delete:
+    operationId: revokeAuthenticatedUserSession
+    security: [{BearerAuth: []}]
+    parameters: [{$ref: '#/sessionIdParameter'}]
+    responses:
+      '204': {description: Session revoked.}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+meLogoutOthers:
+  post:
+    operationId: logoutOtherAuthenticatedUserSessions
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/refreshInput'}
+    responses:
+      '204': {description: All other current-user sessions revoked.}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+authSettings:
+  get:
+    operationId: getAuthenticationSettings
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Authoritative deployment authentication settings.
+        content:
+          application/json:
+            schema: {$ref: ../schemas/auth.yaml#/AuthSettings}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  put:
+    operationId: updateAuthenticationSettings
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/authSettingsInput'}
+    responses:
+      '200':
+        description: Updated authoritative deployment authentication settings.
+        content:
+          application/json:
+            schema: {$ref: ../schemas/auth.yaml#/AuthSettings}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
