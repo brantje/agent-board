@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type abandoningExecutionTransport struct {
