@@ -69,7 +69,6 @@ func TestQuestionerPersistsBlockingQuestionBeforeWaiting(t *testing.T) {
 			Agent:     executioncontext.AgentContext{ID: "agent-1"},
 			Workspace: executioncontext.WorkspaceContext{ID: "workspace-1"},
 		},
-		runtimeInstanceID: "runtime-instance-1",
 	}
 	request := engine.QuestionRequest{Prompt: "Which strategy?", Kind: "SINGLE_CHOICE", Blocking: true, Options: []engine.QuestionOption{{ID: "safe", Label: "Safe"}, {ID: "fast", Label: "Fast"}}}
 
