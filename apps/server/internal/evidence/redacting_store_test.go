@@ -91,29 +91,9 @@ func TestRedactingStoreSanitizesEveryEvidenceWrite(t *testing.T) {
 
 type runnerCapabilityStore struct {
 	store.ControlPlaneStore
-	instance          store.RuntimeInstance
-	generation        int64
 	workspaceRevision string
 }
 
-func (s *runnerCapabilityStore) UpdateRuntimeInstanceRunnerStatusIfStatus(_ context.Context, _, _ string, status, _ string) (store.RuntimeInstance, error) {
-	s.instance.RunnerStatus = status
-	return s.instance, nil
-}
-func (s *runnerCapabilityStore) ClaimRuntimeInstanceRunnerGeneration(context.Context, string, string) (int64, error) {
-	s.generation++
-	return s.generation, nil
-}
-func (s *runnerCapabilityStore) UpdateRuntimeInstanceRunnerStatusGeneration(_ context.Context, _, _ string, status string, generation int64) (store.RuntimeInstance, error) {
-	s.generation = generation
-	s.instance.RunnerStatus = status
-	return s.instance, nil
-}
-func (s *runnerCapabilityStore) UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(_ context.Context, _, _ string, status string, generation int64, _ string) (store.RuntimeInstance, error) {
-	s.generation = generation
-	s.instance.RunnerStatus = status
-	return s.instance, nil
-}
 func (s *runnerCapabilityStore) AcquireWorkspaceBootstrapLock(context.Context, string) (store.WorkspaceBootstrapLock, error) {
 	return redactingTestLock{}, nil
 }
@@ -135,24 +115,11 @@ type redactingTestLock struct{}
 
 func (redactingTestLock) Release() error { return nil }
 
-func TestRedactingStorePreservesRunnerFencingCapabilities(t *testing.T) {
-	base := &runnerCapabilityStore{instance: store.RuntimeInstance{ID: "runtime", Status: "RUNNING"}}
+func TestRedactingStorePreservesRunnerAndWorkspaceCapabilities(t *testing.T) {
+	base := &runnerCapabilityStore{}
 	wrapped := NewRedactingStore(base, redaction.NewRegistry())
 	ctx := t.Context()
 
-	generation, err := wrapped.ClaimRuntimeInstanceRunnerGeneration(ctx, "project", "runtime")
-	if err != nil || generation != 1 {
-		t.Fatalf("claim generation=%d err=%v", generation, err)
-	}
-	if got, err := wrapped.UpdateRuntimeInstanceRunnerStatusIfStatus(ctx, "project", "runtime", "READY", "RUNNING"); err != nil || got.RunnerStatus != "READY" {
-		t.Fatalf("lifecycle-fenced status=%+v err=%v", got, err)
-	}
-	if got, err := wrapped.UpdateRuntimeInstanceRunnerStatusGeneration(ctx, "project", "runtime", "BUSY", generation); err != nil || got.RunnerStatus != "BUSY" {
-		t.Fatalf("generation status=%+v err=%v", got, err)
-	}
-	if got, err := wrapped.UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx, "project", "runtime", "UNAVAILABLE", generation, "RUNNING"); err != nil || got.RunnerStatus != "UNAVAILABLE" {
-		t.Fatalf("generation/lifecycle status=%+v err=%v", got, err)
-	}
 	bootstrapLock, err := wrapped.AcquireWorkspaceBootstrapLock(ctx, "workspace")
 	if err != nil || bootstrapLock == nil {
 		t.Fatalf("bootstrap lock=%v err=%v", bootstrapLock, err)
@@ -167,26 +134,14 @@ func TestRedactingStorePreservesRunnerFencingCapabilities(t *testing.T) {
 	if got, err := wrapped.GetWorkspaceCurrentRevision(ctx, "project", "workspace"); err != nil || got != "revision-1" {
 		t.Fatalf("workspace revision get=%q err=%v", got, err)
 	}
-	if runner, err := wrapped.GetRunner(ctx, "runner-1"); err != nil || runner.ID != "runner-1" {
-		t.Fatalf("runner=%+v err=%v", runner, err)
+	if runnerRecord, err := wrapped.GetRunner(ctx, "runner-1"); err != nil || runnerRecord.ID != "runner-1" {
+		t.Fatalf("runner=%+v err=%v", runnerRecord, err)
 	}
 }
 
-func TestRedactingStoreReportsMissingRunnerFencingCapabilities(t *testing.T) {
+func TestRedactingStoreReportsMissingRunnerAndWorkspaceCapabilities(t *testing.T) {
 	wrapped := NewRedactingStore(&captureStore{}, redaction.NewRegistry())
 	ctx := t.Context()
-	if _, err := wrapped.ClaimRuntimeInstanceRunnerGeneration(ctx, "project", "runtime"); err == nil {
-		t.Fatal("expected missing generation capability error")
-	}
-	if _, err := wrapped.UpdateRuntimeInstanceRunnerStatusIfStatus(ctx, "project", "runtime", "READY", "RUNNING"); err == nil {
-		t.Fatal("expected missing lifecycle-fenced status capability error")
-	}
-	if _, err := wrapped.UpdateRuntimeInstanceRunnerStatusGeneration(ctx, "project", "runtime", "READY", 1); err == nil {
-		t.Fatal("expected missing generation status capability error")
-	}
-	if _, err := wrapped.UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx, "project", "runtime", "READY", 1, "RUNNING"); err == nil {
-		t.Fatal("expected missing generation/lifecycle status capability error")
-	}
 	if _, err := wrapped.AcquireWorkspaceBootstrapLock(ctx, "workspace"); err == nil {
 		t.Fatal("expected missing workspace bootstrap lock capability error")
 	}
