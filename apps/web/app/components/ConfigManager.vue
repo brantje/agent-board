@@ -199,17 +199,6 @@ async function save() {
           <p v-if="kind === 'projects'" class="mt-2 text-sm font-mono break-all">
             {{ item.issuePrefix }} · {{ item.repositoryPath }} · {{ item.defaultBranch }}
           </p>
-          <div v-if="kind === 'runtimes'" class="mt-2 space-y-1 text-sm text-muted">
-            <p class="font-mono break-all">{{ item.image }}</p>
-            <p>Network: {{ readable(item.networkPolicy) }} · Workspace: {{ readable(item.workspacePolicy) }}</p>
-            <p>Identity <span class="font-mono break-all">{{ item.id }}</span></p>
-            <p v-if="item.kind">Kind: {{ readable(item.kind) }}</p>
-            <p v-if="item.cpuLimitMillis || item.memoryLimitBytes || item.pidLimit || item.timeoutSeconds">
-              CPU {{ item.cpuLimitMillis ?? '—' }} · Memory {{ item.memoryLimitBytes ?? '—' }} · PID {{ item.pidLimit ?? '—' }} · Timeout {{ item.timeoutSeconds ?? '—' }}
-            </p>
-            <p>Capabilities</p>
-            <pre>{{ JSON.stringify(item.capabilities ?? {}, null, 2) }}</pre>
-          </div>
         </UCard>
       </div>
     </AsyncState>
@@ -220,7 +209,6 @@ async function save() {
           <UForm :state="draft" :validate="formErrors" class="space-y-4" @submit="save">
             <UAlert v-if="saveError" color="error" title="Unable to save" :description="saveErrorDescription" />
             <UAlert v-if="editingShared" title="Shared resource" description="Manage this resource from global Settings." color="neutral" />
-            <UAlert v-if="kind === 'runtimes'" title="Workspace policy" description="Runtimes use the Issue workspace policy in v0.1. This is server-controlled and is shown on saved Runtime records." color="neutral" />
 
             <div class="form-grid">
               <template v-for="field in definition.fields" :key="field.key">
