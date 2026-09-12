@@ -199,17 +199,6 @@ async function save() {
           <p v-if="kind === 'projects'" class="mt-2 text-sm font-mono break-all">
             {{ item.issuePrefix }} · {{ item.repositoryPath }} · {{ item.defaultBranch }}
           </p>
-          <div v-if="kind === 'runtimes'" class="mt-2 space-y-1 text-sm text-muted">
-            <p class="font-mono break-all">{{ item.image }}</p>
-            <p>Network: {{ readable(item.networkPolicy) }} · Workspace: {{ readable(item.workspacePolicy) }}</p>
-            <p>Identity <span class="font-mono break-all">{{ item.id }}</span></p>
-            <p v-if="item.kind">Kind: {{ readable(item.kind) }}</p>
-            <p v-if="item.cpuLimitMillis || item.memoryLimitBytes || item.pidLimit || item.timeoutSeconds">
-              CPU {{ item.cpuLimitMillis ?? '—' }} · Memory {{ item.memoryLimitBytes ?? '—' }} · PID {{ item.pidLimit ?? '—' }} · Timeout {{ item.timeoutSeconds ?? '—' }}
-            </p>
-            <p>Capabilities</p>
-            <pre>{{ JSON.stringify(item.capabilities ?? {}, null, 2) }}</pre>
-          </div>
         </UCard>
       </div>
     </AsyncState>
@@ -220,7 +209,6 @@ async function save() {
           <UForm :state="draft" :validate="formErrors" class="space-y-4" @submit="save">
             <UAlert v-if="saveError" color="error" title="Unable to save" :description="saveErrorDescription" />
             <UAlert v-if="editingShared" title="Shared resource" description="Manage this resource from global Settings." color="neutral" />
-            <UAlert v-if="kind === 'runtimes'" title="Workspace policy" description="Runtimes use the Issue workspace policy in v0.1. This is server-controlled and is shown on saved Runtime records." color="neutral" />
 
             <div class="form-grid">
               <template v-for="field in definition.fields" :key="field.key">
@@ -273,7 +261,7 @@ async function save() {
                     </div>
                   </template>
                   <USelectMenu v-else-if="field.type === 'select'" v-model="draft[field.key] as string" :items="field.resource ? resourceOptions(references[field.key]?.data.value || []) : field.options" :value-key="field.resource ? 'value' : undefined" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
-                  <UTextarea v-else-if="['textarea', 'json', 'lines'].includes(field.type || '')" v-model="draft[field.key] as string" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
+                  <UTextarea v-else-if="['textarea', 'json'].includes(field.type || '')" v-model="draft[field.key] as string" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
                   <UInput v-else v-model="draft[field.key] as string" :type="field.type === 'number' ? 'number' : 'text'" :min="field.min" :max="field.max" :step="field.key === 'temperature' ? 'any' : 1" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
                 </UFormField>
               </template>
