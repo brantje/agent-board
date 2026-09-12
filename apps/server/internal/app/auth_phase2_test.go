@@ -86,8 +86,9 @@ func phase2Admin() AuthenticatedUser {
 }
 
 func TestPhase2DeploymentMemberCannotAdministerUsersOrSettings(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
-	service := newTestAuthService(t, memory, time.Unix(100, 0).UTC())
+	service := authTestService(t, memory, &now)
 	member := AuthenticatedUser{ID: "member", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive}
 	if _, err := service.ListUsers(context.Background(), member); err == nil {
 		t.Fatal("expected member user administration to be forbidden")
@@ -100,7 +101,7 @@ func TestPhase2DeploymentMemberCannotAdministerUsersOrSettings(t *testing.T) {
 func TestPhase2AdminCreatesPendingUserWithOneTimeSetupSecret(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
-	service := newTestAuthService(t, memory, now)
+	service := authTestService(t, memory, &now)
 	created, err := service.CreatePendingUser(context.Background(), phase2Admin(), PendingUserRegistration{
 		Username: " New.User ", Email: " NEW@example.com ", DisplayName: " New User ",
 	})
@@ -125,7 +126,7 @@ func TestPhase2ProfileNormalizationAndOwnSessionScope(t *testing.T) {
 	memory.users["u1"] = store.User{ID: "u1", Username: "one", Email: "one@example.com", DisplayName: "One", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive, AuthVersion: 1}
 	memory.sessions["one"] = store.AuthSession{ID: "s1", UserID: "u1", ExpiresAt: now.Add(time.Hour)}
 	memory.sessions["other"] = store.AuthSession{ID: "s2", UserID: "u2", ExpiresAt: now.Add(time.Hour)}
-	service := newTestAuthService(t, memory, now)
+	service := authTestService(t, memory, &now)
 	actor := AuthenticatedUser{ID: "u1", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive}
 	updated, err := service.UpdateOwnProfile(context.Background(), actor, UserProfileUpdate{Username: " Updated ", Email: " UPDATED@example.com ", DisplayName: " Updated Name "})
 	if err != nil {
@@ -148,8 +149,9 @@ func TestPhase2ProfileNormalizationAndOwnSessionScope(t *testing.T) {
 }
 
 func TestPhase2AuthSettingsValidationAndUpdate(t *testing.T) {
+	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
-	service := newTestAuthService(t, memory, time.Unix(100, 0).UTC())
+	service := authTestService(t, memory, &now)
 	bad := memory.settings
 	bad.AccessTokenLifetime = time.Minute
 	if _, err := service.UpdateAuthSettings(context.Background(), phase2Admin(), bad); err == nil {
