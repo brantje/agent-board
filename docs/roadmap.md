@@ -7,40 +7,39 @@ This roadmap defines ordering, not release dates. The guiding rule is: **reach t
 Nothing below this phase should delay it.
 
 ```text
-Local Project repository
+Project source (local or git)
  -> Issue
  -> Agent
       -> Engine
       -> Model Profile -> Provider
-      -> Runtime
  -> durable scheduler
- -> durable Issue Workspace
- -> Runtime Instance
- -> agent-runner
+ -> selected connected Runner
+ -> durable Issue branch/Workspace state
  -> Execution Session
  -> real coding Engine
  -> durable execution evidence
  -> Question/resume when needed
- -> Review
+ -> Review pinned to Git SHAs
  -> human approval
 ```
 
 Required work includes:
 
-- direct Agent -> Runtime configuration
+- Agent Engine + Model Profile configuration
 - durable asynchronous/restart-safe scheduling
 - Agent concurrency + Model Profile capacity admission
-- local repository-backed Issue Workspaces
-- Runtime Instance lifecycle with immutable same-Workspace binding
-- `agent-runner` binary in official Runtime images
-- versioned server/runner WebSocket transport
-- separate Runtime Instance / runner / Execution Session / Run identities
+- Project Runner eligibility and live Runner capacity admission
+- local repository-backed Issue Workspaces and remote Git sources
+- standalone external `agent-runner` plus server-managed internal Runner
+- versioned server/Runner WebSocket transport
+- separate Runner / Execution Session / Run identities
 - default Runner capacity of 5 concurrent Execution Sessions, with protocol support for advertised `max_active_sessions`
+- local branch-only transfer and remote Git cache/worktree execution
 - canonical execution context and ephemeral Provider secrets
-- immutable Run provenance
+- immutable Run/Runner provenance
 - durable raw logs and first-class Artifacts
-- complete Run inspection and Review candidate evidence
-- Runtime policy truthfulness and whole-Agent preflight
+- complete Run inspection and SHA-pinned Review evidence
+- Runner/source preflight truthfulness
 - first real coding Engine, OpenCode first
 - clean-room Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS frontend using Nuxt UI v4 as the required component foundation
 - end-to-end crash/restart/security/integration proof
@@ -49,19 +48,19 @@ Frontend implementation follows `frontend-implementation.md` and `frontend-theme
 
 The scripted Engine is infrastructure validation, not the v0.1 destination.
 
-## Phase 1 — initiation, work structure, and remote repository access
+## Phase 1 — initiation, work structure, and source-provider access
 
-After the local-repository v0.1 flow is proven:
+After the v0.1 flow is proven:
 
 - planning strategy: Auto / Always plan / Skip planning
 - Plan artifacts/read model
 - scheduled Project Automations creating normal Issues
 - Agent-created follow-up Issues under explicit Project policy
 - authenticated Source Connections for GitHub, GitLab, Bitbucket and Forgejo
-- remote repository clone/fetch using trusted ephemeral credentials
+- provider-specific repository actions and trusted ephemeral credentials where needed
 - improved retry/operational UX
 
-These reuse normal Issues/Runs/scheduling and the same durable Workspace model.
+These reuse normal Issues/Runs/scheduling and the same Git-native Issue branch model.
 
 ## Phase 2 — delivery automation and Agent collaboration
 
@@ -85,11 +84,11 @@ Do not create a Squad scheduler or parallel Run lifecycle.
 - warm/permanent workers
 - spot/ephemeral execution and recovery
 - scheduling preferences/classes
-- higher runner session capacity where safe/useful
+- higher Runner session capacity where safe/useful
 
-Agents remain independent from Worker identity. Worker, Runtime Instance, runner and Execution Session identities remain separate.
+Agents remain independent from Worker and Runner identity. Worker, Runner and Execution Session identities remain separate.
 
-The v0.1 runner contract is intentionally compatible with future fleets: a healthy Runtime Instance may already serve many sequential sessions against its one bound Workspace, while Worker Pools later decide where Runtime capacity comes from.
+Future fleets should reuse the same scheduler -> Runner -> Execution Session contract rather than introduce a second execution lifecycle.
 
 ## Phase 4 — multi-user administration
 
