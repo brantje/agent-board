@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
@@ -19,7 +18,6 @@ type RunEvidenceStore interface {
 	GetRun(context.Context, string, string) (store.Run, error)
 	GetRunProvenance(context.Context, string, string) (json.RawMessage, error)
 	ListExecutionSessionsByRun(context.Context, string, string, []string) ([]store.ExecutionSession, error)
-	GetRuntimeInstance(context.Context, string, string) (store.RuntimeInstance, error)
 	ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error)
 	GetRawOutputChunk(context.Context, string, string, string) (store.RawOutputChunk, error)
 	ListRawOutputChunks(context.Context, string, string) ([]store.RawOutputChunk, error)
@@ -35,14 +33,13 @@ type RunEvidenceService struct {
 }
 
 type RunEvidence struct {
-	Run              store.Run
-	Provenance       json.RawMessage
-	Sessions         []store.ExecutionSession
-	RuntimeInstances []store.RuntimeInstance
-	Events           []store.Event
-	Usage            *RunUsage
-	RawOutput        []store.RawOutputChunk
-	Artifacts        []store.Artifact
+	Run        store.Run
+	Provenance json.RawMessage
+	Sessions   []store.ExecutionSession
+	Events     []store.Event
+	Usage      *RunUsage
+	RawOutput  []store.RawOutputChunk
+	Artifacts  []store.Artifact
 }
 
 func NewRunEvidenceService(evidenceStore RunEvidenceStore, blobs evidence.BlobStore) (*RunEvidenceService, error) {
@@ -84,20 +81,15 @@ func (s *RunEvidenceService) Inspect(ctx context.Context, projectID, runID strin
 	if err != nil {
 		return RunEvidence{}, fmt.Errorf("list artifacts: %w", err)
 	}
-	runtimeInstances, err := s.runtimeInstances(ctx, projectID, sessions, events)
-	if err != nil {
-		return RunEvidence{}, err
-	}
 
 	return RunEvidence{
-		Run:              run,
-		Provenance:       append(json.RawMessage(nil), provenance...),
-		Sessions:         sessions,
-		RuntimeInstances: runtimeInstances,
-		Events:           events,
-		Usage:            usage,
-		RawOutput:        rawOutput,
-		Artifacts:        artifacts,
+		Run:        run,
+		Provenance: append(json.RawMessage(nil), provenance...),
+		Sessions:   sessions,
+		Events:     events,
+		Usage:      usage,
+		RawOutput:  rawOutput,
+		Artifacts:  artifacts,
 	}, nil
 }
 
@@ -205,32 +197,4 @@ func (s *RunEvidenceService) ListEventsAfter(ctx context.Context, projectID, run
 			return events, nil
 		}
 	}
-}
-
-func (s *RunEvidenceService) runtimeInstances(ctx context.Context, projectID string, sessions []store.ExecutionSession, events []store.Event) ([]store.RuntimeInstance, error) {
-	ids := make(map[string]struct{})
-	for _, session := range sessions {
-		if session.RuntimeInstanceID != "" {
-			ids[session.RuntimeInstanceID] = struct{}{}
-		}
-	}
-	for _, event := range events {
-		if event.RuntimeInstanceID != nil && *event.RuntimeInstanceID != "" {
-			ids[*event.RuntimeInstanceID] = struct{}{}
-		}
-	}
-	ordered := make([]string, 0, len(ids))
-	for id := range ids {
-		ordered = append(ordered, id)
-	}
-	sort.Strings(ordered)
-	instances := make([]store.RuntimeInstance, 0, len(ordered))
-	for _, id := range ordered {
-		instance, err := s.store.GetRuntimeInstance(ctx, projectID, id)
-		if err != nil {
-			return nil, fmt.Errorf("read runtime instance %s: %w", id, err)
-		}
-		instances = append(instances, instance)
-	}
-	return instances, nil
 }
