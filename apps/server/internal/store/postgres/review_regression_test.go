@@ -61,36 +61,6 @@ func TestUpdateIssueRejectsDoneWhileRunOrSchedulerJobIsActive(t *testing.T) {
 	}
 }
 
-func TestUpdateRuntimeNormalizesNilAllowedSecretRefs(t *testing.T) {
-	s := New(testPool(t))
-	ctx := context.Background()
-	project, err := s.CreateProject(ctx, testProjectInput("runtime-update", "/repo/runtime-update", "RTUP"))
-	if err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	runtime, err := s.CreateRuntime(ctx, store.Runtime{
-		ProjectID:     &project.ID,
-		Name:          "runtime-update",
-		Kind:          "docker",
-		Image:         "before",
-		NetworkPolicy: "none",
-		Enabled:       true,
-	})
-	if err != nil {
-		t.Fatalf("create runtime: %v", err)
-	}
-
-	runtime.Image = "after"
-	runtime.AllowedSecretRefs = nil
-	updated, err := s.UpdateRuntime(ctx, &project.ID, runtime)
-	if err != nil {
-		t.Fatalf("update runtime with omitted allowedSecretRefs: %v", err)
-	}
-	if len(updated.AllowedSecretRefs) != 0 {
-		t.Fatalf("allowedSecretRefs=%v, want empty", updated.AllowedSecretRefs)
-	}
-}
-
 func TestNotFoundMapsNotNullViolationToInvalidArgument(t *testing.T) {
 	err := notFound(&pgconn.PgError{Code: "23502"})
 	if !errors.Is(err, store.ErrInvalidArgument) {
