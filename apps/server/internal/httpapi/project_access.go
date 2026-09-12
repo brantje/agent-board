@@ -59,19 +59,36 @@ func (a *api) registerProjectAccessRoutes(r chi.Router) {
 	r.Get("/projects/{projectID}/access/directory/groups", a.searchProjectAccessGroups)
 }
 
+// projectAuthorizationMiddleware authenticates Project-scoped requests and
+// provides defense-in-depth route coverage. The fixed viewer/member/admin
+// policy is owned by ProjectAccessService, not by this transport adapter.
 func (a *api) projectAuthorizationMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if a.auth == nil || a.projectAccess == nil {
+		if a.auth == nil {
 			next.ServeHTTP(w, r)
 			return
 		}
 
-		if isProjectCollectionPath(r.URL.Path) {
-			actor, ok := a.authActor(w, r)
-			if !ok {
-				return
-			}
-			r = r.WithContext(context.WithValue(r.Context(), projectActorContextKey{}, actor))
+		collection := isProjectCollectionPath(r.URL.Path)
+		projectID, tail, scoped := projectScopeFromPath(r.URL.Path)
+		if !collection && !scoped {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		w.Header().Set("Cache-Control", "private, no-store")
+		if a.projectAccess == nil {
+			writeError(w, http.StatusServiceUnavailable, "project_authorization_unavailable", "project authorization is unavailable")
+			return
+		}
+
+		actor, ok := a.authActor(w, r)
+		if !ok {
+			return
+		}
+		r = r.WithContext(context.WithValue(r.Context(), projectActorContextKey{}, actor))
+
+		if collection {
 			switch r.Method {
 			case http.MethodGet, http.MethodHead:
 				a.listAuthorizedProjects(w, r, actor)
@@ -85,22 +102,39 @@ func (a *api) projectAuthorizationMiddleware(next http.Handler) http.Handler {
 			}
 		}
 
-		projectID, tail, ok := projectScopeFromPath(r.URL.Path)
-		if !ok {
-			next.ServeHTTP(w, r)
-			return
-		}
-		actor, ok := a.authActor(w, r)
-		if !ok {
-			return
-		}
-		if _, err := a.projectAccess.RequireRole(r.Context(), actor, projectID, minimumProjectRole(r.Method, tail)); err != nil {
+		if err := a.authorizeProjectRequest(r, actor, projectID, tail); err != nil {
 			writeProjectAccessError(w, err)
 			return
 		}
-		ctx := context.WithValue(r.Context(), projectActorContextKey{}, actor)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(w, r)
 	})
+}
+
+func (a *api) authorizeProjectRequest(r *http.Request, actor app.AuthenticatedUser, projectID string, tail []string) error {
+	if len(tail) == 0 {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			return a.projectAccess.AuthorizeRead(r.Context(), actor, projectID)
+		}
+		return a.projectAccess.AuthorizeAdministration(r.Context(), actor, projectID)
+	}
+
+	if tail[0] == "access" {
+		if len(tail) >= 2 && tail[1] == "effective-role" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+			return a.projectAccess.AuthorizeRead(r.Context(), actor, projectID)
+		}
+		return a.projectAccess.AuthorizeAdministration(r.Context(), actor, projectID)
+	}
+
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+		return a.projectAccess.AuthorizeRead(r.Context(), actor, projectID)
+	}
+
+	switch tail[0] {
+	case "providers", "model-profiles", "runtimes", "agents", "runners", "secrets":
+		return a.projectAccess.AuthorizeAdministration(r.Context(), actor, projectID)
+	default:
+		return a.projectAccess.AuthorizeWorkflowMutation(r.Context(), actor, projectID)
+	}
 }
 
 func isProjectCollectionPath(path string) bool {
@@ -115,33 +149,6 @@ func projectScopeFromPath(path string) (string, []string, bool) {
 		return "", nil, false
 	}
 	return parts[2], parts[3:], true
-}
-
-func minimumProjectRole(method string, tail []string) string {
-	if len(tail) == 0 {
-		if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
-			return store.ProjectRoleViewer
-		}
-		return store.ProjectRoleAdmin
-	}
-
-	if tail[0] == "access" {
-		if len(tail) >= 2 && tail[1] == "effective-role" && (method == http.MethodGet || method == http.MethodHead) {
-			return store.ProjectRoleViewer
-		}
-		return store.ProjectRoleAdmin
-	}
-
-	if method == http.MethodGet || method == http.MethodHead || method == http.MethodOptions {
-		return store.ProjectRoleViewer
-	}
-
-	switch tail[0] {
-	case "providers", "model-profiles", "runtimes", "agents", "runners", "secrets":
-		return store.ProjectRoleAdmin
-	default:
-		return store.ProjectRoleMember
-	}
 }
 
 func writeProjectAccessError(w http.ResponseWriter, err error) {
@@ -223,14 +230,7 @@ func (a *api) listProjectUserAccess(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]projectUserAccessResponse, 0, len(values))
 	for _, value := range values {
-		out = append(out, projectUserAccessResponse{
-			ID:          value.User.ID,
-			Username:    value.User.Username,
-			Email:       value.User.Email,
-			DisplayName: value.User.DisplayName,
-			Status:      value.User.Status,
-			Role:        value.Access.Role,
-		})
+		out = append(out, projectUserAccessResponse{ID: value.User.ID, Username: value.User.Username, Email: value.User.Email, DisplayName: value.User.DisplayName, Status: value.User.Status, Role: value.Access.Role})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
