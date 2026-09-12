@@ -135,12 +135,12 @@ describe('account and deployment admin pages', () => {
     await inputs[2]!.setValue('member@example.com')
     await wrapper.findAll('form')[0]!.trigger('submit')
     await flushPromises()
-    expect(wrapper.text()).toContain('test-setup-display-value')
+    expect(wrapper.findAll('input').some(input => (input.element as HTMLInputElement).value === 'test-setup-display-value')).toBe(true)
 
     const dismiss = wrapper.findAll('button').find(button => button.text().includes('Dismiss'))
     expect(dismiss).toBeDefined()
     await dismiss!.trigger('click')
-    expect(wrapper.text()).not.toContain('test-setup-display-value')
+    expect(wrapper.findAll('input').some(input => (input.element as HTMLInputElement).value === 'test-setup-display-value')).toBe(false)
   })
 
   it('loads and saves the authoritative authentication settings', async () => {
