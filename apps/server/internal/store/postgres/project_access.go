@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
 )
@@ -330,6 +331,18 @@ func (s *Store) userIsSoleActiveDirectAdmin(ctx context.Context, tx pgx.Tx, user
 		return false, err
 	}
 	return exists, nil
+}
+
+func (s *Store) GetProjectAccessUser(ctx context.Context, userID string) (store.User, error) {
+	return s.GetUser(ctx, userID)
+}
+
+func (s *Store) ListProjectAccessUsers(ctx context.Context) ([]store.User, error) {
+	return s.ListUsers(ctx)
+}
+
+func (s *Store) ListProjectAccessGroups(ctx context.Context) ([]store.Group, error) {
+	return s.ListGroups(ctx)
 }
 
 var _ store.ProjectAccessStore = (*Store)(nil)
