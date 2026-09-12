@@ -45,6 +45,7 @@ describe('settings navigation helper', () => {
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/settings/model-profiles')
     expect(links.find(item => item.label === 'Agents')?.to).toBe('/settings/agents')
     expect(links.find(item => item.label === 'Runners')?.to).toBe('/settings/runners')
+    expect(links.find(item => item.label === 'Runtimes')).toBeUndefined()
     expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
   })
 
@@ -96,6 +97,11 @@ describe('settings sidebar shell', () => {
 
 describe('settings route wiring', () => {
   const pages = import.meta.glob('../app/pages/**/*.vue', { eager: true, import: 'default' }) as Record<string, Component>
+
+  it('does not expose a global runtimes settings route', () => {
+    const globalRuntimes = Object.keys(pages).find(path => path.endsWith('/settings/runtimes.vue') && !path.includes('[projectID]'))
+    expect(globalRuntimes).toBeUndefined()
+  })
 
   it('wraps global and project settings pages with SettingsShell', () => {
     vi.stubGlobal('useRoute', () => ({ params: { projectID: 'project-a' } }))
