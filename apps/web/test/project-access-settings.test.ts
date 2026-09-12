@@ -16,26 +16,39 @@ function json(value: unknown, status = 200) {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('ProjectAccessSettings', () => {
-  it('shows effective role and disabled direct users', async () => {
+  it.each(['viewer', 'member'] as const)('keeps access management read-only for %s', async (effectiveRole) => {
     const fetch = vi.fn(async (path: string) => {
-      if (path.endsWith('/effective-role')) return json({ role: 'admin' })
+      throw new Error(`unexpected ${path}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(ProjectAccessSettings, { props: { projectId, effectiveRole }, global })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="access-readonly"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="access-management"]').exists()).toBe(false)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it('shows effective role and disabled direct users for admins', async () => {
+    const fetch = vi.fn(async (path: string) => {
       if (path.endsWith('/access/users')) return json([{ id: userId, username: 'alice', email: 'alice@example.com', displayName: 'Alice', status: 'disabled', role: 'admin' }])
       if (path.endsWith('/access/groups')) return json([])
       throw new Error(`unexpected ${path}`)
     })
     vi.stubGlobal('fetch', fetch)
 
-    const wrapper = mount(ProjectAccessSettings, { props: { projectId }, global })
+    const wrapper = mount(ProjectAccessSettings, { props: { projectId, effectiveRole: 'admin' }, global })
     await flushPromises()
 
     expect(wrapper.text()).toContain('Your effective role is admin')
     expect(wrapper.text()).toContain('Alice')
     expect(wrapper.text()).toContain('Disabled')
+    expect(wrapper.get('[data-testid="access-management"]').exists()).toBe(true)
   })
 
   it('changes roles and surfaces the final-direct-admin conflict', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
-      if (path.endsWith('/effective-role')) return json({ role: 'admin' })
       if (path.endsWith('/access/users') && options.method === 'GET') return json([{ id: userId, username: 'alice', email: 'alice@example.com', displayName: 'Alice', status: 'active', role: 'admin' }])
       if (path.endsWith('/access/groups') && options.method === 'GET') return json([])
       if (path.endsWith(`/access/users/${userId}`) && options.method === 'PUT') return json({ role: 'member' })
@@ -44,7 +57,7 @@ describe('ProjectAccessSettings', () => {
     })
     vi.stubGlobal('fetch', fetch)
 
-    const wrapper = mount(ProjectAccessSettings, { props: { projectId }, global })
+    const wrapper = mount(ProjectAccessSettings, { props: { projectId, effectiveRole: 'admin' }, global })
     await flushPromises()
     await wrapper.get(`[data-testid="user-role-${userId}"] select`).setValue('member')
     await flushPromises()
@@ -57,7 +70,6 @@ describe('ProjectAccessSettings', () => {
 
   it('searches active users and adds a selected role', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
-      if (path.endsWith('/effective-role')) return json({ role: 'admin' })
       if (path.endsWith('/access/users') && options.method === 'GET') return json([])
       if (path.endsWith('/access/groups') && options.method === 'GET') return json([])
       if (path.includes('/access/directory/users?q=bob')) return json([{ id: candidateId, username: 'bob', email: 'bob@example.com', displayName: 'Bob' }])
@@ -66,7 +78,7 @@ describe('ProjectAccessSettings', () => {
     })
     vi.stubGlobal('fetch', fetch)
 
-    const wrapper = mount(ProjectAccessSettings, { props: { projectId }, global })
+    const wrapper = mount(ProjectAccessSettings, { props: { projectId, effectiveRole: 'admin' }, global })
     await flushPromises()
     await wrapper.get('[data-testid="user-search"] input').setValue('bob')
     await wrapper.get('[data-testid="search-users"]').trigger('click')
