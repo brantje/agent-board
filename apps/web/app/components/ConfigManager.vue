@@ -261,7 +261,7 @@ async function save() {
                     </div>
                   </template>
                   <USelectMenu v-else-if="field.type === 'select'" v-model="draft[field.key] as string" :items="field.resource ? resourceOptions(references[field.key]?.data.value || []) : field.options" :value-key="field.resource ? 'value' : undefined" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
-                  <UTextarea v-else-if="['textarea', 'json', 'lines'].includes(field.type || '')" v-model="draft[field.key] as string" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
+                  <UTextarea v-else-if="['textarea', 'json'].includes(field.type || '')" v-model="draft[field.key] as string" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
                   <UInput v-else v-model="draft[field.key] as string" :type="field.type === 'number' ? 'number' : 'text'" :min="field.min" :max="field.max" :step="field.key === 'temperature' ? 'any' : 1" class="w-full" :disabled="controlsDisabled || (field.immutable && !!selected)" />
                 </UFormField>
               </template>
