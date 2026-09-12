@@ -183,15 +183,6 @@ function provenanceText() {
           </UCard>
           <RunChangedFilesCard :project-id="projectId" :evidence="evidence" />
           <UCard>
-            <h2 class="section-label mb-3">Runtime instances</h2>
-            <div v-for="instance in evidence?.runtimeInstances" :key="instance.id" class="mb-3 text-sm">
-              <p class="font-mono break-all">{{ instance.id }}</p>
-              <p>Runtime <span class="font-mono">{{ instance.runtimeId }}</span></p>
-              <p>{{ instance.status }} · runner {{ instance.runnerStatus }}</p>
-            </div>
-            <p v-if="!evidence?.runtimeInstances.length" class="text-sm text-muted">None</p>
-          </UCard>
-          <UCard>
             <h2 class="section-label mb-3">Provenance</h2>
             <pre>{{ provenanceText() }}</pre>
           </UCard>
