@@ -174,8 +174,14 @@ func (s *Store) SetUserStatus(ctx context.Context, id, status string) (store.Use
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var current string
-	if err := tx.QueryRow(ctx, `SELECT status FROM users WHERE id=$1 FOR UPDATE`, id).Scan(&current); err != nil {
+	// Deployment-admin availability is a deployment-global invariant. This
+	// table lock serializes status mutations so two admins cannot concurrently
+	// disable each other after both observing that another active admin exists.
+	if _, err := tx.Exec(ctx, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return store.User{}, err
+	}
+	var current, deploymentRole string
+	if err := tx.QueryRow(ctx, `SELECT status,deployment_role FROM users WHERE id=$1 FOR UPDATE`, id).Scan(&current, &deploymentRole); err != nil {
 		return store.User{}, notFound(err)
 	}
 	if current == status {
@@ -187,6 +193,15 @@ func (s *Store) SetUserStatus(ctx context.Context, id, status string) (store.Use
 			return store.User{}, err
 		}
 		return value, nil
+	}
+	if current == store.UserStatusActive && deploymentRole == store.DeploymentRoleAdmin && status != store.UserStatusActive {
+		var activeAdmins int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM users WHERE deployment_role=$1 AND status=$2`, store.DeploymentRoleAdmin, store.UserStatusActive).Scan(&activeAdmins); err != nil {
+			return store.User{}, err
+		}
+		if activeAdmins <= 1 {
+			return store.User{}, store.ErrConflict
+		}
 	}
 	value, err := scanUser(tx.QueryRow(ctx, `
 		UPDATE users
