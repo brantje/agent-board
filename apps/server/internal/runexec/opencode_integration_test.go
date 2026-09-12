@@ -56,7 +56,7 @@ type openCodeRunSpec struct {
 	description      string
 }
 
-func TestOpenCodeDockerNormalCodingRun(t *testing.T) {
+func TestOpenCodeRunnerContainerNormalCodingRun(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
 	project, run := fixture.createRun(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Do not ask a Question unless the issue explicitly requires human input.",
@@ -82,7 +82,7 @@ func TestOpenCodeDockerNormalCodingRun(t *testing.T) {
 	assertOpenCodeServerSession(t, fixture.ctx, fixture.database, project.ID, run.ID, false)
 }
 
-func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
+func TestOpenCodeRunnerContainerInteractiveQuestionRoundTrip(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
 	project, run := fixture.createRun(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Use OpenCode's native Question tool for the requested human choice and wait for the answer before editing.",
@@ -120,7 +120,7 @@ func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 	assertOpenCodeServerSession(t, fixture.ctx, fixture.database, project.ID, run.ID, false)
 }
 
-func TestOpenCodeDockerInvalidCredentialsFailWithoutSecretLeak(t *testing.T) {
+func TestOpenCodeRunnerContainerInvalidCredentialsFailWithoutSecretLeak(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
 	project, run := fixture.createRun(t, openCodeRunSpec{
 		apiKey:           invalidOpenRouterIntegrationKey,
@@ -147,7 +147,7 @@ func TestOpenCodeDockerInvalidCredentialsFailWithoutSecretLeak(t *testing.T) {
 	assertOpenCodeSecretAbsent(t, fixture, project.ID, run.ID, invalidOpenRouterIntegrationKey)
 }
 
-func TestOpenCodeDockerCancelWhileWaitingForQuestion(t *testing.T) {
+func TestOpenCodeRunnerContainerCancelWhileWaitingForQuestion(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
 	project, run := fixture.createRun(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Use OpenCode's native Question tool for the requested human choice and wait for the answer before editing.",
@@ -251,7 +251,7 @@ func newOpenCodeIntegrationFixture(t *testing.T) *openCodeIntegrationFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, nil, secretService)
+	services, err := app.NewExecutionServices(database, materializer, secretService)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func newOpenCodeIntegrationFixture(t *testing.T) *openCodeIntegrationFixture {
 		t.Fatal(err)
 	}
 	runnerConnector := NewRegistryConnector(services.ControlPlane.Runners.Connections)
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, git, runnerConnector)
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.ExecutionSessions, engines, recorder, output, git, runnerConnector)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,20 +316,20 @@ func requireOpenCodeIntegrationEnv(t *testing.T) openCodeIntegrationEnv {
 		t.Skip("AGENT_BOARD_TEST_OPENCODE=1 is required for the credential-gated OpenCode integration")
 	}
 	if os.Getenv("AGENT_BOARD_TEST_DOCKER") != "1" {
-		t.Skip("AGENT_BOARD_TEST_DOCKER=1 is required for the OpenCode Docker integration")
+		t.Skip("AGENT_BOARD_TEST_DOCKER=1 is required for the OpenCode Runner container integration")
 	}
 	env := openCodeIntegrationEnv{
 		databaseURL:  strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_DATABASE_URL")),
 		apiKey:       strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_API_KEY")),
 		providerKind: strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND")),
 		modelName:    strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_MODEL")),
-		image:        strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE")),
+		image:        strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_OPENCODE_RUNNER_IMAGE")),
 	}
 	if env.databaseURL == "" || env.apiKey == "" || env.providerKind == "" || env.modelName == "" {
 		t.Skip("database URL, OpenCode API key, provider kind and model are required")
 	}
 	if env.image == "" {
-		env.image = "agent-board-opencode-runtime:manual"
+		env.image = "agent-board-opencode-runner:manual"
 	}
 	return env
 }
