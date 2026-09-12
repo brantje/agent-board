@@ -55,7 +55,7 @@ describe('settings navigation helper', () => {
     expect(links.find(item => item.label === 'Project')?.to).toBe('/projects/p/settings')
     expect(links.find(item => item.label === 'Providers')?.to).toBe('/projects/p/settings/providers')
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/projects/p/settings/model-profiles')
-    expect(links.find(item => item.label === 'Runtimes')?.to).toBe('/projects/p/settings/runtimes')
+    expect(links.find(item => item.label === 'Runtimes')).toBeUndefined()
     expect(links.find(item => item.label === 'Agents')).toBeUndefined()
     expect(links.find(item => item.label === 'Runners')).toBeUndefined()
     expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
@@ -98,9 +98,9 @@ describe('settings sidebar shell', () => {
 describe('settings route wiring', () => {
   const pages = import.meta.glob('../app/pages/**/*.vue', { eager: true, import: 'default' }) as Record<string, Component>
 
-  it('does not expose a global runtimes settings route', () => {
-    const globalRuntimes = Object.keys(pages).find(path => path.endsWith('/settings/runtimes.vue') && !path.includes('[projectID]'))
-    expect(globalRuntimes).toBeUndefined()
+  it('does not expose runtime settings routes', () => {
+    const runtimeSettingsPages = Object.keys(pages).filter(path => path.endsWith('/settings/runtimes.vue'))
+    expect(runtimeSettingsPages).toEqual([])
   })
 
   it('wraps global and project settings pages with SettingsShell', () => {
