@@ -87,6 +87,7 @@ func main() {
 		stop()
 		os.Exit(1)
 	}
+	startProviderHealthWorker(ctx, handler)
 	internalDone := make(chan struct{})
 	go func() {
 		defer close(internalDone)
@@ -216,6 +217,26 @@ func reconcileExecutionSessions(ctx context.Context, handler http.Handler) error
 	return application.services.ExecutionSessions.ReconcileAllWithReporter(ctx, func(err error) {
 		slog.Error("reconcile Execution Session", "error", err)
 	})
+}
+
+func startProviderHealthWorker(ctx context.Context, handler http.Handler) {
+	application, ok := handler.(*applicationHandler)
+	if !ok || application.services == nil || application.services.ControlPlane == nil || application.services.ExecutionStore == nil {
+		return
+	}
+	var resolver executioncontext.SecretResolver
+	if application.services.Secrets != nil {
+		if secretResolver, ok := application.services.Secrets.(executioncontext.SecretResolver); ok {
+			resolver = secretResolver
+		}
+	}
+	worker := app.NewProviderHealthWorker(application.services.ControlPlane, application.services.ExecutionStore, resolver, nil)
+	application.services.ControlPlane.SetProviderHealthWorker(worker)
+	go func() {
+		if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			slog.Error("provider health worker stopped", "error", err)
+		}
+	}()
 }
 
 func startScheduler(ctx context.Context, handler http.Handler) (<-chan error, error) {

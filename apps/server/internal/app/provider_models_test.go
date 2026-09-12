@@ -26,6 +26,10 @@ func (s *providerModelStore) GetProvider(_ context.Context, _ *string, id string
 	return s.provider, nil
 }
 
+func (s *providerModelStore) UpdateProviderHealth(context.Context, string, string, *int, *int) error {
+	return nil
+}
+
 type fakeProviderModelSecretResolver struct {
 	values map[string][]byte
 	scope  secrets.Scope

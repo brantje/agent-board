@@ -3,7 +3,9 @@ import { computed, ref, watch } from 'vue'
 import { ApiError, apiPath, apiRequest } from '../utils/api'
 import { useResource } from '../composables/useResource'
 import { useProviderModels } from '../composables/useProviderModels'
+import { useProviderListHealth } from '../composables/useProviderListHealth'
 import { definitions, draftFor, payloadFor, validateDraft, resourceOptions, canEdit, CUSTOM_PROVIDER_KIND, isBuiltInProviderKind, providerKindSelectValue, type ConfigKind, type ConfigRecord } from '../utils/configuration'
+import { providerHealthBadgeColor, providerHealthBadgeLabel, providerModelCounts, providerModelsBadgeLabel } from '../utils/provider-badges'
 import type { RepositorySettings } from '../types/api'
 
 const props = defineProps<{kind: ConfigKind; projectId?: string; resourceId?: string}>()
@@ -43,6 +45,8 @@ const showModelSelect = computed(() => {
   return modelOptions.value.length > 0
 })
 const visible = computed(() => props.resourceId ? data.value?.filter(item => item.id === props.resourceId) : data.value)
+const providerList = computed(() => props.kind === 'providers' ? visible.value ?? [] : [])
+const { overlays: providerHealthOverlays } = useProviderListHealth(providerList, () => props.projectId)
 const pageDescription = computed(() => {
   if (props.kind === 'projects') return props.resourceId ? 'Project settings · backend-managed repository context' : 'Projects · backend-managed repository contexts'
   return props.projectId ? 'Project configuration · shared resources are read-only' : 'Shared configuration'
@@ -105,6 +109,26 @@ function clearSecrets() {
 function readable(value: unknown, fallback = 'Unavailable') {
   if (typeof value !== 'string' || !value) return fallback
   return value.toLowerCase().replaceAll('_', ' ').replace(/^./, character => character.toUpperCase())
+}
+
+function providerCardHealth(item: ConfigRecord) {
+  const overlay = providerHealthOverlays.value[item.id]
+  if (overlay?.checking) {
+    return { status: item.healthStatus ?? 'UNKNOWN', checking: true }
+  }
+  if (overlay?.healthStatus) {
+    return { status: overlay.healthStatus, checking: false }
+  }
+  return { status: String(item.healthStatus ?? 'UNKNOWN'), checking: false }
+}
+
+function providerCardModelsLabel(item: ConfigRecord) {
+  const overlay = providerHealthOverlays.value[item.id]
+  if (overlay?.filtered != null && overlay.total != null) {
+    return providerModelsBadgeLabel(overlay.filtered, overlay.total)
+  }
+  const counts = providerModelCounts(item)
+  return counts ? providerModelsBadgeLabel(counts.filtered, counts.total) : undefined
 }
 
 function formErrors() {
@@ -191,7 +215,20 @@ async function save() {
                 <template v-if="item.enabled !== undefined"> · Configuration: {{ item.enabled ? 'Enabled' : 'Disabled' }}</template>
               </p>
             </div>
-            <UBadge v-if="item.healthStatus" color="neutral" variant="subtle" :label="`Health: ${readable(item.healthStatus)}`" />
+            <template v-if="kind === 'providers'">
+              <UBadge
+                variant="subtle"
+                :color="providerHealthBadgeColor(providerCardHealth(item).status, providerCardHealth(item).checking)"
+                :label="providerHealthBadgeLabel(providerCardHealth(item).status, providerCardHealth(item).checking)"
+              />
+              <UBadge
+                v-if="providerCardModelsLabel(item)"
+                color="neutral"
+                variant="subtle"
+                :label="providerCardModelsLabel(item)"
+              />
+            </template>
+            <UBadge v-else-if="item.healthStatus" color="neutral" variant="subtle" :label="`Health: ${readable(item.healthStatus)}`" />
             <UButton v-if="kind === 'projects'" label="Open board" :to="`/projects/${item.id}/board`" variant="outline" />
             <UButton :label="canEdit(item, kind === 'projects' ? undefined : projectId) ? 'Edit' : 'View shared'" color="neutral" variant="outline" @click="edit(item)" />
           </div>

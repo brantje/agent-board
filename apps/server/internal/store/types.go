@@ -60,9 +60,11 @@ type Provider struct {
 	Kind          string
 	BaseURL       *string
 	CredentialRef *string
-	Enabled       bool
-	HealthStatus  string
-	SafeMetadata  json.RawMessage
+	Enabled            bool
+	HealthStatus       string
+	FilteredModelCount *int
+	TotalModelCount    *int
+	SafeMetadata       json.RawMessage
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }

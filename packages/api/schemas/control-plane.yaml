@@ -116,6 +116,8 @@ Provider:
     baseUrl: {type: [string, 'null']}
     enabled: {type: boolean}
     healthStatus: {type: string, enum: [UNKNOWN, HEALTHY, UNHEALTHY]}
+    filteredModelCount: {type: [integer, 'null'], minimum: 0}
+    totalModelCount: {type: [integer, 'null'], minimum: 0}
     safeMetadata: {$ref: '#/JSONMap'}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
@@ -139,11 +141,12 @@ ProviderModel:
     name: {type: [string, 'null']}
 ProviderModelList:
   type: object
-  required: [models]
+  required: [models, total]
   properties:
     models:
       type: array
       items: {$ref: '#/ProviderModel'}
+    total: {type: integer, minimum: 0}
 ModelProfile:
   type: object
   required: [id, projectId, providerId, name, model, temperature, maxTokens, maxConcurrent, enabled, generationSettings, createdAt, updatedAt]

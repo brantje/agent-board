@@ -40,7 +40,7 @@ func issueRelationshipDTO(v store.IssueRelationship, issueKeys map[string]string
 }
 
 func providerDTO(v store.Provider) ProviderDTO {
-	return ProviderDTO{v.ID, v.ProjectID, v.Name, v.Kind, v.BaseURL, v.Enabled, v.HealthStatus, v.SafeMetadata, v.CreatedAt, v.UpdatedAt}
+	return ProviderDTO{v.ID, v.ProjectID, v.Name, v.Kind, v.BaseURL, v.Enabled, v.HealthStatus, v.FilteredModelCount, v.TotalModelCount, v.SafeMetadata, v.CreatedAt, v.UpdatedAt}
 }
 
 func modelProfileDTO(v store.ModelProfile) ModelProfileDTO {

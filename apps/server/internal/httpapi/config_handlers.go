@@ -212,6 +212,7 @@ func (a *api) createProvider(w http.ResponseWriter, r *http.Request, scope *stri
 			}
 		}
 	}
+	a.service.EnqueueProviderHealthProbe(v.ID)
 	writeJSON(w, 201, providerDTO(v))
 }
 func (a *api) getProvider(w http.ResponseWriter, r *http.Request, scope *string) {
@@ -266,6 +267,7 @@ func (a *api) updateProvider(w http.ResponseWriter, r *http.Request, scope *stri
 		writeAppError(w, err)
 		return
 	}
+	a.service.EnqueueProviderHealthProbe(v.ID)
 	writeJSON(w, 200, providerDTO(v))
 }
 
@@ -297,7 +299,7 @@ func (a *api) listProviderModels(w http.ResponseWriter, r *http.Request, scope *
 	for _, model := range models {
 		out = append(out, ProviderModelDTO{ID: model.ID, Name: model.Name})
 	}
-	writeJSON(w, 200, ProviderModelListDTO{Models: out})
+	writeJSON(w, 200, ProviderModelListDTO{Models: out, Total: len(out)})
 }
 func (a *api) listGlobalProviders(w http.ResponseWriter, r *http.Request) {
 	a.listProviders(w, r, nil)

@@ -52,6 +52,12 @@ func (f *fakeStore) GetProvider(context.Context, *string, string) (store.Provide
 func (f *fakeStore) UpdateProvider(_ context.Context, _ *string, v store.Provider) (store.Provider, error) {
 	return v, nil
 }
+func (f *fakeStore) ListAllProviders(context.Context) ([]store.Provider, error) {
+	return []store.Provider{coverageProvider()}, nil
+}
+func (f *fakeStore) UpdateProviderHealth(context.Context, string, string, *int, *int) error {
+	return nil
+}
 func (f *fakeStore) ListModelProfiles(context.Context, *string) ([]store.ModelProfile, error) {
 	return []store.ModelProfile{coverageModel()}, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/url"
 	"strings"
 
@@ -16,6 +17,7 @@ type Service struct {
 	projectRepositories repository.ProjectRepositoryProvisioner
 	events              issueEventRecorder
 	Runners             *RunnerService
+	providerHealth      *ProviderHealthWorker
 }
 
 type issueEventRecorder interface {
@@ -108,6 +110,25 @@ func (s *Service) UpdateProvider(ctx context.Context, scope *string, input store
 	}
 	value, err := s.store.UpdateProvider(ctx, scope, input)
 	return value, translateStoreError(err, "provider")
+}
+
+func (s *Service) ListAllProviders(ctx context.Context) ([]store.Provider, error) {
+	return s.store.ListAllProviders(ctx)
+}
+
+func (s *Service) persistProviderHealth(ctx context.Context, providerID string, healthy bool, modelCount int) {
+	if s == nil || s.store == nil || providerID == "" {
+		return
+	}
+	if healthy {
+		if err := s.store.UpdateProviderHealth(ctx, providerID, "HEALTHY", &modelCount, &modelCount); err != nil {
+			slog.Error("persist provider health", "providerId", providerID, "error", err)
+		}
+		return
+	}
+	if err := s.store.UpdateProviderHealth(ctx, providerID, "UNHEALTHY", nil, nil); err != nil {
+		slog.Error("persist provider health", "providerId", providerID, "error", err)
+	}
 }
 
 func (s *Service) ensureScope(ctx context.Context, scope *string) error {

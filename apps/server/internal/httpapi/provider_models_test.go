@@ -25,6 +25,10 @@ func (s *providerModelsStore) GetProvider(_ context.Context, _ *string, id strin
 	return s.provider, nil
 }
 
+func (s *providerModelsStore) UpdateProviderHealth(context.Context, string, string, *int, *int) error {
+	return nil
+}
+
 type providerModelsSecretResolver struct {
 	values map[string][]byte
 }
@@ -69,11 +73,12 @@ func TestListProviderModelsReturnsDiscoveredModels(t *testing.T) {
 		Models []struct {
 			ID string `json:"id"`
 		} `json:"models"`
+		Total int `json:"total"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(body.Models) != 1 || body.Models[0].ID != "model-a" {
+	if len(body.Models) != 1 || body.Models[0].ID != "model-a" || body.Total != 1 {
 		t.Fatalf("body=%s", w.Body.String())
 	}
 }
