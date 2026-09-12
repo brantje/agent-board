@@ -132,7 +132,7 @@ describe('account and deployment admin pages', () => {
     await wrapper.get('input[type="password"]').setValue('test-password-updated')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(changePassword).toHaveBeenCalledWith('test-password-updated')
+    expect(changePassword).toHaveBeenCalledWith(undefined, 'test-password-updated')
     expect((wrapper.get('input[type="password"]').element as HTMLInputElement).value).toBe('')
     expect(navigateTo).toHaveBeenCalledWith('/auth/login')
   })
