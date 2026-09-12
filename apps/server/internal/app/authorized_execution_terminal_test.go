@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
-	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type abandoningExecutionTransport struct {
@@ -18,27 +17,18 @@ func (t *abandoningExecutionTransport) AbandonStdout() error { return nil }
 func (t *abandoningExecutionTransport) AbandonStderr() error { return nil }
 
 func TestAuthorizedExecutionPreservesUnreadTerminalOutputBeforeRelease(t *testing.T) {
-	transport := newFakeExecutionTransport("session-1")
+	lowLevel, _, transport, _ := runnerOwnedExecutionService(t)
 	transport.stdout = "stdout before plain-secret after"
 	transport.stderr = "stderr before plain-secret after"
-	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
-	storeFake := &executionSessionStoreFake{
-		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
-	}
-	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	released := make(chan struct{})
 	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{prepared: executioncontext.Prepared{
-				RedactionValues:  []string{"plain-secret"},
+		RedactionValues:  []string{"plain-secret"},
 		ReleaseRedaction: func() { close(released) },
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	process, err := service.Start(context.Background(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"true"}})
+	process, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", AuthorizedExecutionRequest{Command: []string{"true"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,23 +60,21 @@ func TestAuthorizedExecutionPreservesUnreadTerminalOutputBeforeRelease(t *testin
 func TestAuthorizedExecutionExplicitAbandonCompletesLifecycle(t *testing.T) {
 	transport := &abandoningExecutionTransport{fakeExecutionTransport: newFakeExecutionTransport("session-1")}
 	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
-	storeFake := &executionSessionStoreFake{
-		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
-	}
-	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
+	registry := &fakeExecutionManager{client: client}
+	storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"}}
+	lowLevel, err := NewExecutionSessionService(storeFake, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
 	released := make(chan struct{})
 	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{prepared: executioncontext.Prepared{
-				RedactionValues:  []string{"plain-secret"},
+		RedactionValues:  []string{"plain-secret"},
 		ReleaseRedaction: func() { close(released) },
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	process, err := service.Start(context.Background(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"true"}})
+	process, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", AuthorizedExecutionRequest{Command: []string{"true"}})
 	if err != nil {
 		t.Fatal(err)
 	}
