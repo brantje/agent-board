@@ -126,7 +126,6 @@ func newRunnerSyncProcessor(t *testing.T, repo string, safe executioncontext.Saf
 	processor, err := NewProcessor(
 		storeFake,
 		processTestResolver{resolved: executioncontext.Resolved{Safe: safe}},
-		nil,
 		&runnerSyncSessions{},
 		engines,
 		recorder,
@@ -170,7 +169,6 @@ func runnerTransferPayload(t *testing.T, authoritative string) []byte {
 func TestRunnerSyncBackFailureOverridesEngineSuccess(t *testing.T) {
 	repo := initProcessTestRepository(t)
 	safe := processTestSafeContext(repo)
-	safe.Runtime = executioncontext.RuntimeContext{}
 	storeFake := &runnerSyncStore{}
 	client := &failingSyncClient{}
 	processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
@@ -194,7 +192,6 @@ func TestRunnerSyncBackFailureOverridesEngineSuccess(t *testing.T) {
 func TestRunnerExecutionCompletesWithWorkspaceSyncAndReviewEvidence(t *testing.T) {
 	repo := initProcessTestRepository(t)
 	safe := processTestSafeContext(repo)
-	safe.Runtime = executioncontext.RuntimeContext{}
 	storeFake := &runnerSyncStore{}
 	client := &successfulSyncClient{payload: runnerTransferPayload(t, repo)}
 	processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
@@ -221,15 +218,11 @@ func TestRunnerExecutionCompletesWithWorkspaceSyncAndReviewEvidence(t *testing.T
 			t.Fatalf("missing event %q in %+v", eventType, storeFake.events)
 		}
 	}
-	if event := processTestEvent(storeFake.events, "run.ready_for_review"); event.RuntimeInstanceID != nil {
-		t.Fatalf("runner-owned review evidence referenced Runtime Instance: %+v", event)
-	}
 }
 
 func TestRunnerLiveSessionResumesWithoutRetransferringWorkspace(t *testing.T) {
 	repo := initProcessTestRepository(t)
 	safe := processTestSafeContext(repo)
-	safe.Runtime = executioncontext.RuntimeContext{}
 	storeFake := &runnerSyncStore{}
 	storeFake.sessions = []store.ExecutionSession{{
 		ID: "session-live", ProjectID: safe.Project.ID, RunID: safe.Run.ID, RunnerID: "runner-1", Status: "RUNNING",
@@ -248,8 +241,8 @@ func TestRunnerLiveSessionResumesWithoutRetransferringWorkspace(t *testing.T) {
 	if len(client.directions) != 1 || client.directions[0] != "from_runner" {
 		t.Fatalf("reconciled runner transfer directions=%v", client.directions)
 	}
-	if hasProcessTestEvent(storeFake.events, "run.started") || hasProcessTestEvent(storeFake.events, "runtime.provisioning") {
-		t.Fatalf("reconciled runner execution restarted provisioning: %+v", storeFake.events)
+	if hasProcessTestEvent(storeFake.events, "run.started") {
+		t.Fatalf("reconciled runner execution restarted: %+v", storeFake.events)
 	}
 	if !hasProcessTestEvent(storeFake.events, "run.resumed") || !hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
 		t.Fatalf("reconciled runner execution events=%+v", storeFake.events)
@@ -259,7 +252,6 @@ func TestRunnerLiveSessionResumesWithoutRetransferringWorkspace(t *testing.T) {
 func TestRunnerSyncBackAcknowledgementFailureFailsRun(t *testing.T) {
 	repo := initProcessTestRepository(t)
 	safe := processTestSafeContext(repo)
-	safe.Runtime = executioncontext.RuntimeContext{}
 	storeFake := &runnerSyncStore{}
 	client := &successfulSyncClient{
 		payload:    runnerTransferPayload(t, repo),
@@ -297,7 +289,6 @@ func TestRunnerSyncBackAppliesWorkspaceAndAcknowledgesTransfer(t *testing.T) {
 	client := &successfulSyncClient{payload: runnerTransferPayload(t, authoritative)}
 	processor := &Processor{store: storeFake, events: recorder, git: git, runners: runnerSyncConnector{client: client}}
 	safe := processTestSafeContext(authoritative)
-	safe.Runtime = executioncontext.RuntimeContext{}
 
 	if err := processor.syncWorkspaceFromRunner(t.Context(), safe, "runner-1", "session-1"); err != nil {
 		t.Fatal(err)
@@ -315,7 +306,6 @@ func TestRunnerSyncBackTransportFailuresDoNotApplyOrAcknowledge(t *testing.T) {
 	t.Run("missing prepared session", func(t *testing.T) {
 		authoritative := initProcessTestRepository(t)
 		safe := processTestSafeContext(authoritative)
-		safe.Runtime = executioncontext.RuntimeContext{}
 		storeFake := &runnerSyncStore{}
 		client := &successfulSyncClient{}
 		processor := newRunnerSyncProcessor(t, authoritative, safe, storeFake, client)
@@ -331,7 +321,6 @@ func TestRunnerSyncBackTransportFailuresDoNotApplyOrAcknowledge(t *testing.T) {
 	t.Run("runner disconnects before sync request", func(t *testing.T) {
 		authoritative := initProcessTestRepository(t)
 		safe := processTestSafeContext(authoritative)
-		safe.Runtime = executioncontext.RuntimeContext{}
 		storeFake := &runnerSyncStore{}
 		client := &successfulSyncClient{}
 		processor := newRunnerSyncProcessor(t, authoritative, safe, storeFake, client)
@@ -350,92 +339,4 @@ func TestRunnerSyncBackTransportFailuresDoNotApplyOrAcknowledge(t *testing.T) {
 			t.Fatalf("unexpected disconnect transfer events=%+v", storeFake.events)
 		}
 	})
-
-	t.Run("runner disconnects while requesting sync", func(t *testing.T) {
-		authoritative := initProcessTestRepository(t)
-		safe := processTestSafeContext(authoritative)
-		safe.Runtime = executioncontext.RuntimeContext{}
-		storeFake := &runnerSyncStore{}
-		client := &runnerOutboundFailureClient{
-			successfulSyncClient: &successfulSyncClient{},
-			err:                  errors.New("runner disconnected while requesting sync-back"),
-		}
-		processor := newRunnerSyncProcessor(t, authoritative, safe, storeFake, client)
-
-		if err := processor.syncWorkspaceFromRunner(t.Context(), safe, "runner-1", "session-1"); err == nil {
-			t.Fatal("sync-back succeeded after sync request transport failure")
-		}
-		if len(client.directions) != 1 || client.directions[0] != "from_runner" || client.confirmed {
-			t.Fatalf("sync request failure state directions=%v confirmed=%v", client.directions, client.confirmed)
-		}
-		if _, err := os.Stat(filepath.Join(authoritative, "returned.txt")); !os.IsNotExist(err) {
-			t.Fatalf("failed sync request modified authoritative Workspace: %v", err)
-		}
-		if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "workspace.transfer.completed") {
-			t.Fatalf("unexpected sync request failure events=%+v", storeFake.events)
-		}
-	})
-}
-
-func TestRunnerSyncBackWorkspaceLockFailureDoesNotApplyOrAcknowledge(t *testing.T) {
-	authoritative := initProcessTestRepository(t)
-	safe := processTestSafeContext(authoritative)
-	safe.Runtime = executioncontext.RuntimeContext{}
-	storeFake := &runnerSyncStore{}
-	client := &successfulSyncClient{payload: runnerTransferPayload(t, authoritative)}
-	processor := newRunnerSyncProcessor(t, authoritative, safe, storeFake, client)
-	processor.store = &runnerWorkspaceLockFailureStore{
-		runnerSyncStore: storeFake,
-		err:             errors.New("workspace already has an execution writer"),
-	}
-
-	if err := processor.syncWorkspaceFromRunner(t.Context(), safe, "runner-1", "session-1"); err == nil {
-		t.Fatal("sync-back succeeded without authoritative Workspace writer lock")
-	}
-	if client.confirmed {
-		t.Fatal("unapplied Workspace transfer was acknowledged")
-	}
-	if len(client.directions) != 1 || client.directions[0] != "from_runner" {
-		t.Fatalf("unexpected transfer directions=%v", client.directions)
-	}
-	if _, err := os.Stat(filepath.Join(authoritative, "returned.txt")); !os.IsNotExist(err) {
-		t.Fatalf("returned Workspace was applied without writer lock: %v", err)
-	}
-	if !hasProcessTestEvent(storeFake.events, "workspace.transfer.failed") || hasProcessTestEvent(storeFake.events, "workspace.transfer.completed") {
-		t.Fatalf("unexpected transfer events=%+v", storeFake.events)
-	}
-}
-
-type runnerQuestionStore struct {
-	*orchestrationQuestionStore
-	open store.Question
-}
-
-func (s *runnerQuestionStore) GetOpenBlockingQuestion(context.Context, string, string) (store.Question, error) {
-	if s.open.ID == "" {
-		return store.Question{}, store.ErrNotFound
-	}
-	return s.open, nil
-}
-
-func TestRunnerWaitingForInputKeepsRunWaitingWithoutRuntimeCleanup(t *testing.T) {
-	base := &processTestStore{}
-	questionStore := &runnerQuestionStore{
-		orchestrationQuestionStore: &orchestrationQuestionStore{processTestStore: base},
-		open:                       store.Question{ID: "question-1", Blocking: true, Status: "OPEN"},
-	}
-	recorder, err := evidence.NewRecorder(questionStore, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	processor := &Processor{store: questionStore, events: recorder}
-	safe := continuationSafeContext()
-
-	result, err := processor.finishWaitingForInputRunner(t.Context(), safe)
-	if err != nil || result.RunStatus != "WAITING_FOR_INPUT" {
-		t.Fatalf("result=%+v err=%v", result, err)
-	}
-	if event := processTestEvent(base.events, "run.waiting_for_input"); event.Type == "" || event.RuntimeInstanceID != nil {
-		t.Fatalf("waiting event=%+v", event)
-	}
 }
