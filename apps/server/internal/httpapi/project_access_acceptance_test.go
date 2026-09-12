@@ -186,7 +186,10 @@ func (f *projectAccessHTTPFixture) createUser(t *testing.T, username, deployment
 	if err != nil {
 		t.Fatal(err)
 	}
-	user, err = f.auth.SetPassword(t.Context(), user.ID, password, false)
+	if _, err := f.auth.SetPassword(t.Context(), user.ID, password, false); err != nil {
+		t.Fatal(err)
+	}
+	user, err = f.authDB.GetUser(t.Context(), user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
