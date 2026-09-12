@@ -11,30 +11,6 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func (s *runEvidenceTestStore) GetRawOutputChunk(_ context.Context, projectID, runID, chunkID string) (store.RawOutputChunk, error) {
-	if projectID != s.run.ProjectID || runID != s.run.ID {
-		return store.RawOutputChunk{}, store.ErrNotFound
-	}
-	for _, chunk := range s.chunks {
-		if chunk.ID == chunkID {
-			return chunk, nil
-		}
-	}
-	return store.RawOutputChunk{}, store.ErrNotFound
-}
-
-func (s *runEvidenceTestStore) GetArtifact(_ context.Context, projectID, runID, artifactID string) (store.Artifact, error) {
-	if projectID != s.run.ProjectID || runID != s.run.ID {
-		return store.Artifact{}, store.ErrNotFound
-	}
-	for _, artifact := range s.artifacts {
-		if artifact.ID == artifactID {
-			return artifact, nil
-		}
-	}
-	return store.Artifact{}, store.ErrNotFound
-}
-
 type noListRunEvidenceStore struct {
 	*runEvidenceTestStore
 }
@@ -62,8 +38,7 @@ func TestRunEvidenceContentLookupAvoidsRunWideScans(t *testing.T) {
 	}
 
 	base := &runEvidenceTestStore{
-		run:       store.Run{ID: "run", ProjectID: "project"},
-		instances: map[string]store.RuntimeInstance{},
+		run: store.Run{ID: "run", ProjectID: "project"},
 		chunks: []store.RawOutputChunk{{
 			ID: "chunk", ProjectID: "project", RunID: "run", StorageRef: rawBlob.Ref, SizeBytes: rawBlob.SizeBytes,
 		}},
