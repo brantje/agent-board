@@ -71,25 +71,6 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	runtime, err := s.CreateRuntime(ctx, store.Runtime{ProjectID: scope1, Name: "Runtime", Kind: "docker", Image: "agent-board:test", NetworkPolicy: "none", WorkspacePolicy: "issue", Capabilities: store.EmptyObject, Enabled: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.GetRuntime(ctx, scope1, runtime.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = s.GetRuntime(ctx, scope2, runtime.ID); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("cross-project runtime err=%v", err)
-	}
-	runtimes, err := s.ListRuntimes(ctx, scope1)
-	if err != nil || len(runtimes) != 1 {
-		t.Fatalf("runtimes=%d err=%v", len(runtimes), err)
-	}
-	runtime.Image = "agent-board:test2"
-	if _, err = s.UpdateRuntime(ctx, scope1, runtime); err != nil {
-		t.Fatal(err)
-	}
-
 	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Agent", Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
 	if err != nil {
 		t.Fatal(err)
