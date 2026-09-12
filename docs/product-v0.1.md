@@ -57,8 +57,6 @@ Shared/global or Project-scoped product configuration:
 
 Project source configuration belongs to Project. Project Runner allowlisting is execution policy, not Agent configuration.
 
-Legacy Runtime configuration remains only for internal managed-compute code that still uses it. It is not part of normal v0.1 Agent configuration or the preferred production execution path.
-
 Inside a Project, shared resources are visible/read-only and Project-owned resources remain isolated.
 
 ## Navigation
@@ -89,6 +87,8 @@ Models
   Model Profiles
 Execution
   Agents (global/shared only)
+Infrastructure
+  Runners (global only)
 Project page for repository/workflow
 ```
 
@@ -149,10 +149,6 @@ Runner, Execution Session and Run remain separate identities. Default Runner cap
 
 For local Projects, the Runner receives/returns the Issue branch using the existing bounded #71 transfer. For remote Git Projects, the Runner uses a bare repository cache plus a per-Run worktree and publishes the Issue branch with a normal non-force push.
 
-### Legacy/internal managed compute
-
-Runtime and Runtime Instance remain only where the existing internal managed-compute implementation still uses them. They are not the normal v0.1 Agent configuration or production execution path, and external Runner execution must not create placeholder Runtime Instances.
-
 ## Agent
 
 Agent form:
@@ -166,7 +162,7 @@ Model Profile
 
 Operational fields such as concurrency limit may live under Advanced. Engine settings are an optional JSON object on the Agent.
 
-Agents select Engine and Model Profile. They do **not** configure Runtime, Runtime Instance, Runner, Executor Profile or Runner Profile. The scheduler selects eligible connected Runners for execution. Draft, disabled or archived Agents cannot be assigned as runnable Agents. Agent concurrency is enforced by the scheduler.
+Agents select Engine and Model Profile. Runner placement remains scheduler-owned; Agents do not select execution hosts. Draft, disabled or archived Agents cannot be assigned as runnable Agents. Agent concurrency is enforced by the scheduler.
 
 Built-in Engine settings use the Agent Board Nuxt/Nuxt UI frontend. Plugin-provided Engine settings belong to the later sandboxed Plugin boundary.
 
@@ -245,7 +241,6 @@ Run detail is first-class and exposes persisted evidence:
 - Git branch/change evidence and diff
 - tests/checks
 - selected Runner and Execution Session diagnostics/provenance
-- legacy Runtime/Runtime Instance lifecycle only when internal managed compute was actually used
 - raw logs when needed
 - Artifacts
 - failure/cancellation/blocking reason
@@ -297,7 +292,7 @@ Automatic merge/deploy is a separate, stronger permission and must not be implie
 
 The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Engine, Model Profile/Provider credentials/health, live Runner protocol compatibility/availability and Project source prerequisites.
 
-For remote Git sources, runtime Git authentication failures are explicit; Agent Board does not silently fall back to local transfer.
+For remote Git sources, execution-time Git authentication failures are explicit; Agent Board does not silently fall back to local transfer.
 
 ## Explicitly after the v0.1 flow
 
@@ -316,7 +311,7 @@ For remote Git sources, runtime Git authentication failures are explicit; Agent 
 
 ## Implementation priority
 
-1. Agent Engine + Model Profile configuration (no Agent Runtime/Runner selection)
+1. Agent Engine + Model Profile configuration (no Agent host selection)
 2. durable async scheduler/restart-safe continuation with live Runner admission
 3. Project source configuration and Git-native Issue branches
 4. external and internal `agent-runner` hosts over protocol v2
