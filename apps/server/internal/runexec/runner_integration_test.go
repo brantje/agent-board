@@ -2,7 +2,6 @@ package runexec
 
 import (
 	"context"
-	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -14,6 +13,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/scripted"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
+	"github.com/brantje/agent-board/apps/server/internal/httpapi"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -70,28 +70,11 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 		}
 	})
 
-	runner, token, err := createExternalRunnerCredential(ctx, services.ControlPlane)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/runner/ws" {
-			http.NotFound(w, r)
-			return
-		}
-		services.ControlPlane.Runners.Connections.ServeHTTP(w, r)
-	}))
+	server := httptest.NewServer(httpapi.NewRouterWithApplication(services))
 	t.Cleanup(server.Close)
-
 	binary := buildAgentRunnerBinary(t)
-	proc := startExternalAgentRunner(t, binary, server.URL, runner.ID, token, runnerWorkspaceRoot)
-	t.Cleanup(func() {
-		if proc.Process != nil {
-			_ = proc.Process.Kill()
-		}
-		_ = proc.Wait()
-	})
-	waitForRunnerConnected(t, services.ControlPlane.Runners.Connections, runner.ID)
+	external := startRegisteredExternalAgentRunner(t, ctx, services.ControlPlane, binary, server.URL, runnerWorkspaceRoot)
+	runner := external.Runner
 	database.SetRunnerCandidates(services.ControlPlane.Runners.Connections.Candidates)
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
@@ -103,7 +86,7 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("live registry did not advertise the connected runner for the scripted engine")
- admitted:
+admitted:
 	project, run := createRunnerScriptedIntegrationRun(t, ctx, services.ControlPlane, repositoryPath)
 	baseBlobs, err := evidence.NewFileBlobStore(filepath.Join(t.TempDir(), "evidence"), 8<<20)
 	if err != nil {
@@ -195,6 +178,12 @@ func TestScriptedEngineExternalRunnerWalkingSkeleton(t *testing.T) {
 			t.Fatalf("missing %s evidence: %v", eventType, eventTypes(events))
 		}
 	}
+	for _, id := range services.ControlPlane.Runners.Connections.Candidates(scripted.Name) {
+		if id == runner.ID {
+			return
+		}
+	}
+	t.Fatalf("runner %s did not return to available capacity", runner.ID)
 }
 
 func createRunnerScriptedIntegrationRun(t *testing.T, ctx context.Context, control *app.Service, repositoryPath string) (store.Project, store.Run) {

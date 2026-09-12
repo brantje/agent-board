@@ -102,6 +102,27 @@ jobs:
           --file apps/agent-runner/Dockerfile
           --tag agent-board-opencode-runtime:ci
           .
+      - name: Install repository-pinned OpenCode for external Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$(uname -m)" != "x86_64" ]]; then
+            echo "unsupported CI architecture for pinned OpenCode host binary: $(uname -m)" >&2
+            exit 1
+          fi
+          # shellcheck disable=SC1091
+          . apps/agent-runner/opencode.env
+          install_dir="$RUNNER_TEMP/opencode-bin"
+          archive="$RUNNER_TEMP/opencode.tar.gz"
+          mkdir -p "$install_dir"
+          curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors \
+            "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-x64-baseline.tar.gz" \
+            -o "$archive"
+          echo "${OPENCODE_SHA256_AMD64_GLIBC}  ${archive}" | sha256sum -c -
+          tar -xzf "$archive" -C "$install_dir" opencode
+          chmod 0755 "$install_dir/opencode"
+          test "$("$install_dir/opencode" --version)" = "$OPENCODE_VERSION"
+          echo "$install_dir" >> "$GITHUB_PATH"
       - name: Run real OpenCode/OpenRouter integration suite
         working-directory: apps/server
         env:
@@ -112,8 +133,8 @@ jobs:
           AGENT_BOARD_TEST_OPENCODE_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
-          if timeout --signal=TERM --kill-after=10s 480s \
-            go test -count=1 -failfast -run '^TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)$' -v ./internal/runexec; then
+          if timeout --signal=TERM --kill-after=10s 600s \
+            go test -count=1 -failfast -run '^(TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)|TestOpenCodeExternalRunnerGoldenPath)$' -v ./internal/runexec; then
             exit 0
           fi
 
@@ -121,10 +142,22 @@ jobs:
           PGPASSWORD=agent_board psql \
             -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
             -c 'SELECT id, status, failure_reason FROM runs ORDER BY created_at DESC LIMIT 1' || true
+          echo '--- Issue status ---'
+          PGPASSWORD=agent_board psql \
+            -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
+            -c 'SELECT id, status FROM issues ORDER BY updated_at DESC LIMIT 1' || true
+          echo '--- Review status ---'
+          PGPASSWORD=agent_board psql \
+            -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
+            -c 'SELECT id, status, base_revision, review_revision FROM reviews ORDER BY created_at DESC LIMIT 1' || true
+          echo '--- Runner status ---'
+          PGPASSWORD=agent_board psql \
+            -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
+            -c 'SELECT id, name, registered_at, revoked_at, last_seen_at FROM runners ORDER BY created_at' || true
           echo '--- Execution Sessions ---'
           PGPASSWORD=agent_board psql \
             -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
-            -c 'SELECT status, cwd, command_argv, exit_code FROM execution_sessions ORDER BY created_at' || true
+            -c 'SELECT status, runner_id, runtime_instance_id, cwd, command_argv, exit_code FROM execution_sessions ORDER BY created_at' || true
           echo '--- Run Events ---'
           PGPASSWORD=agent_board psql \
             -h 127.0.0.1 -p '${{ job.services.postgres.ports['5432'] }}' -U agent_board -d agent_board_test -x \
