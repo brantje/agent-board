@@ -12,7 +12,6 @@ import (
 func TestProjectScopedEndpointsHideMissingProject(t *testing.T) {
 	router := NewRouter(app.New(&fakeControlPlaneStore{}))
 	modelBody := `{"providerId":"` + providerID + `","name":"Model","model":"model","generationSettings":{}}`
-	runtimeBody := `{"name":"Runtime","kind":"docker","image":"image","networkPolicy":"none","capabilities":{}}`
 	agentBody := `{"name":"Agent","engine":"test","modelProfileId":"` + modelID + `","engineSettings":{},"concurrencyLimit":1,"state":"ENABLED"}`
 	issueBody := `{"title":"Issue","status":"TODO"}`
 	cases := []struct{ method, path, body string }{
@@ -27,10 +26,6 @@ func TestProjectScopedEndpointsHideMissingProject(t *testing.T) {
 		{http.MethodPost, "/api/projects/" + otherID + "/model-profiles", modelBody},
 		{http.MethodGet, "/api/projects/" + otherID + "/model-profiles/" + modelID, ""},
 		{http.MethodPut, "/api/projects/" + otherID + "/model-profiles/" + modelID, modelBody},
-		{http.MethodGet, "/api/projects/" + otherID + "/runtimes", ""},
-		{http.MethodPost, "/api/projects/" + otherID + "/runtimes", runtimeBody},
-		{http.MethodGet, "/api/projects/" + otherID + "/runtimes/" + runtimeID, ""},
-		{http.MethodPut, "/api/projects/" + otherID + "/runtimes/" + runtimeID, runtimeBody},
 		{http.MethodGet, "/api/projects/" + otherID + "/agents", ""},
 		{http.MethodPost, "/api/projects/" + otherID + "/agents", agentBody},
 		{http.MethodGet, "/api/projects/" + otherID + "/agents/" + agentID, ""},
@@ -63,7 +58,6 @@ func TestGlobalEndpointValidationAndMissingResources(t *testing.T) {
 		{http.MethodPost, "/api/providers", `{}`, "invalid_argument", http.StatusBadRequest},
 		{http.MethodPut, "/api/providers/" + otherID, `{"name":"Provider","kind":"test"}`, "provider_not_found", http.StatusNotFound},
 		{http.MethodGet, "/api/model-profiles/" + otherID, "", "model_profile_not_found", http.StatusNotFound},
-		{http.MethodGet, "/api/runtimes/" + otherID, "", "runtime_not_found", http.StatusNotFound},
 		{http.MethodGet, "/api/agents/" + otherID, "", "agent_not_found", http.StatusNotFound},
 	}
 	for _, tc := range cases {
