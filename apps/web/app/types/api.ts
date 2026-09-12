@@ -148,7 +148,7 @@ export interface EventEvidence {
 
 export interface ExecutionSessionEvidence {
   id: string
-  runnerId: string | null
+  runnerId: string
   status: string
   cwd: string
   command: string[]
