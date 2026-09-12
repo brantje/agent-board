@@ -10,12 +10,13 @@ services:
         credential_file=/run/agent-board/postgres-password
         encryption_key_file=/run/agent-board/secret-encryption-key
         write_token_file=/run/agent-board/secret-write-token
+        auth_signing_key_file=/run/agent-board/auth-signing-key
         if [ ! -s "$$credential_file" ]; then
           umask 077
           dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n' > "$$credential_file"
         fi
         chmod 0444 "$$credential_file"
-        for secret_file in "$$encryption_key_file" "$$write_token_file"; do
+        for secret_file in "$$encryption_key_file" "$$write_token_file" "$$auth_signing_key_file"; do
           if [ ! -s "$$secret_file" ]; then
             umask 077
             dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64 | tr -d '\n' > "$$secret_file"
@@ -61,6 +62,7 @@ services:
       AGENT_BOARD_REPOSITORY_MOUNT_PATH: ${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}
       AGENT_BOARD_SECRET_ENCRYPTION_KEY: ${AGENT_BOARD_SECRET_ENCRYPTION_KEY:-}
       AGENT_BOARD_SECRET_WRITE_TOKEN: ${AGENT_BOARD_SECRET_WRITE_TOKEN:-}
+      AGENT_BOARD_AUTH_SIGNING_KEY: ${AGENT_BOARD_AUTH_SIGNING_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODELS: ${OPENROUTER_MODELS:-}
       AGENT_BOARD_DOCKER_NETWORK: ${AGENT_BOARD_DOCKER_NETWORK:-agent-board_default}
@@ -75,6 +77,9 @@ services:
         fi
         if [ -z "$$AGENT_BOARD_SECRET_WRITE_TOKEN" ] && [ -s /run/agent-board/secret-write-token ]; then
           export AGENT_BOARD_SECRET_WRITE_TOKEN="$$(cat /run/agent-board/secret-write-token)"
+        fi
+        if [ -z "$$AGENT_BOARD_AUTH_SIGNING_KEY" ] && [ -s /run/agent-board/auth-signing-key ]; then
+          export AGENT_BOARD_AUTH_SIGNING_KEY="$$(cat /run/agent-board/auth-signing-key)"
         fi
         exec /usr/local/bin/agent-board-server
     depends_on:
