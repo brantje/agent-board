@@ -110,12 +110,32 @@ func (s *AuthService) AdminCreatePasswordToken(ctx context.Context, actor Authen
 	if err := requireDeploymentAdmin(actor); err != nil {
 		return PasswordTokenSecret{}, err
 	}
+	if purpose != store.PasswordTokenPurposeSetup && purpose != store.PasswordTokenPurposeReset {
+		return PasswordTokenSecret{}, NewError("invalid_argument", "password token purpose is invalid", store.ErrInvalidArgument)
+	}
+	user, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return PasswordTokenSecret{}, err
+	}
+	if purpose == store.PasswordTokenPurposeSetup && user.Status != store.UserStatusPending {
+		return PasswordTokenSecret{}, NewError("invalid_user_status", "setup tokens are only available for pending users", store.ErrInvalidArgument)
+	}
+	if purpose == store.PasswordTokenPurposeReset && user.Status == store.UserStatusPending {
+		return PasswordTokenSecret{}, NewError("invalid_user_status", "pending users must complete setup before password reset", store.ErrInvalidArgument)
+	}
 	return s.CreatePasswordToken(ctx, userID, purpose)
 }
 
 func (s *AuthService) AdminSetPassword(ctx context.Context, actor AuthenticatedUser, userID, password string) (AuthenticatedUser, error) {
 	if err := requireDeploymentAdmin(actor); err != nil {
 		return AuthenticatedUser{}, err
+	}
+	user, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return AuthenticatedUser{}, err
+	}
+	if user.Status == store.UserStatusPending {
+		return AuthenticatedUser{}, NewError("invalid_user_status", "pending users must complete setup before direct password assignment", store.ErrInvalidArgument)
 	}
 	return s.SetPassword(ctx, userID, password, true)
 }
