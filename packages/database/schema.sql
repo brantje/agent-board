@@ -113,30 +113,6 @@ CREATE UNIQUE INDEX model_profiles_global_name_uq ON model_profiles (lower(name)
 CREATE UNIQUE INDEX model_profiles_project_name_uq ON model_profiles (project_id, lower(name)) WHERE project_id IS NOT NULL;
 CREATE INDEX model_profiles_provider_idx ON model_profiles (provider_id);
 
-CREATE TABLE runtimes (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
-    name text NOT NULL CHECK (btrim(name) <> ''),
-    kind text NOT NULL CHECK (kind IN ('docker')),
-    image text NOT NULL CHECK (btrim(image) <> ''),
-    cpu_limit_millis integer CHECK (cpu_limit_millis IS NULL OR cpu_limit_millis >= 1),
-    memory_limit_bytes bigint CHECK (memory_limit_bytes IS NULL OR memory_limit_bytes >= 1),
-    pid_limit integer CHECK (pid_limit IS NULL OR pid_limit >= 1),
-    timeout_seconds integer CHECK (timeout_seconds IS NULL OR timeout_seconds >= 1),
-    network_policy text NOT NULL CHECK (network_policy IN ('none', 'restricted', 'outbound')),
-    workspace_policy text NOT NULL DEFAULT 'issue' CHECK (workspace_policy = 'issue'),
-    allowed_secret_refs text[] NOT NULL DEFAULT ARRAY[]::text[],
-    capabilities jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(capabilities) = 'object'),
-    enabled boolean NOT NULL DEFAULT true,
-    health_status text NOT NULL DEFAULT 'UNKNOWN' CHECK (health_status IN ('UNKNOWN', 'HEALTHY', 'UNHEALTHY')),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (project_id, id)
-);
-
-CREATE UNIQUE INDEX runtimes_global_name_uq ON runtimes (lower(name)) WHERE project_id IS NULL;
-CREATE UNIQUE INDEX runtimes_project_name_uq ON runtimes (project_id, lower(name)) WHERE project_id IS NOT NULL;
-
 CREATE TABLE agents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
@@ -283,34 +259,11 @@ CREATE TABLE scheduler_capacity_reservations (
 CREATE INDEX scheduler_capacity_resource_idx ON scheduler_capacity_reservations (resource_kind, resource_id);
 CREATE INDEX scheduler_capacity_run_idx ON scheduler_capacity_reservations (run_id);
 
-CREATE TABLE runtime_instances (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    workspace_id uuid NOT NULL,
-    runtime_id uuid NOT NULL REFERENCES runtimes(id) ON DELETE RESTRICT,
-    status text NOT NULL DEFAULT 'PROVISIONING' CHECK (status IN ('PROVISIONING', 'STARTING', 'RUNNING', 'STOPPING', 'FAILED', 'STOPPED', 'DESTROYED')),
-    external_id text,
-    runner_status text NOT NULL DEFAULT 'CONNECTING' CHECK (runner_status IN ('CONNECTING', 'READY', 'BUSY', 'DRAINING', 'UNAVAILABLE')),
-    runner_generation bigint NOT NULL DEFAULT 0 CHECK (runner_generation >= 0),
-    safe_handle_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(safe_handle_metadata) = 'object'),
-    created_at timestamptz NOT NULL DEFAULT now(),
-    started_at timestamptz,
-    stopped_at timestamptz,
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT runtime_instances_workspace_fk FOREIGN KEY (project_id, workspace_id) REFERENCES workspaces(project_id, id) ON DELETE RESTRICT,
-    UNIQUE (project_id, id)
-);
-
-CREATE INDEX runtime_instances_workspace_idx ON runtime_instances (workspace_id, status);
-CREATE INDEX runtime_instances_runtime_idx ON runtime_instances (runtime_id, status);
-CREATE UNIQUE INDEX runtime_instances_external_id_uq ON runtime_instances (external_id) WHERE external_id IS NOT NULL;
-
 CREATE TABLE execution_sessions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL,
     run_id uuid NOT NULL,
-    runtime_instance_id uuid,
-    runner_id uuid REFERENCES runners(id) ON DELETE RESTRICT,
+    runner_id uuid NOT NULL REFERENCES runners(id) ON DELETE RESTRICT,
     status text NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'STARTING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')),
     cwd text NOT NULL DEFAULT '/workspace' CHECK (btrim(cwd) <> ''),
     command_argv jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(command_argv) = 'array'),
@@ -320,19 +273,11 @@ CREATE TABLE execution_sessions (
     completed_at timestamptz,
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT execution_sessions_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
-    CONSTRAINT execution_sessions_runtime_instance_fk FOREIGN KEY (project_id, runtime_instance_id) REFERENCES runtime_instances(project_id, id) ON DELETE RESTRICT,
-    CONSTRAINT execution_sessions_owner_check CHECK (
-        (runner_id IS NOT NULL AND runtime_instance_id IS NULL) OR
-        (runner_id IS NULL AND runtime_instance_id IS NOT NULL)
-    ),
     UNIQUE (project_id, id)
 );
 
 CREATE INDEX execution_sessions_run_idx ON execution_sessions (run_id, created_at);
-CREATE INDEX execution_sessions_runner_idx ON execution_sessions (runner_id, created_at) WHERE runner_id IS NOT NULL;
-CREATE UNIQUE INDEX execution_sessions_one_active_per_instance_uq
-    ON execution_sessions (runtime_instance_id)
-    WHERE status IN ('PENDING', 'STARTING', 'RUNNING') AND runtime_instance_id IS NOT NULL;
+CREATE INDEX execution_sessions_runner_idx ON execution_sessions (runner_id, created_at);
 
 CREATE TABLE questions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -434,7 +379,6 @@ CREATE TABLE events (
     run_id uuid,
     agent_id uuid REFERENCES agents(id) ON DELETE RESTRICT,
     workspace_id uuid,
-    runtime_instance_id uuid,
     correlation_id uuid,
     parent_event_id uuid REFERENCES events(id) ON DELETE RESTRICT,
     sequence bigint,
@@ -444,7 +388,6 @@ CREATE TABLE events (
     CONSTRAINT events_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE RESTRICT,
     CONSTRAINT events_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE RESTRICT,
     CONSTRAINT events_workspace_fk FOREIGN KEY (project_id, workspace_id) REFERENCES workspaces(project_id, id) ON DELETE RESTRICT,
-    CONSTRAINT events_runtime_instance_fk FOREIGN KEY (project_id, runtime_instance_id) REFERENCES runtime_instances(project_id, id) ON DELETE RESTRICT,
     CHECK ((run_id IS NULL AND sequence IS NULL) OR (run_id IS NOT NULL AND sequence IS NOT NULL AND sequence >= 1)),
     UNIQUE (project_id, id)
 );
@@ -460,7 +403,7 @@ CREATE TABLE raw_output_chunks (
     project_id uuid NOT NULL,
     issue_id uuid NOT NULL,
     run_id uuid NOT NULL,
-    stream text NOT NULL CHECK (stream IN ('STDOUT', 'STDERR', 'PROTOCOL', 'RUNTIME', 'DIAGNOSTIC')),
+    stream text NOT NULL CHECK (stream IN ('STDOUT', 'STDERR', 'PROTOCOL', 'DIAGNOSTIC')),
     sequence bigint NOT NULL CHECK (sequence >= 1),
     storage_ref text NOT NULL CHECK (btrim(storage_ref) <> ''),
     size_bytes bigint NOT NULL CHECK (size_bytes >= 0),
@@ -520,11 +463,6 @@ BEGIN
                 RAISE EXCEPTION 'run cannot reference agent from another project' USING ERRCODE = '23514';
             END IF;
         END IF;
-    ELSIF TG_TABLE_NAME = 'runtime_instances' THEN
-        SELECT project_id INTO referenced_project_id FROM runtimes WHERE id = NEW.runtime_id;
-        IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
-            RAISE EXCEPTION 'runtime instance cannot reference runtime from another project' USING ERRCODE = '23514';
-        END IF;
     END IF;
     RETURN NEW;
 END;
@@ -543,59 +481,16 @@ BEGIN
         ) THEN
             RAISE EXCEPTION 'model profile ownership change would cross project scope' USING ERRCODE = '23514';
         END IF;
-    ELSIF TG_TABLE_NAME = 'runtimes' THEN
-        IF EXISTS (
-            SELECT 1 FROM runtime_instances
-            WHERE runtime_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
-        ) THEN
-            RAISE EXCEPTION 'runtime ownership change would cross project scope' USING ERRCODE = '23514';
-        END IF;
     END IF;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER model_profiles_owner_change_check BEFORE UPDATE OF project_id ON model_profiles FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
-CREATE TRIGGER runtimes_owner_change_check BEFORE UPDATE OF project_id ON runtimes FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 
 CREATE TRIGGER agents_scope_check BEFORE INSERT OR UPDATE OF project_id, model_profile_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER issues_scope_check BEFORE INSERT OR UPDATE OF project_id, assigned_agent_id ON issues FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER runs_scope_check BEFORE INSERT OR UPDATE OF project_id, agent_id ON runs FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
-CREATE TRIGGER runtime_instances_scope_check BEFORE INSERT OR UPDATE OF project_id, runtime_id ON runtime_instances FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
-
-CREATE FUNCTION enforce_runtime_instance_binding() RETURNS trigger AS $$
-BEGIN
-    IF NEW.project_id IS DISTINCT FROM OLD.project_id OR NEW.workspace_id IS DISTINCT FROM OLD.workspace_id OR NEW.runtime_id IS DISTINCT FROM OLD.runtime_id THEN
-        RAISE EXCEPTION 'runtime instance project, workspace and runtime bindings are immutable' USING ERRCODE = '55000';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER runtime_instances_immutable_binding
-    BEFORE UPDATE OF project_id, workspace_id, runtime_id ON runtime_instances
-    FOR EACH ROW EXECUTE FUNCTION enforce_runtime_instance_binding();
-
-CREATE FUNCTION enforce_execution_session_workspace() RETURNS trigger AS $$
-DECLARE
-    run_workspace_id uuid;
-    instance_workspace_id uuid;
-BEGIN
-    IF NEW.runtime_instance_id IS NULL THEN
-        RETURN NEW;
-    END IF;
-    SELECT workspace_id INTO run_workspace_id FROM runs WHERE project_id = NEW.project_id AND id = NEW.run_id;
-    SELECT workspace_id INTO instance_workspace_id FROM runtime_instances WHERE project_id = NEW.project_id AND id = NEW.runtime_instance_id;
-    IF run_workspace_id IS NULL OR instance_workspace_id IS NULL OR run_workspace_id IS DISTINCT FROM instance_workspace_id THEN
-        RAISE EXCEPTION 'execution session Run and Runtime Instance must use the same Workspace' USING ERRCODE = '23514';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER execution_sessions_workspace_check
-    BEFORE INSERT OR UPDATE OF project_id, run_id, runtime_instance_id ON execution_sessions
-    FOR EACH ROW EXECUTE FUNCTION enforce_execution_session_workspace();
 
 CREATE FUNCTION reject_immutable_row_mutation() RETURNS trigger AS $$
 BEGIN
