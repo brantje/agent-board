@@ -99,6 +99,28 @@ func (s *ProjectAccessService) RequireRole(ctx context.Context, actor Authentica
 	return role, nil
 }
 
+// AuthorizeRead is the shared application boundary for Project-scoped reads.
+// Transports authenticate the actor, while this boundary owns the fixed
+// viewer < member < admin policy.
+func (s *ProjectAccessService) AuthorizeRead(ctx context.Context, actor AuthenticatedUser, projectID string) error {
+	_, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleViewer)
+	return err
+}
+
+// AuthorizeWorkflowMutation is the shared application boundary for normal
+// Project workflow mutations such as Issue, Run, Question, and Review actions.
+func (s *ProjectAccessService) AuthorizeWorkflowMutation(ctx context.Context, actor AuthenticatedUser, projectID string) error {
+	_, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleMember)
+	return err
+}
+
+// AuthorizeAdministration is the shared application boundary for Project
+// configuration and Project access management.
+func (s *ProjectAccessService) AuthorizeAdministration(ctx context.Context, actor AuthenticatedUser, projectID string) error {
+	_, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin)
+	return err
+}
+
 func (s *ProjectAccessService) GetProject(ctx context.Context, actor AuthenticatedUser, projectID string) (store.Project, string, error) {
 	role, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleViewer)
 	if err != nil {
@@ -109,14 +131,144 @@ func (s *ProjectAccessService) GetProject(ctx context.Context, actor Authenticat
 }
 
 func (s *ProjectAccessService) UpdateProject(ctx context.Context, actor AuthenticatedUser, input store.Project) (store.Project, error) {
-	if _, err := s.RequireRole(ctx, actor, input.ID, store.ProjectRoleAdmin); err != nil {
+	if err := s.AuthorizeAdministration(ctx, actor, input.ID); err != nil {
 		return store.Project{}, err
 	}
 	return s.controlPlane.UpdateProject(ctx, input)
 }
 
+// The methods below deliberately wrap the existing workflow services instead
+// of reimplementing their lifecycles. They form the trusted application entry
+// points for human Project operations used by HTTP and any future transport.
+
+func (s *ProjectAccessService) ResolveIssueUUID(ctx context.Context, actor AuthenticatedUser, projectID, key string) (string, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return "", err
+	}
+	return s.controlPlane.ResolveIssueUUID(ctx, projectID, key)
+}
+
+func (s *ProjectAccessService) ListIssues(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.Issue, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.controlPlane.ListIssues(ctx, projectID)
+}
+
+func (s *ProjectAccessService) GetIssue(ctx context.Context, actor AuthenticatedUser, projectID, issueID string) (store.Issue, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return store.Issue{}, err
+	}
+	return s.controlPlane.GetIssue(ctx, projectID, issueID)
+}
+
+func (s *ProjectAccessService) CreateIssue(ctx context.Context, actor AuthenticatedUser, input store.Issue) (store.Issue, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
+		return store.Issue{}, err
+	}
+	return s.controlPlane.CreateIssue(ctx, input)
+}
+
+func (s *ProjectAccessService) UpdateIssue(ctx context.Context, actor AuthenticatedUser, input store.Issue) (store.Issue, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
+		return store.Issue{}, err
+	}
+	return s.controlPlane.UpdateIssue(ctx, input)
+}
+
+func (s *ProjectAccessService) AssignIssue(ctx context.Context, actor AuthenticatedUser, projectID, issueID, agentID string) (store.Issue, store.Run, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return store.Issue{}, store.Run{}, err
+	}
+	return s.controlPlane.AssignIssue(ctx, projectID, issueID, agentID)
+}
+
+func (s *ProjectAccessService) ListRuns(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.Run, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.controlPlane.ListRuns(ctx, projectID)
+}
+
+func (s *ProjectAccessService) GetRun(ctx context.Context, actor AuthenticatedUser, projectID, runID string) (store.Run, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return store.Run{}, err
+	}
+	return s.controlPlane.GetRun(ctx, projectID, runID)
+}
+
+func (s *ProjectAccessService) ListQuestions(ctx context.Context, actor AuthenticatedUser, questions *QuestionService, projectID string, filter store.QuestionFilter) ([]store.Question, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if questions == nil {
+		return nil, errors.New("question service is unavailable")
+	}
+	return questions.List(ctx, projectID, filter)
+}
+
+func (s *ProjectAccessService) GetQuestion(ctx context.Context, actor AuthenticatedUser, questions *QuestionService, projectID, questionID string) (store.Question, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return store.Question{}, err
+	}
+	if questions == nil {
+		return store.Question{}, errors.New("question service is unavailable")
+	}
+	return questions.Get(ctx, projectID, questionID)
+}
+
+func (s *ProjectAccessService) AnswerQuestion(ctx context.Context, actor AuthenticatedUser, questions *QuestionService, projectID, questionID string, answer store.QuestionAnswer) (store.AnswerQuestionResult, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return store.AnswerQuestionResult{}, err
+	}
+	if questions == nil {
+		return store.AnswerQuestionResult{}, errors.New("question service is unavailable")
+	}
+	return questions.Answer(ctx, projectID, questionID, answer, nil)
+}
+
+func (s *ProjectAccessService) ListReviews(ctx context.Context, actor AuthenticatedUser, reviews *ReviewService, projectID string, filter store.ReviewFilter) ([]store.Review, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	if reviews == nil {
+		return nil, errors.New("review service is unavailable")
+	}
+	return reviews.List(ctx, projectID, filter)
+}
+
+func (s *ProjectAccessService) GetReview(ctx context.Context, actor AuthenticatedUser, reviews *ReviewService, projectID, reviewID string) (ReviewInspection, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return ReviewInspection{}, err
+	}
+	if reviews == nil {
+		return ReviewInspection{}, errors.New("review service is unavailable")
+	}
+	return reviews.Get(ctx, projectID, reviewID)
+}
+
+func (s *ProjectAccessService) ApproveReview(ctx context.Context, actor AuthenticatedUser, reviews *ReviewService, projectID, reviewID string) (store.CompleteReviewApprovalResult, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return store.CompleteReviewApprovalResult{}, err
+	}
+	if reviews == nil {
+		return store.CompleteReviewApprovalResult{}, errors.New("review service is unavailable")
+	}
+	return reviews.Approve(ctx, projectID, reviewID, nil)
+}
+
+func (s *ProjectAccessService) RequestReviewChanges(ctx context.Context, actor AuthenticatedUser, reviews *ReviewService, projectID, reviewID, feedback string) (store.RequestReviewChangesResult, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return store.RequestReviewChangesResult{}, err
+	}
+	if reviews == nil {
+		return store.RequestReviewChangesResult{}, errors.New("review service is unavailable")
+	}
+	return reviews.RequestChanges(ctx, projectID, reviewID, feedback, nil)
+}
+
 func (s *ProjectAccessService) ListUserAccess(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.ProjectUserAccessView, error) {
-	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+	if err := s.AuthorizeAdministration(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
 	values, err := s.store.ListProjectUserAccess(ctx, projectID)
@@ -124,7 +276,7 @@ func (s *ProjectAccessService) ListUserAccess(ctx context.Context, actor Authent
 }
 
 func (s *ProjectAccessService) UpsertUserAccess(ctx context.Context, actor AuthenticatedUser, input store.ProjectUserAccess) (store.ProjectUserAccess, error) {
-	if _, err := s.RequireRole(ctx, actor, input.ProjectID, store.ProjectRoleAdmin); err != nil {
+	if err := s.AuthorizeAdministration(ctx, actor, input.ProjectID); err != nil {
 		return store.ProjectUserAccess{}, err
 	}
 	if !store.ValidProjectRole(input.Role) {
@@ -141,14 +293,14 @@ func (s *ProjectAccessService) UpsertUserAccess(ctx context.Context, actor Authe
 }
 
 func (s *ProjectAccessService) DeleteUserAccess(ctx context.Context, actor AuthenticatedUser, projectID, userID string) error {
-	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+	if err := s.AuthorizeAdministration(ctx, actor, projectID); err != nil {
 		return err
 	}
 	return projectAccessStoreError(s.store.DeleteProjectUserAccess(ctx, projectID, userID))
 }
 
 func (s *ProjectAccessService) ListGroupAccess(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.ProjectGroupAccessView, error) {
-	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+	if err := s.AuthorizeAdministration(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
 	values, err := s.store.ListProjectGroupAccess(ctx, projectID)
@@ -156,7 +308,7 @@ func (s *ProjectAccessService) ListGroupAccess(ctx context.Context, actor Authen
 }
 
 func (s *ProjectAccessService) UpsertGroupAccess(ctx context.Context, actor AuthenticatedUser, input store.ProjectGroupAccess) (store.ProjectGroupAccess, error) {
-	if _, err := s.RequireRole(ctx, actor, input.ProjectID, store.ProjectRoleAdmin); err != nil {
+	if err := s.AuthorizeAdministration(ctx, actor, input.ProjectID); err != nil {
 		return store.ProjectGroupAccess{}, err
 	}
 	if !store.ValidProjectRole(input.Role) {
@@ -181,14 +333,14 @@ func (s *ProjectAccessService) UpsertGroupAccess(ctx context.Context, actor Auth
 }
 
 func (s *ProjectAccessService) DeleteGroupAccess(ctx context.Context, actor AuthenticatedUser, projectID, groupID string) error {
-	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+	if err := s.AuthorizeAdministration(ctx, actor, projectID); err != nil {
 		return err
 	}
 	return projectAccessStoreError(s.store.DeleteProjectGroupAccess(ctx, projectID, groupID))
 }
 
 func (s *ProjectAccessService) SearchUsers(ctx context.Context, actor AuthenticatedUser, projectID, query string) ([]ProjectDirectoryUser, error) {
-	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+	if err := s.AuthorizeAdministration(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
 	users, err := s.store.ListProjectAccessUsers(ctx)
@@ -213,7 +365,7 @@ func (s *ProjectAccessService) SearchUsers(ctx context.Context, actor Authentica
 }
 
 func (s *ProjectAccessService) SearchGroups(ctx context.Context, actor AuthenticatedUser, projectID, query string) ([]ProjectDirectoryGroup, error) {
-	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+	if err := s.AuthorizeAdministration(ctx, actor, projectID); err != nil {
 		return nil, err
 	}
 	groups, err := s.store.ListProjectAccessGroups(ctx)
