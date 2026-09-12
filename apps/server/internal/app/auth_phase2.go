@@ -116,13 +116,26 @@ func (s *AuthService) CreatePendingUser(ctx context.Context, actor Authenticated
 	if err != nil {
 		return PendingUserResult{}, err
 	}
-	user, err := s.store.CreateUser(ctx, store.User{
+	extended, err := s.phase2Store()
+	if err != nil {
+		return PendingUserResult{}, err
+	}
+	rawToken, tokenHash, err := s.newOpaqueToken()
+	if err != nil {
+		return PendingUserResult{}, err
+	}
+	expiresAt := s.now().UTC().Add(passwordTokenTTL)
+	user, token, err := extended.CreatePendingUserWithSetupToken(ctx, store.User{
 		Username:       username,
 		Email:          email,
 		DisplayName:    displayName,
 		DeploymentRole: store.DeploymentRoleMember,
 		Status:         store.UserStatusPending,
 		AuthVersion:    1,
+	}, store.PasswordToken{
+		Purpose:   store.PasswordTokenPurposeSetup,
+		TokenHash: tokenHash,
+		ExpiresAt: expiresAt,
 	})
 	if errors.Is(err, store.ErrConflict) {
 		return PendingUserResult{}, NewError("conflict", "username or email is already in use", err)
@@ -130,11 +143,13 @@ func (s *AuthService) CreatePendingUser(ctx context.Context, actor Authenticated
 	if err != nil {
 		return PendingUserResult{}, err
 	}
-	setup, err := s.CreatePasswordToken(ctx, user.ID, store.PasswordTokenPurposeSetup)
-	if err != nil {
-		return PendingUserResult{}, err
-	}
-	return PendingUserResult{User: publicUser(user), Setup: setup}, nil
+	return PendingUserResult{
+		User: publicUser(user),
+		Setup: PasswordTokenSecret{
+			Token:     rawToken,
+			ExpiresAt: token.ExpiresAt,
+		},
+	}, nil
 }
 
 func (s *AuthService) AdminCreatePasswordToken(ctx context.Context, actor AuthenticatedUser, userID, purpose string) (PasswordTokenSecret, error) {
@@ -204,11 +219,24 @@ func (s *AuthService) UpdateOwnProfile(ctx context.Context, actor AuthenticatedU
 	return publicUser(user), nil
 }
 
-func (s *AuthService) ChangeOwnPassword(ctx context.Context, actor AuthenticatedUser, password string) (AuthenticatedUser, error) {
+func (s *AuthService) ChangeOwnPassword(ctx context.Context, actor AuthenticatedUser, currentPassword, newPassword string) (AuthenticatedUser, error) {
 	if err := requireAuthenticatedUser(actor); err != nil {
 		return AuthenticatedUser{}, err
 	}
-	return s.SetPassword(ctx, actor.ID, password, false)
+	if !actor.ForcePasswordChange {
+		if currentPassword == "" {
+			return AuthenticatedUser{}, authFailure()
+		}
+		user, err := s.store.GetUser(ctx, actor.ID)
+		if err != nil {
+			return AuthenticatedUser{}, authFailure()
+		}
+		valid, err := verifyPassword(user.PasswordHash, currentPassword)
+		if err != nil || !valid {
+			return AuthenticatedUser{}, authFailure()
+		}
+	}
+	return s.SetPassword(ctx, actor.ID, newPassword, false)
 }
 
 func (s *AuthService) ListOwnSessions(ctx context.Context, actor AuthenticatedUser) ([]AuthSessionInfo, error) {
