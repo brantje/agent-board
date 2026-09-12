@@ -10,6 +10,7 @@ import (
 // issue #76. Keeping this separate preserves the Phase 1 AuthStore contract for
 // existing focused test fakes and alternate implementations.
 type AuthPhase2Store interface {
+	CreatePendingUserWithSetupToken(context.Context, User, PasswordToken) (User, PasswordToken, error)
 	ListUsers(context.Context) ([]User, error)
 	UpdateUserIdentity(context.Context, string, string, string, string) (User, error)
 	ListUserAuthSessions(context.Context, string, time.Time) ([]AuthSession, error)
