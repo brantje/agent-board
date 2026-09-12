@@ -18,7 +18,7 @@ services:
         credential_file=/run/agent-board/postgres-password
         encryption_key_file=/run/agent-board/secret-encryption-key
         write_token_file=/run/agent-board/secret-write-token
-        auth_signing_key_file=/run/agent-board/auth-signing-key
+        auth_signing_key_file=/run/agent-board-auth/auth-signing-key
         umask 077
         printf '%s' 'agent_board_dev' > "$$credential_file"
         chmod 0444 "$$credential_file"
@@ -56,8 +56,8 @@ services:
         if [ -z "$$AGENT_BOARD_SECRET_WRITE_TOKEN" ] && [ -s /run/agent-board/secret-write-token ]; then
           export AGENT_BOARD_SECRET_WRITE_TOKEN="$$(cat /run/agent-board/secret-write-token)"
         fi
-        if [ -z "$$AGENT_BOARD_AUTH_SIGNING_KEY" ] && [ -s /run/agent-board/auth-signing-key ]; then
-          export AGENT_BOARD_AUTH_SIGNING_KEY="$$(cat /run/agent-board/auth-signing-key)"
+        if [ -z "$$AGENT_BOARD_AUTH_SIGNING_KEY" ] && [ -s /run/agent-board-auth/auth-signing-key ]; then
+          export AGENT_BOARD_AUTH_SIGNING_KEY="$$(cat /run/agent-board-auth/auth-signing-key)"
         fi
         exec air -c .air.toml
     env_file:
