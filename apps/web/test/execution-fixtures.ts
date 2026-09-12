@@ -146,7 +146,8 @@ export const candidateArtifacts: ArtifactEvidence[] = [
 export function reviewDetail(overrides: Partial<ReviewDetail> = {}): ReviewDetail {
   const fileEvents = [
     event({ id: 'file-del', type: 'file.deleted', sequence: 4, payload: { path: 'gone.txt' } }),
-    event({ id: 'file-ren', type: 'file.renamed', sequence: 5, payload: { path: 'renamed.txt', oldPath: 'old.txt' } })
+    event({ id: 'file-ren', type: 'file.renamed', sequence: 5, payload: { path: 'renamed.txt', oldPath: 'old.txt' } }),
+    event({ id: 'file-mod', type: 'file.modified', sequence: 6, payload: { path: 'index.html' } })
   ]
   return {
     review: review(),

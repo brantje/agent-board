@@ -1,10 +1,14 @@
 import { mount, flushPromises } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ReviewDetail from '../app/components/ReviewDetail.vue'
+import RunChangedFilesCard from '../app/components/RunChangedFilesCard.vue'
 import { candidateArtifacts, reviewDetail, run } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
-const global = { stubs: { ...uiStubs, NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' } } }
+const global = {
+  stubs: { ...uiStubs, NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' } },
+  components: { RunChangedFilesCard }
+}
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(value => value.text() === label)!
 
 afterEach(() => vi.unstubAllGlobals())
@@ -20,10 +24,11 @@ describe('ReviewDetail', () => {
     expect(wrapper.text()).toContain('candidate-staged.patch')
     expect(wrapper.text()).toContain('candidate-unstaged.patch')
     expect(wrapper.text()).toContain('candidate-manifest.json')
+    expect(wrapper.get('[data-changed-files]').text()).toContain('Changed files 3')
+    expect(wrapper.get('[data-changed-files]').text()).toContain('gone.txt')
+    expect(wrapper.get('[data-changed-files]').text()).toContain('index.html')
+    expect(wrapper.get('[data-changed-files]').text()).toContain('old.txt → renamed.txt')
     expect(wrapper.text()).toContain('new.txt')
-    expect(wrapper.text()).toContain('gone.txt')
-    expect(wrapper.text()).toContain('old.txt')
-    expect(wrapper.text()).toContain('renamed.txt')
     expect(wrapper.text()).toContain('git status')
     expect(wrapper.text()).toContain('Candidate is ready.')
     expect(wrapper.get('a[href="/api/projects/project-a/runs/run-1/artifacts/art-staged"]').exists()).toBe(true)
