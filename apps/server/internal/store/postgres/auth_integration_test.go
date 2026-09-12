@@ -167,6 +167,11 @@ func TestAuthStorePasswordMutationAndDisableInvalidateSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	backupAdmin := authUser("backup-admin", "backup-admin@example.com", store.UserStatusActive)
+	backupAdmin.DeploymentRole = store.DeploymentRoleAdmin
+	if _, err := s.CreateUser(ctx, backupAdmin); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now().UTC()
 
 	hash := make([]byte, 32)
