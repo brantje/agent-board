@@ -19,7 +19,6 @@ type runFixture struct {
 	workspace store.Workspace
 	provider  store.Provider
 	model     store.ModelProfile
-	runtime   store.Runtime
 	agent     store.Agent
 	run       store.Run
 }
@@ -59,10 +58,6 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create model: %v", err)
 	}
-	runtime, err := s.CreateRuntime(ctx, store.Runtime{ProjectID: &project.ID, Name: "runtime-" + suffix, Kind: "docker", Image: "test", NetworkPolicy: "restricted", Enabled: true})
-	if err != nil {
-		t.Fatalf("create runtime: %v", err)
-	}
 	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
@@ -79,7 +74,7 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
-	return runFixture{project, issue, workspace, provider, model, runtime, agent, run}
+	return runFixture{project: project, issue: issue, workspace: workspace, provider: provider, model: model, agent: agent, run: run}
 }
 
 func TestExecutionPersistenceInvariants(t *testing.T) {
@@ -101,39 +96,30 @@ func TestExecutionPersistenceInvariants(t *testing.T) {
 		t.Fatalf("cross-project run error=%v", err)
 	}
 
-	instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
-		ProjectID: f.project.ID, WorkspaceID: f.workspace.ID, RuntimeID: f.runtime.ID,
-	})
+	runnerRecord, err := s.CreateRunner(ctx, store.Runner{Name: "execution-host", TokenHash: make([]byte, 32)})
 	if err != nil {
-		t.Fatalf("create runtime instance: %v", err)
+		t.Fatalf("create runner: %v", err)
 	}
-	if instance.Status != "PROVISIONING" || instance.RunnerStatus != "CONNECTING" {
-		t.Fatalf("runtime defaults=%+v", instance)
-	}
-	external := "container-1"
-	instance, err = s.UpdateRuntimeInstanceState(ctx, f.project.ID, instance.ID, "RUNNING", &external, "READY", json.RawMessage(`{"safe":true}`))
-	if err != nil || instance.WorkspaceID != f.workspace.ID || instance.StartedAt == nil {
-		t.Fatalf("update runtime instance: got=%+v err=%v", instance, err)
-	}
-	if _, err := s.UpdateRuntimeInstanceState(ctx, other.project.ID, instance.ID, "RUNNING", nil, "READY", nil); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("cross-project instance update error=%v", err)
-	}
-
 	session, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
-		ProjectID: f.project.ID, RunID: f.run.ID, RuntimeInstanceID: instance.ID,
+		ProjectID: f.project.ID, RunID: f.run.ID, RunnerID: runnerRecord.ID,
 	})
-	if err != nil || session.Status != "PENDING" || session.CWD != "/workspace" {
+	if err != nil || session.Status != "PENDING" || session.CWD != "/workspace" || session.RunnerID != runnerRecord.ID {
 		t.Fatalf("create session: got=%+v err=%v", session, err)
 	}
 	if _, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
-		ProjectID: f.project.ID, RunID: f.run.ID, RuntimeInstanceID: instance.ID,
-	}); err == nil {
-		t.Fatal("expected one-active-session constraint")
+		ProjectID: f.project.ID, RunID: f.run.ID, RunnerID: runnerRecord.ID,
+	}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("second active session error=%v, want ErrConflict", err)
 	}
 	if _, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
-		ProjectID: other.project.ID, RunID: other.run.ID, RuntimeInstanceID: instance.ID, Status: "COMPLETED",
-	}); err == nil {
-		t.Fatal("expected cross-workspace session rejection")
+		ProjectID: f.project.ID, RunID: f.run.ID,
+	}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("missing runner error=%v, want ErrInvalidArgument", err)
+	}
+	if _, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: other.project.ID, RunID: f.run.ID, RunnerID: runnerRecord.ID, Status: "COMPLETED",
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-project run/session error=%v", err)
 	}
 
 	q, err := s.CreateQuestion(ctx, store.Question{
@@ -293,7 +279,7 @@ func TestEvidencePersistenceIsImmutableOrderedAndScoped(t *testing.T) {
 	f := seedRunFixture(t, s, "evidence")
 	other := seedRunFixture(t, s, "evidence-other")
 
-	snapshot := json.RawMessage(`{"runtime":{"id":"runtime"}}`)
+	snapshot := json.RawMessage(`{"runner":{"id":"runner"}}`)
 	if err := s.PutRunProvenance(ctx, f.project.ID, f.run.ID, snapshot); err != nil {
 		t.Fatalf("put provenance: %v", err)
 	}
