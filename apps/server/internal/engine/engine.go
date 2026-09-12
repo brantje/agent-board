@@ -8,8 +8,8 @@ import (
 )
 
 // ProcessLauncher is the only process capability exposed to Engine adapters.
-// Implementations remain responsible for Runtime/runner transport details and
-// the trusted execution-context/redaction boundary.
+// Implementations remain responsible for Runner transport details and the
+// trusted execution-context/redaction boundary.
 type ProcessLauncher interface {
 	Start(context.Context, ProcessRequest) (Process, error)
 }
@@ -27,7 +27,6 @@ type ProcessRequest struct {
 	CWD                   string
 	Env                   map[string]string
 	ProviderCredentialEnv string
-	RuntimeSecretRefs     map[string]string
 	Kind                  string
 	Name                  string
 }
