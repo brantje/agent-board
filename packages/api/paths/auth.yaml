@@ -65,6 +65,11 @@ passwordInput:
         required: [password]
         properties:
           password: {type: string, minLength: 1, writeOnly: true}
+selfPasswordInput:
+  required: true
+  content:
+    application/json:
+      schema: {$ref: ../schemas/auth.yaml#/SelfPasswordChange}
 authSettingsInput:
   required: true
   content:
@@ -174,6 +179,9 @@ users:
     responses:
       '200':
         description: Deployment users visible to a deployment admin.
+        headers:
+          Cache-Control:
+            schema: {type: string, const: no-store}
         content:
           application/json:
             schema: {type: array, items: {$ref: ../schemas/auth.yaml#/AuthUser}}
@@ -237,7 +245,7 @@ mePassword:
   put:
     operationId: changeAuthenticatedUserPassword
     security: [{BearerAuth: []}]
-    requestBody: {$ref: '#/passwordInput'}
+    requestBody: {$ref: '#/selfPasswordInput'}
     responses:
       '200': {$ref: '#/userResponse'}
       default: {$ref: ../components/api-components.yaml#/responses/Error}
@@ -278,6 +286,9 @@ authSettings:
     responses:
       '200':
         description: Authoritative deployment authentication settings.
+        headers:
+          Cache-Control:
+            schema: {type: string, const: no-store}
         content:
           application/json:
             schema: {$ref: ../schemas/auth.yaml#/AuthSettings}
