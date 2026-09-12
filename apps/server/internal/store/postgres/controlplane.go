@@ -208,37 +208,6 @@ func (s *Store) UpdateModelProfile(ctx context.Context, scope *string, input sto
 	return scanModelProfile(s.pool.QueryRow(ctx, `UPDATE model_profiles SET provider_id=$3, name=$4, model=$5, temperature=$6, max_tokens=$7, max_concurrent=$8, generation_settings=$9, enabled=$10, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, provider_id::text, name, model, temperature, max_tokens, max_concurrent, generation_settings, enabled, created_at, updated_at`, scope, input.ID, input.ProviderID, input.Name, input.Model, input.Temperature, input.MaxTokens, input.MaxConcurrent, objectJSON(input.GenerationSettings), input.Enabled))
 }
 
-func (s *Store) ListRuntimes(ctx context.Context, projectID *string) ([]store.Runtime, error) {
-	project, scoped := visibleScope(projectID)
-	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status, created_at, updated_at FROM runtimes WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []store.Runtime
-	for rows.Next() {
-		value, err := scanRuntime(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, value)
-	}
-	return out, rows.Err()
-}
-
-func (s *Store) GetRuntime(ctx context.Context, projectID *string, id string) (store.Runtime, error) {
-	project, scoped := visibleScope(projectID)
-	return scanRuntime(s.pool.QueryRow(ctx, `SELECT id::text, project_id::text, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status, created_at, updated_at FROM runtimes WHERE id=$3 AND (($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL))`, nullableUUID(project, scoped), scoped, id))
-}
-
-func (s *Store) UpdateRuntime(ctx context.Context, scope *string, input store.Runtime) (store.Runtime, error) {
-	allowedSecretRefs := input.AllowedSecretRefs
-	if allowedSecretRefs == nil {
-		allowedSecretRefs = []string{}
-	}
-	return scanRuntime(s.pool.QueryRow(ctx, `UPDATE runtimes SET name=$3, kind=$4, image=$5, cpu_limit_millis=$6, memory_limit_bytes=$7, pid_limit=$8, timeout_seconds=$9, network_policy=$10, workspace_policy=$11, allowed_secret_refs=$12, capabilities=$13, enabled=$14, updated_at=now() WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid RETURNING id::text, project_id::text, name, kind, image, cpu_limit_millis, memory_limit_bytes, pid_limit, timeout_seconds, network_policy, workspace_policy, allowed_secret_refs, capabilities, enabled, health_status, created_at, updated_at`, scope, input.ID, input.Name, input.Kind, input.Image, input.CPULimitMillis, input.MemoryLimitBytes, input.PIDLimit, input.TimeoutSeconds, input.NetworkPolicy, input.WorkspacePolicy, allowedSecretRefs, objectJSON(input.Capabilities), input.Enabled))
-}
-
 func (s *Store) ListAgents(ctx context.Context, projectID *string) ([]store.Agent, error) {
 	project, scoped := visibleScope(projectID)
 	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, engine_settings, concurrency_limit, state, created_at, updated_at FROM agents WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
