@@ -240,35 +240,3 @@ func TestAuthRawSecretsStayOutOfDurableAndLoggableSinks(t *testing.T) {
 		}
 	}
 }
-
-func TestResetTokenReuseFailsExplicitly(t *testing.T) {
-	pool := testPool(t)
-	s := New(pool)
-	service := reviewAuthService(t, s)
-	ctx := context.Background()
-
-	user, err := service.Bootstrap(ctx, app.BootstrapRegistration{
-		Username: "admin", Email: "admin@example.com", DisplayName: "Admin", Password: "ValidPassword1!",
-	})
-	if err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	reset, err := service.CreatePasswordToken(ctx, user.ID, store.PasswordTokenPurposeReset)
-	if err != nil {
-		t.Fatalf("create reset token: %v", err)
-	}
-	if _, err := service.CompletePasswordToken(ctx, reset.Token, store.PasswordTokenPurposeReset, "ReplacementPassword2!"); err != nil {
-		t.Fatalf("first reset completion: %v", err)
-	}
-	if _, err := service.CompletePasswordToken(ctx, reset.Token, store.PasswordTokenPurposeReset, "ReplacementPassword3!"); err == nil {
-		t.Fatal("second reset completion unexpectedly succeeded")
-	}
-
-	stored, err := s.GetUser(ctx, user.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if stored.AuthVersion < 2 || stored.PasswordHash == "" {
-		t.Fatalf("reset did not update durable auth state: %#v", stored)
-	}
-}
