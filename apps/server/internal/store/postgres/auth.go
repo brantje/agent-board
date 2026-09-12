@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -168,6 +169,17 @@ func (s *Store) GetUserByLogin(ctx context.Context, login string) (store.User, e
 }
 
 func (s *Store) SetUserStatus(ctx context.Context, id, status string) (store.User, error) {
+	return s.setUserStatus(ctx, id, status, false)
+}
+
+func (s *Store) SetUserDisabled(ctx context.Context, id string, disabled bool) (store.User, error) {
+	if disabled {
+		return s.setUserStatus(ctx, id, store.UserStatusDisabled, false)
+	}
+	return s.setUserStatus(ctx, id, store.UserStatusActive, true)
+}
+
+func (s *Store) setUserStatus(ctx context.Context, id, status string, deriveEnabledStatus bool) (store.User, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return store.User{}, err
@@ -177,12 +189,17 @@ func (s *Store) SetUserStatus(ctx context.Context, id, status string) (store.Use
 	// Deployment-admin availability is a deployment-global invariant. This
 	// table lock serializes status mutations so two admins cannot concurrently
 	// disable each other after both observing that another active admin exists.
+	// It also serializes re-enable with password writes so the target status is
+	// derived from the password state that is current at mutation time.
 	if _, err := tx.Exec(ctx, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
 		return store.User{}, err
 	}
-	var current, deploymentRole string
-	if err := tx.QueryRow(ctx, `SELECT status,deployment_role FROM users WHERE id=$1 FOR UPDATE`, id).Scan(&current, &deploymentRole); err != nil {
+	var current, deploymentRole, passwordHash string
+	if err := tx.QueryRow(ctx, `SELECT status,deployment_role,COALESCE(password_hash,'') FROM users WHERE id=$1 FOR UPDATE`, id).Scan(&current, &deploymentRole, &passwordHash); err != nil {
 		return store.User{}, notFound(err)
+	}
+	if deriveEnabledStatus && passwordHash == "" {
+		status = store.UserStatusPending
 	}
 	if current == status {
 		value, err := scanUser(tx.QueryRow(ctx, `SELECT `+userColumns+` FROM users WHERE id=$1`, id))
@@ -221,21 +238,51 @@ func (s *Store) SetUserStatus(ctx context.Context, id, status string) (store.Use
 }
 
 func (s *Store) SetUserPassword(ctx context.Context, id, passwordHash string, forcePasswordChange bool) (store.User, error) {
+	return s.setUserPassword(ctx, id, nil, passwordHash, forcePasswordChange)
+}
+
+func (s *Store) SetUserPasswordIfAuthVersion(ctx context.Context, id string, expectedAuthVersion int64, passwordHash string, forcePasswordChange bool) (store.User, error) {
+	return s.setUserPassword(ctx, id, &expectedAuthVersion, passwordHash, forcePasswordChange)
+}
+
+func (s *Store) setUserPassword(ctx context.Context, id string, expectedAuthVersion *int64, passwordHash string, forcePasswordChange bool) (store.User, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return store.User{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	value, err := scanUser(tx.QueryRow(ctx, `
-		UPDATE users
-		SET password_hash=$2,
-		    status=CASE WHEN status='pending' THEN 'active' ELSE status END,
-		    force_password_change=$3,
-		    auth_version=auth_version+1,
-		    updated_at=now()
-		WHERE id=$1
-		RETURNING `+userColumns, id, passwordHash, forcePasswordChange))
+	var value store.User
+	if expectedAuthVersion == nil {
+		value, err = scanUser(tx.QueryRow(ctx, `
+			UPDATE users
+			SET password_hash=$2,
+			    status=CASE WHEN status='pending' THEN 'active' ELSE status END,
+			    force_password_change=$3,
+			    auth_version=auth_version+1,
+			    updated_at=now()
+			WHERE id=$1
+			RETURNING `+userColumns, id, passwordHash, forcePasswordChange))
+	} else {
+		value, err = scanUser(tx.QueryRow(ctx, `
+			UPDATE users
+			SET password_hash=$2,
+			    status=CASE WHEN status='pending' THEN 'active' ELSE status END,
+			    force_password_change=$3,
+			    auth_version=auth_version+1,
+			    updated_at=now()
+			WHERE id=$1 AND auth_version=$4
+			RETURNING `+userColumns, id, passwordHash, forcePasswordChange, *expectedAuthVersion))
+		if errors.Is(err, store.ErrNotFound) {
+			var exists bool
+			if existsErr := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE id=$1)`, id).Scan(&exists); existsErr != nil {
+				return store.User{}, existsErr
+			}
+			if exists {
+				return store.User{}, store.ErrConflict
+			}
+		}
+	}
 	if err != nil {
 		return store.User{}, err
 	}
