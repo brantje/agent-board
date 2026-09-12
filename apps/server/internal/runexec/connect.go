@@ -9,12 +9,12 @@ import (
 )
 
 type sessionDialService interface {
-	DialSession(context.Context, string, string, string, string, string) (net.Conn, error)
+	DialSession(context.Context, string, string, string, string) (net.Conn, error)
 }
 
-// DialContext lets an Engine connect only through the Execution Session that
-// owns this process. The adapter never receives runner, Runtime or WebSocket
-// objects; it sees only the standard net.Conn contract.
+// DialContext lets an Engine connect only through the Runner-owned Execution
+// Session that owns this process. The adapter sees only the standard net.Conn
+// contract and never receives Runner or WebSocket objects.
 func (p *capturingProcess) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
 	if p == nil || p.process == nil || p.launcher == nil {
 		return nil, fmt.Errorf("run execution: process session connector is unavailable")
@@ -24,16 +24,10 @@ func (p *capturingProcess) DialContext(ctx context.Context, network, address str
 		return nil, fmt.Errorf("run execution: process session connector is unsupported")
 	}
 	record := p.process.Record()
-	if record.ID == "" || record.ProjectID == "" {
-		return nil, fmt.Errorf("run execution: process has no durable Execution Session binding")
+	if record.ID == "" || record.ProjectID == "" || record.RunnerID == "" {
+		return nil, fmt.Errorf("run execution: process has no durable Runner-owned Execution Session binding")
 	}
-	if record.RunnerID != "" {
-		return dialer.DialSession(ctx, record.ProjectID, "", record.ID, network, address)
-	}
-	if record.RuntimeInstanceID == "" {
-		return nil, fmt.Errorf("run execution: process has no durable Execution Session binding")
-	}
-	return dialer.DialSession(ctx, record.ProjectID, record.RuntimeInstanceID, record.ID, network, address)
+	return dialer.DialSession(ctx, record.ProjectID, record.ID, network, address)
 }
 
 var _ engine.SessionConnector = (*capturingProcess)(nil)
