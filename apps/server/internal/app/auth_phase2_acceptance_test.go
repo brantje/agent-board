@@ -182,7 +182,7 @@ func TestPhase2SharedProfilePasswordSettingsAndSessionPolicy(t *testing.T) {
 	if _, err := service.AdminSetPassword(ctx, updated, member.ID, "not-complex-enough"); err == nil {
 		t.Fatal("admin password path ignored shared password policy")
 	}
-	if _, err := service.ChangeOwnPassword(ctx, updated, "not-complex-enough"); err == nil {
+	if _, err := service.ChangeOwnPassword(ctx, updated, "long-enough-password", "not-complex-enough"); err == nil {
 		t.Fatal("self password path ignored shared password policy")
 	}
 
@@ -193,7 +193,7 @@ func TestPhase2SharedProfilePasswordSettingsAndSessionPolicy(t *testing.T) {
 	if beforeChange.AccessTokenExpiresAt.Sub(now) != 2*time.Hour || beforeChange.RefreshTokenExpiresAt.Sub(now) != 7*24*time.Hour {
 		t.Fatalf("configured token lifetimes not used: access=%v refresh=%v", beforeChange.AccessTokenExpiresAt.Sub(now), beforeChange.RefreshTokenExpiresAt.Sub(now))
 	}
-	if _, err := service.ChangeOwnPassword(ctx, updated, "ValidPassword123!"); err != nil {
+	if _, err := service.ChangeOwnPassword(ctx, updated, "long-enough-password", "ValidPassword123!"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := service.AuthenticateAccessToken(ctx, beforeChange.AccessToken); err == nil {
