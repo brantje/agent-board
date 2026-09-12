@@ -45,6 +45,9 @@ func (s *reviewFeedbackStore) GetRuntime(context.Context, *string, string) (stor
 func (s *reviewFeedbackStore) GetReview(context.Context, string, string) (store.Review, error) {
 	return store.Review{}, store.ErrNotFound
 }
+func (s *reviewFeedbackStore) GetReviewByRun(context.Context, string, string) (store.Review, error) {
+	return store.Review{}, store.ErrNotFound
+}
 func (s *reviewFeedbackStore) ListReviews(context.Context, string, store.ReviewFilter) ([]store.Review, error) {
 	return append([]store.Review(nil), s.reviews...), nil
 }

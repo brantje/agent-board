@@ -23,6 +23,10 @@ func (s *reviewForwardStore) GetReview(context.Context, string, string) (store.R
 	s.calls = append(s.calls, "get")
 	return s.review, nil
 }
+func (s *reviewForwardStore) GetReviewByRun(context.Context, string, string) (store.Review, error) {
+	s.calls = append(s.calls, "get-by-run")
+	return s.review, nil
+}
 func (s *reviewForwardStore) ListReviews(context.Context, string, store.ReviewFilter) ([]store.Review, error) {
 	s.calls = append(s.calls, "list")
 	return []store.Review{s.review}, nil

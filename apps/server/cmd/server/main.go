@@ -28,7 +28,6 @@ import (
 	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/secrets"
-	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
@@ -319,9 +318,9 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if err != nil {
 		return err
 	}
-	if reviewStore, ok := services.ExecutionStore.(store.ReviewStore); ok {
+	if lookup, ok := services.ExecutionStore.(app.RunEvidenceReviewStore); ok {
 		if gitCLI, ok := git.(*workspace.GitCLI); ok {
-			runEvidence.ConfigureReviewFileChanges(reviewStore, gitCLI)
+			runEvidence.ConfigureReviewFileChanges(lookup, gitCLI)
 		}
 	}
 	services.RunEvidence = runEvidence

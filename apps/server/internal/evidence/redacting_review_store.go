@@ -27,6 +27,14 @@ func (s *RedactingStore) GetReview(ctx context.Context, projectID, reviewID stri
 	return base.GetReview(ctx, projectID, reviewID)
 }
 
+func (s *RedactingStore) GetReviewByRun(ctx context.Context, projectID, runID string) (store.Review, error) {
+	base, err := s.reviewStore()
+	if err != nil {
+		return store.Review{}, err
+	}
+	return base.GetReviewByRun(ctx, projectID, runID)
+}
+
 func (s *RedactingStore) ListReviews(ctx context.Context, projectID string, filter store.ReviewFilter) ([]store.Review, error) {
 	base, err := s.reviewStore()
 	if err != nil {
