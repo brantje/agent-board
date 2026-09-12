@@ -78,6 +78,8 @@ describe('intentional configuration inputs', () => {
     expect(validateDraft('agents', { ...draftFor('agents'), name: 'Agent', modelProfileId: 'm', engine: 'unknown', concurrencyLimit: 1, state: 'ENABLED' }).map(error => error.name)).toContain('engine')
     expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', safeMetadata: '[]' }).map(error => error.name)).toContain('safeMetadata')
     expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', safeMetadata: 'null' }).map(error => error.name)).toContain('safeMetadata')
+    expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', safeMetadata: '"metadata"' }).map(error => error.name)).toContain('safeMetadata')
+    expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', safeMetadata: '{' }).map(error => error.name)).toContain('safeMetadata')
   })
 
   it('labels scope and marks directly unrunnable choices unavailable', () => {
