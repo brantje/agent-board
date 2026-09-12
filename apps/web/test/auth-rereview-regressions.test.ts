@@ -101,17 +101,21 @@ describe('phase 2 auth rereview regressions', () => {
     ['HTTP 5xx', () => Promise.resolve(json({ error: { code: 'temporary' } }, 503))]
   ])('preserves credentials after refresh %s', async (_name, response) => {
     installState()
+    seedPersistentCredentials()
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
-      if (path === '/api/auth/login') return json(tokens('one'))
+      if (path === '/api/auth/me') return json(activeUser)
       if (path === '/api/auth/refresh') return response()
       throw new Error(`unexpected fetch ${path}`)
     }))
 
     const auth = useAuth()
-    await auth.login('admin', 'long-enough-password', true)
+    await auth.initialize()
+    expect(auth.persistent.value).toBe(true)
+    expect(localStorage.getItem(AUTH_STORAGE_KEY)).not.toBeNull()
+
     expect(await auth.refresh()).toBe(false)
-    expect(auth.credentials.value?.refreshToken).toBe('test-refresh-one')
+    expect(auth.credentials.value?.refreshToken).toBe('test-refresh-stored')
     expect(localStorage.getItem(AUTH_STORAGE_KEY)).not.toBeNull()
   })
 
