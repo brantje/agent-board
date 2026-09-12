@@ -50,13 +50,13 @@ describe('auth credential persistence', () => {
 
 describe('auth route policy', () => {
   it('blocks normal application flow during forced password change', () => {
-    expect(authRedirect('/projects', true, true, false)).toBe('/account/password')
-    expect(authRedirect('/account/password', true, true, false)).toBeNull()
+    expect(authRedirect('/projects', true, true, false)).toBe('/account')
+    expect(authRedirect('/account', true, true, false)).toBeNull()
   })
 
   it('requires authentication and keeps admin settings admin-only', () => {
-    expect(authRedirect('/projects', false, false, false)).toBe('/login')
-    expect(authRedirect('/login', false, false, false)).toBeNull()
+    expect(authRedirect('/projects', false, false, false)).toBe('/auth/login')
+    expect(authRedirect('/auth/login', false, false, false)).toBeNull()
     expect(authRedirect('/settings/users', true, false, false)).toBe('/account')
     expect(authRedirect('/settings/users', true, false, true)).toBeNull()
   })
