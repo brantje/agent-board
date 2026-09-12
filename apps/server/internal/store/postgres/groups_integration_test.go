@@ -84,7 +84,8 @@ func TestGroupStoreConstraints(t *testing.T) {
 	s := New(pool)
 	ctx := context.Background()
 
-	if _, err := s.CreateGroup(ctx, store.Group{Name: "team"}); err != nil {
+	group, err := s.CreateGroup(ctx, store.Group{Name: "team"})
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreateGroup(ctx, store.Group{Name: "team"}); !errors.Is(err, store.ErrConflict) {
@@ -102,8 +103,18 @@ func TestGroupStoreConstraints(t *testing.T) {
 	if err := s.DeleteGroup(ctx, "00000000-0000-0000-0000-000000000999"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing group delete = %v", err)
 	}
-	if err := s.AddGroupMember(ctx, "00000000-0000-0000-0000-000000000999", "00000000-0000-0000-0000-000000000998"); !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("invalid group/user membership = %v", err)
+
+	user, err := s.CreateUser(ctx, authUser("valid-member", "valid-member@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingGroupID := "00000000-0000-0000-0000-000000000999"
+	if err := s.AddGroupMember(ctx, missingGroupID, user.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing group membership = %v", err)
+	}
+	missingUserID := "00000000-0000-0000-0000-000000000998"
+	if err := s.AddGroupMember(ctx, group.ID, missingUserID); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid user membership = %v", err)
 	}
 }
 

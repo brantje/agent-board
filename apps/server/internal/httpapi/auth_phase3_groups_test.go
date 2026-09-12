@@ -159,8 +159,8 @@ func TestPhase3GroupHTTPAdminCRUDAndMembership(t *testing.T) {
 		t.Fatalf("update group status=%d body=%s", updated.Code, updated.Body.String())
 	}
 	listed := authHTTPRequest(t, handler, http.MethodGet, "/api/groups", "", headers)
-	if listed.Code != http.StatusOK {
-		t.Fatalf("list groups status=%d body=%s", listed.Code, listed.Body.String())
+	if listed.Code != http.StatusOK || listed.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("list groups status=%d cache=%q body=%s", listed.Code, listed.Header().Get("Cache-Control"), listed.Body.String())
 	}
 
 	disabledID := "00000000-0000-0000-0000-000000000099"
