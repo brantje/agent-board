@@ -1,7 +1,7 @@
 import { ref, shallowRef, watch, onBeforeUnmount, toValue, type MaybeRefOrGetter } from 'vue'
 import { apiRequest, providerModelsPath, type ApiError, type ProviderModel } from '../utils/api'
 
-type ProviderModelList = { models: ProviderModel[] }
+type ProviderModelList = { models: ProviderModel[]; total?: number }
 
 export function useProviderModels(providerId: MaybeRefOrGetter<string>, projectId?: MaybeRefOrGetter<string | undefined>) {
   const models = shallowRef<ProviderModel[]>([])

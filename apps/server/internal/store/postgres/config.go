@@ -15,7 +15,7 @@ func (s *Store) CreateProvider(ctx context.Context, input store.Provider) (store
 	return scanProvider(s.pool.QueryRow(ctx, `
 		INSERT INTO providers (project_id, name, kind, base_url, credential_ref, enabled, health_status, safe_metadata)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id::text, project_id::text, name, kind, base_url, credential_ref, enabled, health_status, safe_metadata, created_at, updated_at
+		RETURNING `+providerSelectColumns+`
 	`, input.ProjectID, input.Name, input.Kind, input.BaseURL, input.CredentialRef, input.Enabled, health, objectJSON(input.SafeMetadata)))
 }
 
@@ -71,9 +71,11 @@ func (s *Store) GetAgent(ctx context.Context, projectID, agentID string) (store.
 	`, projectID, agentID))
 }
 
+const providerSelectColumns = `id::text, project_id::text, name, kind, base_url, credential_ref, enabled, health_status, filtered_model_count, total_model_count, safe_metadata, created_at, updated_at`
+
 func scanProvider(row pgx.Row) (store.Provider, error) {
 	var value store.Provider
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Kind, &value.BaseURL, &value.CredentialRef, &value.Enabled, &value.HealthStatus, &value.SafeMetadata, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.Kind, &value.BaseURL, &value.CredentialRef, &value.Enabled, &value.HealthStatus, &value.FilteredModelCount, &value.TotalModelCount, &value.SafeMetadata, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Provider{}, notFound(err)
 	}
 	return value, nil

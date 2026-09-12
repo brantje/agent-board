@@ -58,7 +58,7 @@ func TestResolveBaseURLRequiresBaseURLForBuiltInWithoutDefault(t *testing.T) {
 }
 
 func TestListModelsParsesOpenAIResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models" {
 			t.Fatalf("path=%s", r.URL.Path)
 		}
@@ -75,13 +75,44 @@ func TestListModelsParsesOpenAIResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := &http.Client{}
-	models, err := ListModels(context.Background(), client, server.URL, []byte("secret-key"))
+	models, upstreamTotal, err := ListModels(context.Background(), server.Client(), server.URL, []byte("secret-key"))
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
 	if len(models) != 2 || models[0].ID != "gpt-a" || models[1].ID != "gpt-z" {
 		t.Fatalf("models=%v", models)
+	}
+	if upstreamTotal != 3 {
+		t.Fatalf("upstreamTotal=%d", upstreamTotal)
+	}
+}
+
+func TestListModelsPreservesUpstreamTotalWithFilteredModels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{
+				{"id": "model-a"},
+				{"id": "model-a"},
+				{"id": ""},
+				{"id": "model-b"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	models, upstreamTotal, err := ListModels(context.Background(), server.Client(), server.URL, nil)
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if len(models) != 2 || upstreamTotal != 4 {
+		t.Fatalf("models=%v upstreamTotal=%d", models, upstreamTotal)
+	}
+}
+
+func TestListModelsRejectsHTTPCredentialedDiscovery(t *testing.T) {
+	_, _, err := ListModels(context.Background(), &http.Client{}, "http://example.com/v1", []byte("secret-key"))
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
@@ -91,14 +122,14 @@ func TestListModelsRejectsInvalidJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := ListModels(context.Background(), server.Client(), server.URL, nil)
+	_, _, err := ListModels(context.Background(), server.Client(), server.URL, nil)
 	if err == nil || !strings.Contains(err.Error(), "decode response") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
 func TestListModelsRequiresHTTPClient(t *testing.T) {
-	_, err := ListModels(context.Background(), nil, "https://example.com/v1", nil)
+	_, _, err := ListModels(context.Background(), nil, "https://example.com/v1", nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -112,7 +143,7 @@ func TestListModelsIncludesDisplayName(t *testing.T) {
 	}))
 	defer server.Close()
 
-	models, err := ListModels(context.Background(), server.Client(), server.URL, nil)
+	models, _, err := ListModels(context.Background(), server.Client(), server.URL, nil)
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
@@ -122,20 +153,20 @@ func TestListModelsIncludesDisplayName(t *testing.T) {
 }
 
 func TestListModelsRejectsUpstreamFailure(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = io.WriteString(w, `{"error":"bad key"}`)
 	}))
 	defer server.Close()
 
-	_, err := ListModels(context.Background(), server.Client(), server.URL, []byte("secret-key"))
+	_, _, err := ListModels(context.Background(), server.Client(), server.URL, []byte("secret-key"))
 	if err == nil {
 		t.Fatal("expected error")
 	}
 }
 
 func TestDiscoverUsesProviderBaseURLAndCredential(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]string{{"id": "model-a"}},
 		})
@@ -143,17 +174,25 @@ func TestDiscoverUsesProviderBaseURLAndCredential(t *testing.T) {
 	defer server.Close()
 
 	base := server.URL
-	models, err := Discover(context.Background(), server.Client(), store.Provider{Kind: "custom", BaseURL: &base}, []byte("secret"))
+	models, upstreamTotal, err := Discover(context.Background(), server.Client(), store.Provider{Kind: "custom", BaseURL: &base}, []byte("secret"))
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
-	if len(models) != 1 || models[0].ID != "model-a" {
-		t.Fatalf("models=%v", models)
+	if len(models) != 1 || models[0].ID != "model-a" || upstreamTotal != 1 {
+		t.Fatalf("models=%v upstreamTotal=%d", models, upstreamTotal)
+	}
+}
+
+func TestDiscoverRejectsHTTPCredentialedProvider(t *testing.T) {
+	base := "http://example.com/v1"
+	_, _, err := Discover(context.Background(), nil, store.Provider{Kind: "custom", BaseURL: &base}, []byte("secret"))
+	if err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("err=%v", err)
 	}
 }
 
 func TestDiscoverRejectsUnconfiguredProvider(t *testing.T) {
-	_, err := Discover(context.Background(), nil, store.Provider{Kind: "custom"}, nil)
+	_, _, err := Discover(context.Background(), nil, store.Provider{Kind: "custom"}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}

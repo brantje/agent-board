@@ -384,6 +384,75 @@ describe('configuration screens', () => {
     expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
   })
 
+  it('shows semantic provider health and persisted model counts', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path === '/api/providers/healthy/models') {
+        return new Response('{"models":[{"id":"a"},{"id":"b"},{"id":"c"}],"total":3}')
+      }
+      if (path === '/api/providers/unhealthy/models') {
+        return new Response('{"error":{"code":"provider_model_discovery_failed","message":"Unable to discover models from the Provider API."}}', { status: 502 })
+      }
+      return new Response(JSON.stringify([
+        { id: 'healthy', name: 'Healthy', enabled: true, healthStatus: 'HEALTHY', filteredModelCount: 3, totalModelCount: 3, safeMetadata: {} },
+        { id: 'unhealthy', name: 'Unhealthy', enabled: true, healthStatus: 'UNHEALTHY', safeMetadata: {} }
+      ]))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ConfigManager, { props: { kind: 'providers' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Health: Healthy')
+    expect(wrapper.text()).toContain('Health: Unhealthy')
+    expect(wrapper.text()).toContain('Models: 3 / 3')
+    expect(wrapper.text()).not.toContain('Models: 0 / 0')
+    const badges = wrapper.findAll('[data-color]')
+    expect(badges.some(badge => badge.attributes('data-color') === 'success' && badge.text().includes('Health: Healthy'))).toBe(true)
+    expect(badges.some(badge => badge.attributes('data-color') === 'error' && badge.text().includes('Health: Unhealthy'))).toBe(true)
+    expect(fetch.mock.calls.some(([calledPath]) => String(calledPath).includes('/models'))).toBe(true)
+  })
+
+  it('overlays live provider health and model counts after discovery', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path === '/api/providers/p1/models') {
+        return new Response('{"models":[{"id":"a"},{"id":"b"}],"total":2}')
+      }
+      if (path.includes('/models')) return new Response('{"models":[],"total":0}')
+      return new Response(JSON.stringify([{ id: 'p1', name: 'OpenRouter', enabled: true, healthStatus: 'UNKNOWN', safeMetadata: {} }]))
+    }))
+    const wrapper = mount(ConfigManager, { props: { kind: 'providers' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Health: Healthy')
+    expect(wrapper.text()).toContain('Models: 2 / 2')
+    const badges = wrapper.findAll('[data-color]')
+    expect(badges.some(badge => badge.attributes('data-color') === 'success')).toBe(true)
+  })
+
+  it('marks provider discovery failures as unhealthy without a models badge', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.includes('/models')) {
+        return new Response('{"error":{"code":"provider_model_discovery_failed","message":"Unable to discover models from the Provider API."}}', { status: 502 })
+      }
+      return new Response(JSON.stringify([{ id: 'p1', name: 'Broken', enabled: true, healthStatus: 'UNKNOWN', safeMetadata: {} }]))
+    }))
+    const wrapper = mount(ConfigManager, { props: { kind: 'providers' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Health: Unhealthy')
+    expect(wrapper.text()).not.toContain('Models:')
+    expect(wrapper.findAll('[data-color]').some(badge => badge.attributes('data-color') === 'error')).toBe(true)
+  })
+
+  it('does not probe models outside the providers list', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path.includes('/models')) throw new Error('unexpected models fetch')
+      if (path === '/api/model-profiles') return new Response('[{"id":"m","name":"Model","enabled":true}]')
+      return new Response('[{"id":"a","name":"Agent","enabled":true,"state":"ENABLED","engine":"opencode","modelProfileId":"m","engineSettings":{},"concurrencyLimit":1}]')
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ConfigManager, { props: { kind: 'agents', projectId: 'p' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Agent')
+    expect(fetch.mock.calls.some(([calledPath]) => String(calledPath).includes('/models'))).toBe(false)
+  })
+
   it.each(Object.keys(definitions) as ConfigKind[])('shows a resource-specific empty state for %s', async kind => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('[]')))
     const wrapper = mount(ConfigManager, { props: { kind }, global })

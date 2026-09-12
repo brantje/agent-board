@@ -138,7 +138,7 @@ func (s *Store) ListRuns(ctx context.Context, projectID string) ([]store.Run, er
 
 func (s *Store) ListProviders(ctx context.Context, projectID *string) ([]store.Provider, error) {
 	project, scoped := visibleScope(projectID)
-	rows, err := s.pool.Query(ctx, `SELECT id::text, project_id::text, name, kind, base_url, credential_ref, enabled, health_status, safe_metadata, created_at, updated_at FROM providers WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
+	rows, err := s.pool.Query(ctx, `SELECT `+providerSelectColumns+` FROM providers WHERE ($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL) ORDER BY project_id NULLS FIRST, created_at, id`, nullableUUID(project, scoped), scoped)
 	if err != nil {
 		return nil, err
 	}
@@ -156,15 +156,56 @@ func (s *Store) ListProviders(ctx context.Context, projectID *string) ([]store.P
 
 func (s *Store) GetProvider(ctx context.Context, projectID *string, id string) (store.Provider, error) {
 	project, scoped := visibleScope(projectID)
-	return scanProvider(s.pool.QueryRow(ctx, `SELECT id::text, project_id::text, name, kind, base_url, credential_ref, enabled, health_status, safe_metadata, created_at, updated_at FROM providers WHERE id=$3 AND (($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL))`, nullableUUID(project, scoped), scoped, id))
+	return scanProvider(s.pool.QueryRow(ctx, `SELECT `+providerSelectColumns+` FROM providers WHERE id=$3 AND (($2::boolean AND (project_id IS NULL OR project_id=$1::uuid)) OR (NOT $2::boolean AND project_id IS NULL))`, nullableUUID(project, scoped), scoped, id))
+}
+
+func (s *Store) ListAllProviders(ctx context.Context) ([]store.Provider, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+providerSelectColumns+` FROM providers ORDER BY project_id NULLS FIRST, created_at, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.Provider
+	for rows.Next() {
+		value, err := scanProvider(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, value)
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) UpdateProvider(ctx context.Context, scope *string, input store.Provider) (store.Provider, error) {
 	return scanProvider(s.pool.QueryRow(ctx, `
 		UPDATE providers SET name=$3, kind=$4, base_url=$5, credential_ref=$6, enabled=$7, safe_metadata=$8, updated_at=now()
 		WHERE id=$2 AND project_id IS NOT DISTINCT FROM $1::uuid
-		RETURNING id::text, project_id::text, name, kind, base_url, credential_ref, enabled, health_status, safe_metadata, created_at, updated_at
+		RETURNING `+providerSelectColumns+`
 	`, scope, input.ID, input.Name, input.Kind, input.BaseURL, input.CredentialRef, input.Enabled, objectJSON(input.SafeMetadata)))
+}
+
+func (s *Store) UpdateProviderHealth(ctx context.Context, id string, healthStatus string, filteredCount, totalCount *int) error {
+	if filteredCount != nil && totalCount != nil {
+		tag, err := s.pool.Exec(ctx, `
+			UPDATE providers SET health_status=$2, filtered_model_count=$3, total_model_count=$4
+			WHERE id=$1
+		`, id, healthStatus, *filteredCount, *totalCount)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return store.ErrNotFound
+		}
+		return nil
+	}
+	tag, err := s.pool.Exec(ctx, `UPDATE providers SET health_status=$2 WHERE id=$1`, id, healthStatus)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return store.ErrNotFound
+	}
+	return nil
 }
 
 func visibleScope(projectID *string) (string, bool) {

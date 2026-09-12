@@ -54,16 +54,18 @@ type IssueRelationshipDTO struct {
 }
 
 type ProviderDTO struct {
-	ID           string          `json:"id"`
-	ProjectID    *string         `json:"projectId"`
-	Name         string          `json:"name"`
-	Kind         string          `json:"kind"`
-	BaseURL      *string         `json:"baseUrl"`
-	Enabled      bool            `json:"enabled"`
-	HealthStatus string          `json:"healthStatus"`
-	SafeMetadata json.RawMessage `json:"safeMetadata"`
-	CreatedAt    time.Time       `json:"createdAt"`
-	UpdatedAt    time.Time       `json:"updatedAt"`
+	ID                 string          `json:"id"`
+	ProjectID          *string         `json:"projectId"`
+	Name               string          `json:"name"`
+	Kind               string          `json:"kind"`
+	BaseURL            *string         `json:"baseUrl"`
+	Enabled            bool            `json:"enabled"`
+	HealthStatus       string          `json:"healthStatus"`
+	FilteredModelCount *int            `json:"filteredModelCount"`
+	TotalModelCount    *int            `json:"totalModelCount"`
+	SafeMetadata       json.RawMessage `json:"safeMetadata"`
+	CreatedAt          time.Time       `json:"createdAt"`
+	UpdatedAt          time.Time       `json:"updatedAt"`
 }
 
 type ProviderModelDTO struct {
@@ -73,6 +75,7 @@ type ProviderModelDTO struct {
 
 type ProviderModelListDTO struct {
 	Models []ProviderModelDTO `json:"models"`
+	Total  int                `json:"total"`
 }
 
 type ModelProfileDTO struct {

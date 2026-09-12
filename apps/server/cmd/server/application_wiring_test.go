@@ -81,6 +81,35 @@ func TestStartSchedulerRejectsNonApplicationHandler(t *testing.T) {
 	}
 }
 
+func TestStartProviderHealthWorkerRejectsNonApplicationHandler(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	startProviderHealthWorker(ctx, http.NotFoundHandler())
+}
+
+func TestStartProviderHealthWorkerWiresBackgroundProbes(t *testing.T) {
+	databaseURL := os.Getenv("AGENT_BOARD_TEST_DATABASE_URL")
+	if databaseURL == "" {
+		t.Skip("AGENT_BOARD_TEST_DATABASE_URL is required for integration wiring test")
+	}
+	repositoryRoot := t.TempDir()
+	workspaceRoot := filepath.Join(t.TempDir(), "workspaces")
+	t.Setenv("AGENT_BOARD_REPOSITORY_ROOTS", repositoryRoot)
+	t.Setenv("AGENT_BOARD_WORKSPACE_ROOT", workspaceRoot)
+	t.Setenv("AGENT_BOARD_EVIDENCE_ROOT", filepath.Join(t.TempDir(), "evidence"))
+	t.Setenv("AGENT_BOARD_SECRET_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString([]byte(strings.Repeat("k", 32))))
+
+	handler, closeStore, err := controlPlaneHandler(context.Background(), databaseURL)
+	if err != nil {
+		t.Fatalf("controlPlaneHandler() error = %v", err)
+	}
+	defer closeStore()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	startProviderHealthWorker(ctx, handler)
+	cancel()
+}
+
 func TestConfiguredApplicationRejectsRelativeRepositoryRoot(t *testing.T) {
 	t.Setenv("AGENT_BOARD_REPOSITORY_ROOTS", "relative/repositories")
 	if _, err := configuredApplication(nil); err == nil {

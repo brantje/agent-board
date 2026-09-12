@@ -95,6 +95,12 @@ func (f *fakeControlPlaneStore) UpdateProvider(_ context.Context, scope *string,
 	}
 	return v, nil
 }
+func (f *fakeControlPlaneStore) ListAllProviders(_ context.Context) ([]store.Provider, error) {
+	return []store.Provider{{ID: providerID, Name: "Provider", Kind: "test", Enabled: true, HealthStatus: "UNKNOWN", SafeMetadata: store.EmptyObject}}, nil
+}
+func (f *fakeControlPlaneStore) UpdateProviderHealth(context.Context, string, string, *int, *int) error {
+	return nil
+}
 func (f *fakeControlPlaneStore) ListModelProfiles(_ context.Context, scope *string) ([]store.ModelProfile, error) {
 	return []store.ModelProfile{{ID: modelID, ProjectID: scoped(scope), ProviderID: providerID, Name: "Model", Model: "model", GenerationSettings: store.EmptyObject, Enabled: true}}, nil
 }

@@ -84,6 +84,8 @@ CREATE TABLE providers (
     credential_ref text,
     enabled boolean NOT NULL DEFAULT true,
     health_status text NOT NULL DEFAULT 'UNKNOWN' CHECK (health_status IN ('UNKNOWN', 'HEALTHY', 'UNHEALTHY')),
+    filtered_model_count integer CHECK (filtered_model_count IS NULL OR filtered_model_count >= 0),
+    total_model_count integer CHECK (total_model_count IS NULL OR total_model_count >= 0),
     safe_metadata jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(safe_metadata) = 'object'),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),

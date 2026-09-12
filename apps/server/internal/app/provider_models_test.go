@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
@@ -26,6 +27,10 @@ func (s *providerModelStore) GetProvider(_ context.Context, _ *string, id string
 	return s.provider, nil
 }
 
+func (s *providerModelStore) UpdateProviderHealth(context.Context, string, string, *int, *int) error {
+	return nil
+}
+
 type fakeProviderModelSecretResolver struct {
 	values map[string][]byte
 	scope  secrets.Scope
@@ -41,7 +46,7 @@ func (f *fakeProviderModelSecretResolver) Resolve(_ context.Context, scope secre
 }
 
 func TestListProviderModelsReturnsDiscoveredModels(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]string{{"id": "model-a"}, {"id": "model-b"}},
 		})
@@ -61,12 +66,50 @@ func TestListProviderModelsReturnsDiscoveredModels(t *testing.T) {
 	service := New(store)
 	resolver := &fakeProviderModelSecretResolver{values: map[string][]byte{ref: []byte("secret")}}
 
-	models, err := service.ListProviderModels(context.Background(), nil, testProviderID, resolver, upstream.Client())
+	result, err := service.ListProviderModels(context.Background(), nil, testProviderID, resolver, upstream.Client())
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
-	if len(models) != 2 || models[0].ID != "model-a" || models[1].ID != "model-b" {
-		t.Fatalf("models=%v", models)
+	if len(result.Models) != 2 || result.Models[0].ID != "model-a" || result.Models[1].ID != "model-b" || result.Total != 2 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestListProviderModelsPersistsDistinctFilteredAndTotalCounts(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]string{
+				{"id": "model-a"},
+				{"id": "model-a"},
+				{"id": ""},
+				{"id": "model-b"},
+			},
+		})
+	}))
+	defer upstream.Close()
+
+	ref := "provider:" + testProviderID
+	store := &providerHealthStore{provider: store.Provider{
+		ID:            testProviderID,
+		Kind:          "openai-compatible",
+		BaseURL:       &[]string{upstream.URL}[0],
+		CredentialRef: &ref,
+		Enabled:       true,
+		SafeMetadata:  store.EmptyObject,
+	}}
+	service := New(store)
+	resolver := &fakeProviderModelSecretResolver{values: map[string][]byte{ref: []byte("secret")}}
+
+	result, err := service.ListProviderModels(context.Background(), nil, testProviderID, resolver, upstream.Client())
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if len(result.Models) != 2 || result.Total != 4 {
+		t.Fatalf("result=%+v", result)
+	}
+	update := store.lastHealthUpdate()
+	if update.health != "HEALTHY" || update.filtered == nil || *update.filtered != 2 || update.total == nil || *update.total != 4 {
+		t.Fatalf("update=%+v", update)
 	}
 }
 
@@ -91,7 +134,7 @@ func TestListProviderModelsRequiresSecretResolverWhenCredentialConfigured(t *tes
 }
 
 func TestListProviderModelsResolvesSharedProviderCredentialInOwnerScope(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]string{{"id": "model-a"}},
 		})
@@ -123,7 +166,7 @@ func TestListProviderModelsResolvesSharedProviderCredentialInOwnerScope(t *testi
 }
 
 func TestListProviderModelsResolvesOwnedProviderCredentialInOwnerScope(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]string{{"id": "model-a"}},
 		})
@@ -152,6 +195,79 @@ func TestListProviderModelsResolvesOwnedProviderCredentialInOwnerScope(t *testin
 	}
 	if resolver.scope.ProjectID == nil || *resolver.scope.ProjectID != owner {
 		t.Fatalf("secret scope project=%v, want %s", resolver.scope.ProjectID, owner)
+	}
+}
+
+func TestListProviderModelsRejectsMissingCredentialValue(t *testing.T) {
+	ref := "provider:" + testProviderID
+	store := &providerModelStore{provider: store.Provider{
+		ID:            testProviderID,
+		Kind:          "openai",
+		CredentialRef: &ref,
+		Enabled:       true,
+		SafeMetadata:  store.EmptyObject,
+	}}
+	service := New(store)
+	_, err := service.ListProviderModels(context.Background(), nil, testProviderID, &fakeProviderModelSecretResolver{values: map[string][]byte{}}, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "provider_credential_unavailable" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListProviderModelsRejectsUpstreamDiscoveryFailure(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+
+	ref := "provider:" + testProviderID
+	store := &providerModelStore{provider: store.Provider{
+		ID:            testProviderID,
+		Kind:          "openai-compatible",
+		BaseURL:       &[]string{upstream.URL}[0],
+		CredentialRef: &ref,
+		Enabled:       true,
+		SafeMetadata:  store.EmptyObject,
+	}}
+	service := New(store)
+	resolver := &fakeProviderModelSecretResolver{values: map[string][]byte{ref: []byte("secret")}}
+	_, err := service.ListProviderModels(context.Background(), nil, testProviderID, resolver, upstream.Client())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "provider_model_discovery_failed" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListProviderModelsRejectsHTTPCredentialedDiscovery(t *testing.T) {
+	ref := "provider:" + testProviderID
+	base := "http://example.com/v1"
+	store := &providerModelStore{provider: store.Provider{
+		ID:            testProviderID,
+		Kind:          "custom",
+		BaseURL:       &base,
+		CredentialRef: &ref,
+		Enabled:       true,
+		SafeMetadata:  store.EmptyObject,
+	}}
+	service := New(store)
+	resolver := &fakeProviderModelSecretResolver{values: map[string][]byte{ref: []byte("secret")}}
+	_, err := service.ListProviderModels(context.Background(), nil, testProviderID, resolver, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "provider_model_discovery_failed" {
+		t.Fatalf("err=%v", err)
+	}
+	if !strings.Contains(apiErr.Message, "Unable to discover models") {
+		t.Fatalf("message=%q", apiErr.Message)
 	}
 }
 

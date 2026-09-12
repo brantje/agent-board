@@ -25,6 +25,10 @@ func (s *providerModelsStore) GetProvider(_ context.Context, _ *string, id strin
 	return s.provider, nil
 }
 
+func (s *providerModelsStore) UpdateProviderHealth(context.Context, string, string, *int, *int) error {
+	return nil
+}
+
 type providerModelsSecretResolver struct {
 	values map[string][]byte
 }
@@ -45,22 +49,20 @@ func providerModelsRouter(t *testing.T, store *providerModelsStore, resolver exe
 func TestListProviderModelsReturnsDiscoveredModels(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"data": []map[string]string{{"id": "model-a"}},
+			"data": []map[string]string{{"id": "model-a"}, {"id": "model-a"}, {"id": ""}},
 		})
 	}))
 	defer upstream.Close()
 
-	ref := "provider:" + providerID
 	store := &providerModelsStore{provider: store.Provider{
-		ID:            providerID,
-		Kind:          "openai-compatible",
-		BaseURL:       &[]string{upstream.URL}[0],
-		CredentialRef: &ref,
-		Enabled:       true,
-		SafeMetadata:  store.EmptyObject,
+		ID:           providerID,
+		Kind:         "openai-compatible",
+		BaseURL:      &[]string{upstream.URL}[0],
+		Enabled:      true,
+		SafeMetadata: store.EmptyObject,
 	}}
 	w := httptest.NewRecorder()
-	providerModelsRouter(t, store, &providerModelsSecretResolver{values: map[string][]byte{ref: []byte("secret")}}).
+	providerModelsRouter(t, store, &providerModelsSecretResolver{}).
 		ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/providers/"+providerID+"/models", nil))
 	if w.Code != http.StatusOK {
 		t.Fatalf("status %d: %s", w.Code, w.Body.String())
@@ -69,11 +71,12 @@ func TestListProviderModelsReturnsDiscoveredModels(t *testing.T) {
 		Models []struct {
 			ID string `json:"id"`
 		} `json:"models"`
+		Total int `json:"total"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(body.Models) != 1 || body.Models[0].ID != "model-a" {
+	if len(body.Models) != 1 || body.Models[0].ID != "model-a" || body.Total != 3 {
 		t.Fatalf("body=%s", w.Body.String())
 	}
 }
