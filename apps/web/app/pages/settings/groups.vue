@@ -50,7 +50,9 @@ async function run(action: () => Promise<void>) {
 }
 
 async function loadMembers() {
-  members.value = selectedGroupId.value ? await auth.groupMembers(selectedGroupId.value) : []
+  const groupId = selectedGroupId.value
+  const nextMembers = groupId ? await auth.groupMembers(groupId) : []
+  if (selectedGroupId.value === groupId) members.value = nextMembers
 }
 
 async function reload() {
