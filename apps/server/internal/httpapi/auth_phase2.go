@@ -27,8 +27,13 @@ type passwordTokenResponse struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-type passwordChangeRequest struct {
+type adminPasswordChangeRequest struct {
 	Password string `json:"password"`
+}
+
+type selfPasswordChangeRequest struct {
+	CurrentPassword string `json:"currentPassword"`
+	NewPassword     string `json:"newPassword"`
 }
 
 type profileUpdateRequest struct {
@@ -52,6 +57,26 @@ type authSettingsResponse struct {
 	RequireLowercase            bool  `json:"requireLowercase"`
 	RequireNumber               bool  `json:"requireNumber"`
 	RequireSymbol               bool  `json:"requireSymbol"`
+}
+
+type authSettingsUpdateRequest struct {
+	AccessTokenLifetimeSeconds  *int64 `json:"accessTokenLifetimeSeconds"`
+	RefreshTokenLifetimeSeconds *int64 `json:"refreshTokenLifetimeSeconds"`
+	MinimumPasswordLength       *int   `json:"minimumPasswordLength"`
+	RequireUppercase            *bool  `json:"requireUppercase"`
+	RequireLowercase            *bool  `json:"requireLowercase"`
+	RequireNumber               *bool  `json:"requireNumber"`
+	RequireSymbol               *bool  `json:"requireSymbol"`
+}
+
+func (input authSettingsUpdateRequest) complete() bool {
+	return input.AccessTokenLifetimeSeconds != nil &&
+		input.RefreshTokenLifetimeSeconds != nil &&
+		input.MinimumPasswordLength != nil &&
+		input.RequireUppercase != nil &&
+		input.RequireLowercase != nil &&
+		input.RequireNumber != nil &&
+		input.RequireSymbol != nil
 }
 
 func (a *api) registerAuthPhase2Routes(r chi.Router) {
@@ -128,7 +153,7 @@ func (a *api) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	if err != nil { writeAppError(w, err); return }
 	response := make([]authUserResponse, 0, len(users))
 	for _, user := range users { response = append(response, authUserDTO(user)) }
-	writeJSON(w, http.StatusOK, response)
+	writeSensitiveJSON(w, http.StatusOK, response)
 }
 
 func (a *api) handleCreatePendingUser(w http.ResponseWriter, r *http.Request) {
@@ -158,7 +183,7 @@ func (a *api) handleAdminSetPassword(w http.ResponseWriter, r *http.Request) {
 	if !ok { return }
 	userID, ok := pathUUID(w, r, "userID")
 	if !ok { return }
-	var input passwordChangeRequest
+	var input adminPasswordChangeRequest
 	if !decodeJSON(w, r, &input) { return }
 	user, err := a.auth.AdminSetPassword(r.Context(), actor, userID, input.Password)
 	if err != nil { writeAppError(w, err); return }
@@ -190,9 +215,17 @@ func (a *api) handleUpdateOwnProfile(w http.ResponseWriter, r *http.Request) {
 func (a *api) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.authActorAllowForcedPasswordChange(w, r)
 	if !ok { return }
-	var input passwordChangeRequest
+	var input selfPasswordChangeRequest
 	if !decodeJSON(w, r, &input) { return }
-	user, err := a.auth.ChangeOwnPassword(r.Context(), actor, input.Password)
+	if input.NewPassword == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "newPassword is required")
+		return
+	}
+	if !actor.ForcePasswordChange && input.CurrentPassword == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "currentPassword is required")
+		return
+	}
+	user, err := a.auth.ChangeOwnPassword(r.Context(), actor, input.CurrentPassword, input.NewPassword)
 	if err != nil { writeAppError(w, err); return }
 	writeSensitiveJSON(w, http.StatusOK, authUserDTO(user))
 }
@@ -234,18 +267,22 @@ func (a *api) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok { return }
 	settings, err := a.auth.AuthSettings(r.Context(), actor)
 	if err != nil { writeAppError(w, err); return }
-	writeJSON(w, http.StatusOK, authSettingsDTO(settings))
+	writeSensitiveJSON(w, http.StatusOK, authSettingsDTO(settings))
 }
 
 func (a *api) handleUpdateAuthSettings(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.adminActor(w, r)
 	if !ok { return }
-	var input authSettingsResponse
+	var input authSettingsUpdateRequest
 	if !decodeJSON(w, r, &input) { return }
+	if !input.complete() {
+		writeError(w, http.StatusBadRequest, "invalid_request", "all authentication settings fields are required")
+		return
+	}
 	settings, err := a.auth.UpdateAuthSettings(r.Context(), actor, store.AuthSettings{
-		AccessTokenLifetime: time.Duration(input.AccessTokenLifetimeSeconds) * time.Second,
-		RefreshTokenLifetime: time.Duration(input.RefreshTokenLifetimeSeconds) * time.Second,
-		PasswordPolicy: store.PasswordPolicy{MinimumLength: input.MinimumPasswordLength, RequireUppercase: input.RequireUppercase, RequireLowercase: input.RequireLowercase, RequireNumber: input.RequireNumber, RequireSymbol: input.RequireSymbol},
+		AccessTokenLifetime: time.Duration(*input.AccessTokenLifetimeSeconds) * time.Second,
+		RefreshTokenLifetime: time.Duration(*input.RefreshTokenLifetimeSeconds) * time.Second,
+		PasswordPolicy: store.PasswordPolicy{MinimumLength: *input.MinimumPasswordLength, RequireUppercase: *input.RequireUppercase, RequireLowercase: *input.RequireLowercase, RequireNumber: *input.RequireNumber, RequireSymbol: *input.RequireSymbol},
 	})
 	if err != nil { writeAppError(w, err); return }
 	writeJSON(w, http.StatusOK, authSettingsDTO(settings))
