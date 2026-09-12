@@ -61,12 +61,12 @@ func TestAuthPhase2OwnPasswordHTTPPolicyAndInvalidation(t *testing.T) {
 	login := loginAuthHTTPUser(t, handler)
 	headers := map[string]string{"Authorization": "Bearer " + login.AccessToken}
 
-	weak := authHTTPRequest(t, handler, http.MethodPut, "/api/auth/me/password", `{"password":"short"}`, headers)
+	weak := authHTTPRequest(t, handler, http.MethodPut, "/api/auth/me/password", `{"currentPassword":"long-enough-password","newPassword":"short"}`, headers)
 	if weak.Code != http.StatusBadRequest {
 		t.Fatalf("weak password status=%d body=%s", weak.Code, weak.Body.String())
 	}
 
-	changed := authHTTPRequest(t, handler, http.MethodPut, "/api/auth/me/password", `{"password":"replacement-password-value"}`, headers)
+	changed := authHTTPRequest(t, handler, http.MethodPut, "/api/auth/me/password", `{"currentPassword":"long-enough-password","newPassword":"replacement-password-value"}`, headers)
 	if changed.Code != http.StatusOK {
 		t.Fatalf("change password status=%d body=%s", changed.Code, changed.Body.String())
 	}
