@@ -1,6 +1,6 @@
 # Test-driven development
 
-Agent Board uses TDD for backend, persistence, runtime orchestration, contracts and frontend behavior.
+Agent Board uses TDD for backend, persistence, execution orchestration, contracts and frontend behavior.
 
 ## Core loop
 
@@ -35,7 +35,7 @@ Required concerns include:
 - Project isolation
 - scheduler claiming/leases/capacity/restart recovery
 - Workspace repository bootstrap/reuse/path safety
-- Runtime Instance lifecycle/cancellation/cleanup
+- Runner selection/reconnect/cancellation/session cleanup
 - agent-runner WebSocket/session behavior
 - canonical execution context
 - secret non-disclosure
@@ -78,7 +78,7 @@ go build ./...
 
 Use targeted package/test invocations during Red/Green iteration, then run broader relevant suites before completion. Before completion, measure and report coverage for every affected Go module and confirm the 85% gate.
 
-Docker integration tests should be explicit/gated where they require a live Docker daemon.
+Docker integration tests should be explicit/gated where they require a live Docker daemon, such as the official Runner image boundary.
 
 ## PostgreSQL
 
@@ -127,6 +127,7 @@ At minimum cover:
 - Agent concurrency 1 and N
 - Model Profile capacity 1, N and unlimited
 - combined constraints without partial leaks
+- Runner eligibility/capacity admission without partial leaks
 - release on success/fail/cancel/pause/reconciliation
 - browser/request disconnect independence
 - backend restart reconciliation
@@ -160,35 +161,33 @@ Git-native source/Workspace behavior must cover:
 
 See `source-control.md`.
 
-## Runtime and agent-runner tests
+## Runner and Execution Session tests
 
-Runtime/runner contract and integration tests cover:
+Runner contract and integration tests cover:
 
-- Runtime create/start/inspect/stop/destroy for the legacy managed-compute path
-- runner starts from the official Runtime image only for the legacy Docker path
-- external and internal runners connect outbound over protocol v2
+- external and internal Runners connect outbound over protocol v2
 - versioned WebSocket handshake and incompatible-version failure
-- explicit Execution Session identity
+- explicit Execution Session identity and required Runner binding
 - default advertised Runner capacity of 5 concurrent sessions
-- multiple sequential sessions over one runner lifetime
+- multiple sequential sessions over one Runner lifetime
 - stdout/stderr channel fidelity
 - stdin forwarding/close
 - non-zero exit status
 - one process tree per Execution Session
 - `/workspace` working directory/write persistence
 - cancellation/graceful/forced process-tree cleanup
-- runner/session disconnect reconciliation without blindly duplicating execution
-- cleanup after backend restart
-- runner capability advertisement
-- network/resource/policy enforcement
-- secret values are not reflected in runner protocol output
-- Docker socket absence inside Agent Runtime
+- Runner/session disconnect reconciliation without blindly duplicating execution
+- backend restart reconciliation
+- Runner capability advertisement
+- Project Runner eligibility and internal-Runner fallback policy
+- secret values are not reflected in Runner protocol output
+- official Runner image does not receive the host Docker socket from Agent Board
 - `WAITING_FOR_INPUT` keeps the same live Runner/Execution Session/checkout
 - retained local/remote checkout state is cleaned only after durable apply acknowledgement
 
-A real Runner flow should prove source-aware Git execution and continuation. Legacy Docker lifecycle integration remains required for code that changes that compatibility path.
+A real Runner flow should prove source-aware Git execution and continuation.
 
-See `runtime-contract.md`, `runtime-execution.md` and `agent-runner.md`.
+See `agent-runner.md`.
 
 ## Evidence/Review tests
 
@@ -197,6 +196,7 @@ At minimum prove:
 - historical provenance unaffected by later config edits
 - raw output is bounded/chunked and redacted
 - Artifacts are first-class and Project scoped
+- Execution Session evidence identifies its selected Runner
 - Review pins exact `base_revision` and `review_revision`
 - `git diff base_revision..review_revision` reproduces the reviewed source change
 - Request Changes advances the same Issue branch while old Review SHAs remain immutable
@@ -226,12 +226,12 @@ Cover:
 
 - cross-Project access
 - forged actor headers/identity cannot gain privilege
-- untrusted Runtime/runner cannot invoke privileged control-plane actions anonymously
-- secret values absent from DB Events, runner responses, raw logs, Artifacts, provenance, HTTP responses and application logs
+- untrusted Runner/execution code cannot invoke privileged control-plane actions anonymously
+- secret values absent from DB Events, Runner responses, raw logs, Artifacts, provenance, HTTP responses and application logs
 - path traversal
 - unsafe source/server URLs/SSRF where applicable
-- forbidden Docker/host access
-- Runtime Instance cannot be rebound to another Workspace
+- forbidden host/daemon access through the Runner protocol
+- Execution Sessions cannot change their immutable Runner binding
 - remote Git credentials remain Runner-host Git configuration rather than durable control-plane evidence
 
 ## Definition of done
@@ -244,7 +244,7 @@ A change is not complete until:
 - measured coverage is reported with verification results
 - targeted tests pass
 - relevant broader Go/frontend suites pass
-- Go vet/build pass when backend or runner changed
+- Go vet/build pass when backend or Runner changed
 - shared Go packages changed by the work pass their own test/vet/build checks
 - frontend typecheck/build pass when frontend changed
 - schema applies cleanly to a fresh database when database structure changed
@@ -268,7 +268,5 @@ Project source
  -> durable evidence
  -> Review pinned to Git SHAs
 ```
-
-Legacy Runtime/Docker integration remains a separate compatibility gate where that path is changed.
 
 Green unit tests or a passing numeric coverage threshold alone are not proof that the v0.1 flow is complete.
