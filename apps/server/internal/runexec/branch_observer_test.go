@@ -75,7 +75,7 @@ func TestBranchObserverRecordsCheckoutEvent(t *testing.T) {
 			ID: "workspace-1", Path: "/tmp/workspace", BootstrapStatus: "READY", WorkingBranch: "agent-board/AB-12",
 		},
 	}
-	observer.observeIfChanged(context.Background(), safe, nil)
+	observer.observeIfChanged(context.Background(), safe)
 	if state.updated != "feat/foo" {
 		t.Fatalf("updated branch=%q", state.updated)
 	}
@@ -111,7 +111,7 @@ func TestBranchObserverSkipsUnchangedBranch(t *testing.T) {
 			ID: "workspace-1", Path: "/tmp/workspace", BootstrapStatus: "READY", WorkingBranch: "agent-board/AB-12",
 		},
 	}
-	observer.observeIfChanged(context.Background(), safe, nil)
+	observer.observeIfChanged(context.Background(), safe)
 	if state.updated != "" || len(evidenceStore.events) != 0 {
 		t.Fatalf("updated=%q events=%+v", state.updated, evidenceStore.events)
 	}
