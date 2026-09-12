@@ -19,7 +19,6 @@ const (
 	projectID       = "11111111-1111-4111-8111-111111111111"
 	providerID      = "22222222-2222-4222-8222-222222222222"
 	modelID         = "33333333-3333-4333-8333-333333333333"
-	runtimeID       = "44444444-4444-4444-8444-444444444444"
 	agentID         = "66666666-6666-4666-8666-666666666666"
 	issueID         = "77777777-7777-4777-8777-777777777777"
 	issueKey        = "AB-1"
@@ -114,26 +113,6 @@ func (f *fakeControlPlaneStore) GetModelProfile(_ context.Context, scope *string
 func (f *fakeControlPlaneStore) UpdateModelProfile(_ context.Context, _ *string, v store.ModelProfile) (store.ModelProfile, error) {
 	return v, nil
 }
-func (f *fakeControlPlaneStore) ListRuntimes(_ context.Context, scope *string) ([]store.Runtime, error) {
-	return []store.Runtime{{ID: runtimeID, ProjectID: scoped(scope), Name: "Runtime", Kind: "docker", Image: "image", NetworkPolicy: "none", WorkspacePolicy: "issue", Capabilities: store.EmptyObject, Enabled: true, HealthStatus: "UNKNOWN"}}, nil
-}
-func (f *fakeControlPlaneStore) CreateRuntime(_ context.Context, v store.Runtime) (store.Runtime, error) {
-	v.ID = runtimeID
-	v.HealthStatus = "UNKNOWN"
-	if v.Capabilities == nil {
-		v.Capabilities = store.EmptyObject
-	}
-	return v, nil
-}
-func (f *fakeControlPlaneStore) GetRuntime(_ context.Context, scope *string, id string) (store.Runtime, error) {
-	if id != runtimeID {
-		return store.Runtime{}, store.ErrNotFound
-	}
-	return store.Runtime{ID: runtimeID, ProjectID: scoped(scope), Name: "Runtime", Kind: "docker", Image: "image", NetworkPolicy: "none", WorkspacePolicy: "issue", Capabilities: store.EmptyObject, Enabled: true, HealthStatus: "UNKNOWN"}, nil
-}
-func (f *fakeControlPlaneStore) UpdateRuntime(_ context.Context, _ *string, v store.Runtime) (store.Runtime, error) {
-	return v, nil
-}
 func agentFixture(scope *string) store.Agent {
 	return store.Agent{ID: agentID, ProjectID: scoped(scope), Name: "Agent", Engine: "test", ModelProfileID: modelID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"}
 }
@@ -226,7 +205,6 @@ func TestControlPlaneRoutes(t *testing.T) {
 	projectBody := `{"name":"Project","issuePrefix":"AB","repositoryPath":"/repo","workflowSettings":{}}`
 	providerBody := `{"name":"Provider","kind":"test","credentialRef":"secret-ref","safeMetadata":{}}`
 	modelBody := `{"providerId":"` + providerID + `","name":"Model","model":"model","generationSettings":{}}`
-	runtimeBody := `{"name":"Runtime","kind":"docker","image":"image","networkPolicy":"none","capabilities":{}}`
 	agentBody := `{"name":"Agent","engine":"test","modelProfileId":"` + modelID + `","engineSettings":{},"concurrencyLimit":1,"state":"ENABLED"}`
 	issueBody := `{"title":"Issue","status":"TODO"}`
 	cases := []struct {
@@ -235,7 +213,7 @@ func TestControlPlaneRoutes(t *testing.T) {
 	}{
 		{"list projects", "GET", "/api/projects", "", 200}, {"create project", "POST", "/api/projects", projectBody, 201}, {"get project", "GET", "/api/projects/" + projectID, "", 200}, {"update project", "PATCH", "/api/projects/" + projectID, `{"name":"Renamed"}`, 200},
 	}
-	resources := []struct{ name, path, id, body string }{{"provider", "providers", providerID, providerBody}, {"model", "model-profiles", modelID, modelBody}, {"runtime", "runtimes", runtimeID, runtimeBody}, {"agent", "agents", agentID, agentBody}}
+	resources := []struct{ name, path, id, body string }{{"provider", "providers", providerID, providerBody}, {"model", "model-profiles", modelID, modelBody}, {"agent", "agents", agentID, agentBody}}
 	for _, r := range resources {
 		cases = append(cases,
 			struct {
@@ -332,7 +310,6 @@ func TestControlPlaneRejectsInvalidRequestsAndInaccessibleIDs(t *testing.T) {
 		{"invalid project id", "GET", "/api/projects/not-a-uuid", "", "invalid_id", 400},
 		{"unknown field", "POST", "/api/projects", `{"name":"P","issuePrefix":"AB","repositoryPath":"/repo","unknown":true}`, "invalid_request", 400},
 		{"multiple objects", "POST", "/api/projects", `{"name":"P","issuePrefix":"AB","repositoryPath":"/repo"} {}`, "invalid_request", 400},
-		{"invalid runtime", "POST", "/api/runtimes", `{"name":"R","kind":"podman","image":"i","networkPolicy":"none"}`, "invalid_argument", 400},
 		{"cross project issue", "GET", "/api/projects/" + projectID + "/issues/" + missingIssueKey, "", "issue_not_found", 404},
 		{"uuid issue id rejected", "GET", "/api/projects/" + projectID + "/issues/" + issueID, "", "invalid_id", 400},
 		{"missing provider", "GET", "/api/providers/" + otherID, "", "provider_not_found", 404},
@@ -350,6 +327,18 @@ func TestControlPlaneRejectsInvalidRequestsAndInaccessibleIDs(t *testing.T) {
 				t.Fatalf("expected code %q in %s", tc.code, rec.Body.String())
 			}
 		})
+	}
+}
+
+func TestRuntimeRoutesAreRemoved(t *testing.T) {
+	router := NewRouter(app.New(&fakeControlPlaneStore{}))
+	for _, path := range []string{"/api/runtimes", "/api/projects/" + projectID + "/runtimes"} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("GET %s status=%d want 404 body=%s", path, rec.Code, rec.Body.String())
+		}
 	}
 }
 
@@ -430,7 +419,7 @@ func blockHasMethod(doc, label, method string) bool {
 }
 
 func TestDTOsMarshalAsObjects(t *testing.T) {
-	for _, value := range []any{projectDTO(store.Project{IssuePrefix: "AB", WorkflowSettings: store.EmptyObject}), issueDTO(issueFixture("TODO")), providerDTO(store.Provider{SafeMetadata: store.EmptyObject}), modelProfileDTO(store.ModelProfile{GenerationSettings: store.EmptyObject}), runtimeDTO(store.Runtime{Capabilities: store.EmptyObject}), agentDTO(store.Agent{EngineSettings: store.EmptyObject}), runDTO(store.Run{IssueID: issueID}, map[string]string{issueID: issueKey})} {
+	for _, value := range []any{projectDTO(store.Project{IssuePrefix: "AB", WorkflowSettings: store.EmptyObject}), issueDTO(issueFixture("TODO")), providerDTO(store.Provider{SafeMetadata: store.EmptyObject}), modelProfileDTO(store.ModelProfile{GenerationSettings: store.EmptyObject}), agentDTO(store.Agent{EngineSettings: store.EmptyObject}), runDTO(store.Run{IssueID: issueID}, map[string]string{issueID: issueKey})} {
 		if _, err := json.Marshal(value); err != nil {
 			t.Fatal(err)
 		}
