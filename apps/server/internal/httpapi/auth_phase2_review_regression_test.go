@@ -192,7 +192,7 @@ func TestAuthPhase2HTTPForcedPasswordChangeBlocksNormalAndAdminAccess(t *testing
 		}
 	}
 
-	change := authHTTPRequest(t, handler, http.MethodPut, "/api/auth/me/password", `{"password":"permanent-admin-password"}`, forcedHeaders)
+	change := authHTTPRequest(t, handler, http.MethodPut, "/api/auth/me/password", `{"newPassword":"permanent-admin-password"}`, forcedHeaders)
 	if change.Code != http.StatusOK {
 		t.Fatalf("forced self password change status=%d body=%s", change.Code, change.Body.String())
 	}
