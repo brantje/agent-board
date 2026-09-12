@@ -100,6 +100,6 @@ func TestConfiguredEvidenceRoot(t *testing.T) {
 func TestConfiguredSchedulerOwnerIDUsesExplicitValue(t *testing.T) {
 	t.Setenv("AGENT_BOARD_SCHEDULER_OWNER_ID", "worker-a")
 	if got := configuredSchedulerOwnerID(); got != "worker-a" {
-		t.Fatalf("configuredSchedulerOwnerID()=%q want %q", got)
+		t.Fatalf("configuredSchedulerOwnerID()=%q want %q", got, "worker-a")
 	}
 }
