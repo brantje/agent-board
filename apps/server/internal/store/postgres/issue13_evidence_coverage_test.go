@@ -17,14 +17,12 @@ func TestRunScopedExecutionEvidenceQueries(t *testing.T) {
 
 	createSession := func(t *testing.T, f runFixture) store.ExecutionSession {
 		t.Helper()
-		instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
-			ProjectID: f.project.ID, WorkspaceID: f.workspace.ID, RuntimeID: f.runtime.ID,
-		})
+		runner, err := s.CreateRunner(ctx, store.Runner{Name: "evidence-runner"})
 		if err != nil {
-			t.Fatalf("create runtime instance: %v", err)
+			t.Fatalf("create runner: %v", err)
 		}
 		session, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
-			ProjectID: f.project.ID, RunID: f.run.ID, RuntimeInstanceID: instance.ID,
+			ProjectID: f.project.ID, RunID: f.run.ID, RunnerID: runner.ID,
 			Status: "PENDING", CWD: "/workspace", CommandArgv: json.RawMessage(`["true"]`),
 		})
 		if err != nil {
