@@ -53,6 +53,18 @@ AuthSettings:
     requireNumber: {type: boolean}
     requireSymbol: {type: boolean}
 
+SelfPasswordChange:
+  type: object
+  additionalProperties: false
+  required: [newPassword]
+  properties:
+    currentPassword:
+      type: string
+      minLength: 1
+      writeOnly: true
+      description: Required for an ordinary password change; omitted when completing a forced password change.
+    newPassword: {type: string, minLength: 1, writeOnly: true}
+
 PasswordTokenSecret:
   type: object
   additionalProperties: false
