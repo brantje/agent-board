@@ -257,6 +257,7 @@ describe('user administration alternate paths', () => {
     const wrapper = mount(UsersPage, { global })
     await flushPromises()
     const button = (text: string) => wrapper.findAll('button').find(item => item.text() === text)!
+    const buttons = (text: string) => wrapper.findAll('button').filter(item => item.text() === text)
 
     await button('New setup token').trigger('click')
     await flushPromises()
@@ -268,14 +269,14 @@ describe('user administration alternate paths', () => {
     expect(passwordToken).toHaveBeenCalledWith(memberUser.id, 'reset')
     expect(wrapper.text()).toContain('Reset token for member')
 
-    await button('Disable').trigger('click')
+    await buttons('Disable')[1]!.trigger('click')
     await flushPromises()
     expect(setUserDisabled).toHaveBeenCalledWith(memberUser.id, true)
     await button('Re-enable').trigger('click')
     await flushPromises()
     expect(setUserDisabled).toHaveBeenCalledWith(disabledUser.id, false)
 
-    await button('Set password').trigger('click')
+    await buttons('Set password')[1]!.trigger('click')
     await wrapper.get('input[type="password"]').setValue('test-password-value')
     const passwordForm = wrapper.findAll('form').find(form => form.text().includes('Assign and require change'))!
     await passwordForm.trigger('submit')
@@ -283,7 +284,7 @@ describe('user administration alternate paths', () => {
     expect(setUserPassword).toHaveBeenCalledWith(memberUser.id, 'test-password-value')
     expect(wrapper.find('input[type="password"]').exists()).toBe(false)
 
-    await button('Set password').trigger('click')
+    await buttons('Set password')[1]!.trigger('click')
     await flushPromises()
     await button('Cancel').trigger('click')
     expect(wrapper.find('input[type="password"]').exists()).toBe(false)

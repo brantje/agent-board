@@ -38,7 +38,7 @@ export function useAuth() {
     try {
       await apiRequest<void>('/api/auth/logout', { method: 'POST', body: { refreshToken } })
     } catch {
-      // Logout is best-effort. Local state remains authoritative for this client.
+      // Rotated credentials discovered after logout are revoked best-effort.
     }
   }
 
@@ -120,12 +120,20 @@ export function useAuth() {
     const refreshToken = credentials.value?.refreshToken
     const inFlightRefresh = refreshing.value
     clear()
+    let logoutError: unknown
     try {
-      if (refreshToken) await revokeRefreshToken(refreshToken)
+      if (refreshToken) {
+        await apiRequest<void>('/api/auth/logout', { method: 'POST', body: { refreshToken } })
+      }
+    } catch (error) {
+      logoutError = error
+    }
+    try {
       if (inFlightRefresh) await inFlightRefresh
     } finally {
       clear()
     }
+    if (logoutError) throw logoutError
   }
 
   async function updateProfile(input: { username: string; email: string; displayName: string }) {
