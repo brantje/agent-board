@@ -95,6 +95,42 @@ func TestExecutionSessionLifecycleAndSequentialReuse(t *testing.T) {
 	}
 }
 
+func TestRunnerAllowsConcurrentExecutionSessionsOnDifferentWorkspaces(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	first := seedRunFixture(t, s, "runner-concurrent-first")
+	secondRun := createQueuedFixtureRun(t, s, first, "runner-concurrent-second")
+	runner, err := s.CreateRunner(ctx, store.Runner{Name: "shared-runner", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatalf("create runner: %v", err)
+	}
+
+	firstSession, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: first.project.ID, RunID: first.run.ID, RunnerID: runner.ID,
+		Status: "RUNNING", CommandArgv: json.RawMessage(`["true"]`),
+	})
+	if err != nil {
+		t.Fatalf("create first runner session: %v", err)
+	}
+	secondSession, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: first.project.ID, RunID: secondRun.ID, RunnerID: runner.ID,
+		Status: "PENDING", CommandArgv: json.RawMessage(`["true"]`),
+	})
+	if err != nil {
+		t.Fatalf("create second runner session on different workspace: %v", err)
+	}
+	active, err := s.ListExecutionSessionsByRunner(ctx, runner.ID, []string{"PENDING", "STARTING", "RUNNING"})
+	if err != nil || len(active) != 2 {
+		t.Fatalf("active runner sessions=%+v err=%v", active, err)
+	}
+	if active[0].ID != firstSession.ID && active[1].ID != firstSession.ID {
+		t.Fatalf("first session missing from active set=%+v", active)
+	}
+	if active[0].ID != secondSession.ID && active[1].ID != secondSession.ID {
+		t.Fatalf("second session missing from active set=%+v", active)
+	}
+}
+
 func TestListExecutionSessionsByRunner(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
