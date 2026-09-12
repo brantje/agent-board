@@ -563,6 +563,42 @@ CREATE TABLE artifacts (
 
 CREATE INDEX artifacts_run_idx ON artifacts (run_id, created_at) WHERE deleted_at IS NULL;
 
+-- Usernames and email addresses share one normalized deployment-wide login
+-- namespace. Per-column unique indexes cannot protect cross-field collisions, so
+-- serialize only writes that touch the same identifiers and reject the collision
+-- at the database boundary as a uniqueness violation.
+CREATE FUNCTION enforce_user_login_namespace() RETURNS trigger AS $$
+DECLARE
+    first_identifier text := LEAST(NEW.username, NEW.email);
+    second_identifier text := GREATEST(NEW.username, NEW.email);
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended('agent-board:user-login:' || first_identifier, 0));
+    IF second_identifier <> first_identifier THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended('agent-board:user-login:' || second_identifier, 0));
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM users
+        WHERE id IS DISTINCT FROM NEW.id
+          AND (
+              username IN (NEW.username, NEW.email)
+              OR email IN (NEW.username, NEW.email)
+          )
+    ) THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '23505',
+            MESSAGE = 'user login identifier already exists',
+            CONSTRAINT = 'users_login_namespace_uq';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER users_login_namespace_check
+    BEFORE INSERT OR UPDATE OF username, email ON users
+    FOR EACH ROW EXECUTE FUNCTION enforce_user_login_namespace();
+
 -- Global configuration can be consumed by any Project; Project-owned configuration
 -- may only reference other global configuration or configuration owned by that Project.
 CREATE FUNCTION enforce_configuration_scope() RETURNS trigger AS $$
