@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -83,38 +82,10 @@ func (s *Store) GetRun(ctx context.Context, projectID, runID string) (store.Run,
 	`, projectID, runID))
 }
 
-func (s *Store) CreateRuntimeInstance(ctx context.Context, input store.RuntimeInstance) (store.RuntimeInstance, error) {
-	status := input.Status
-	if status == "" {
-		status = "PROVISIONING"
-	}
-	runnerStatus := input.RunnerStatus
-	if runnerStatus == "" {
-		runnerStatus = "CONNECTING"
-	}
-	return scanRuntimeInstance(s.pool.QueryRow(ctx, `
-		INSERT INTO runtime_instances (project_id, workspace_id, runtime_id, status, external_id, runner_status, safe_handle_metadata)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id::text, project_id::text, workspace_id::text, runtime_id::text, status, external_id, runner_status, safe_handle_metadata, created_at, started_at, stopped_at, updated_at
-	`, input.ProjectID, input.WorkspaceID, input.RuntimeID, status, input.ExternalID, runnerStatus, objectJSON(input.SafeHandleMetadata)))
-}
-
-func (s *Store) UpdateRuntimeInstanceState(ctx context.Context, projectID, instanceID, status string, externalID *string, runnerStatus string, safeMetadata json.RawMessage) (store.RuntimeInstance, error) {
-	return scanRuntimeInstance(s.pool.QueryRow(ctx, `
-		UPDATE runtime_instances
-		SET status = $3,
-		    external_id = $4,
-		    runner_status = $5,
-		    safe_handle_metadata = $6,
-		    started_at = CASE WHEN $3 = 'RUNNING' AND started_at IS NULL THEN now() ELSE started_at END,
-		    stopped_at = CASE WHEN $3 IN ('STOPPED', 'DESTROYED', 'FAILED') AND stopped_at IS NULL THEN now() ELSE stopped_at END,
-		    updated_at = now()
-		WHERE project_id = $1 AND id = $2
-		RETURNING id::text, project_id::text, workspace_id::text, runtime_id::text, status, external_id, runner_status, safe_handle_metadata, created_at, started_at, stopped_at, updated_at
-	`, projectID, instanceID, status, externalID, runnerStatus, objectJSON(safeMetadata)))
-}
-
 func (s *Store) CreateExecutionSession(ctx context.Context, input store.ExecutionSession) (store.ExecutionSession, error) {
+	if strings.TrimSpace(input.RunnerID) == "" {
+		return store.ExecutionSession{}, store.ErrInvalidArgument
+	}
 	status := input.Status
 	if status == "" {
 		status = "PENDING"
@@ -181,10 +152,10 @@ func (s *Store) CreateExecutionSession(ctx context.Context, input store.Executio
 	}
 
 	created, err := scanExecutionSession(tx.QueryRow(ctx, `
-		INSERT INTO execution_sessions (project_id, run_id, runtime_instance_id, runner_id, status, cwd, command_argv, exit_code)
-		VALUES ($1, $2, nullif($3, '')::uuid, nullif($4, '')::uuid, $5, $6, $7, $8)
-		RETURNING id::text, project_id::text, run_id::text, coalesce(runtime_instance_id::text, ''), coalesce(runner_id::text, ''), status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
-	`, input.ProjectID, input.RunID, input.RuntimeInstanceID, input.RunnerID, status, cwd, arrayJSON(input.CommandArgv), input.ExitCode))
+		INSERT INTO execution_sessions (project_id, run_id, runner_id, status, cwd, command_argv, exit_code)
+		VALUES ($1, $2, $3::uuid, $4, $5, $6, $7)
+		RETURNING id::text, project_id::text, run_id::text, runner_id::text, status, cwd, command_argv, exit_code, created_at, started_at, completed_at, updated_at
+	`, input.ProjectID, input.RunID, input.RunnerID, status, cwd, arrayJSON(input.CommandArgv), input.ExitCode))
 	if err != nil {
 		return store.ExecutionSession{}, err
 	}
@@ -285,17 +256,9 @@ func scanRunWithBranch(row pgx.Row) (store.Run, error) {
 	return value, nil
 }
 
-func scanRuntimeInstance(row pgx.Row) (store.RuntimeInstance, error) {
-	var value store.RuntimeInstance
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.WorkspaceID, &value.RuntimeID, &value.Status, &value.ExternalID, &value.RunnerStatus, &value.SafeHandleMetadata, &value.CreatedAt, &value.StartedAt, &value.StoppedAt, &value.UpdatedAt); err != nil {
-		return store.RuntimeInstance{}, notFound(err)
-	}
-	return value, nil
-}
-
 func scanExecutionSession(row pgx.Row) (store.ExecutionSession, error) {
 	var value store.ExecutionSession
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.RunID, &value.RuntimeInstanceID, &value.RunnerID, &value.Status, &value.CWD, &value.CommandArgv, &value.ExitCode, &value.CreatedAt, &value.StartedAt, &value.CompletedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.RunID, &value.RunnerID, &value.Status, &value.CWD, &value.CommandArgv, &value.ExitCode, &value.CreatedAt, &value.StartedAt, &value.CompletedAt, &value.UpdatedAt); err != nil {
 		return store.ExecutionSession{}, notFound(err)
 	}
 	return value, nil
