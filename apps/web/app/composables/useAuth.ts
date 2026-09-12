@@ -121,6 +121,7 @@ export function useAuth() {
 
   async function login(loginValue: string, password: string, stayLoggedIn: boolean) {
     const tokens = await apiRequest<AuthTokens>('/api/auth/login', { method: 'POST', body: { login: loginValue, password } })
+    generation.value++
     store(tokens, stayLoggedIn)
     return tokens.user
   }
@@ -160,6 +161,7 @@ export function useAuth() {
     const updated = await request<AuthUser>('/api/auth/me/password', {
       method: 'PUT', body: { currentPassword, newPassword }
     })
+    generation.value++
     clear()
     return updated
   }
