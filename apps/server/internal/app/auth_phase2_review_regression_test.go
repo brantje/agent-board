@@ -169,7 +169,7 @@ func TestPhase2ForcedPasswordChangeBlocksNormalApplicationAccess(t *testing.T) {
 		t.Fatal("forced-change user retained normal self-service session access")
 	}
 
-	changed, err := service.ChangeOwnPassword(ctx, forced.User, "permanent-admin-password")
+	changed, err := service.ChangeOwnPassword(ctx, forced.User, "", "permanent-admin-password")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +233,7 @@ func TestPhase2PersistedPasswordPolicyCoversEveryPasswordPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ChangeOwnPassword(ctx, member, weak); err == nil {
+	if _, err := service.ChangeOwnPassword(ctx, member, "ValidSetup123!", weak); err == nil {
 		t.Fatal("self-service password change ignored persisted password policy")
 	}
 
@@ -260,10 +260,10 @@ func TestPhase2PersistedPasswordPolicyCoversEveryPasswordPath(t *testing.T) {
 	if !forced.User.ForcePasswordChange {
 		t.Fatal("admin direct password did not enter forced-change flow")
 	}
-	if _, err := service.ChangeOwnPassword(ctx, forced.User, weak); err == nil {
+	if _, err := service.ChangeOwnPassword(ctx, forced.User, "", weak); err == nil {
 		t.Fatal("forced password completion ignored persisted password policy")
 	}
-	if _, err := service.ChangeOwnPassword(ctx, forced.User, "ValidSelfChange123!"); err != nil {
+	if _, err := service.ChangeOwnPassword(ctx, forced.User, "", "ValidSelfChange123!"); err != nil {
 		t.Fatal(err)
 	}
 }
