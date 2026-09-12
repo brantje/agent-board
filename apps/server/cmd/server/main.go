@@ -61,8 +61,15 @@ func main() {
 		slog.SetDefault(slog.New(redaction.NewSlogHandler(baseHandler, application.services.Redaction)))
 	}
 	if application, ok := handler.(*applicationHandler); ok && application.services != nil {
-		if err := app.EnsureOpenRouterFromEnv(ctx, application.services.ControlPlane, app.SecretStoreFromWriter(application.services.Secrets), os.Getenv); err != nil {
+		secretStore := app.SecretStoreFromWriter(application.services.Secrets)
+		if err := app.EnsureOpenRouterFromEnv(ctx, application.services.ControlPlane, secretStore, os.Getenv); err != nil {
 			slog.Error("bootstrap OpenRouter provider", "error", err)
+			closeStore()
+			stop()
+			os.Exit(1)
+		}
+		if err := app.EnsureLiteLLMFromEnv(ctx, application.services.ControlPlane, secretStore, os.Getenv); err != nil {
+			slog.Error("bootstrap LiteLLM provider", "error", err)
 			closeStore()
 			stop()
 			os.Exit(1)

@@ -16,6 +16,11 @@ const (
 	openRouterModelsEnvKey = "OPENROUTER_MODELS"
 	openRouterProviderName = "OpenRouter"
 	openRouterProviderKind = "openrouter"
+
+	liteLLMEndpointEnvKey = "LITELLM_ENDPOINT"
+	liteLLMAPIKeyEnvKey   = "LITELLM_API_KEY"
+	liteLLMProviderName   = "LiteLLM"
+	liteLLMProviderKind   = "openai-compatible"
 )
 
 func EnsureOpenRouterFromEnv(ctx context.Context, control *Service, secretStore SecretStore, getenv func(string) string) error {
@@ -50,8 +55,115 @@ func EnsureOpenRouterFromEnv(ctx context.Context, control *Service, secretStore 
 	return ensureOpenRouterModelProfilesFromEnv(ctx, control, provider, models)
 }
 
+func EnsureLiteLLMFromEnv(ctx context.Context, control *Service, secretStore SecretStore, getenv func(string) string) error {
+	if control == nil {
+		return fmt.Errorf("control plane service is required")
+	}
+	if getenv == nil {
+		getenv = func(string) string { return "" }
+	}
+
+	endpoint := strings.TrimSpace(getenv(liteLLMEndpointEnvKey))
+	apiKey := strings.TrimSpace(getenv(liteLLMAPIKeyEnvKey))
+	if endpoint == "" && apiKey == "" {
+		return nil
+	}
+
+	providers, err := control.ListProviders(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("list providers for env bootstrap: %w", err)
+	}
+	_, err = ensureLiteLLMProviderFromEnv(ctx, control, secretStore, endpoint, apiKey, providers)
+	return err
+}
+
+func ensureLiteLLMProviderFromEnv(ctx context.Context, control *Service, secretStore SecretStore, endpoint, apiKey string, providers []store.Provider) (store.Provider, error) {
+	if provider, found, err := findNamedProvider(providers, liteLLMProviderName, liteLLMProviderKind); err != nil {
+		return store.Provider{}, err
+	} else if found {
+		return reconcileLiteLLMProviderFromEnv(ctx, control, secretStore, endpoint, apiKey, provider)
+	}
+	if endpoint == "" || apiKey == "" {
+		return store.Provider{}, fmt.Errorf("%s and %s must both be set to create the LiteLLM provider", liteLLMEndpointEnvKey, liteLLMAPIKeyEnvKey)
+	}
+	if secretStore == nil {
+		return store.Provider{}, fmt.Errorf("%s is set but secret storage is not configured", liteLLMAPIKeyEnvKey)
+	}
+
+	baseURL := endpoint
+	provider, err := control.CreateProvider(ctx, store.Provider{
+		Name:         liteLLMProviderName,
+		Kind:         liteLLMProviderKind,
+		BaseURL:      &baseURL,
+		Enabled:      true,
+		SafeMetadata: store.EmptyObject,
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) {
+			reloaded, listErr := control.ListProviders(ctx, nil)
+			if listErr != nil {
+				return store.Provider{}, fmt.Errorf("list providers after LiteLLM create conflict: %w", listErr)
+			}
+			provider, found, findErr := findNamedProvider(reloaded, liteLLMProviderName, liteLLMProviderKind)
+			if findErr != nil {
+				return store.Provider{}, findErr
+			}
+			if !found {
+				return store.Provider{}, fmt.Errorf("create LiteLLM provider: %w", err)
+			}
+			return reconcileLiteLLMProviderFromEnv(ctx, control, secretStore, endpoint, apiKey, provider)
+		}
+		return store.Provider{}, fmt.Errorf("create LiteLLM provider: %w", err)
+	}
+
+	provider, err = completeProviderCredential(ctx, control, secretStore, apiKey, provider, "LiteLLM")
+	if err != nil {
+		return store.Provider{}, err
+	}
+	slog.Info("created LiteLLM provider from env bootstrap")
+	return provider, nil
+}
+
+func reconcileLiteLLMProviderFromEnv(ctx context.Context, control *Service, secretStore SecretStore, endpoint, apiKey string, provider store.Provider) (store.Provider, error) {
+	next := provider
+	baseURLMissing := endpoint != "" && !providerBaseURLConfigured(next)
+	if baseURLMissing {
+		baseURL := endpoint
+		next.BaseURL = &baseURL
+	}
+
+	if apiKey != "" {
+		configured, err := providerCredentialConfigured(ctx, secretStore, provider, "LiteLLM")
+		if err != nil {
+			return store.Provider{}, err
+		}
+		if !configured {
+			if secretStore == nil {
+				return store.Provider{}, fmt.Errorf("%s is set but secret storage is not configured", liteLLMAPIKeyEnvKey)
+			}
+			provider, err = completeProviderCredential(ctx, control, secretStore, apiKey, next, "LiteLLM")
+			if err != nil {
+				return store.Provider{}, err
+			}
+			slog.Info("completed LiteLLM provider credential from env bootstrap")
+			return provider, nil
+		}
+		slog.Info("LiteLLM provider already exists; skipping credential env bootstrap")
+	}
+
+	if !baseURLMissing {
+		return provider, nil
+	}
+	provider, err := control.UpdateProvider(ctx, nil, next)
+	if err != nil {
+		return store.Provider{}, fmt.Errorf("update LiteLLM base URL: %w", err)
+	}
+	slog.Info("completed LiteLLM provider base URL from env bootstrap")
+	return provider, nil
+}
+
 func ensureOpenRouterProviderFromEnv(ctx context.Context, control *Service, secretStore SecretStore, apiKey string, providers []store.Provider) (store.Provider, error) {
-	if provider, found, err := findOpenRouterProvider(providers); err != nil {
+	if provider, found, err := findNamedProvider(providers, openRouterProviderName, openRouterProviderKind); err != nil {
 		return store.Provider{}, err
 	} else if found {
 		return reconcileOpenRouterProviderCredential(ctx, control, secretStore, apiKey, provider)
@@ -75,7 +187,7 @@ func ensureOpenRouterProviderFromEnv(ctx context.Context, control *Service, secr
 			if listErr != nil {
 				return store.Provider{}, fmt.Errorf("list providers after OpenRouter create conflict: %w", listErr)
 			}
-			provider, found, findErr := findOpenRouterProvider(reloaded)
+			provider, found, findErr := findNamedProvider(reloaded, openRouterProviderName, openRouterProviderKind)
 			if findErr != nil {
 				return store.Provider{}, findErr
 			}
@@ -87,7 +199,7 @@ func ensureOpenRouterProviderFromEnv(ctx context.Context, control *Service, secr
 		return store.Provider{}, fmt.Errorf("create OpenRouter provider: %w", err)
 	}
 
-	provider, err = completeOpenRouterProviderCredential(ctx, control, secretStore, apiKey, provider)
+	provider, err = completeProviderCredential(ctx, control, secretStore, apiKey, provider, "OpenRouter")
 	if err != nil {
 		return store.Provider{}, err
 	}
@@ -99,7 +211,7 @@ func reconcileOpenRouterProviderCredential(ctx context.Context, control *Service
 	if apiKey == "" {
 		return provider, nil
 	}
-	configured, err := openRouterProviderCredentialConfigured(ctx, secretStore, provider)
+	configured, err := providerCredentialConfigured(ctx, secretStore, provider, "OpenRouter")
 	if err != nil {
 		return store.Provider{}, err
 	}
@@ -110,7 +222,7 @@ func reconcileOpenRouterProviderCredential(ctx context.Context, control *Service
 	if secretStore == nil {
 		return store.Provider{}, fmt.Errorf("%s is set but secret storage is not configured", openRouterEnvKey)
 	}
-	provider, err = completeOpenRouterProviderCredential(ctx, control, secretStore, apiKey, provider)
+	provider, err = completeProviderCredential(ctx, control, secretStore, apiKey, provider, "OpenRouter")
 	if err != nil {
 		return store.Provider{}, err
 	}
@@ -118,21 +230,21 @@ func reconcileOpenRouterProviderCredential(ctx context.Context, control *Service
 	return provider, nil
 }
 
-func completeOpenRouterProviderCredential(ctx context.Context, control *Service, secretStore SecretStore, apiKey string, provider store.Provider) (store.Provider, error) {
+func completeProviderCredential(ctx context.Context, control *Service, secretStore SecretStore, apiKey string, provider store.Provider, label string) (store.Provider, error) {
 	ref := "provider:" + provider.ID
 	if _, err := secretStore.Put(ctx, secrets.Scope{}, ref, []byte(apiKey)); err != nil {
-		return store.Provider{}, fmt.Errorf("store OpenRouter credential: %w", err)
+		return store.Provider{}, fmt.Errorf("store %s credential: %w", label, err)
 	}
 	refValue := ref
 	provider.CredentialRef = &refValue
 	provider, err := control.UpdateProvider(ctx, nil, provider)
 	if err != nil {
-		return store.Provider{}, fmt.Errorf("update OpenRouter credential ref: %w", err)
+		return store.Provider{}, fmt.Errorf("update %s credential ref: %w", label, err)
 	}
 	return provider, nil
 }
 
-func openRouterProviderCredentialConfigured(ctx context.Context, secretStore SecretStore, provider store.Provider) (bool, error) {
+func providerCredentialConfigured(ctx context.Context, secretStore SecretStore, provider store.Provider, label string) (bool, error) {
 	if provider.CredentialRef == nil || strings.TrimSpace(*provider.CredentialRef) == "" {
 		return false, nil
 	}
@@ -144,9 +256,13 @@ func openRouterProviderCredentialConfigured(ctx context.Context, secretStore Sec
 		return false, nil
 	}
 	if err != nil {
-		return false, fmt.Errorf("resolve OpenRouter credential: %w", err)
+		return false, fmt.Errorf("resolve %s credential: %w", label, err)
 	}
 	return true, nil
+}
+
+func providerBaseURLConfigured(provider store.Provider) bool {
+	return provider.BaseURL != nil && strings.TrimSpace(*provider.BaseURL) != ""
 }
 
 func ensureOpenRouterModelProfilesFromEnv(ctx context.Context, control *Service, provider store.Provider, modelIDs []string) error {
@@ -209,14 +325,14 @@ func deriveOpenRouterModelProfileName(modelID string) string {
 	return modelID
 }
 
-func findOpenRouterProvider(providers []store.Provider) (store.Provider, bool, error) {
+func findNamedProvider(providers []store.Provider, name, kind string) (store.Provider, bool, error) {
 	var wrongKind store.Provider
 	var wrongKindFound bool
 	for _, provider := range providers {
-		if !strings.EqualFold(provider.Name, openRouterProviderName) {
+		if !strings.EqualFold(provider.Name, name) {
 			continue
 		}
-		if provider.Kind == openRouterProviderKind {
+		if provider.Kind == kind {
 			return provider, true, nil
 		}
 		wrongKind = provider
@@ -225,9 +341,9 @@ func findOpenRouterProvider(providers []store.Provider) (store.Provider, bool, e
 	if wrongKindFound {
 		return store.Provider{}, false, fmt.Errorf(
 			"provider named %q exists with kind %q; env bootstrap requires kind %q",
-			openRouterProviderName,
+			name,
 			wrongKind.Kind,
-			openRouterProviderKind,
+			kind,
 		)
 	}
 	return store.Provider{}, false, nil
