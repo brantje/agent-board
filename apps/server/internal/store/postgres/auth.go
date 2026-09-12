@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const userColumns = `id::text, username, email, display_name, password_hash, deployment_role, status, force_password_change, auth_version, created_at, updated_at`
+const userColumns = `id::text, username, email, display_name, COALESCE(password_hash,''), deployment_role, status, force_password_change, auth_version, created_at, updated_at`
 const authSessionColumns = `id::text, user_id::text, refresh_token_hash, expires_at, revoked_at, created_at, last_used_at`
 const passwordTokenColumns = `id::text, user_id::text, purpose, token_hash, expires_at, consumed_at, revoked_at, created_at`
 
