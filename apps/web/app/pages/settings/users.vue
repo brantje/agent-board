@@ -1,9 +1,16 @@
 <script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
 import { onMounted, reactive, ref } from 'vue'
 import type { AuthUser } from '../../types/auth'
 
 const auth = useAuth()
 const rows = ref<AuthUser[]>([])
+const columns: TableColumn<AuthUser>[] = [
+  { accessorKey: 'displayName', header: 'User' },
+  { accessorKey: 'deploymentRole', header: 'Role' },
+  { accessorKey: 'status', header: 'Status' },
+  { id: 'actions', header: 'Actions' }
+]
 const createForm = reactive({ username: '', email: '', displayName: '' })
 const passwordForm = reactive({ userId: '', password: '' })
 const oneTimeSecret = ref<{ label: string; token: string; expiresAt: string } | null>(null)
@@ -75,21 +82,25 @@ onMounted(() => run(reload))
         <UCard>
           <template #header><h2 class="font-semibold">Local users</h2></template>
           <UEmpty v-if="rows.length === 0" title="No users" />
-          <div v-else class="overflow-x-auto">
-            <table class="w-full text-left text-sm">
-              <thead><tr class="border-b border-default"><th class="p-2">User</th><th class="p-2">Role</th><th class="p-2">Status</th><th class="p-2">Actions</th></tr></thead>
-              <tbody><tr v-for="user in rows" :key="user.id" class="border-b border-default align-top">
-                <td class="p-2"><p class="font-medium">{{ user.displayName }}</p><p class="text-muted">{{ user.username }} · {{ user.email }}</p></td>
-                <td class="p-2">{{ user.deploymentRole }}</td><td class="p-2"><UBadge color="neutral" variant="soft">{{ user.status }}</UBadge></td>
-                <td class="p-2"><div class="flex flex-wrap gap-2">
-                  <UButton v-if="user.status === 'pending'" size="xs" variant="soft" @click="issueToken(user, 'setup')">New setup token</UButton>
-                  <UButton v-if="user.status !== 'pending'" size="xs" variant="soft" @click="issueToken(user, 'reset')">Reset token</UButton>
-                  <UButton v-if="user.status !== 'pending'" size="xs" variant="soft" @click="passwordForm.userId = user.id">Set password</UButton>
-                  <UButton v-if="user.status !== 'pending'" size="xs" :color="user.status === 'disabled' ? 'success' : 'error'" variant="soft" @click="toggleDisabled(user)">{{ user.status === 'disabled' ? 'Re-enable' : 'Disable' }}</UButton>
-                </div></td>
-              </tr></tbody>
-            </table>
-          </div>
+          <UTable v-else :data="rows" :columns="columns" class="w-full">
+            <template #displayName-cell="{ row }">
+              <div>
+                <p class="font-medium">{{ row.original.displayName }}</p>
+                <p class="text-muted">{{ row.original.username }} · {{ row.original.email }}</p>
+              </div>
+            </template>
+            <template #status-cell="{ row }">
+              <UBadge color="neutral" variant="soft">{{ row.original.status }}</UBadge>
+            </template>
+            <template #actions-cell="{ row }">
+              <div class="flex flex-wrap gap-2">
+                <UButton v-if="row.original.status === 'pending'" size="xs" variant="soft" @click="issueToken(row.original, 'setup')">New setup token</UButton>
+                <UButton v-if="row.original.status !== 'pending'" size="xs" variant="soft" @click="issueToken(row.original, 'reset')">Reset token</UButton>
+                <UButton v-if="row.original.status !== 'pending'" size="xs" variant="soft" @click="passwordForm.userId = row.original.id">Set password</UButton>
+                <UButton v-if="row.original.status !== 'pending'" size="xs" :color="row.original.status === 'disabled' ? 'success' : 'error'" variant="soft" @click="toggleDisabled(row.original)">{{ row.original.status === 'disabled' ? 'Re-enable' : 'Disable' }}</UButton>
+              </div>
+            </template>
+          </UTable>
         </UCard>
 
         <UCard v-if="passwordForm.userId">
