@@ -84,9 +84,6 @@ func (s *reviewServiceStore) GetRunProvenance(context.Context, string, string) (
 func (s *reviewServiceStore) ListExecutionSessionsByRun(context.Context, string, string, []string) ([]store.ExecutionSession, error) {
 	return nil, nil
 }
-func (s *reviewServiceStore) GetRuntimeInstance(context.Context, string, string) (store.RuntimeInstance, error) {
-	return store.RuntimeInstance{}, store.ErrNotFound
-}
 func (s *reviewServiceStore) ListRunEvents(_ context.Context, _, _ string, after int64, limit int) ([]store.Event, error) {
 	values := make([]store.Event, 0, len(s.events))
 	for index, event := range s.events {
