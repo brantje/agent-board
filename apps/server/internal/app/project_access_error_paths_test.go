@@ -11,13 +11,13 @@ import (
 
 type projectAccessFailureStore struct {
 	*projectAccessCRUDStore
-	effectiveErr  error
-	getUserErr    error
-	listUsersErr  error
-	listGroupsErr error
-	userGrantsErr error
+	effectiveErr   error
+	getUserErr     error
+	listUsersErr   error
+	listGroupsErr  error
+	userGrantsErr  error
 	groupGrantsErr error
-	deleteUserErr error
+	deleteUserErr  error
 	deleteGroupErr error
 }
 
@@ -188,10 +188,10 @@ func TestProjectAccessApplicationRejectsDisabledActors(t *testing.T) {
 	service := newProjectAccessFailureService(t, fake)
 	actor := AuthenticatedUser{ID: "disabled", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusDisabled}
 
-	if _, err := service.ListProjects(t.Context(), actor); errorCode(err) != "authentication_failed" {
+	if _, err := service.ListProjects(t.Context(), actor); errorCode(err) != "forbidden" {
 		t.Fatalf("ListProjects disabled actor error = %v", err)
 	}
-	if _, err := service.CreateProject(t.Context(), actor, projectAccessValidProject("", "Disabled")); errorCode(err) != "authentication_failed" {
+	if _, err := service.CreateProject(t.Context(), actor, projectAccessValidProject("", "Disabled")); errorCode(err) != "forbidden" {
 		t.Fatalf("CreateProject disabled actor error = %v", err)
 	}
 }
