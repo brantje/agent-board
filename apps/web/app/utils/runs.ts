@@ -76,7 +76,6 @@ export interface RunAgentInfo {
   engine?: string
   model?: string
   provider?: string
-  runtime?: string
   runner?: string
 }
 
@@ -98,16 +97,14 @@ export function runAgentInfo(provenance: Record<string, unknown> | null | undefi
   const agent = recordValue(context.agent)
   const model = recordValue(context.model)
   const provider = recordValue(context.provider)
-  const runtime = recordValue(context.runtime)
   const runner = recordValue(context.runner)
   const info: RunAgentInfo = {
     name: textValue(agent?.name),
     engine: textValue(agent?.engine),
     model: textValue(model?.model) || textValue(model?.name),
     provider: textValue(provider?.name) || textValue(provider?.kind),
-    runtime: textValue(runtime?.name) || textValue(runtime?.kind),
     runner: textValue(runner?.name)
   }
-  if (!info.name && !info.engine && !info.model && !info.provider && !info.runtime && !info.runner) return null
+  if (!info.name && !info.engine && !info.model && !info.provider && !info.runner) return null
   return info
 }
