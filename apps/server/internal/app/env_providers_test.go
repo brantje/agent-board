@@ -629,6 +629,7 @@ func TestEnsureLiteLLMFromEnvNoOpWhenBlank(t *testing.T) {
 	if err := EnsureLiteLLMFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
 		liteLLMEndpointEnvKey: "   ",
 		liteLLMAPIKeyEnvKey:   "  ",
+		liteLLMModelsEnvKey:   " , ",
 	})); err != nil {
 		t.Fatalf("EnsureLiteLLMFromEnv() error = %v", err)
 	}
@@ -1004,5 +1005,172 @@ func TestEnsureLiteLLMFromEnvResumeRequiresSecretStorage(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("expected error when secret storage is unavailable")
+	}
+}
+
+func TestEnsureLiteLLMFromEnvCreatesModelProfiles(t *testing.T) {
+	st := &envProviderStore{
+		providers: []store.Provider{{ID: "litellm-provider-id", Name: "LiteLLM", Kind: "openai-compatible"}},
+	}
+	writer := newCaptureEnvSecretWriter()
+	svc := New(st)
+
+	if err := EnsureLiteLLMFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
+		liteLLMModelsEnvKey: "anthropic/claude-3.5-sonnet, openai/gpt-4o-mini",
+	})); err != nil {
+		t.Fatalf("EnsureLiteLLMFromEnv() error = %v", err)
+	}
+	if len(st.createdModels) != 2 {
+		t.Fatalf("created models = %d, want 2", len(st.createdModels))
+	}
+	if st.createdModels[0].Name != "claude-3.5-sonnet" || st.createdModels[0].Model != "anthropic/claude-3.5-sonnet" {
+		t.Fatalf("first model profile = %+v", st.createdModels[0])
+	}
+	if st.createdModels[0].ProjectID != nil {
+		t.Fatal("expected global model profile")
+	}
+	if st.createdModels[0].ProviderID != "litellm-provider-id" {
+		t.Fatalf("provider id = %q", st.createdModels[0].ProviderID)
+	}
+	if st.createdModels[1].Name != "gpt-4o-mini" || st.createdModels[1].Model != "openai/gpt-4o-mini" {
+		t.Fatalf("second model profile = %+v", st.createdModels[1])
+	}
+}
+
+func TestEnsureLiteLLMFromEnvSkipsExistingModelProfileByName(t *testing.T) {
+	st := &envProviderStore{
+		providers: []store.Provider{{ID: "litellm-provider-id", Name: "LiteLLM", Kind: "openai-compatible"}},
+		modelProfiles: []store.ModelProfile{
+			{ID: "existing", Name: "claude-3.5-sonnet", Model: "other/model", ProviderID: "other-provider"},
+		},
+	}
+	svc := New(st)
+
+	if err := EnsureLiteLLMFromEnv(context.Background(), svc, nil, envGetter(map[string]string{
+		liteLLMModelsEnvKey: "anthropic/claude-3.5-sonnet",
+	})); err != nil {
+		t.Fatalf("EnsureLiteLLMFromEnv() error = %v", err)
+	}
+	if len(st.createdModels) != 0 {
+		t.Fatalf("created models = %d, want 0", len(st.createdModels))
+	}
+}
+
+func TestEnsureLiteLLMFromEnvSkipsExistingModelProfileByModel(t *testing.T) {
+	st := &envProviderStore{
+		providers: []store.Provider{{ID: "litellm-provider-id", Name: "LiteLLM", Kind: "openai-compatible"}},
+		modelProfiles: []store.ModelProfile{
+			{ID: "existing", Name: "Different Name", Model: "anthropic/claude-3.5-sonnet", ProviderID: "litellm-provider-id"},
+		},
+	}
+	svc := New(st)
+
+	if err := EnsureLiteLLMFromEnv(context.Background(), svc, nil, envGetter(map[string]string{
+		liteLLMModelsEnvKey: "anthropic/claude-3.5-sonnet",
+	})); err != nil {
+		t.Fatalf("EnsureLiteLLMFromEnv() error = %v", err)
+	}
+	if len(st.createdModels) != 0 {
+		t.Fatalf("created models = %d, want 0", len(st.createdModels))
+	}
+}
+
+func TestEnsureLiteLLMFromEnvSkipsModelCreateOnConflict(t *testing.T) {
+	st := &envProviderStore{
+		providers:      []store.Provider{{ID: "litellm-provider-id", Name: "LiteLLM", Kind: "openai-compatible"}},
+		createModelErr: store.ErrConflict,
+	}
+	svc := New(st)
+
+	if err := EnsureLiteLLMFromEnv(context.Background(), svc, nil, envGetter(map[string]string{
+		liteLLMModelsEnvKey: "anthropic/claude-3.5-sonnet",
+	})); err != nil {
+		t.Fatalf("EnsureLiteLLMFromEnv() error = %v", err)
+	}
+}
+
+func TestEnsureLiteLLMFromEnvModelsWithoutProviderFails(t *testing.T) {
+	st := &envProviderStore{}
+	svc := New(st)
+
+	err := EnsureLiteLLMFromEnv(context.Background(), svc, nil, envGetter(map[string]string{
+		liteLLMModelsEnvKey: "anthropic/claude-3.5-sonnet",
+	}))
+	if err == nil {
+		t.Fatal("expected error when LiteLLM provider does not exist")
+	}
+}
+
+func TestEnsureLiteLLMFromEnvModelsWithExistingProvider(t *testing.T) {
+	st := &envProviderStore{
+		providers: []store.Provider{{ID: "litellm-provider-id", Name: "LiteLLM", Kind: "openai-compatible"}},
+	}
+	svc := New(st)
+
+	if err := EnsureLiteLLMFromEnv(context.Background(), svc, nil, envGetter(map[string]string{
+		liteLLMModelsEnvKey: "gpt-4o-mini",
+	})); err != nil {
+		t.Fatalf("EnsureLiteLLMFromEnv() error = %v", err)
+	}
+	if len(st.createdModels) != 1 {
+		t.Fatalf("created models = %d, want 1", len(st.createdModels))
+	}
+	if st.createdModels[0].Name != "gpt-4o-mini" || st.createdModels[0].Model != "gpt-4o-mini" {
+		t.Fatalf("created model profile = %+v", st.createdModels[0])
+	}
+}
+
+func TestEnsureLiteLLMFromEnvExistingProviderWithAPIKeyAndModels(t *testing.T) {
+	credentialRef := "provider:litellm-provider-id"
+	baseURL := "https://existing.example/v1"
+	st := &envProviderStore{
+		providers: []store.Provider{{ID: "litellm-provider-id", Name: "LiteLLM", Kind: "openai-compatible", BaseURL: &baseURL, CredentialRef: &credentialRef}},
+	}
+	writer := newCaptureEnvSecretWriter()
+	writer.stored[credentialRef] = []byte("existing-key")
+	svc := New(st)
+
+	if err := EnsureLiteLLMFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
+		liteLLMEndpointEnvKey: "https://litellm.example/v1",
+		liteLLMAPIKeyEnvKey:   "sk-litellm-key",
+		liteLLMModelsEnvKey:   "openai/gpt-4o-mini",
+	})); err != nil {
+		t.Fatalf("EnsureLiteLLMFromEnv() error = %v", err)
+	}
+	if st.created.ID != "" {
+		t.Fatal("expected no provider create")
+	}
+	if writer.calls != 0 {
+		t.Fatalf("secret writes = %d, want 0", writer.calls)
+	}
+	if len(st.createdModels) != 1 {
+		t.Fatalf("created models = %d, want 1", len(st.createdModels))
+	}
+}
+
+func TestEnsureLiteLLMFromEnvCreateConflictReloadsProviderAndModels(t *testing.T) {
+	st := &envProviderStore{
+		createErr:                 store.ErrConflict,
+		deferProvidersUntilRelist: true,
+		providers:                 []store.Provider{{ID: "existing-from-race", Name: "LiteLLM", Kind: "openai-compatible"}},
+	}
+	writer := newCaptureEnvSecretWriter()
+	svc := New(st)
+
+	if err := EnsureLiteLLMFromEnv(context.Background(), svc, writer, envGetter(map[string]string{
+		liteLLMEndpointEnvKey: "https://litellm.example/v1",
+		liteLLMAPIKeyEnvKey:   "sk-litellm-key",
+		liteLLMModelsEnvKey:   "openai/gpt-4o-mini",
+	})); err != nil {
+		t.Fatalf("EnsureLiteLLMFromEnv() error = %v", err)
+	}
+	if st.listCalls < 2 {
+		t.Fatalf("list calls = %d, want at least 2", st.listCalls)
+	}
+	if writer.calls != 1 {
+		t.Fatalf("secret writes = %d, want 1", writer.calls)
+	}
+	if len(st.createdModels) != 1 {
+		t.Fatalf("created models = %d, want 1", len(st.createdModels))
 	}
 }

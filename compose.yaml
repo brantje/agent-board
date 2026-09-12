@@ -65,6 +65,7 @@ services:
       OPENROUTER_MODELS: ${OPENROUTER_MODELS:-}
       LITELLM_ENDPOINT: ${LITELLM_ENDPOINT:-}
       LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+      LITELLM_MODELS: ${LITELLM_MODELS:-}
       AGENT_BOARD_DOCKER_NETWORK: ${AGENT_BOARD_DOCKER_NETWORK:-agent-board_default}
     entrypoint:
       - /bin/sh
