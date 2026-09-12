@@ -27,13 +27,12 @@ type runEventReader interface {
 }
 
 type interactiveQuestioner struct {
-	store             store.QuestionStore
-	interactive       store.InteractiveQuestionStore
-	events            *evidence.Recorder
-	eventReader       runEventReader
-	safe              executioncontext.SafeContext
-	runtimeInstanceID string
-	engine            string
+	store       store.QuestionStore
+	interactive store.InteractiveQuestionStore
+	events      *evidence.Recorder
+	eventReader runEventReader
+	safe        executioncontext.SafeContext
+	engine      string
 }
 
 func (q *interactiveQuestioner) Open(ctx context.Context, correlationKey string, request engine.QuestionRequest) (engine.Question, error) {
@@ -153,9 +152,8 @@ func (q *interactiveQuestioner) prepareOpenCommand(correlationKey string, reques
 			Blocking:       true,
 			Status:         "OPEN",
 		},
-		Engine:            q.engine,
-		CorrelationKey:    correlationKey,
-		RuntimeInstanceID: q.runtimeInstanceID,
+		Engine:         q.engine,
+		CorrelationKey: correlationKey,
 	}, nil
 }
 
@@ -388,15 +386,14 @@ func (q *interactiveQuestioner) record(ctx context.Context, eventType string, pa
 	}
 	issueID, runID, agentID, workspaceID := q.safe.Issue.ID, q.safe.Run.ID, q.safe.Agent.ID, q.safe.Workspace.ID
 	_, err = q.events.Record(ctx, store.Event{
-		Type:              eventType,
-		ProjectID:         q.safe.Project.ID,
-		IssueID:           &issueID,
-		RunID:             &runID,
-		AgentID:           &agentID,
-		WorkspaceID:       &workspaceID,
-		RuntimeInstanceID: optionalEventID(q.runtimeInstanceID),
-		Actor:             store.EmptyObject,
-		Payload:           encoded,
+		Type:        eventType,
+		ProjectID:   q.safe.Project.ID,
+		IssueID:     &issueID,
+		RunID:       &runID,
+		AgentID:     &agentID,
+		WorkspaceID: &workspaceID,
+		Actor:       store.EmptyObject,
+		Payload:     encoded,
 	})
 	return err
 }
