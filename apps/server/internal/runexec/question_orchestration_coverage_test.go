@@ -14,13 +14,13 @@ import (
 
 type orchestrationQuestionStore struct {
 	*processTestStore
-	questions       []store.Question
-	decision        store.Decision
-	listErr         error
-	decisionErr     error
-	openErr         error
-	createErr       error
-	created         []store.Question
+	questions   []store.Question
+	decision    store.Decision
+	listErr     error
+	decisionErr error
+	openErr     error
+	createErr   error
+	created     []store.Question
 }
 
 func (s *orchestrationQuestionStore) CreateQuestion(_ context.Context, question store.Question) (store.Question, error) {
@@ -56,26 +56,12 @@ func (s *orchestrationQuestionStore) AnswerQuestion(context.Context, store.Answe
 	return store.AnswerQuestionResult{}, nil
 }
 
-type acquiringRuntime struct {
-	*processTestRuntime
-	instance store.RuntimeInstance
-	calls    int
-}
-
-func (r *acquiringRuntime) Acquire(_ context.Context, projectID, _, runtimeID string) (store.RuntimeInstance, error) {
-	r.calls++
-	if r.instance.ID == "" {
-		r.instance = store.RuntimeInstance{ID: "acquired-runtime", ProjectID: projectID, Status: "RUNNING"}
-	}
-	return r.instance, nil
-}
-
 func continuationSafeContext() executioncontext.SafeContext {
 	return executioncontext.SafeContext{
-		Project: executioncontext.ProjectContext{ID: "project-1"},
-		Issue: executioncontext.IssueContext{ID: "issue-1"},
-		Run: executioncontext.RunContext{ID: "run-1"},
-		Agent: executioncontext.AgentContext{ID: "agent-1"},
+		Project:   executioncontext.ProjectContext{ID: "project-1"},
+		Issue:     executioncontext.IssueContext{ID: "issue-1"},
+		Run:       executioncontext.RunContext{ID: "run-1"},
+		Agent:     executioncontext.AgentContext{ID: "agent-1"},
 		Workspace: executioncontext.WorkspaceContext{ID: "workspace-1"},
 	}
 }
@@ -99,7 +85,7 @@ func TestEngineRequestLoadsLatestBlockingContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	processor := &Processor{store: storeWithQuestions, events: recorder}
-	request, err := processor.engineRequest(context.Background(), safe, nil, "runtime-instance-1")
+	request, err := processor.engineRequest(context.Background(), safe, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +99,7 @@ func TestEngineRequestLoadsLatestBlockingContinuation(t *testing.T) {
 
 func TestEngineRequestWithoutQuestionStoreHasNoContinuation(t *testing.T) {
 	processor := &Processor{store: &processTestStore{}}
-	request, err := processor.engineRequest(context.Background(), continuationSafeContext(), nil, "runtime-instance-1")
+	request, err := processor.engineRequest(context.Background(), continuationSafeContext(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,22 +136,6 @@ func TestLoadContinuationRejectsInvalidDurableState(t *testing.T) {
 	}
 }
 
-func TestAcquireRuntimeUsesOptionalAcquirerAndFallback(t *testing.T) {
-	acquirer := &acquiringRuntime{processTestRuntime: &processTestRuntime{}}
-	processor := &Processor{runtimes: acquirer}
-	instance, err := processor.acquireRuntime(context.Background(), "project-1", "issue-1", "runtime-1")
-	if err != nil || instance.ID != "acquired-runtime" || acquirer.calls != 1 || acquirer.created != 0 {
-		t.Fatalf("acquire instance=%+v calls=%d created=%d err=%v", instance, acquirer.calls, acquirer.created, err)
-	}
-
-	fallback := &processTestRuntime{}
-	processor.runtimes = fallback
-	instance, err = processor.acquireRuntime(context.Background(), "project-1", "issue-1", "runtime-1")
-	if err != nil || fallback.created != 1 || instance.ID != "runtime-instance" {
-		t.Fatalf("fallback instance=%+v created=%d err=%v", instance, fallback.created, err)
-	}
-}
-
 func TestQuestionerErrorAndNonBlockingPaths(t *testing.T) {
 	if _, err := (*questioner)(nil).Ask(context.Background(), engine.QuestionRequest{Prompt: "Explain", Kind: "TEXT"}); err == nil {
 		t.Fatal("expected unavailable Question capability error")
@@ -178,7 +148,7 @@ func TestQuestionerErrorAndNonBlockingPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	questionStore := &orchestrationQuestionStore{processTestStore: &processTestStore{}}
-	q := &questioner{store: questionStore, events: recorder, safe: safe, runtimeInstanceID: "runtime-instance-1"}
+	q := &questioner{store: questionStore, events: recorder, safe: safe}
 
 	if _, err := q.Ask(context.Background(), engine.QuestionRequest{Prompt: " ", Kind: "TEXT"}); err == nil {
 		t.Fatal("expected validation error")
