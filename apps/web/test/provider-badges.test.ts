@@ -9,6 +9,8 @@ describe('provider badges', () => {
     expect(providerHealthBadgeColor('HEALTHY', true)).toBe('warning')
     expect(providerHealthBadgeLabel('HEALTHY')).toBe('Health: Healthy')
     expect(providerHealthBadgeLabel('UNKNOWN', true)).toBe('Health: Checking')
+    expect(providerHealthBadgeLabel('UNHEALTHY')).toBe('Health: Unhealthy')
+    expect(providerHealthBadgeLabel('')).toBe('Health: Unavailable')
   })
 
   it('formats model counts and ignores missing persisted counts', () => {

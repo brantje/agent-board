@@ -198,6 +198,18 @@ func (s *multiProviderHealthStore) UpdateProviderHealth(_ context.Context, id st
 	return nil
 }
 
+func TestServiceListAllProviders(t *testing.T) {
+	store := &providerHealthStore{provider: store.Provider{ID: testProviderID, Kind: "test", Enabled: true, SafeMetadata: store.EmptyObject}}
+	service := New(store)
+	providers, err := service.ListAllProviders(context.Background())
+	if err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	if len(providers) != 1 || providers[0].ID != testProviderID {
+		t.Fatalf("providers=%v", providers)
+	}
+}
+
 func TestServiceEnqueueProviderHealthProbe(t *testing.T) {
 	service := New(&providerHealthStore{provider: store.Provider{ID: testProviderID, Kind: "test", Enabled: true, SafeMetadata: store.EmptyObject}})
 	worker := NewProviderHealthWorker(service, service.store, nil, nil)
@@ -225,6 +237,34 @@ func TestProviderHealthWorkerProbeByID(t *testing.T) {
 	worker := NewProviderHealthWorker(service, store, nil, nil)
 	worker.probeByID(context.Background(), testProviderID)
 	worker.probeByID(context.Background(), "missing")
+}
+
+func TestProviderHealthWorkerProbeByIDHandlesListError(t *testing.T) {
+	store := &failingListProviderHealthStore{err: errors.New("list failed")}
+	worker := NewProviderHealthWorker(New(store), store, nil, nil)
+	worker.probeByID(context.Background(), testProviderID)
+}
+
+func TestProviderHealthWorkerProbeProviderSkipsWithoutService(t *testing.T) {
+	worker := &ProviderHealthWorker{store: &providerHealthStore{}}
+	worker.probeProvider(context.Background(), store.Provider{ID: testProviderID})
+}
+
+func TestProviderHealthWorkerRunProcessesEnqueueAndTicker(t *testing.T) {
+	store := &providerHealthStore{provider: store.Provider{ID: testProviderID, Kind: "llamarack", Enabled: true, SafeMetadata: store.EmptyObject}}
+	service := New(store)
+	worker := NewProviderHealthWorker(service, store, nil, nil)
+	worker.interval = 30 * time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx) }()
+	time.Sleep(20 * time.Millisecond)
+	worker.Enqueue(testProviderID)
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	if err := waitFor(done, time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
 }
 
 func TestProviderHealthWorkerEnqueueOverflowUsesFallbackProbe(t *testing.T) {
