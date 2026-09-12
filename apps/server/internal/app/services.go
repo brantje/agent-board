@@ -77,7 +77,7 @@ func NewExecutionServices(controlPlaneStore store.ControlPlaneStore, materialize
 	if services.ControlPlane.Runners != nil {
 		runnerRegistry = services.ControlPlane.Runners.Connections
 	}
-	transportSessions, err := NewExecutionSessionService(securedStore, nil, runnerRegistry)
+	transportSessions, err := NewExecutionSessionService(securedStore, runnerRegistry)
 	if err != nil {
 		return nil, err
 	}
