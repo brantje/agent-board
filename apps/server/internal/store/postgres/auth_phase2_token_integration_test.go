@@ -105,12 +105,12 @@ func TestAuthPhase2StorePasswordTokenLifecycle(t *testing.T) {
 	}
 
 	expired, err := s.CreatePasswordToken(ctx, store.PasswordToken{
-		UserID: activated.ID, Purpose: store.PasswordTokenPurposeReset, TokenHash: hash(56), ExpiresAt: now.Add(-time.Minute),
+		UserID: activated.ID, Purpose: store.PasswordTokenPurposeReset, TokenHash: hash(56), ExpiresAt: now.Add(10 * time.Minute),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CompletePasswordToken(ctx, expired.TokenHash, store.PasswordTokenPurposeReset, "expired-hash", now); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.CompletePasswordToken(ctx, expired.TokenHash, store.PasswordTokenPurposeReset, "expired-hash", now.Add(11*time.Minute)); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expired reset token should be unusable: %v", err)
 	}
 }
