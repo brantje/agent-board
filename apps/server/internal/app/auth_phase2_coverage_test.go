@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
@@ -169,9 +168,5 @@ func TestPhase2LogoutOtherSessionsValidatesCurrentSession(t *testing.T) {
 	memory.mu.Unlock()
 	if err := service.LogoutOtherSessions(ctx, actor, currentToken); err == nil {
 		t.Fatal("expected revoked current session to fail")
-	}
-
-	if !errors.Is(store.ErrNotFound, store.ErrNotFound) {
-		t.Fatal("unreachable")
 	}
 }
