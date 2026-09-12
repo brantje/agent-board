@@ -91,9 +91,20 @@ func (a *api) listReviews(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	values, err := a.reviews.List(r.Context(), projectID, filter)
+	var values []store.Review
+	var err error
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		values, err = a.projectAccess.ListReviews(r.Context(), actor, a.reviews, projectID, filter)
+	} else {
+		values, err = a.reviews.List(r.Context(), projectID, filter)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	keys, err := a.issueKeyMap(r.Context(), projectID)
@@ -113,9 +124,20 @@ func (a *api) getReview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	value, err := a.reviews.Get(r.Context(), projectID, reviewID)
+	var value app.ReviewInspection
+	var err error
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		value, err = a.projectAccess.GetReview(r.Context(), actor, a.reviews, projectID, reviewID)
+	} else {
+		value, err = a.reviews.Get(r.Context(), projectID, reviewID)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	keys, err := a.issueKeyMap(r.Context(), projectID)
@@ -145,9 +167,19 @@ func (a *api) approveReview(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	result, err := a.reviews.Approve(r.Context(), projectID, reviewID, nil)
+	var result store.CompleteReviewApprovalResult
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		result, err = a.projectAccess.ApproveReview(r.Context(), actor, a.reviews, projectID, reviewID)
+	} else {
+		result, err = a.reviews.Approve(r.Context(), projectID, reviewID, nil)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, ReviewApprovalResponse{
@@ -172,9 +204,19 @@ func (a *api) requestReviewChanges(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	result, err := a.reviews.RequestChanges(r.Context(), projectID, reviewID, request.Feedback, nil)
+	var result store.RequestReviewChangesResult
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		result, err = a.projectAccess.RequestReviewChanges(r.Context(), actor, a.reviews, projectID, reviewID, request.Feedback)
+	} else {
+		result, err = a.reviews.RequestChanges(r.Context(), projectID, reviewID, request.Feedback, nil)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusAccepted, ReviewRequestChangesResponse{
