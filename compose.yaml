@@ -52,6 +52,25 @@ services:
       - postgres-credentials:/run/agent-board:ro
       - ./packages/database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
 
+  database-upgrade:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-agent_board}
+      POSTGRES_USER: ${POSTGRES_USER:-agent_board}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        export PGPASSWORD="$$(cat /run/agent-board/postgres-password)"
+        exec psql -v ON_ERROR_STOP=1 -h postgres -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}" -f /upgrade/004-project-access.sql
+    volumes:
+      - postgres-credentials:/run/agent-board:ro
+      - ./packages/database/upgrades/004-project-access.sql:/upgrade/004-project-access.sql:ro
+    restart: "no"
+
   server:
     build:
       context: .
@@ -89,8 +108,8 @@ services:
         fi
         exec /usr/local/bin/agent-board-server
     depends_on:
-      postgres:
-        condition: service_healthy
+      database-upgrade:
+        condition: service_completed_successfully
     group_add:
       - "${AGENT_BOARD_DOCKER_GID:?set AGENT_BOARD_DOCKER_GID to the host docker group GID from: stat -c '%g' /var/run/docker.sock}"
     ports:
