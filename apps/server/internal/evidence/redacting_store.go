@@ -9,16 +9,6 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-type runtimeRunnerStatusStore interface {
-	UpdateRuntimeInstanceRunnerStatusIfStatus(context.Context, string, string, string, string) (store.RuntimeInstance, error)
-}
-
-type runtimeRunnerGenerationStore interface {
-	ClaimRuntimeInstanceRunnerGeneration(context.Context, string, string) (int64, error)
-	UpdateRuntimeInstanceRunnerStatusGeneration(context.Context, string, string, string, int64) (store.RuntimeInstance, error)
-	UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(context.Context, string, string, string, int64, string) (store.RuntimeInstance, error)
-}
-
 type workspaceBootstrapLockStore interface {
 	AcquireWorkspaceBootstrapLock(context.Context, string) (store.WorkspaceBootstrapLock, error)
 }
@@ -106,38 +96,6 @@ func (s *RedactingStore) CreateArtifact(ctx context.Context, input store.Artifac
 	}
 	input.SafeMetadata = redacted
 	return s.ControlPlaneStore.CreateArtifact(ctx, input)
-}
-
-func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusIfStatus(ctx context.Context, projectID, instanceID, status, expectedStatus string) (store.RuntimeInstance, error) {
-	base, ok := s.ControlPlaneStore.(runtimeRunnerStatusStore)
-	if !ok {
-		return store.RuntimeInstance{}, fmt.Errorf("redacting store base does not support lifecycle-fenced runner status updates")
-	}
-	return base.UpdateRuntimeInstanceRunnerStatusIfStatus(ctx, projectID, instanceID, status, expectedStatus)
-}
-
-func (s *RedactingStore) ClaimRuntimeInstanceRunnerGeneration(ctx context.Context, projectID, instanceID string) (int64, error) {
-	base, ok := s.ControlPlaneStore.(runtimeRunnerGenerationStore)
-	if !ok {
-		return 0, fmt.Errorf("redacting store base does not support runner connection generations")
-	}
-	return base.ClaimRuntimeInstanceRunnerGeneration(ctx, projectID, instanceID)
-}
-
-func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusGeneration(ctx context.Context, projectID, instanceID, status string, generation int64) (store.RuntimeInstance, error) {
-	base, ok := s.ControlPlaneStore.(runtimeRunnerGenerationStore)
-	if !ok {
-		return store.RuntimeInstance{}, fmt.Errorf("redacting store base does not support runner connection generations")
-	}
-	return base.UpdateRuntimeInstanceRunnerStatusGeneration(ctx, projectID, instanceID, status, generation)
-}
-
-func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx context.Context, projectID, instanceID, status string, generation int64, expectedStatus string) (store.RuntimeInstance, error) {
-	base, ok := s.ControlPlaneStore.(runtimeRunnerGenerationStore)
-	if !ok {
-		return store.RuntimeInstance{}, fmt.Errorf("redacting store base does not support runner connection generations")
-	}
-	return base.UpdateRuntimeInstanceRunnerStatusGenerationIfStatus(ctx, projectID, instanceID, status, generation, expectedStatus)
 }
 
 func (s *RedactingStore) AcquireWorkspaceBootstrapLock(ctx context.Context, workspaceID string) (store.WorkspaceBootstrapLock, error) {
