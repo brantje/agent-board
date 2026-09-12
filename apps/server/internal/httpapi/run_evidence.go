@@ -16,59 +16,45 @@ import (
 )
 
 type RunEvidenceDTO struct {
-	Run              RunDTO                        `json:"run"`
-	Provenance       json.RawMessage               `json:"provenance"`
-	RuntimeInstances []RuntimeInstanceEvidenceDTO  `json:"runtimeInstances"`
-	Commands         []ExecutionSessionEvidenceDTO `json:"commands"`
-	Events           []EventEvidenceDTO            `json:"events"`
-	Tests            []EventEvidenceDTO            `json:"tests"`
-	FileChanges      []EventEvidenceDTO            `json:"fileChanges"`
-	Usage            *RunUsageEvidenceDTO          `json:"usage"`
-	RawOutput        []RawOutputChunkEvidenceDTO   `json:"rawOutput"`
-	Artifacts        []ArtifactEvidenceDTO         `json:"artifacts"`
-}
-
-type RuntimeInstanceEvidenceDTO struct {
-	ID           string     `json:"id"`
-	RuntimeID    string     `json:"runtimeId"`
-	Status       string     `json:"status"`
-	RunnerStatus string     `json:"runnerStatus"`
-	CreatedAt    time.Time  `json:"createdAt"`
-	StartedAt    *time.Time `json:"startedAt"`
-	StoppedAt    *time.Time `json:"stoppedAt"`
-	UpdatedAt    time.Time  `json:"updatedAt"`
+	Run         RunDTO                        `json:"run"`
+	Provenance  json.RawMessage               `json:"provenance"`
+	Commands    []ExecutionSessionEvidenceDTO `json:"commands"`
+	Events      []EventEvidenceDTO            `json:"events"`
+	Tests       []EventEvidenceDTO            `json:"tests"`
+	FileChanges []EventEvidenceDTO            `json:"fileChanges"`
+	Usage       *RunUsageEvidenceDTO          `json:"usage"`
+	RawOutput   []RawOutputChunkEvidenceDTO   `json:"rawOutput"`
+	Artifacts   []ArtifactEvidenceDTO         `json:"artifacts"`
 }
 
 type ExecutionSessionEvidenceDTO struct {
-	ID                string          `json:"id"`
-	RuntimeInstanceID *string         `json:"runtimeInstanceId"`
-	RunnerID          *string         `json:"runnerId"`
-	Status            string          `json:"status"`
-	CWD               string          `json:"cwd"`
-	Command           json.RawMessage `json:"command"`
-	ExitCode          *int            `json:"exitCode"`
-	CreatedAt         time.Time       `json:"createdAt"`
-	StartedAt         *time.Time      `json:"startedAt"`
-	CompletedAt       *time.Time      `json:"completedAt"`
-	UpdatedAt         time.Time       `json:"updatedAt"`
+	ID          string          `json:"id"`
+	RunnerID    string          `json:"runnerId"`
+	Status      string          `json:"status"`
+	CWD         string          `json:"cwd"`
+	Command     json.RawMessage `json:"command"`
+	ExitCode    *int            `json:"exitCode"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	StartedAt   *time.Time      `json:"startedAt"`
+	CompletedAt *time.Time      `json:"completedAt"`
+	UpdatedAt   time.Time       `json:"updatedAt"`
 }
 
 type EventEvidenceDTO struct {
-	ID                string          `json:"id"`
-	SchemaVersion     int             `json:"schemaVersion"`
-	Type              string          `json:"type"`
-	OccurredAt        time.Time       `json:"occurredAt"`
-	ProjectID         string          `json:"projectId"`
-	IssueID           *string         `json:"issueId"`
-	RunID             *string         `json:"runId"`
-	Sequence          *int64          `json:"sequence"`
-	AgentID           *string         `json:"agentId"`
-	WorkspaceID       *string         `json:"workspaceId"`
-	RuntimeInstanceID *string         `json:"runtimeInstanceId"`
-	CorrelationID     *string         `json:"correlationId"`
-	ParentEventID     *string         `json:"parentEventId"`
-	Actor             json.RawMessage `json:"actor"`
-	Payload           json.RawMessage `json:"payload"`
+	ID            string          `json:"id"`
+	SchemaVersion int             `json:"schemaVersion"`
+	Type          string          `json:"type"`
+	OccurredAt    time.Time       `json:"occurredAt"`
+	ProjectID     string          `json:"projectId"`
+	IssueID       *string         `json:"issueId"`
+	RunID         *string         `json:"runId"`
+	Sequence      *int64          `json:"sequence"`
+	AgentID       *string         `json:"agentId"`
+	WorkspaceID   *string         `json:"workspaceId"`
+	CorrelationID *string         `json:"correlationId"`
+	ParentEventID *string         `json:"parentEventId"`
+	Actor         json.RawMessage `json:"actor"`
+	Payload       json.RawMessage `json:"payload"`
 }
 
 type RawOutputChunkEvidenceDTO struct {
@@ -193,19 +179,15 @@ func evidenceRunPath(w http.ResponseWriter, r *http.Request) (string, string, bo
 
 func runEvidenceDTO(value app.RunEvidence, issueKeys map[string]string) RunEvidenceDTO {
 	out := RunEvidenceDTO{
-		Run:              runDTO(value.Run, issueKeys),
-		Provenance:       value.Provenance,
-		RuntimeInstances: make([]RuntimeInstanceEvidenceDTO, 0, len(value.RuntimeInstances)),
-		Commands:         make([]ExecutionSessionEvidenceDTO, 0, len(value.Sessions)),
-		Events:           make([]EventEvidenceDTO, 0, len(value.Events)),
-		Tests:            make([]EventEvidenceDTO, 0),
-		FileChanges:      make([]EventEvidenceDTO, 0),
-		Usage:            runUsageEvidenceDTO(value.Usage),
-		RawOutput:        make([]RawOutputChunkEvidenceDTO, 0, len(value.RawOutput)),
-		Artifacts:        make([]ArtifactEvidenceDTO, 0, len(value.Artifacts)),
-	}
-	for _, instance := range value.RuntimeInstances {
-		out.RuntimeInstances = append(out.RuntimeInstances, runtimeInstanceEvidenceDTO(instance))
+		Run:         runDTO(value.Run, issueKeys),
+		Provenance:  value.Provenance,
+		Commands:    make([]ExecutionSessionEvidenceDTO, 0, len(value.Sessions)),
+		Events:      make([]EventEvidenceDTO, 0, len(value.Events)),
+		Tests:       make([]EventEvidenceDTO, 0),
+		FileChanges: make([]EventEvidenceDTO, 0),
+		Usage:       runUsageEvidenceDTO(value.Usage),
+		RawOutput:   make([]RawOutputChunkEvidenceDTO, 0, len(value.RawOutput)),
+		Artifacts:   make([]ArtifactEvidenceDTO, 0, len(value.Artifacts)),
 	}
 	for _, session := range value.Sessions {
 		out.Commands = append(out.Commands, executionSessionEvidenceDTO(session))
@@ -229,27 +211,12 @@ func runEvidenceDTO(value app.RunEvidence, issueKeys map[string]string) RunEvide
 	return out
 }
 
-func runtimeInstanceEvidenceDTO(value store.RuntimeInstance) RuntimeInstanceEvidenceDTO {
-	return RuntimeInstanceEvidenceDTO{
-		ID: value.ID, RuntimeID: value.RuntimeID, Status: value.Status, RunnerStatus: value.RunnerStatus,
-		CreatedAt: value.CreatedAt, StartedAt: value.StartedAt, StoppedAt: value.StoppedAt, UpdatedAt: value.UpdatedAt,
-	}
-}
-
 func executionSessionEvidenceDTO(value store.ExecutionSession) ExecutionSessionEvidenceDTO {
 	return ExecutionSessionEvidenceDTO{
-		ID: value.ID, RuntimeInstanceID: optionalEvidenceID(value.RuntimeInstanceID), RunnerID: optionalEvidenceID(value.RunnerID), Status: value.Status, CWD: value.CWD,
+		ID: value.ID, RunnerID: value.RunnerID, Status: value.Status, CWD: value.CWD,
 		Command: append(json.RawMessage(nil), value.CommandArgv...), ExitCode: value.ExitCode, CreatedAt: value.CreatedAt,
 		StartedAt: value.StartedAt, CompletedAt: value.CompletedAt, UpdatedAt: value.UpdatedAt,
 	}
-}
-
-func optionalEvidenceID(value string) *string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return nil
-	}
-	return &value
 }
 
 func eventEvidenceDTO(value store.Event) EventEvidenceDTO {
@@ -257,7 +224,7 @@ func eventEvidenceDTO(value store.Event) EventEvidenceDTO {
 		ID: value.ID, SchemaVersion: value.SchemaVersion, Type: value.Type, OccurredAt: value.OccurredAt,
 		ProjectID: value.ProjectID, IssueID: value.IssueID, RunID: value.RunID,
 		Sequence: value.Sequence, AgentID: value.AgentID, WorkspaceID: value.WorkspaceID,
-		RuntimeInstanceID: value.RuntimeInstanceID, CorrelationID: value.CorrelationID, ParentEventID: value.ParentEventID,
+		CorrelationID: value.CorrelationID, ParentEventID: value.ParentEventID,
 		Actor: append(json.RawMessage(nil), value.Actor...), Payload: append(json.RawMessage(nil), value.Payload...),
 	}
 }
