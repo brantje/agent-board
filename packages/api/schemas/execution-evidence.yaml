@@ -1,7 +1,7 @@
 RunEvidence:
   type: object
   additionalProperties: false
-  required: [run, provenance, runtimeInstances, commands, events, tests, fileChanges, usage, rawOutput, artifacts]
+  required: [run, provenance, commands, events, tests, fileChanges, usage, rawOutput, artifacts]
   properties:
     run:
       $ref: ./control-plane.yaml#/Run
@@ -10,10 +10,6 @@ RunEvidence:
       - type: object
         additionalProperties: true
       - type: 'null'
-    runtimeInstances:
-      type: array
-      items:
-        $ref: '#/RuntimeInstanceEvidence'
     commands:
       type: array
       items:
@@ -58,28 +54,13 @@ RunUsageEvidence:
     averageWaitMs: {type: [number, 'null'], minimum: 0}
     tokensPerSecond: {type: [number, 'null'], exclusiveMinimum: 0}
 
-RuntimeInstanceEvidence:
-  type: object
-  additionalProperties: false
-  required: [id, runtimeId, status, runnerStatus, createdAt, startedAt, stoppedAt, updatedAt]
-  properties:
-    id: {type: string, format: uuid}
-    runtimeId: {type: string, format: uuid}
-    status: {type: string}
-    runnerStatus: {type: string}
-    createdAt: {type: string, format: date-time}
-    startedAt: {type: [string, 'null'], format: date-time}
-    stoppedAt: {type: [string, 'null'], format: date-time}
-    updatedAt: {type: string, format: date-time}
-
 ExecutionSessionEvidence:
   type: object
   additionalProperties: false
-  required: [id, runtimeInstanceId, runnerId, status, cwd, command, exitCode, createdAt, startedAt, completedAt, updatedAt]
+  required: [id, runnerId, status, cwd, command, exitCode, createdAt, startedAt, completedAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
-    runtimeInstanceId: {type: [string, 'null'], format: uuid}
-    runnerId: {type: [string, 'null'], format: uuid}
+    runnerId: {type: string, format: uuid}
     status: {type: string}
     cwd: {type: string}
     command:
@@ -94,7 +75,7 @@ ExecutionSessionEvidence:
 EventEvidence:
   type: object
   additionalProperties: false
-  required: [id, schemaVersion, type, occurredAt, projectId, issueId, runId, sequence, agentId, workspaceId, runtimeInstanceId, correlationId, parentEventId, actor, payload]
+  required: [id, schemaVersion, type, occurredAt, projectId, issueId, runId, sequence, agentId, workspaceId, correlationId, parentEventId, actor, payload]
   properties:
     id: {type: string, format: uuid}
     schemaVersion: {type: integer, minimum: 1}
@@ -106,7 +87,6 @@ EventEvidence:
     sequence: {type: [integer, 'null'], minimum: 1}
     agentId: {type: [string, 'null'], format: uuid}
     workspaceId: {type: [string, 'null'], format: uuid}
-    runtimeInstanceId: {type: [string, 'null'], format: uuid}
     correlationId: {type: [string, 'null'], format: uuid}
     parentEventId: {type: [string, 'null'], format: uuid}
     actor:
@@ -124,7 +104,7 @@ RawOutputChunkEvidence:
     id: {type: string, format: uuid}
     stream:
       type: string
-      enum: [STDOUT, STDERR, PROTOCOL, RUNTIME, DIAGNOSTIC]
+      enum: [STDOUT, STDERR, PROTOCOL, DIAGNOSTIC]
     sequence: {type: integer, minimum: 1}
     sizeBytes: {type: integer, minimum: 0}
     digest: {type: [string, 'null']}
