@@ -103,11 +103,26 @@ func TestAuthPhase2ActivatedUserAdminLifecycle(t *testing.T) {
 
 func TestAuthPhase2HTTPAlternateAndErrorPaths(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	handler, _, _ := newAuthHTTPHandler(t, &now)
+	handler, authStore, _ := newAuthHTTPHandler(t, &now)
 	registerAuthHTTPUser(t, handler)
 	first := loginAuthHTTPUser(t, handler)
 	second := loginAuthHTTPUser(t, handler)
 	headers := map[string]string{"Authorization": "Bearer " + second.AccessToken}
+
+	// The in-memory store predates UUID-constrained session routes. Give its two
+	// sessions routable IDs so this HTTP test reaches the ownership/revoke path.
+	authStore.mu.Lock()
+	sessionIDs := []string{
+		"00000000-0000-0000-0000-000000000111",
+		"00000000-0000-0000-0000-000000000112",
+	}
+	i := 0
+	for key, session := range authStore.sessions {
+		session.ID = sessionIDs[i]
+		authStore.sessions[key] = session
+		i++
+	}
+	authStore.mu.Unlock()
 
 	for _, path := range []string{"/api/auth/users", "/api/auth/me/sessions", "/api/auth/settings"} {
 		response := authHTTPRequest(t, handler, http.MethodGet, path, "", nil)
