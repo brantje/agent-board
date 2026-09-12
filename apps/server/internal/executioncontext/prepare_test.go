@@ -28,7 +28,6 @@ func TestPrepareBuildsOnlyRequestedExecutionSecretsAndProvenance(t *testing.T) {
 	}
 	secretResolver := &fakeSecretResolver{values: map[string][]byte{
 		"provider-token": []byte("provider-plain"),
-		"runtime-token":  []byte("runtime-plain"),
 	}}
 	provenance := &fakeProvenanceStore{}
 	redaction := &fakeRedactionRegistrar{}
@@ -62,7 +61,7 @@ func TestPrepareBuildsOnlyRequestedExecutionSecretsAndProvenance(t *testing.T) {
 	}
 }
 
-func TestPrepareRedactsAuthorizedSecretsWithoutInjectingThem(t *testing.T) {
+func TestPrepareRedactsAuthorizedProviderSecretWithoutInjectingIt(t *testing.T) {
 	values := validStore()
 	resolver, err := NewResolver(values)
 	if err != nil {
@@ -70,7 +69,6 @@ func TestPrepareRedactsAuthorizedSecretsWithoutInjectingThem(t *testing.T) {
 	}
 	secretResolver := &fakeSecretResolver{values: map[string][]byte{
 		"provider-token": []byte("provider-plain"),
-		"runtime-token":  []byte("runtime-plain"),
 	}}
 	redaction := &fakeRedactionRegistrar{}
 	preparer, err := NewPreparer(resolver, secretResolver, &fakeProvenanceStore{}, redaction)
@@ -90,50 +88,28 @@ func TestPrepareRedactsAuthorizedSecretsWithoutInjectingThem(t *testing.T) {
 	}
 }
 
-func TestPrepareRejectsUnauthorizedSecretBeforeProvenance(t *testing.T) {
+func TestPrepareRejectsInvalidProviderCredentialTargetBeforeProvenance(t *testing.T) {
 	values := validStore()
 	resolver, err := NewResolver(values)
 	if err != nil {
 		t.Fatal(err)
 	}
-	secretResolver := &fakeSecretResolver{values: map[string][]byte{"forged": []byte("plain")}}
+	secretResolver := &fakeSecretResolver{values: map[string][]byte{"provider-token": []byte("provider-plain")}}
 	provenance := &fakeProvenanceStore{}
 	preparer, err := NewPreparer(resolver, secretResolver, provenance)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = preparer.Prepare(context.Background(), "p1", "r1", SecretRequest{RuntimeSecretRefs: map[string]string{"TOKEN": "forged"}})
+	_, err = preparer.Prepare(context.Background(), "p1", "r1", SecretRequest{ProviderCredentialEnv: "BAD-NAME"})
 	apiErr, ok := AsError(err)
-	if !ok || apiErr.Code != "execution_secret_unauthorized" {
+	if !ok || apiErr.Code != "execution_secret_target_invalid" {
 		t.Fatalf("err = %#v", err)
 	}
 	if len(secretResolver.calls) != 0 {
 		t.Fatalf("secret resolver calls = %v", secretResolver.calls)
 	}
 	if provenance.puts != 0 {
-		t.Fatalf("provenance persisted for failed preflight")
-	}
-}
-
-func TestPrepareRejectsInvalidAndDuplicateSecretTargets(t *testing.T) {
-	values := validStore()
-	resolver, err := NewResolver(values)
-	if err != nil {
-		t.Fatal(err)
-	}
-	preparer, err := NewPreparer(resolver, nil, &fakeProvenanceStore{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, request := range []SecretRequest{
-		{ProviderCredentialEnv: "BAD-NAME"},
-		{RuntimeSecretRefs: map[string]string{"1TOKEN": "runtime-token"}},
-		{ProviderCredentialEnv: "TOKEN", RuntimeSecretRefs: map[string]string{"TOKEN": "runtime-token"}},
-	} {
-		if _, err := preparer.Prepare(context.Background(), "p1", "r1", request); err == nil {
-			t.Fatalf("Prepare(%+v) unexpectedly succeeded", request)
-		}
+		t.Fatal("provenance persisted for failed preflight")
 	}
 }
