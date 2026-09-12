@@ -8,6 +8,22 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+func (m *authMemory) CreatePendingUserWithSetupToken(_ context.Context, user store.User, token store.PasswordToken) (store.User, store.PasswordToken, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	created, err := m.createUserLocked(user)
+	if err != nil {
+		return store.User{}, store.PasswordToken{}, err
+	}
+	token.UserID = created.ID
+	if token.ID == "" {
+		token.ID = m.id("token")
+	}
+	token.CreatedAt = time.Unix(1, 0).UTC()
+	m.tokens[hashKey(token.TokenHash)] = token
+	return created, token, nil
+}
+
 func (m *authMemory) ListUsers(context.Context) ([]store.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
