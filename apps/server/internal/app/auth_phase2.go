@@ -124,6 +124,16 @@ func (s *AuthService) AdminSetDisabled(ctx context.Context, actor AuthenticatedU
 	if err := requireDeploymentAdmin(actor); err != nil {
 		return AuthenticatedUser{}, err
 	}
+	user, err := s.store.GetUser(ctx, userID)
+	if err != nil {
+		return AuthenticatedUser{}, err
+	}
+	if user.Status == store.UserStatusPending {
+		return AuthenticatedUser{}, NewError("invalid_user_status", "pending users must complete setup before they can be disabled or re-enabled", store.ErrInvalidArgument)
+	}
+	if !disabled && user.PasswordHash == "" {
+		return AuthenticatedUser{}, NewError("invalid_user_status", "user cannot be enabled without a password", store.ErrInvalidArgument)
+	}
 	status := store.UserStatusActive
 	if disabled {
 		status = store.UserStatusDisabled
