@@ -158,40 +158,6 @@ func (s *Service) UpdateModelProfile(ctx context.Context, scope *string, input s
 	return value, translateStoreError(err, "model_profile")
 }
 
-func (s *Service) ListRuntimes(ctx context.Context, scope *string) ([]store.Runtime, error) {
-	if err := s.ensureScope(ctx, scope); err != nil {
-		return nil, err
-	}
-	return s.store.ListRuntimes(ctx, scope)
-}
-func (s *Service) GetRuntime(ctx context.Context, scope *string, id string) (store.Runtime, error) {
-	if err := s.ensureScope(ctx, scope); err != nil {
-		return store.Runtime{}, err
-	}
-	value, err := s.store.GetRuntime(ctx, scope, id)
-	return value, translateStoreError(err, "runtime")
-}
-func (s *Service) CreateRuntime(ctx context.Context, input store.Runtime) (store.Runtime, error) {
-	if err := s.ensureScope(ctx, input.ProjectID); err != nil {
-		return store.Runtime{}, err
-	}
-	if err := validateRuntime(input); err != nil {
-		return store.Runtime{}, err
-	}
-	value, err := s.store.CreateRuntime(ctx, input)
-	return value, translateStoreError(err, "runtime")
-}
-func (s *Service) UpdateRuntime(ctx context.Context, scope *string, input store.Runtime) (store.Runtime, error) {
-	if err := s.ensureScope(ctx, scope); err != nil {
-		return store.Runtime{}, err
-	}
-	if err := validateRuntime(input); err != nil {
-		return store.Runtime{}, err
-	}
-	value, err := s.store.UpdateRuntime(ctx, scope, input)
-	return value, translateStoreError(err, "runtime")
-}
-
 func (s *Service) ListAgents(ctx context.Context, scope *string) ([]store.Agent, error) {
 	if err := s.ensureScope(ctx, scope); err != nil {
 		return nil, err
@@ -520,33 +486,6 @@ func validateModelProfile(v store.ModelProfile) error {
 	}
 	if !validObject(v.GenerationSettings) {
 		return invalid("generationSettings must be a JSON object")
-	}
-	return nil
-}
-func validateRuntime(v store.Runtime) error {
-	if strings.TrimSpace(v.Name) == "" || v.Kind != "docker" || strings.TrimSpace(v.Image) == "" {
-		return invalid("runtime requires name, docker kind and image")
-	}
-	if v.CPULimitMillis != nil && *v.CPULimitMillis < 1 {
-		return invalid("cpuLimitMillis must be positive")
-	}
-	if v.MemoryLimitBytes != nil && *v.MemoryLimitBytes < 1 {
-		return invalid("memoryLimitBytes must be positive")
-	}
-	if v.PIDLimit != nil && *v.PIDLimit < 1 {
-		return invalid("pidLimit must be positive")
-	}
-	if v.TimeoutSeconds != nil && *v.TimeoutSeconds < 1 {
-		return invalid("timeoutSeconds must be positive")
-	}
-	if v.NetworkPolicy != "none" && v.NetworkPolicy != "restricted" && v.NetworkPolicy != "outbound" {
-		return invalid("invalid networkPolicy")
-	}
-	if v.WorkspacePolicy != "" && v.WorkspacePolicy != "issue" {
-		return invalid("invalid workspacePolicy")
-	}
-	if !validObject(v.Capabilities) {
-		return invalid("capabilities must be a JSON object")
 	}
 	return nil
 }
