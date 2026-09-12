@@ -69,6 +69,7 @@ type AuthenticatedUser struct {
 	DeploymentRole      string
 	Status              string
 	ForcePasswordChange bool
+	AuthVersion         int64 `json:"-"`
 }
 
 type AuthTokens struct {
@@ -545,6 +546,7 @@ func publicUser(user store.User) AuthenticatedUser {
 		DeploymentRole:      user.DeploymentRole,
 		Status:              user.Status,
 		ForcePasswordChange: user.ForcePasswordChange,
+		AuthVersion:         user.AuthVersion,
 	}
 }
 

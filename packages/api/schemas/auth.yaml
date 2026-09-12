@@ -29,3 +29,55 @@ AuthTokens:
     refreshTokenExpiresAt: {type: string, format: date-time}
     user:
       $ref: '#/AuthUser'
+
+AuthSession:
+  type: object
+  additionalProperties: false
+  required: [id, expiresAt, createdAt]
+  properties:
+    id: {type: string, format: uuid}
+    expiresAt: {type: string, format: date-time}
+    createdAt: {type: string, format: date-time}
+    lastUsedAt: {type: [string, 'null'], format: date-time}
+
+AuthSettings:
+  type: object
+  additionalProperties: false
+  required: [accessTokenLifetimeSeconds, refreshTokenLifetimeSeconds, minimumPasswordLength, requireUppercase, requireLowercase, requireNumber, requireSymbol]
+  properties:
+    accessTokenLifetimeSeconds: {type: integer, minimum: 300, maximum: 86400}
+    refreshTokenLifetimeSeconds: {type: integer, minimum: 3600, maximum: 31536000}
+    minimumPasswordLength: {type: integer, minimum: 8, maximum: 256}
+    requireUppercase: {type: boolean}
+    requireLowercase: {type: boolean}
+    requireNumber: {type: boolean}
+    requireSymbol: {type: boolean}
+
+SelfPasswordChange:
+  type: object
+  additionalProperties: false
+  required: [newPassword]
+  properties:
+    currentPassword:
+      type: string
+      minLength: 1
+      writeOnly: true
+      description: Required for an ordinary password change; omitted when completing a forced password change.
+    newPassword: {type: string, minLength: 1, writeOnly: true}
+
+PasswordTokenSecret:
+  type: object
+  additionalProperties: false
+  required: [token, expiresAt]
+  properties:
+    token: {type: string, minLength: 1}
+    expiresAt: {type: string, format: date-time}
+
+PendingUserSecret:
+  type: object
+  additionalProperties: false
+  required: [user, setupToken, setupTokenExpiresAt]
+  properties:
+    user: {$ref: '#/AuthUser'}
+    setupToken: {type: string, minLength: 1}
+    setupTokenExpiresAt: {type: string, format: date-time}

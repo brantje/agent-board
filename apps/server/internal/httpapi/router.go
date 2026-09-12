@@ -112,6 +112,7 @@ func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceServ
 	router.Route("/api", func(r chi.Router) {
 		if a.auth != nil {
 			a.registerAuthRoutes(r)
+			a.registerAuthPhase2Routes(r)
 		}
 		a.registerConfigurationRoutes(r)
 		if a.service.Runners != nil {
