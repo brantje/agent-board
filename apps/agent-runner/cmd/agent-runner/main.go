@@ -29,10 +29,17 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := execute(ctx, os.Args, &http.Client{Timeout: 30 * time.Second}, os.Stdin, os.Stdout, defaultConfigPath); err != nil {
+	if err := execute(ctx, os.Args, &http.Client{Timeout: 30 * time.Second}, os.Stdin, os.Stdout, runnerConfigPath()); err != nil {
 		slog.Error("agent-runner stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+func runnerConfigPath() string {
+	if path := os.Getenv("AGENT_RUNNER_CONFIG_PATH"); path != "" {
+		return path
+	}
+	return defaultConfigPath
 }
 
 func execute(ctx context.Context, args []string, client httpDoer, input io.Reader, output io.Writer, configPath string) error {

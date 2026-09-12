@@ -51,6 +51,18 @@ func TestExecuteRejectsInvalidCommandAndMissingRegistration(t *testing.T) {
 	}
 }
 
+func TestRunnerConfigPath(t *testing.T) {
+	t.Setenv("AGENT_RUNNER_CONFIG_PATH", "/tmp/agent-board-test-runner.env")
+	if got := runnerConfigPath(); got != "/tmp/agent-board-test-runner.env" {
+		t.Fatalf("runner config path=%q", got)
+	}
+
+	t.Setenv("AGENT_RUNNER_CONFIG_PATH", "")
+	if got := runnerConfigPath(); got != defaultConfigPath {
+		t.Fatalf("default runner config path=%q want %q", got, defaultConfigPath)
+	}
+}
+
 func TestConfigFromEnv(t *testing.T) {
 	t.Setenv("AGENT_BOARD_URL", "http://127.0.0.1:9876")
 	t.Setenv("AGENT_RUNNER_ID", "runner")
