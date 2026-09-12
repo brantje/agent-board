@@ -13,9 +13,11 @@ const renameForm = reactive({ name: '' })
 const memberSearch = ref('')
 const selectedUserId = ref('')
 const loading = ref(true)
+const memberLoading = ref(false)
 const busy = ref(false)
 const confirmDelete = ref(false)
 const errorMessage = ref('')
+let memberLoadGeneration = 0
 
 const memberColumns: TableColumn<AuthUser>[] = [
   { accessorKey: 'displayName', header: 'User' },
@@ -37,22 +39,47 @@ const userOptions = computed(() => {
     }))
 })
 
+function requestErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'The request failed.'
+}
+
 async function run(action: () => Promise<void>) {
   busy.value = true
   errorMessage.value = ''
   try {
     await action()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'The request failed.'
+    errorMessage.value = requestErrorMessage(error)
   } finally {
     busy.value = false
   }
 }
 
-async function loadMembers() {
+async function loadMembers(clearExisting = false) {
   const groupId = selectedGroupId.value
-  const nextMembers = groupId ? await auth.groupMembers(groupId) : []
-  if (selectedGroupId.value === groupId) members.value = nextMembers
+  const generation = ++memberLoadGeneration
+  if (clearExisting) members.value = []
+  if (!groupId) {
+    members.value = []
+    memberLoading.value = false
+    return
+  }
+
+  memberLoading.value = true
+  try {
+    const nextMembers = await auth.groupMembers(groupId)
+    if (generation === memberLoadGeneration && selectedGroupId.value === groupId) {
+      members.value = nextMembers
+    }
+  } catch (error) {
+    if (generation === memberLoadGeneration && selectedGroupId.value === groupId) {
+      errorMessage.value = requestErrorMessage(error)
+    }
+  } finally {
+    if (generation === memberLoadGeneration && selectedGroupId.value === groupId) {
+      memberLoading.value = false
+    }
+  }
 }
 
 async function reload() {
@@ -64,9 +91,9 @@ async function reload() {
     users.value = nextUsers
     if (!nextGroups.some(group => group.id === selectedGroupId.value)) selectedGroupId.value = nextGroups[0]?.id ?? ''
     renameForm.name = selectedGroup.value?.name ?? ''
-    await loadMembers()
+    await loadMembers(true)
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'The request failed.'
+    errorMessage.value = requestErrorMessage(error)
   } finally {
     loading.value = false
   }
@@ -76,18 +103,21 @@ async function selectGroup(groupId: string) {
   selectedGroupId.value = groupId
   selectedUserId.value = ''
   confirmDelete.value = false
+  errorMessage.value = ''
   renameForm.name = selectedGroup.value?.name ?? ''
-  await run(loadMembers)
+  await loadMembers(true)
 }
 
 async function createGroup() {
   await run(async () => {
     const created = await auth.createGroup(createForm.name)
     createForm.name = ''
-    groups.value = await auth.groups()
+    groups.value = [...groups.value.filter(group => group.id !== created.id), created]
     selectedGroupId.value = created.id
+    selectedUserId.value = ''
+    memberSearch.value = ''
     renameForm.name = created.name
-    await loadMembers()
+    await loadMembers(true)
   })
 }
 
@@ -102,17 +132,31 @@ async function renameGroup() {
 
 async function deleteSelectedGroup() {
   if (!selectedGroup.value) return
+  const groupId = selectedGroup.value.id
   await run(async () => {
-    await auth.deleteGroup(selectedGroup.value!.id)
+    await auth.deleteGroup(groupId)
+    groups.value = groups.value.filter(group => group.id !== groupId)
     confirmDelete.value = false
-    await reload()
+    if (selectedGroupId.value !== groupId) return
+    selectedGroupId.value = groups.value[0]?.id ?? ''
+    selectedUserId.value = ''
+    memberSearch.value = ''
+    renameForm.name = selectedGroup.value?.name ?? ''
+    await loadMembers(true)
   })
 }
 
 async function addMember() {
   if (!selectedGroup.value || !selectedUserId.value) return
+  const groupId = selectedGroup.value.id
+  const userId = selectedUserId.value
+  const user = users.value.find(candidate => candidate.id === userId)
   await run(async () => {
-    await auth.addGroupMember(selectedGroup.value!.id, selectedUserId.value)
+    await auth.addGroupMember(groupId, userId)
+    if (selectedGroupId.value !== groupId) return
+    if (user && !members.value.some(member => member.id === user.id)) {
+      members.value = [...members.value, user]
+    }
     selectedUserId.value = ''
     memberSearch.value = ''
     await loadMembers()
@@ -121,8 +165,11 @@ async function addMember() {
 
 async function removeMember(user: AuthUser) {
   if (!selectedGroup.value) return
+  const groupId = selectedGroup.value.id
   await run(async () => {
-    await auth.removeGroupMember(selectedGroup.value!.id, user.id)
+    await auth.removeGroupMember(groupId, user.id)
+    if (selectedGroupId.value !== groupId) return
+    members.value = members.value.filter(member => member.id !== user.id)
     await loadMembers()
   })
 }
@@ -176,9 +223,10 @@ onMounted(reload)
           <div class="mb-4 grid gap-3 md:grid-cols-[1fr_1fr_auto] md:items-end">
             <UFormField label="Search users"><UInput v-model="memberSearch" placeholder="Name, username or email" class="w-full" /></UFormField>
             <UFormField label="User"><USelect v-model="selectedUserId" :items="userOptions" class="w-full" /></UFormField>
-            <UButton :loading="busy" :disabled="!selectedUserId" @click="addMember">Add member</UButton>
+            <UButton :loading="busy" :disabled="!selectedUserId || memberLoading" @click="addMember">Add member</UButton>
           </div>
-          <UEmpty v-if="members.length === 0" title="No group members" />
+          <UAlert v-if="memberLoading && members.length === 0" title="Loading members" description="Loading Group members…" />
+          <UEmpty v-else-if="members.length === 0" title="No group members" />
           <UTable v-else :data="members" :columns="memberColumns" class="w-full">
             <template #displayName-cell="{ row }">
               <div>
