@@ -3,7 +3,7 @@ securitySchemes:
     type: apiKey
     in: header
     name: X-Agent-Board-Secret-Write-Token
-    description: Deployment-scoped v0.1 capability required for privileged secret writes. It is not a user identity token and must never be injected into Runtime sessions.
+    description: Deployment-scoped v0.1 capability required for privileged secret writes. It is not a user identity token and must never be injected into execution sessions.
 parameters:
   ProjectID:
     name: projectID
@@ -70,12 +70,6 @@ requestBodies:
       application/json:
         schema:
           $ref: ../schemas/control-plane.yaml#/ModelProfileInput
-  RuntimeInput:
-    required: true
-    content:
-      application/json:
-        schema:
-          $ref: ../schemas/control-plane.yaml#/RuntimeInput
   AgentInput:
     required: true
     content:
@@ -173,20 +167,6 @@ responses:
           type: array
           items:
             $ref: ../schemas/control-plane.yaml#/ModelProfile
-  Runtime:
-    description: Runtime response.
-    content:
-      application/json:
-        schema:
-          $ref: ../schemas/control-plane.yaml#/Runtime
-  RuntimeList:
-    description: Runtime list response.
-    content:
-      application/json:
-        schema:
-          type: array
-          items:
-            $ref: ../schemas/control-plane.yaml#/Runtime
   Agent:
     description: Agent response.
     content:
