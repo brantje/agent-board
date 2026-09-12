@@ -3,10 +3,12 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -194,6 +196,87 @@ func (s *multiProviderHealthStore) UpdateProviderHealth(_ context.Context, id st
 	s.healthUpdates = append(s.healthUpdates, providerHealthUpdate{id: id, health: health, filtered: filtered, total: total})
 	s.healthUpdatesMu.Unlock()
 	return nil
+}
+
+func TestServiceEnqueueProviderHealthProbe(t *testing.T) {
+	service := New(&providerHealthStore{provider: store.Provider{ID: testProviderID, Kind: "test", Enabled: true, SafeMetadata: store.EmptyObject}})
+	worker := NewProviderHealthWorker(service, service.store, nil, nil)
+	service.SetProviderHealthWorker(worker)
+	service.EnqueueProviderHealthProbe("")
+	service.EnqueueProviderHealthProbe(testProviderID)
+}
+
+func TestProviderHealthWorkerRunStopsOnCancel(t *testing.T) {
+	store := &providerHealthStore{provider: store.Provider{ID: testProviderID, Kind: "llamarack", Enabled: true, SafeMetadata: store.EmptyObject}}
+	service := New(store)
+	worker := NewProviderHealthWorker(service, store, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- worker.Run(ctx) }()
+	cancel()
+	if err := waitFor(done, time.Second); !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestProviderHealthWorkerProbeByID(t *testing.T) {
+	store := &providerHealthStore{provider: store.Provider{ID: testProviderID, Kind: "llamarack", Enabled: true, SafeMetadata: store.EmptyObject}}
+	service := New(store)
+	worker := NewProviderHealthWorker(service, store, nil, nil)
+	worker.probeByID(context.Background(), testProviderID)
+	worker.probeByID(context.Background(), "missing")
+}
+
+func TestProviderHealthWorkerEnqueueOverflowUsesFallbackProbe(t *testing.T) {
+	store := &providerHealthStore{provider: store.Provider{ID: testProviderID, Kind: "llamarack", Enabled: true, SafeMetadata: store.EmptyObject}}
+	service := New(store)
+	worker := NewProviderHealthWorker(service, store, nil, nil)
+	for range 65 {
+		worker.Enqueue(testProviderID)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		store.healthUpdatesMu.Lock()
+		count := len(store.healthUpdates)
+		store.healthUpdatesMu.Unlock()
+		if count > 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("expected fallback probe to persist health")
+}
+
+func TestProviderHealthWorkerProbeAllHandlesListError(t *testing.T) {
+	store := &failingListProviderHealthStore{err: errors.New("list failed")}
+	worker := NewProviderHealthWorker(New(store), store, nil, nil)
+	worker.probeAll(context.Background())
+}
+
+func TestProviderHealthWorkerNilReceiverIsSafe(t *testing.T) {
+	var worker *ProviderHealthWorker
+	if err := worker.Run(context.Background()); err != nil {
+		t.Fatalf("err=%v", err)
+	}
+	worker.Enqueue("id")
+}
+
+type failingListProviderHealthStore struct {
+	fakeStore
+	err error
+}
+
+func (s *failingListProviderHealthStore) ListAllProviders(context.Context) ([]store.Provider, error) {
+	return nil, s.err
+}
+
+func waitFor(done <-chan error, timeout time.Duration) error {
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return errors.New("timed out")
+	}
 }
 
 var _ executioncontext.SecretResolver = (*fakeProviderModelSecretResolver)(nil)

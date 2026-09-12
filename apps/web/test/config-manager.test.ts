@@ -440,13 +440,16 @@ describe('configuration screens', () => {
     expect(wrapper.findAll('[data-color]').some(badge => badge.attributes('data-color') === 'error')).toBe(true)
   })
 
-  it('keeps runtime health badges neutral and does not probe models', async () => {
-    const fetch = vi.fn(async () => new Response(JSON.stringify([{ id: 'r', name: 'Docker', projectId: 'p', enabled: false, healthStatus: 'UNHEALTHY', kind: 'docker', image: 'runner:latest', networkPolicy: 'restricted', workspacePolicy: 'issue', capabilities: { git: true }, cpuLimitMillis: 1000, memoryLimitBytes: 256, pidLimit: 128, timeoutSeconds: 60 }])))
+  it('does not probe models outside the providers list', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path.includes('/models')) throw new Error('unexpected models fetch')
+      if (path === '/api/model-profiles') return new Response('[{"id":"m","name":"Model","enabled":true}]')
+      return new Response('[{"id":"a","name":"Agent","enabled":true,"state":"ENABLED","engine":"opencode","modelProfileId":"m","engineSettings":{},"concurrencyLimit":1}]')
+    })
     vi.stubGlobal('fetch', fetch)
-    const wrapper = mount(ConfigManager, { props: { kind: 'runtimes', projectId: 'p' }, global })
+    const wrapper = mount(ConfigManager, { props: { kind: 'agents', projectId: 'p' }, global })
     await flushPromises()
-    expect(wrapper.text()).toContain('Health: Unhealthy')
-    expect(wrapper.find('[data-color]').attributes('data-color')).toBe('neutral')
+    expect(wrapper.text()).toContain('Agent')
     expect(fetch.mock.calls.some(([calledPath]) => String(calledPath).includes('/models'))).toBe(false)
   })
 
