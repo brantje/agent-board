@@ -63,7 +63,6 @@ export function useProjectEvents(
         sequence: null,
         agentId: null,
         workspaceId: null,
-        runtimeInstanceId: null,
         correlationId: null,
         parentEventId: null,
         actor: { type: 'SYSTEM' },
