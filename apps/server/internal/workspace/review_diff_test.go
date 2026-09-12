@@ -64,6 +64,52 @@ func TestReviewFileChangesSummarizesDiffStats(t *testing.T) {
 	}
 }
 
+func TestReviewFileChangesRejectsMissingRevisions(t *testing.T) {
+	git, err := NewGitCLI("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := git.ReviewFileChanges(t.Context(), t.TempDir(), "", "abc"); err == nil {
+		t.Fatal("expected missing revisions to fail")
+	}
+}
+
+func TestReviewFileChangesSameRevisionIsEmpty(t *testing.T) {
+	git, err := NewGitCLI("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	changes, err := git.ReviewFileChanges(t.Context(), t.TempDir(), "abc", "abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("changes=%+v", changes)
+	}
+}
+
+func TestParseDiffHelpersCoverRenameDeleteAndBinaryStats(t *testing.T) {
+	stats := parseDiffNumstat("1\t2\tmodified.txt\n-\t-\tbinary.bin\n")
+	if stats["modified.txt"].Added != 1 || stats["modified.txt"].Removed != 2 {
+		t.Fatalf("modified stats=%+v", stats["modified.txt"])
+	}
+	if stats["binary.bin"].Added != 0 || stats["binary.bin"].Removed != 0 {
+		t.Fatalf("binary stats=%+v", stats["binary.bin"])
+	}
+
+	changes := parseDiffNameStatus("M\tmodified.txt\nA\tcreated.txt\nD\tdeleted.txt\nR100\told.txt\tnew.txt\n", stats)
+	byPath := map[string]ReviewFileChange{}
+	for _, change := range changes {
+		byPath[change.Path] = change
+	}
+	if byPath["modified.txt"].ChangeType != "modified" || byPath["created.txt"].ChangeType != "created" || byPath["deleted.txt"].ChangeType != "deleted" {
+		t.Fatalf("changes=%+v", byPath)
+	}
+	if byPath["new.txt"].ChangeType != "renamed" || byPath["new.txt"].OldPath != "old.txt" {
+		t.Fatalf("rename=%+v", byPath["new.txt"])
+	}
+}
+
 func stringsRepeat(value string, count int) string {
 	out := make([]byte, 0, len(value)*count)
 	for range count {

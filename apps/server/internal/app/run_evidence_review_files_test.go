@@ -83,3 +83,33 @@ func TestRunEvidenceInspectDerivesReviewFileChangesFromGit(t *testing.T) {
 		t.Fatalf("payload=%v", payload)
 	}
 }
+
+func TestRunEvidenceInspectSkipsGitDerivationWhenFileEventsExist(t *testing.T) {
+	const projectID = "project"
+	const runID = "run"
+	sequence := int64(1)
+	storeFake := &reviewEvidenceStore{
+		runEvidenceTestStore: runEvidenceTestStore{
+			run:    store.Run{ID: runID, ProjectID: projectID, IssueID: "issue", WorkspaceID: "workspace", Status: "READY_FOR_REVIEW"},
+			events: []store.Event{{ID: "file-1", Type: "file.modified", ProjectID: projectID, RunID: runEvidenceStringPointer(runID), Sequence: &sequence, Payload: json.RawMessage(`{"path":"README.md"}`)}},
+		},
+		review: store.Review{ProjectID: projectID, RunID: runID, BaseRevision: "base", ReviewRevision: "review"},
+	}
+	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewRunEvidenceService(storeFake, blobs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.ConfigureReviewFileChanges(storeFake, &fakeReviewGit{changes: []workspace.ReviewFileChange{{Path: "index.html", ChangeType: "modified", Added: 1, Removed: 1}}})
+
+	got, err := service.Inspect(t.Context(), projectID, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Events) != 1 || got.Events[0].ID != "file-1" {
+		t.Fatalf("events=%+v", got.Events)
+	}
+}
