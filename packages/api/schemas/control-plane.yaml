@@ -173,43 +173,6 @@ ModelProfileInput:
     maxConcurrent: {type: [integer, 'null'], minimum: 1}
     generationSettings: {$ref: '#/JSONMap'}
     enabled: {type: boolean, default: true}
-Runtime:
-  type: object
-  required: [id, projectId, name, kind, image, cpuLimitMillis, memoryLimitBytes, pidLimit, timeoutSeconds, networkPolicy, workspacePolicy, allowedSecretRefs, capabilities, enabled, healthStatus, createdAt, updatedAt]
-  properties:
-    id: {type: string, format: uuid}
-    projectId: {type: [string, 'null'], format: uuid}
-    name: {type: string}
-    kind: {type: string, enum: [docker]}
-    image: {type: string}
-    cpuLimitMillis: {type: [integer, 'null'], minimum: 1}
-    memoryLimitBytes: {type: [integer, 'null'], minimum: 1}
-    pidLimit: {type: [integer, 'null'], minimum: 1}
-    timeoutSeconds: {type: [integer, 'null'], minimum: 1}
-    networkPolicy: {type: string, enum: [none, restricted, outbound]}
-    workspacePolicy: {type: string, enum: [issue]}
-    allowedSecretRefs: {type: array, items: {type: string}}
-    capabilities: {$ref: '#/JSONMap'}
-    enabled: {type: boolean}
-    healthStatus: {type: string, enum: [UNKNOWN, HEALTHY, UNHEALTHY]}
-    createdAt: {type: string, format: date-time}
-    updatedAt: {type: string, format: date-time}
-RuntimeInput:
-  type: object
-  additionalProperties: false
-  required: [name, kind, image, networkPolicy]
-  properties:
-    name: {type: string}
-    kind: {type: string, enum: [docker]}
-    image: {type: string}
-    cpuLimitMillis: {type: [integer, 'null'], minimum: 1}
-    memoryLimitBytes: {type: [integer, 'null'], minimum: 1}
-    pidLimit: {type: [integer, 'null'], minimum: 1}
-    timeoutSeconds: {type: [integer, 'null'], minimum: 1}
-    networkPolicy: {type: string, enum: [none, restricted, outbound]}
-    allowedSecretRefs: {type: array, items: {type: string}}
-    capabilities: {$ref: '#/JSONMap'}
-    enabled: {type: boolean, default: true}
 Agent:
   type: object
   required: [id, projectId, name, roleInstructions, engine, modelProfileId, engineSettings, concurrencyLimit, state, createdAt, updatedAt]
