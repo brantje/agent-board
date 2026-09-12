@@ -12,7 +12,7 @@ export interface ConfigRecord {
 export interface Field {
   key: string
   label: string
-  type?: 'number'|'select'|'textarea'|'checkbox'|'json'|'lines'|'provider-model'
+  type?: 'number'|'select'|'textarea'|'checkbox'|'json'|'provider-model'
   required?: boolean
   options?: string[]
   selectItems?: Array<{ label: string; value: string }>
@@ -152,9 +152,7 @@ export function draftFor(kind: ConfigKind, source: Record<string, unknown> = {})
       ? field.initial ?? ''
       : field.type === 'json'
         ? JSON.stringify(value, null, 2)
-        : field.type === 'lines'
-          ? (value as string[]).join('\n')
-          : value]
+        : value]
   })) as Draft
 }
 
@@ -168,10 +166,8 @@ export function payloadFor(kind: ConfigKind, draft: Draft, options?: { editing?:
           ? value === '' ? null : Number(value)
           : field.type === 'json'
             ? JSON.parse(String(value))
-            : field.type === 'lines'
-              ? String(value).split('\n').map(item => item.trim()).filter(Boolean)
-              : field.key === 'issuePrefix'
-                ? String(value).trim().toUpperCase()
+            : field.key === 'issuePrefix'
+              ? String(value).trim().toUpperCase()
               : typeof value === 'string' ? value.trim() : value]
     }))
 }
