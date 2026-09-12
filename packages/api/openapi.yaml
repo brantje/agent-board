@@ -52,6 +52,14 @@ paths:
     $ref: ./paths/auth.yaml#/meLogoutOthers
   /api/auth/settings:
     $ref: ./paths/auth.yaml#/authSettings
+  /api/groups:
+    $ref: ./paths/groups.yaml#/collection
+  /api/groups/{groupID}:
+    $ref: ./paths/groups.yaml#/resource
+  /api/groups/{groupID}/members:
+    $ref: ./paths/groups.yaml#/members
+  /api/groups/{groupID}/members/{userID}:
+    $ref: ./paths/groups.yaml#/member
   /api/runners:
     $ref: ./paths/runners.yaml#/collection
   /api/runner/register:

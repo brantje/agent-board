@@ -113,6 +113,7 @@ func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceServ
 		if a.auth != nil {
 			a.registerAuthRoutes(r)
 			a.registerAuthPhase2Routes(r)
+			a.registerAuthPhase3GroupRoutes(r)
 		}
 		a.registerConfigurationRoutes(r)
 		if a.service.Runners != nil {
