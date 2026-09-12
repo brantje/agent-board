@@ -16,11 +16,11 @@ Run
   -> explicit Question/Review/resume context
 ```
 
-Agents select Engine and Model Profile. The scheduler selects an eligible connected Runner for execution. Runner and Runtime are not Agent configuration, and Runner-based execution does not require Runtime resolution.
+Agents select Engine and Model Profile. The scheduler selects an eligible connected Runner for execution; Runner placement is not Agent configuration.
 
 The resolved non-secret context is immutable for the execution attempt and suitable for safe provenance capture.
 
-Model identifier/generation settings come from Model Profile. Provider connection metadata comes from Provider. Runner hosts own the executable environment for preferred production execution. Legacy Runtime policy is resolved only when existing internal managed-compute code actually uses that path.
+Model identifier/generation settings come from Model Profile. Provider connection metadata comes from Provider. Runner hosts own the executable environment for production execution.
 
 ## Secret separation
 
@@ -33,11 +33,11 @@ encrypted secret/reference
  -> redact before every durable sink
 ```
 
-Provider/source-control and, where applicable, legacy Runtime secrets are never persisted into:
+Provider credentials and other authorized execution secrets are never persisted into:
 
 - Run rows/resume metadata
 - scheduler jobs/reservations
-- Runtime Instance durable state
+- Execution Session durable state
 - Events
 - raw logs
 - Artifacts
@@ -58,27 +58,17 @@ The capability grants secret-write authority across the deployment, including gl
 
 The secret-write capability remains backend/operator-owned. It is never persisted in Agent Board data, injected into execution sessions, or treated as caller-supplied actor identity.
 
-## Legacy Runtime secret references
-
-This section applies only to the existing internal managed-compute Runtime path. External and server-managed Runner execution does not require an Agent-selected Runtime.
-
-When a legacy Runtime declares allowed secret references, trusted Go code must:
-
-1. verify the ref is allowed by that Runtime
-2. reject undeclared refs before secret resolution
-3. authorize within current Project/Run context
-4. resolve in trusted backend code
-5. inject only at process launch
-
 ## Source-control credentials
 
-Repository bootstrap uses the same trusted secret boundary. Source credentials are ephemeral and excluded from durable repository URLs, Git config, provenance and logs.
+Remote Git Projects use the selected Runner host's own Git authentication. Agent Board does not persist provider credentials in clone URLs and does not forward source-provider secrets through the Runner protocol merely to clone or publish the Issue branch.
+
+Future authenticated Source Connections may use the same trusted secret boundary for provider-specific actions without changing the Runner ownership model.
 
 See `source-control.md`.
 
 ## Resume and Review context
 
-Question answers continue the same Run where product policy says so. Native OpenCode Questions remain on the same live Runner Execution Session and native Engine session while waiting. Review changes may create a new attempt linked to the reviewed Run while reusing the same Issue Workspace.
+Question answers continue the same Run where product policy says so. Native OpenCode Questions remain on the same live Runner Execution Session and native Engine session while waiting. Review changes may create a new attempt linked to the reviewed Run while continuing the same Issue branch.
 
 Only explicit relevant human feedback is composed into execution context. Engines do not scan arbitrary historical Events and hidden reasoning is not product state.
 
@@ -90,10 +80,10 @@ Redaction applies before every durable boundary.
 
 ## Failure behavior
 
-Missing/inaccessible configuration, failed decryption, unauthorized secret refs, unavailable Runner prerequisites or source-authentication failures produce stable actionable error codes before coding-agent process launch where possible. Legacy Runtime prerequisite failures are reported only when that managed-compute path is actually selected internally.
+Missing/inaccessible configuration, failed decryption, unavailable Runner prerequisites or source-authentication failures produce stable actionable error codes before coding-agent process launch where possible.
 
 Errors never include plaintext secrets, ciphertext, full environments or sensitive authorization material.
 
 ## Provenance
 
-The safe resolved context is the source for immutable Run provenance. Historical Run inspection never reconstructs execution truth from mutable current Agent/Model/Provider/Runner records. Runtime provenance is conditional legacy evidence, not a required Runner execution-context input.
+The safe resolved context is the source for immutable Run provenance. The selected Runner is attached as execution provenance after scheduler placement. Historical Run inspection never reconstructs execution truth from mutable current Agent/Model/Provider/Runner records.
