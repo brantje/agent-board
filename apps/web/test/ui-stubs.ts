@@ -1,4 +1,4 @@
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h, reactive, ref } from 'vue'
 export const uiStubs = {
   PageFrame: {props:['title','description'],template:'<main><h1>{{title}}</h1><p>{{description}}</p><slot name="actions"/><slot/></main>'},
   AsyncState: {props:['pending','error','empty','emptyTitle','emptyDescription'],emits:['retry'],template:'<div><p v-if="pending">Loading</p><p v-else-if="error">{{error.message}}<button @click="$emit(\'retry\')">Retry</button></p><p v-else-if="empty">{{emptyTitle}} {{emptyDescription}}</p><slot v-else/></div>'},
@@ -9,6 +9,35 @@ export const uiStubs = {
   UAvatar: {props:['alt','text','size'],template:'<span :aria-label="alt">{{text || alt}}</span>'},
   UModal: {props:['open','title'],template:'<div v-if="open" role="dialog"><h2>{{title}}</h2><slot name="body"/></div>'},
   UForm: {props:['state','validate'],emits:['submit'],template:'<form @submit.prevent="$emit(\'submit\')"><slot/></form>'},
+  UAuthForm: defineComponent({
+    props: ['fields', 'title', 'description', 'submit', 'loading'],
+    emits: ['submit'],
+    setup(props, { emit, slots }) {
+      const state = reactive<Record<string, unknown>>({})
+      return () => h('form', {
+        onSubmit: (event: Event) => {
+          event.preventDefault()
+          emit('submit', { data: { ...state } })
+        }
+      }, [
+        h('h2', String(props.title ?? '')),
+        h('p', String(props.description ?? '')),
+        slots.validation?.(),
+        ...((props.fields ?? []) as Array<{ name: string, type?: string, label?: string, description?: string }>).map((field) => h('label', { 'data-field': field.name }, [
+          field.label ?? field.name,
+          h('input', {
+            type: field.type === 'checkbox' ? 'checkbox' : (field.type ?? 'text'),
+            checked: field.type === 'checkbox' ? state[field.name] === true : undefined,
+            value: field.type === 'checkbox' ? undefined : String(state[field.name] ?? ''),
+            onInput: field.type === 'checkbox' ? undefined : (event: Event) => { state[field.name] = (event.target as HTMLInputElement).value },
+            onChange: field.type === 'checkbox' ? (event: Event) => { state[field.name] = (event.target as HTMLInputElement).checked } : undefined
+          }),
+          field.description ? h('small', field.description) : null
+        ])),
+        h('button', { type: 'submit', disabled: props.loading === true }, String((props.submit as { label?: string } | undefined)?.label ?? 'Continue'))
+      ])
+    }
+  }),
   UFormField: {props:['name','label','description'],template:'<label :data-field="name">{{label}}<slot/><small>{{description}}</small></label>'},
   UInput: {props:['modelValue','type','disabled'],emits:['update:modelValue'],template:'<input :type="type || \'text\'" :value="modelValue" :disabled="disabled" @input="$emit(\'update:modelValue\', $event.target.value)"/>'},
   UTextarea: {props:['modelValue','disabled'],emits:['update:modelValue'],template:'<textarea :value="modelValue" :disabled="disabled" @input="$emit(\'update:modelValue\', $event.target.value)"/>'},
