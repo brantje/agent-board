@@ -65,7 +65,6 @@ func remoteRunnerSafeContext(t *testing.T) (storeFake *runnerSyncStore, safeCont
 	safe.Project.RepositoryPath = ""
 	safe.Project.DefaultBranch = ""
 	safe.Workspace.WorkingBranch = "agent-board/AB-42"
-	safe.Runtime = processTestSafeContext(repo).Runtime
 	base := &runnerSyncStore{}
 	client := &gitControlClient{}
 	p := newRunnerSyncProcessor(t, repo, safe, base, client)
