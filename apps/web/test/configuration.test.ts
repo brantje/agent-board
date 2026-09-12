@@ -18,13 +18,14 @@ describe('intentional configuration inputs', () => {
     expect(draft.maxConcurrent).toBe('')
     expect(payloadFor('model-profiles', draft)).toMatchObject({ maxConcurrent: null })
     expect(payloadFor('model-profiles', draft)).not.toHaveProperty('id')
-    expect(payloadFor('runtimes', draftFor('runtimes', { name: 'Runtime', workspacePolicy: 'issue' }))).not.toHaveProperty('workspacePolicy')
   })
 
-  it('uses Engine and Model Profile on Agents and omits server-owned credential references', () => {
+  it('uses Engine and Model Profile on Agents and omits removed placement and credential fields', () => {
     expect(definitions.agents.fields.map(field => field.key)).toEqual(expect.arrayContaining(['engine', 'modelProfileId', 'engineSettings']))
     expect(definitions.agents.fields.map(field => field.key)).not.toContain('runtimeId')
+    expect(definitions.agents.fields.map(field => field.key)).not.toContain('runnerId')
     expect(definitions.agents.fields.map(field => field.key)).not.toContain('executorProfileId')
+    expect(definitions).not.toHaveProperty('runtimes')
     expect(definitions).not.toHaveProperty('executor-profiles')
     expect(definitions).not.toHaveProperty('runtime-profiles')
     expect(definitions.providers.fields.map(field => field.key)).not.toContain('credentialRef')
@@ -71,13 +72,11 @@ describe('intentional configuration inputs', () => {
     expect(validateDraft('projects', { ...draft, issuePrefix: '1A' }).map(error => error.name)).toContain('issuePrefix')
   })
 
-  it('validates required, numeric, enum, JSON and array inputs', () => {
+  it('validates required, numeric, enum and JSON inputs', () => {
     expect(validateDraft('projects', draftFor('projects')).length).toBeGreaterThan(0)
-    const draft = { ...draftFor('runtimes'), name: 'Docker', image: 'runner', cpuLimitMillis: 'bad', networkPolicy: 'invalid', capabilities: '[]' }
-    expect(validateDraft('runtimes', draft).map(error => error.name)).toEqual(expect.arrayContaining(['cpuLimitMillis', 'networkPolicy', 'capabilities']))
-    expect(payloadFor('runtimes', { ...draftFor('runtimes'), allowedSecretRefs: 'one\n two\n' }).allowedSecretRefs).toEqual(['one', 'two'])
+    expect(validateDraft('agents', { ...draftFor('agents'), name: 'A', modelProfileId: 'm', concurrencyLimit: 'bad', engine: 'invalid', state: 'UNKNOWN' }).map(error => error.name)).toEqual(expect.arrayContaining(['concurrencyLimit', 'engine', 'state']))
     expect(validateDraft('model-profiles', { ...draftFor('model-profiles'), name: 'M', providerId: 'p', model: 'm', temperature: 3, maxTokens: 0 }).length).toBe(2)
-    expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', safeMetadata: '[]' }).map(error => error.name)).toContain('safeMetadata')
+    expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', kind: 'anthropic', safeMetadata: '[]' }).map(error => error.name)).toContain('safeMetadata')
   })
 
   it('labels scope and marks directly unrunnable choices unavailable', () => {
@@ -104,7 +103,6 @@ describe('intentional configuration inputs', () => {
     expect(definitions.projects.fields.find(field => field.key === 'repositoryPath')?.help).toContain('creates it and initializes a new Git repository')
     expect(definitions.providers.emptyDescription).toBe('Add a Provider with encrypted credentials so Model Profiles can call a model API.')
     expect(definitions['model-profiles'].emptyDescription).toBe('Create a Model Profile to select a Provider, model, and optional concurrent Run capacity.')
-    expect(definitions.runtimes.emptyDescription).toBe('Define a Runtime image and execution policy for legacy internal managed compute.')
     expect(definitions.agents.emptyDescription).toBe('Create an Agent with role instructions, Engine and Model Profile before assigning Issues.')
     for (const kind of Object.keys(definitions) as (keyof typeof definitions)[]) {
       expect(definitions[kind].emptyDescription).not.toContain('New work will appear here')
@@ -118,7 +116,7 @@ describe('intentional configuration inputs', () => {
       expect(payload).toHaveProperty('name')
       expect(definitions[kind].title).toBeTruthy()
     }
-    expect(draftFor('runtimes', { allowedSecretRefs: ['a', 'b'], capabilities: { git: true } })).toMatchObject({ allowedSecretRefs: 'a\nb', capabilities: '{\n  "git": true\n}' })
-    expect(validateDraft('runtimes', { ...draftFor('runtimes'), capabilities: '{' })[0]?.name).toBeTruthy()
+    expect(draftFor('providers', { safeMetadata: { region: 'eu' } })).toMatchObject({ safeMetadata: '{\n  "region": "eu"\n}' })
+    expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', kind: 'anthropic', safeMetadata: '{' })[0]?.name).toBeTruthy()
   })
 })
