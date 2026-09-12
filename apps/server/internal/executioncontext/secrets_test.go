@@ -17,49 +17,44 @@ func (f *fakeSecretResolver) Resolve(_ context.Context, _ secretstore.Scope, ref
 	return append([]byte(nil), f.values[ref]...), nil
 }
 
-func TestUnauthorizedRuntimeSecretFailsBeforeResolution(t *testing.T) {
-	resolver := &fakeSecretResolver{values: map[string][]byte{"forged": []byte("do-not-read")}}
-	_, err := ResolveSecretMaterial(context.Background(), resolver, "p1", Resolved{AllowedSecretRefs: []string{"allowed"}}, false, []string{"forged"})
-	apiErr, ok := AsError(err)
-	if !ok || apiErr.Code != "execution_secret_unauthorized" {
-		t.Fatalf("err = %#v", err)
-	}
-	if len(resolver.calls) != 0 {
-		t.Fatalf("secret resolver called for unauthorized ref: %v", resolver.calls)
-	}
-}
-
-func TestAuthorizedSecretsResolveAfterPolicyCheck(t *testing.T) {
+func TestProviderCredentialResolvesWhenRequested(t *testing.T) {
 	credentialRef := "provider-token"
 	resolver := &fakeSecretResolver{values: map[string][]byte{
 		"provider-token": []byte("provider-plain"),
-		"runtime-token":  []byte("runtime-plain"),
 	}}
 	material, err := ResolveSecretMaterial(context.Background(), resolver, "p1", Resolved{
 		ProviderCredentialRef: &credentialRef,
-		AllowedSecretRefs:     []string{"runtime-token"},
-	}, true, []string{"runtime-token", "runtime-token"})
+	}, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(material.ProviderCredential) != "provider-plain" || string(material.Runtime["runtime-token"]) != "runtime-plain" {
+	if string(material.ProviderCredential) != "provider-plain" {
 		t.Fatalf("material = %+v", material)
 	}
-	if len(resolver.calls) != 2 {
+	if len(resolver.calls) != 1 || resolver.calls[0] != credentialRef {
 		t.Fatalf("resolver calls = %v", resolver.calls)
 	}
 	values := material.Values()
-	if len(values) != 2 {
+	if len(values) != 1 || values[0] != "provider-plain" {
 		t.Fatalf("redaction values = %v", values)
 	}
 }
 
-func TestNoRequestedSecretsDoesNotRequireResolver(t *testing.T) {
-	material, err := ResolveSecretMaterial(context.Background(), nil, "p1", Resolved{}, false, nil)
+func TestProviderCredentialNotRequestedDoesNotRequireResolver(t *testing.T) {
+	material, err := ResolveSecretMaterial(context.Background(), nil, "p1", Resolved{}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(material.Runtime) != 0 || len(material.ProviderCredential) != 0 {
+	if len(material.ProviderCredential) != 0 || len(material.Values()) != 0 {
 		t.Fatalf("material = %+v", material)
+	}
+}
+
+func TestProviderCredentialRequestRequiresResolver(t *testing.T) {
+	credentialRef := "provider-token"
+	_, err := ResolveSecretMaterial(context.Background(), nil, "p1", Resolved{ProviderCredentialRef: &credentialRef}, true)
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "execution_secret_resolver_unavailable" {
+		t.Fatalf("err = %#v", err)
 	}
 }
