@@ -40,10 +40,6 @@ paths:
     $ref: ./paths/model-profiles.yaml#/path1
   /api/model-profiles/{resourceID}:
     $ref: ./paths/model-profiles.yaml#/path2
-  /api/runtimes:
-    $ref: ./paths/runtimes.yaml#/path1
-  /api/runtimes/{resourceID}:
-    $ref: ./paths/runtimes.yaml#/path2
   /api/agents:
     $ref: ./paths/agents.yaml#/path1
   /api/agents/{resourceID}:
@@ -60,10 +56,6 @@ paths:
     $ref: ./paths/model-profiles.yaml#/path3
   /api/projects/{projectID}/model-profiles/{resourceID}:
     $ref: ./paths/model-profiles.yaml#/path4
-  /api/projects/{projectID}/runtimes:
-    $ref: ./paths/runtimes.yaml#/path3
-  /api/projects/{projectID}/runtimes/{resourceID}:
-    $ref: ./paths/runtimes.yaml#/path4
   /api/projects/{projectID}/agents:
     $ref: ./paths/agents.yaml#/path3
   /api/projects/{projectID}/agents/{resourceID}:
