@@ -53,7 +53,7 @@ func TestRemoteGitExternalRunnerLifecycleContinuesAcrossRunners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, nil)
+	services, err := app.NewExecutionServices(database, materializer)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestRemoteGitExternalRunnerLifecycleContinuesAcrossRunners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, recorder, output, git, NewRegistryConnector(services.ControlPlane.Runners.Connections))
+	processor, err := NewProcessor(services.ExecutionStore, services.ExecutionContext, services.ExecutionSessions, engines, recorder, output, git, NewRegistryConnector(services.ControlPlane.Runners.Connections))
 	if err != nil {
 		t.Fatal(err)
 	}
