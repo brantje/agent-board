@@ -1,13 +1,110 @@
 package httpapi
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/brantje/agent-board/apps/server/internal/app"
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
+
+type phase2AuthHTTPStore struct {
+	*authHTTPStore
+}
+
+func (s *phase2AuthHTTPStore) SetUserPassword(_ context.Context, id, hash string, force bool) (store.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	user, ok := s.users[id]
+	if !ok {
+		return store.User{}, store.ErrNotFound
+	}
+	user.PasswordHash = hash
+	if user.Status == store.UserStatusPending {
+		user.Status = store.UserStatusActive
+	}
+	user.ForcePasswordChange = force
+	user.AuthVersion++
+	s.users[id] = user
+	now := time.Unix(2, 0).UTC()
+	s.revokeUserSessionsLocked(id, now)
+	for key, token := range s.tokens {
+		if token.UserID == id && token.ConsumedAt == nil && token.RevokedAt == nil {
+			token.RevokedAt = &now
+			s.tokens[key] = token
+		}
+	}
+	return user, nil
+}
+
+func newPhase2AuthHTTPHandler(t *testing.T, now *time.Time) http.Handler {
+	t.Helper()
+	authStore := &phase2AuthHTTPStore{authHTTPStore: newAuthHTTPStore()}
+	authService, err := app.NewAuthService(authStore, app.AuthServiceConfig{
+		Now:        func() time.Time { return *now },
+		Random:     &authHTTPRandom{},
+		SigningKey: bytes.Repeat([]byte{17}, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := &app.Services{
+		ControlPlane: app.New(&fakeControlPlaneStore{}),
+		Auth:         authService,
+	}
+	return NewRouterWithApplication(services)
+}
+
+func TestAuthPhase2HTTPPendingDirectPasswordActivatesAndRevokesSetup(t *testing.T) {
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	handler := newPhase2AuthHTTPHandler(t, &now)
+	registerAuthHTTPUser(t, handler)
+	admin := loginAuthHTTPUser(t, handler)
+	adminHeaders := map[string]string{"Authorization": "Bearer " + admin.AccessToken}
+
+	createdResponse := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/users", `{"username":"member","email":"member@example.com","displayName":"Member"}`, adminHeaders)
+	if createdResponse.Code != http.StatusCreated {
+		t.Fatalf("create pending status=%d body=%s", createdResponse.Code, createdResponse.Body.String())
+	}
+	var created pendingUserResponse
+	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
+		t.Fatal(err)
+	}
+
+	setPassword := authHTTPRequest(t, handler, http.MethodPut, fmt.Sprintf("/api/auth/users/%s/password", created.User.ID), `{"password":"temporary-member-password"}`, adminHeaders)
+	if setPassword.Code != http.StatusOK {
+		t.Fatalf("pending direct password status=%d body=%s", setPassword.Code, setPassword.Body.String())
+	}
+	var assigned authUserResponse
+	if err := json.Unmarshal(setPassword.Body.Bytes(), &assigned); err != nil {
+		t.Fatal(err)
+	}
+	if assigned.Status != store.UserStatusActive || !assigned.ForcePasswordChange {
+		t.Fatalf("pending direct password response = %+v", assigned)
+	}
+
+	oldSetup := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/setup/complete", fmt.Sprintf(`{"token":%q,"password":"replacement-member-password"}`, created.SetupToken), nil)
+	if oldSetup.Code == http.StatusOK {
+		t.Fatal("setup token remained usable after pending direct password assignment")
+	}
+	login := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/login", `{"login":"member","password":"temporary-member-password"}`, nil)
+	if login.Code != http.StatusOK {
+		t.Fatalf("temporary password login status=%d body=%s", login.Code, login.Body.String())
+	}
+	var forced authTokensResponse
+	if err := json.Unmarshal(login.Body.Bytes(), &forced); err != nil {
+		t.Fatal(err)
+	}
+	if !forced.User.ForcePasswordChange {
+		t.Fatalf("temporary password login did not require change: %+v", forced.User)
+	}
+}
 
 func TestAuthPhase2HTTPOneTimeTokenPlaintextOnlyAtResponseBoundary(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)

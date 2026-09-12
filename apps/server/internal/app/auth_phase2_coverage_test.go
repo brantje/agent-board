@@ -45,9 +45,19 @@ func TestPhase2AdminPasswordAndStatusRules(t *testing.T) {
 		t.Fatalf("reset token = %+v, %v", reset, err)
 	}
 
-	if _, err := service.AdminSetPassword(ctx, admin, "pending", "long-enough-password"); err == nil {
-		t.Fatal("expected direct password assignment for pending user to be rejected")
+	disabledPending, err := service.AdminSetDisabled(ctx, admin, "pending", true)
+	if err != nil || disabledPending.Status != store.UserStatusDisabled {
+		t.Fatalf("disable pending = %+v, %v", disabledPending, err)
 	}
+	reenabledPending, err := service.AdminSetDisabled(ctx, admin, "pending", false)
+	if err != nil || reenabledPending.Status != store.UserStatusPending {
+		t.Fatalf("re-enable passwordless pending = %+v, %v", reenabledPending, err)
+	}
+	pendingChanged, err := service.AdminSetPassword(ctx, admin, "pending", "long-enough-password")
+	if err != nil || !pendingChanged.ForcePasswordChange {
+		t.Fatalf("pending direct password = %+v, %v", pendingChanged, err)
+	}
+
 	changed, err := service.AdminSetPassword(ctx, admin, "active", "new-long-enough-password")
 	if err != nil {
 		t.Fatal(err)
@@ -56,11 +66,9 @@ func TestPhase2AdminPasswordAndStatusRules(t *testing.T) {
 		t.Fatalf("direct password assignment must require a change: %+v", changed)
 	}
 
-	if _, err := service.AdminSetDisabled(ctx, admin, "pending", true); err == nil {
-		t.Fatal("expected pending user disable to be rejected")
-	}
-	if _, err := service.AdminSetDisabled(ctx, admin, "disabled-no-password", false); err == nil {
-		t.Fatal("expected passwordless user enable to be rejected")
+	passwordless, err := service.AdminSetDisabled(ctx, admin, "disabled-no-password", false)
+	if err != nil || passwordless.Status != store.UserStatusPending {
+		t.Fatalf("passwordless user enable = %+v, %v", passwordless, err)
 	}
 	disabled, err := service.AdminSetDisabled(ctx, admin, "active", true)
 	if err != nil || disabled.Status != store.UserStatusDisabled {

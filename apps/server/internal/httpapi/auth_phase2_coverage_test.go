@@ -25,19 +25,21 @@ func TestAuthPhase2ActivatedUserAdminLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for _, request := range []struct {
-		method string
-		path   string
-		body   string
-	}{
-		{http.MethodPost, "/api/auth/users/" + pending.User.ID + "/reset-token", ""},
-		{http.MethodPut, "/api/auth/users/" + pending.User.ID + "/password", `{"password":"member-direct-password"}`},
-		{http.MethodPost, "/api/auth/users/" + pending.User.ID + "/disable", ""},
-	} {
-		response := authHTTPRequest(t, handler, request.method, request.path, request.body, headers)
-		if response.Code != http.StatusBadRequest {
-			t.Fatalf("pending %s %s status=%d body=%s", request.method, request.path, response.Code, response.Body.String())
-		}
+	resetWhilePending := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/users/"+pending.User.ID+"/reset-token", "", headers)
+	if resetWhilePending.Code != http.StatusBadRequest {
+		t.Fatalf("pending reset status=%d body=%s", resetWhilePending.Code, resetWhilePending.Body.String())
+	}
+	disablePending := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/users/"+pending.User.ID+"/disable", "", headers)
+	if disablePending.Code != http.StatusOK {
+		t.Fatalf("pending disable status=%d body=%s", disablePending.Code, disablePending.Body.String())
+	}
+	enablePending := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/users/"+pending.User.ID+"/enable", "", headers)
+	if enablePending.Code != http.StatusOK {
+		t.Fatalf("pending re-enable status=%d body=%s", enablePending.Code, enablePending.Body.String())
+	}
+	var pendingAgain authUserResponse
+	if err := json.Unmarshal(enablePending.Body.Bytes(), &pendingAgain); err != nil || pendingAgain.Status != store.UserStatusPending {
+		t.Fatalf("pending re-enable=%+v err=%v", pendingAgain, err)
 	}
 
 	setupResponse := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/users/"+pending.User.ID+"/setup-token", "", headers)

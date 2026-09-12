@@ -52,14 +52,25 @@ func TestPhase2AdministrationRejectsInvalidUserStates(t *testing.T) {
 		t.Fatalf("missing user password-token error = %v", err)
 	}
 
-	if _, err := service.AdminSetPassword(ctx, admin, "pending", "long-enough-password"); err == nil {
-		t.Fatal("expected direct password assignment for pending user to be rejected")
+	if changed, err := service.AdminSetPassword(ctx, admin, "pending", "long-enough-password"); err != nil || !changed.ForcePasswordChange {
+		t.Fatalf("pending direct password = %+v, %v", changed, err)
 	}
-	if _, err := service.AdminSetDisabled(ctx, admin, "pending", true); err == nil {
-		t.Fatal("expected pending user disable to be rejected")
+
+	memory.users["pending"] = store.User{
+		ID: "pending", Username: "pending", Email: "pending@example.com", DisplayName: "Pending",
+		DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusPending, AuthVersion: 1,
 	}
-	if _, err := service.AdminSetDisabled(ctx, admin, "disabled-no-password", false); err == nil {
-		t.Fatal("expected passwordless disabled user enable to be rejected")
+	disabled, err := service.AdminSetDisabled(ctx, admin, "pending", true)
+	if err != nil || disabled.Status != store.UserStatusDisabled {
+		t.Fatalf("pending disable = %+v, %v", disabled, err)
+	}
+	pendingAgain, err := service.AdminSetDisabled(ctx, admin, "pending", false)
+	if err != nil || pendingAgain.Status != store.UserStatusPending {
+		t.Fatalf("pending re-enable = %+v, %v", pendingAgain, err)
+	}
+	passwordless, err := service.AdminSetDisabled(ctx, admin, "disabled-no-password", false)
+	if err != nil || passwordless.Status != store.UserStatusPending {
+		t.Fatalf("passwordless re-enable = %+v, %v", passwordless, err)
 	}
 }
 
