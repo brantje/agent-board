@@ -48,7 +48,6 @@ const lastEventSelectColumns = `
 	last_event.run_id::text,
 	last_event.agent_id::text,
 	last_event.workspace_id::text,
-	last_event.runtime_instance_id::text,
 	last_event.correlation_id::text,
 	last_event.parent_event_id::text,
 	last_event.sequence,
@@ -60,7 +59,7 @@ const lastEventSelectColumns = `
 const lastEventLateralJoin = `
 LEFT JOIN LATERAL (
 	SELECT id, schema_version, type, occurred_at, project_id, issue_id, run_id, agent_id, workspace_id,
-	       runtime_instance_id, correlation_id, parent_event_id, sequence, actor, payload, created_at
+	       correlation_id, parent_event_id, sequence, actor, payload, created_at
 	FROM events
 	WHERE project_id = i.project_id
 	  AND issue_id = i.id
@@ -223,20 +222,20 @@ func scanIssueJoinedWithLastEvent(row pgx.Row) (store.Issue, error) {
 	var value store.Issue
 	var prefix string
 	var (
-		eventID, eventType, eventProjectID                        *string
-		eventIssueID, eventRunID, eventAgentID, eventWorkspaceID  *string
-		eventRuntimeInstanceID, eventCorrelationID, eventParentID *string
-		schemaVersion                                             *int
-		sequence                                                  *int64
-		occurredAt, createdAt                                     *time.Time
-		actor, payload                                            json.RawMessage
+		eventID, eventType, eventProjectID                       *string
+		eventIssueID, eventRunID, eventAgentID, eventWorkspaceID *string
+		eventCorrelationID, eventParentID                        *string
+		schemaVersion                                            *int
+		sequence                                                 *int64
+		occurredAt, createdAt                                    *time.Time
+		actor, payload                                           json.RawMessage
 	)
 	if err := row.Scan(
 		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
 		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedAt, &value.UpdatedAt,
 		&value.CurrentBranch,
 		&eventID, &schemaVersion, &eventType, &occurredAt, &eventProjectID, &eventIssueID, &eventRunID,
-		&eventAgentID, &eventWorkspaceID, &eventRuntimeInstanceID, &eventCorrelationID, &eventParentID,
+		&eventAgentID, &eventWorkspaceID, &eventCorrelationID, &eventParentID,
 		&sequence, &actor, &payload, &createdAt,
 	); err != nil {
 		return store.Issue{}, notFound(err)
@@ -246,17 +245,16 @@ func scanIssueJoinedWithLastEvent(row pgx.Row) (store.Issue, error) {
 		return value, nil
 	}
 	event := store.Event{
-		ID:                *eventID,
-		IssueID:           eventIssueID,
-		RunID:             eventRunID,
-		AgentID:           eventAgentID,
-		WorkspaceID:       eventWorkspaceID,
-		RuntimeInstanceID: eventRuntimeInstanceID,
-		CorrelationID:     eventCorrelationID,
-		ParentEventID:     eventParentID,
-		Sequence:          sequence,
-		Actor:             actor,
-		Payload:           payload,
+		ID:            *eventID,
+		IssueID:       eventIssueID,
+		RunID:         eventRunID,
+		AgentID:       eventAgentID,
+		WorkspaceID:   eventWorkspaceID,
+		CorrelationID: eventCorrelationID,
+		ParentEventID: eventParentID,
+		Sequence:      sequence,
+		Actor:         actor,
+		Payload:       payload,
 	}
 	if schemaVersion != nil {
 		event.SchemaVersion = *schemaVersion
