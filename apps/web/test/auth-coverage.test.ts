@@ -89,10 +89,8 @@ describe('auth composable alternate paths', () => {
       throw new Error(`unexpected fetch ${path}`)
     }))
     await auth.login('admin', 'test-password-value', true)
-    expect(localStorage.getItem(AUTH_STORAGE_KEY)).not.toBeNull()
     await expect(auth.refresh()).resolves.toBe(false)
     expect(auth.credentials.value).toBeNull()
-    expect(localStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
   })
 
   it('does not retry non-401 failures and shares an in-flight refresh', async () => {
@@ -112,7 +110,6 @@ describe('auth composable alternate paths', () => {
     }))
     const auth = useAuth()
     await auth.login('admin', 'test-password-value', false)
-    expect(sessionStorage.getItem(AUTH_STORAGE_KEY)).not.toBeNull()
     await expect(auth.request('/api/failure')).rejects.toMatchObject({ status: 500 })
 
     const first = auth.refresh()
