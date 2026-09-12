@@ -149,13 +149,13 @@ describe('settings groups', () => {
     await flushPromises()
     expect(auth.addGroupMember).toHaveBeenCalledWith(group.id, active.id)
     expect(wrapper.findAll('button').some(button => button.text() === 'Remove')).toBe(true)
-    expect(wrapper.text()).toContain('add refresh unavailable')
+    expect(wrapper.text()).toContain('Change saved, but refreshing members failed: add refresh unavailable')
 
     await wrapper.findAll('button').find(button => button.text() === 'Remove')!.trigger('click')
     await flushPromises()
     expect(auth.removeGroupMember).toHaveBeenCalledWith(group.id, active.id)
     expect(wrapper.findAll('button').some(button => button.text() === 'Remove')).toBe(false)
-    expect(wrapper.text()).toContain('remove refresh unavailable')
+    expect(wrapper.text()).toContain('Change saved, but refreshing members failed: remove refresh unavailable')
   })
 
   it('keeps created/deleted Group state when the following member read fails', async () => {
@@ -181,7 +181,7 @@ describe('settings groups', () => {
     await flushPromises()
     expect(auth.createGroup).toHaveBeenCalledWith('Design')
     expect(wrapper.text()).toContain('Members · design')
-    expect(wrapper.text()).toContain('create refresh unavailable')
+    expect(wrapper.text()).toContain('Change saved, but refreshing members failed: create refresh unavailable')
     expect(auth.groups).toHaveBeenCalledTimes(1)
 
     await wrapper.findAll('button').find(button => button.text() === 'Delete group')!.trigger('click')
@@ -190,7 +190,7 @@ describe('settings groups', () => {
     expect(auth.deleteGroup).toHaveBeenCalledWith(created.id)
     expect(wrapper.text()).not.toContain('design')
     expect(wrapper.text()).toContain('Members · engineering')
-    expect(wrapper.text()).toContain('delete refresh unavailable')
+    expect(wrapper.text()).toContain('Change saved, but refreshing members failed: delete refresh unavailable')
   })
 
   it('creates, renames, adds/removes members and confirms deletion through the shared auth client', async () => {

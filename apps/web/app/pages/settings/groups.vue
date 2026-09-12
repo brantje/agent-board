@@ -19,6 +19,8 @@ const confirmDelete = ref(false)
 const errorMessage = ref('')
 let memberLoadGeneration = 0
 
+const savedRefreshError = 'Change saved, but refreshing members failed: '
+
 const memberColumns: TableColumn<AuthUser>[] = [
   { accessorKey: 'displayName', header: 'User' },
   { accessorKey: 'status', header: 'Status' },
@@ -55,7 +57,7 @@ async function run(action: () => Promise<void>) {
   }
 }
 
-async function loadMembers(clearExisting = false) {
+async function loadMembers(clearExisting = false, errorPrefix = '') {
   const groupId = selectedGroupId.value
   const generation = ++memberLoadGeneration
   if (clearExisting) members.value = []
@@ -73,7 +75,7 @@ async function loadMembers(clearExisting = false) {
     }
   } catch (error) {
     if (generation === memberLoadGeneration && selectedGroupId.value === groupId) {
-      errorMessage.value = requestErrorMessage(error)
+      errorMessage.value = errorPrefix + requestErrorMessage(error)
     }
   } finally {
     if (generation === memberLoadGeneration && selectedGroupId.value === groupId) {
@@ -117,7 +119,7 @@ async function createGroup() {
     selectedUserId.value = ''
     memberSearch.value = ''
     renameForm.name = created.name
-    await loadMembers(true)
+    await loadMembers(true, savedRefreshError)
   })
 }
 
@@ -142,7 +144,7 @@ async function deleteSelectedGroup() {
     selectedUserId.value = ''
     memberSearch.value = ''
     renameForm.name = selectedGroup.value?.name ?? ''
-    await loadMembers(true)
+    await loadMembers(true, savedRefreshError)
   })
 }
 
@@ -159,7 +161,7 @@ async function addMember() {
     }
     selectedUserId.value = ''
     memberSearch.value = ''
-    await loadMembers()
+    await loadMembers(false, savedRefreshError)
   })
 }
 
@@ -170,7 +172,7 @@ async function removeMember(user: AuthUser) {
     await auth.removeGroupMember(groupId, user.id)
     if (selectedGroupId.value !== groupId) return
     members.value = members.value.filter(member => member.id !== user.id)
-    await loadMembers()
+    await loadMembers(false, savedRefreshError)
   })
 }
 
