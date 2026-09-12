@@ -8,6 +8,37 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func (s *Store) CreatePendingUserWithSetupToken(ctx context.Context, input store.User, token store.PasswordToken) (store.User, store.PasswordToken, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return store.User{}, store.PasswordToken{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if _, err := tx.Exec(ctx, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+		return store.User{}, store.PasswordToken{}, err
+	}
+	if err := ensureLoginIdentifiersAvailable(ctx, tx, input.Username, input.Email); err != nil {
+		return store.User{}, store.PasswordToken{}, err
+	}
+	user, err := insertUser(ctx, tx, input)
+	if err != nil {
+		return store.User{}, store.PasswordToken{}, err
+	}
+	token.UserID = user.ID
+	storedToken, err := scanPasswordToken(tx.QueryRow(ctx, `
+		INSERT INTO password_tokens (user_id,purpose,token_hash,expires_at)
+		VALUES ($1,$2,$3,$4)
+		RETURNING `+passwordTokenColumns, token.UserID, token.Purpose, token.TokenHash, token.ExpiresAt))
+	if err != nil {
+		return store.User{}, store.PasswordToken{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.User{}, store.PasswordToken{}, err
+	}
+	return user, storedToken, nil
+}
+
 func (s *Store) ListUsers(ctx context.Context) ([]store.User, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+userColumns+` FROM users ORDER BY created_at,id`)
 	if err != nil {
@@ -57,7 +88,7 @@ func (s *Store) UpdateUserIdentity(ctx context.Context, id, username, email, dis
 		WHERE id=$1
 		RETURNING `+userColumns, id, username, email, displayName))
 	if err != nil {
-		return store.User{}, err
+		return store.User{}, notFound(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.User{}, err
