@@ -140,27 +140,14 @@ export interface EventEvidence {
   sequence: number | null
   agentId: string | null
   workspaceId: string | null
-  runtimeInstanceId: string | null
   correlationId: string | null
   parentEventId: string | null
   actor: Record<string, unknown>
   payload: Record<string, unknown>
 }
 
-export interface RuntimeInstanceEvidence {
-  id: string
-  runtimeId: string
-  status: string
-  runnerStatus: string
-  createdAt: string
-  startedAt: string | null
-  stoppedAt: string | null
-  updatedAt: string
-}
-
 export interface ExecutionSessionEvidence {
   id: string
-  runtimeInstanceId: string | null
   runnerId: string | null
   status: string
   cwd: string
@@ -207,7 +194,6 @@ export interface RunUsageEvidence {
 export interface RunEvidence {
   run: Run
   provenance: Record<string, unknown> | null
-  runtimeInstances: RuntimeInstanceEvidence[]
   commands: ExecutionSessionEvidence[]
   events: EventEvidence[]
   tests: EventEvidence[]
