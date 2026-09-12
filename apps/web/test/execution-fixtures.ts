@@ -28,7 +28,8 @@ export const run: Run = {
   createdAt: '2026-01-01T00:00:00.000Z',
   startedAt: '2026-01-01T00:01:00.000Z',
   completedAt: null,
-  updatedAt: '2026-01-01T00:01:00.000Z'
+  updatedAt: '2026-01-01T00:01:00.000Z',
+  currentBranch: 'agent-board/AB-1'
 }
 
 export function event(partial: Partial<EventEvidence> & Pick<EventEvidence, 'id' | 'type'>): EventEvidence {
@@ -41,7 +42,6 @@ export function event(partial: Partial<EventEvidence> & Pick<EventEvidence, 'id'
     sequence: 1,
     agentId: 'agent-1',
     workspaceId: 'workspace-1',
-    runtimeInstanceId: 'instance-1',
     correlationId: null,
     parentEventId: null,
     actor: { type: 'AGENT' },
@@ -59,23 +59,12 @@ export function evidence(overrides: Partial<RunEvidence> = {}): RunEvidence {
         agent: { id: 'agent-1', name: 'Coder', engine: 'opencode', roleInstructions: 'Ship maintainable code.' },
         model: { id: 'model-1', name: 'gpt-test', model: 'openai/gpt-test' },
         provider: { id: 'provider-1', name: 'OpenRouter', kind: 'openrouter' },
-        runtime: { id: 'runtime-1', name: 'Docker', kind: 'docker' },
         runner: { id: 'runner-1', name: 'lab-host', internal: false }
       }
     },
-    runtimeInstances: [{
-      id: 'instance-1',
-      runtimeId: 'runtime-1',
-      status: 'RUNNING',
-      runnerStatus: 'CONNECTED',
-      createdAt: '2026-01-01T00:01:00.000Z',
-      startedAt: '2026-01-01T00:01:00.000Z',
-      stoppedAt: null,
-      updatedAt: '2026-01-01T00:01:00.000Z'
-    }],
     commands: [{
       id: 'session-1',
-      runtimeInstanceId: 'instance-1',
+      runnerId: 'runner-1',
       status: 'COMPLETED',
       cwd: '/workspace',
       command: ['git', 'status'],
