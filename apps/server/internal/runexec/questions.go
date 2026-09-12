@@ -10,38 +10,31 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
-	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type questioner struct {
-	store             store.QuestionStore
-	events            *evidence.Recorder
-	safe              executioncontext.SafeContext
-	runtimeInstanceID string
+	store  store.QuestionStore
+	events *evidence.Recorder
+	safe   executioncontext.SafeContext
 }
 
-type runtimeAcquirer interface {
-	Acquire(context.Context, string, string, string) (store.RuntimeInstance, error)
-}
-
-func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string) (engine.Request, error) {
+func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher) (engine.Request, error) {
 	request := engine.Request{Context: safe, Launcher: launcher}
 	if !store.SupportsQuestionStore(p.store) {
 		return request, nil
 	}
 	questions := any(p.store).(store.QuestionStore)
-	request.Questions = &questioner{store: questions, events: p.events, safe: safe, runtimeInstanceID: runtimeInstanceID}
+	request.Questions = &questioner{store: questions, events: p.events, safe: safe}
 	if store.SupportsInteractiveQuestionStore(p.store) {
 		eventReader, _ := any(p.store).(runEventReader)
 		interactive := &interactiveQuestioner{
-			store:             questions,
-			interactive:       any(p.store).(store.InteractiveQuestionStore),
-			events:            p.events,
-			eventReader:       eventReader,
-			safe:              safe,
-			runtimeInstanceID: runtimeInstanceID,
-			engine:            safe.Agent.Engine,
+			store:       questions,
+			interactive: any(p.store).(store.InteractiveQuestionStore),
+			events:      p.events,
+			eventReader: eventReader,
+			safe:        safe,
+			engine:      safe.Agent.Engine,
 		}
 		request.InteractiveQuestions = exposeInteractiveQuestioner(interactive)
 	}
@@ -89,41 +82,6 @@ func loadContinuation(ctx context.Context, questions store.QuestionStore, safe e
 		}, nil
 	}
 	return nil, nil
-}
-
-func (p *Processor) acquireRuntime(ctx context.Context, projectID, issueID, runtimeID string) (store.RuntimeInstance, error) {
-	if acquirer, ok := p.runtimes.(runtimeAcquirer); ok {
-		return acquirer.Acquire(ctx, projectID, issueID, runtimeID)
-	}
-	return p.runtimes.Create(ctx, projectID, issueID, runtimeID)
-}
-
-func (p *Processor) finishWaitingForInput(ctx context.Context, safe executioncontext.SafeContext, instance store.RuntimeInstance) (scheduler.Result, error) {
-	if !store.SupportsQuestionStore(p.store) {
-		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
-		return failed(errors.Join(fmt.Errorf("run execution: Question store capability is required for WAITING_FOR_INPUT"), cleanupErr)), nil
-	}
-	questions := any(p.store).(store.QuestionStore)
-	question, err := questions.GetOpenBlockingQuestion(ctx, safe.Project.ID, safe.Run.ID)
-	if err != nil {
-		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
-		if ctx.Err() != nil {
-			return scheduler.Result{}, ctx.Err()
-		}
-		return failed(errors.Join(fmt.Errorf("run execution: persisted blocking Question is required before WAITING_FOR_INPUT: %w", err), cleanupErr)), nil
-	}
-
-	cleanupErr := p.cleanupRuntime(ctx, safe, instance)
-	if ctx.Err() != nil {
-		return scheduler.Result{}, ctx.Err()
-	}
-	if cleanupErr != nil {
-		reason := safeFailure(fmt.Errorf("run execution: cleanup Runtime before waiting: %w", cleanupErr))
-		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, &instance.ID, nil)
-		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
-	}
-	_ = p.record(ctx, safe, "run.waiting_for_input", map[string]any{"questionId": question.ID}, &instance.ID, nil)
-	return scheduler.Result{RunStatus: "WAITING_FOR_INPUT"}, nil
 }
 
 func (q *questioner) Ask(ctx context.Context, request engine.QuestionRequest) (engine.Question, error) {
@@ -176,15 +134,14 @@ func (q *questioner) Ask(ctx context.Context, request engine.QuestionRequest) (e
 	if err == nil {
 		issueID, runID, agentID, workspaceID := q.safe.Issue.ID, q.safe.Run.ID, q.safe.Agent.ID, q.safe.Workspace.ID
 		_, err = q.events.Record(ctx, store.Event{
-			Type:              "question.created",
-			ProjectID:         q.safe.Project.ID,
-			IssueID:           &issueID,
-			RunID:             &runID,
-			AgentID:           &agentID,
-			WorkspaceID:       &workspaceID,
-			RuntimeInstanceID: optionalEventID(q.runtimeInstanceID),
-			Actor:             store.EmptyObject,
-			Payload:           payload,
+			Type:        "question.created",
+			ProjectID:   q.safe.Project.ID,
+			IssueID:     &issueID,
+			RunID:       &runID,
+			AgentID:     &agentID,
+			WorkspaceID: &workspaceID,
+			Actor:       store.EmptyObject,
+			Payload:     payload,
 		})
 	}
 	result := engine.Question{ID: question.ID, Blocking: question.Blocking}
