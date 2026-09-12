@@ -58,7 +58,6 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 	t.Run("workspace lock failure blocks transfer and execution", func(t *testing.T) {
 		repo := initProcessTestRepository(t)
 		safe := processTestSafeContext(repo)
-		safe.Runtime = executioncontext.RuntimeContext{}
 		storeFake := &runnerSyncStore{}
 		client := &successfulSyncClient{}
 		processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
@@ -83,7 +82,6 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 	t.Run("runner connection failure blocks workspace transfer and execution", func(t *testing.T) {
 		repo := initProcessTestRepository(t)
 		safe := processTestSafeContext(repo)
-		safe.Runtime = executioncontext.RuntimeContext{}
 		storeFake := &runnerSyncStore{}
 		processor := newRunnerSyncProcessor(t, repo, safe, storeFake, &successfulSyncClient{})
 		processor.runners = failingRunnerSyncConnector{err: errors.New("runner disconnected before transfer")}
@@ -104,7 +102,6 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 	t.Run("outbound workspace transfer failure blocks execution", func(t *testing.T) {
 		repo := initProcessTestRepository(t)
 		safe := processTestSafeContext(repo)
-		safe.Runtime = executioncontext.RuntimeContext{}
 		storeFake := &runnerSyncStore{}
 		client := &runnerOutboundFailureClient{
 			successfulSyncClient: &successfulSyncClient{},
