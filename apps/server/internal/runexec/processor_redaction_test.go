@@ -42,7 +42,6 @@ func TestProcessorReleasesRunRedactionLeaseOnExit(t *testing.T) {
 	processor, err := NewProcessor(
 		evidenceStore,
 		processTestResolver{err: errors.New("resolver unavailable")},
-		&processTestRuntime{},
 		sessions,
 		registry,
 		recorder,
