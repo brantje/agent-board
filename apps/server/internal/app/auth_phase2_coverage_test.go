@@ -117,8 +117,7 @@ func TestPhase2LogoutOtherSessionsValidatesCurrentSession(t *testing.T) {
 	actor := AuthenticatedUser{ID: "u1", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive}
 	ctx := context.Background()
 
-	currentToken := "current-refresh-token"
-	currentHash, err := hashOpaqueToken(currentToken)
+	currentToken, currentHash, err := service.newOpaqueToken()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +127,7 @@ func TestPhase2LogoutOtherSessionsValidatesCurrentSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherHash, err := hashOpaqueToken("other-refresh-token")
+	_, otherHash, err := service.newOpaqueToken()
 	if err != nil {
 		t.Fatal(err)
 	}
