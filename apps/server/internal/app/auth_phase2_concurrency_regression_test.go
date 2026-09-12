@@ -35,34 +35,13 @@ func (m *blockingPasswordMutationStore) SetUserPassword(ctx context.Context, id,
 	return m.phase2LifecycleMemory.SetUserPassword(ctx, id, passwordHash, force)
 }
 
-// This method intentionally exists before the production store contract grows it.
-// The regression proves ChangeOwnPassword actually selects the auth-version-aware
-// mutation instead of the legacy unconditional write.
 func (m *blockingPasswordMutationStore) SetUserPasswordIfAuthVersion(ctx context.Context, id string, expectedAuthVersion int64, passwordHash string, force bool) (store.User, error) {
 	m.waitForPasswordCommit()
-	current, err := m.phase2LifecycleMemory.GetUser(ctx, id)
-	if err != nil {
-		return store.User{}, err
-	}
-	if current.AuthVersion != expectedAuthVersion {
-		return store.User{}, store.ErrConflict
-	}
-	return m.phase2LifecycleMemory.SetUserPassword(ctx, id, passwordHash, force)
+	return m.phase2LifecycleMemory.SetUserPasswordIfAuthVersion(ctx, id, expectedAuthVersion, passwordHash, force)
 }
 
 func (m *blockingPasswordMutationStore) SetUserDisabled(ctx context.Context, id string, disabled bool) (store.User, error) {
-	current, err := m.phase2LifecycleMemory.GetUser(ctx, id)
-	if err != nil {
-		return store.User{}, err
-	}
-	status := store.UserStatusDisabled
-	if !disabled {
-		status = store.UserStatusActive
-		if current.PasswordHash == "" {
-			status = store.UserStatusPending
-		}
-	}
-	return m.phase2LifecycleMemory.SetUserStatus(ctx, id, status)
+	return m.phase2LifecycleMemory.SetUserDisabled(ctx, id, disabled)
 }
 
 type casLifecycleMemory struct {
@@ -70,46 +49,32 @@ type casLifecycleMemory struct {
 }
 
 func (m *casLifecycleMemory) SetUserPasswordIfAuthVersion(ctx context.Context, id string, expectedAuthVersion int64, passwordHash string, force bool) (store.User, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	user, ok := m.users[id]
-	if !ok {
-		return store.User{}, store.ErrNotFound
-	}
-	if user.AuthVersion != expectedAuthVersion {
-		return store.User{}, store.ErrConflict
-	}
-	user.PasswordHash = passwordHash
-	if user.Status == store.UserStatusPending {
-		user.Status = store.UserStatusActive
-	}
-	user.ForcePasswordChange = force
-	user.AuthVersion++
-	m.users[id] = user
-	now := time.Unix(2, 0).UTC()
-	m.revokeUserSessionsLocked(id, now)
-	for key, token := range m.tokens {
-		if token.UserID == id && token.ConsumedAt == nil && token.RevokedAt == nil {
-			token.RevokedAt = &now
-			m.tokens[key] = token
-		}
-	}
-	return user, nil
+	return m.phase2LifecycleMemory.SetUserPasswordIfAuthVersion(ctx, id, expectedAuthVersion, passwordHash, force)
 }
 
 func (m *casLifecycleMemory) SetUserDisabled(ctx context.Context, id string, disabled bool) (store.User, error) {
-	current, err := m.phase2LifecycleMemory.GetUser(ctx, id)
-	if err != nil {
-		return store.User{}, err
+	return m.phase2LifecycleMemory.SetUserDisabled(ctx, id, disabled)
+}
+
+type blockingCASLifecycleMemory struct {
+	*casLifecycleMemory
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func newBlockingCASLifecycleMemory() *blockingCASLifecycleMemory {
+	return &blockingCASLifecycleMemory{
+		casLifecycleMemory: &casLifecycleMemory{phase2LifecycleMemory: &phase2LifecycleMemory{authMemory: newAuthMemory()}},
+		started:            make(chan struct{}),
+		release:            make(chan struct{}),
 	}
-	status := store.UserStatusDisabled
-	if !disabled {
-		status = store.UserStatusActive
-		if current.PasswordHash == "" {
-			status = store.UserStatusPending
-		}
-	}
-	return m.phase2LifecycleMemory.SetUserStatus(ctx, id, status)
+}
+
+func (m *blockingCASLifecycleMemory) SetUserPasswordIfAuthVersion(ctx context.Context, id string, expectedAuthVersion int64, passwordHash string, force bool) (store.User, error) {
+	m.once.Do(func() { close(m.started) })
+	<-m.release
+	return m.casLifecycleMemory.SetUserPasswordIfAuthVersion(ctx, id, expectedAuthVersion, passwordHash, force)
 }
 
 func TestPhase2StaleSelfPasswordChangeCannotOverwriteAdminAssignment(t *testing.T) {
@@ -150,10 +115,10 @@ func TestPhase2StaleSelfPasswordChangeCannotOverwriteAdminAssignment(t *testing.
 	}
 }
 
-func TestPhase2ForcedPasswordChangeUsesAuthenticatedAuthVersion(t *testing.T) {
+func TestPhase2ForcedPasswordChangeUsesCapturedAuthVersion(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	memory := &casLifecycleMemory{phase2LifecycleMemory: &phase2LifecycleMemory{authMemory: newAuthMemory()}}
+	memory := newBlockingCASLifecycleMemory()
 	service := phase2ReviewAuthTestService(t, memory, &now)
 	admin := bootstrapTestUser(t, service)
 
@@ -168,10 +133,18 @@ func TestPhase2ForcedPasswordChangeUsesAuthenticatedAuthVersion(t *testing.T) {
 		t.Fatal("temporary password login was not forced-change")
 	}
 
+	result := make(chan error, 1)
+	go func() {
+		_, err := service.ChangeOwnPassword(ctx, forced.User, "", "stale-forced-password")
+		result <- err
+	}()
+	<-memory.started
+
 	if _, err := service.AdminSetPassword(ctx, phase2Admin(), admin.ID, "admin-recovery-password"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ChangeOwnPassword(ctx, forced.User, "", "stale-forced-password"); !errors.Is(err, store.ErrConflict) {
+	close(memory.release)
+	if err := <-result; !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale forced password change error=%v want conflict", err)
 	}
 	stored, err := memory.GetUser(ctx, admin.ID)
