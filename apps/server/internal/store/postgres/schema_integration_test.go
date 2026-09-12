@@ -17,7 +17,8 @@ func TestCanonicalSchemaCreatesRequiredTables(t *testing.T) {
 		"agents", "workspaces", "runs", "scheduler_jobs",
 		"scheduler_leases", "scheduler_capacity_reservations", "runtime_instances",
 		"execution_sessions", "questions", "decisions", "reviews", "run_provenance",
-		"events", "raw_output_chunks", "artifacts",
+		"events", "raw_output_chunks", "artifacts", "users", "auth_settings",
+		"auth_sessions", "password_tokens",
 	}
 
 	rows, err := pool.Query(ctx, `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`)
@@ -139,10 +140,23 @@ func TestSchemaHasNoObviousSecretPlaintextColumns(t *testing.T) {
 	}
 	defer rows.Close()
 
+	// These exact auth fields are either one-way hashes or non-secret policy/state
+	// metadata. Keep the exception list narrow so future secret-looking columns are
+	// still rejected by default.
+	allowedSecretLikeColumns := map[string]bool{
+		"auth_settings.access_token_lifetime_seconds": true,
+		"auth_settings.password_minimum_length":       true,
+		"users.password_hash":                         true,
+		"users.force_password_change":                 true,
+	}
+
 	for rows.Next() {
 		var tableName, columnName string
 		if err := rows.Scan(&tableName, &columnName); err != nil {
 			t.Fatalf("scan schema column: %v", err)
+		}
+		if allowedSecretLikeColumns[tableName+"."+columnName] {
+			continue
 		}
 		lower := strings.ToLower(columnName)
 		for _, forbidden := range []string{"password", "secret_value", "access_token", "api_key", "private_key"} {

@@ -10,6 +10,7 @@ services:
         credential_file=/run/agent-board/postgres-password
         encryption_key_file=/run/agent-board/secret-encryption-key
         write_token_file=/run/agent-board/secret-write-token
+        auth_signing_key_file=/run/agent-board-auth/auth-signing-key
         if [ ! -s "$$credential_file" ]; then
           umask 077
           dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n' > "$$credential_file"
@@ -22,8 +23,14 @@ services:
           fi
           chmod 0444 "$$secret_file"
         done
+        if [ ! -s "$$auth_signing_key_file" ]; then
+          umask 077
+          dd if=/dev/urandom bs=32 count=1 2>/dev/null | base64 | tr -d '\n' > "$$auth_signing_key_file"
+        fi
+        chmod 0444 "$$auth_signing_key_file"
     volumes:
       - postgres-credentials:/run/agent-board
+      - auth-credentials:/run/agent-board-auth
     restart: "no"
 
   postgres:
@@ -61,6 +68,7 @@ services:
       AGENT_BOARD_REPOSITORY_MOUNT_PATH: ${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}
       AGENT_BOARD_SECRET_ENCRYPTION_KEY: ${AGENT_BOARD_SECRET_ENCRYPTION_KEY:-}
       AGENT_BOARD_SECRET_WRITE_TOKEN: ${AGENT_BOARD_SECRET_WRITE_TOKEN:-}
+      AGENT_BOARD_AUTH_SIGNING_KEY: ${AGENT_BOARD_AUTH_SIGNING_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODELS: ${OPENROUTER_MODELS:-}
       LITELLM_ENDPOINT: ${LITELLM_ENDPOINT:-}
@@ -78,6 +86,9 @@ services:
         fi
         if [ -z "$$AGENT_BOARD_SECRET_WRITE_TOKEN" ] && [ -s /run/agent-board/secret-write-token ]; then
           export AGENT_BOARD_SECRET_WRITE_TOKEN="$$(cat /run/agent-board/secret-write-token)"
+        fi
+        if [ -z "$$AGENT_BOARD_AUTH_SIGNING_KEY" ] && [ -s /run/agent-board-auth/auth-signing-key ]; then
+          export AGENT_BOARD_AUTH_SIGNING_KEY="$$(cat /run/agent-board-auth/auth-signing-key)"
         fi
         exec /usr/local/bin/agent-board-server
     depends_on:
@@ -98,6 +109,7 @@ services:
       - ${AGENT_BOARD_REPOSITORY_ROOT:-.}:${AGENT_BOARD_REPOSITORY_MOUNT_PATH:-/repositories}
       - ${AGENT_BOARD_DOCKER_SOCKET:-/var/run/docker.sock}:/var/run/docker.sock
       - postgres-credentials:/run/agent-board:ro
+      - auth-credentials:/run/agent-board-auth:ro
 
   web:
     build:
@@ -123,6 +135,7 @@ services:
 volumes:
   postgres-data:
   postgres-credentials:
+  auth-credentials:
 
 networks:
   default:

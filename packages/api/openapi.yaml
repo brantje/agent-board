@@ -7,9 +7,29 @@ servers:
 - url: /
 components:
   securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
     SecretWriteCapability:
       $ref: ./components/api-components.yaml#/securitySchemes/SecretWriteCapability
 paths:
+  /api/auth/bootstrap:
+    $ref: ./paths/auth.yaml#/bootstrapStatus
+  /api/auth/bootstrap/register:
+    $ref: ./paths/auth.yaml#/bootstrapRegister
+  /api/auth/login:
+    $ref: ./paths/auth.yaml#/login
+  /api/auth/refresh:
+    $ref: ./paths/auth.yaml#/refresh
+  /api/auth/logout:
+    $ref: ./paths/auth.yaml#/logout
+  /api/auth/setup/complete:
+    $ref: ./paths/auth.yaml#/setupComplete
+  /api/auth/reset/complete:
+    $ref: ./paths/auth.yaml#/resetComplete
+  /api/auth/me:
+    $ref: ./paths/auth.yaml#/me
   /api/runners:
     $ref: ./paths/runners.yaml#/collection
   /api/runner/register:

@@ -1,0 +1,142 @@
+bootstrapRegistrationInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [username, email, displayName, password]
+        properties:
+          username: {type: string, minLength: 1}
+          email: {type: string, format: email}
+          displayName: {type: string, minLength: 1}
+          password: {type: string, minLength: 1, writeOnly: true}
+loginInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [login, password]
+        properties:
+          login: {type: string, minLength: 1}
+          password: {type: string, minLength: 1, writeOnly: true}
+refreshInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [refreshToken]
+        properties:
+          refreshToken: {type: string, minLength: 1, writeOnly: true}
+passwordCompletionInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [token, password]
+        properties:
+          token: {type: string, minLength: 1, writeOnly: true}
+          password: {type: string, minLength: 1, writeOnly: true}
+userResponse:
+  description: Trusted deployment user identity.
+  content:
+    application/json:
+      schema:
+        $ref: ../schemas/auth.yaml#/AuthUser
+tokensResponse:
+  description: Short-lived access token and rotating opaque refresh token.
+  headers:
+    Cache-Control:
+      schema: {type: string, const: no-store}
+  content:
+    application/json:
+      schema:
+        $ref: ../schemas/auth.yaml#/AuthTokens
+bootstrapStatus:
+  get:
+    operationId: getAuthBootstrapStatus
+    responses:
+      '200':
+        description: Whether first-user bootstrap registration is still available.
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/auth.yaml#/BootstrapStatus
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+bootstrapRegister:
+  post:
+    operationId: registerBootstrapAdmin
+    requestBody:
+      $ref: '#/bootstrapRegistrationInput'
+    responses:
+      '201':
+        $ref: '#/userResponse'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+login:
+  post:
+    operationId: login
+    requestBody:
+      $ref: '#/loginInput'
+    responses:
+      '200':
+        $ref: '#/tokensResponse'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+refresh:
+  post:
+    operationId: refreshAuthentication
+    requestBody:
+      $ref: '#/refreshInput'
+    responses:
+      '200':
+        $ref: '#/tokensResponse'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+logout:
+  post:
+    operationId: logout
+    requestBody:
+      $ref: '#/refreshInput'
+    responses:
+      '204':
+        description: The supplied refresh session is revoked or was already unavailable.
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+setupComplete:
+  post:
+    operationId: completeUserSetup
+    requestBody:
+      $ref: '#/passwordCompletionInput'
+    responses:
+      '200':
+        $ref: '#/userResponse'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+resetComplete:
+  post:
+    operationId: completePasswordReset
+    requestBody:
+      $ref: '#/passwordCompletionInput'
+    responses:
+      '200':
+        $ref: '#/userResponse'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+me:
+  get:
+    operationId: getAuthenticatedUser
+    security:
+    - BearerAuth: []
+    responses:
+      '200':
+        $ref: '#/userResponse'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

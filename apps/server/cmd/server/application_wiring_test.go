@@ -45,7 +45,7 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	if !ok {
 		t.Fatalf("handler type = %T, want *applicationHandler", handler)
 	}
-	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.ExecutionStore == nil || application.services.ExecutionContext == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil || application.services.EventHub == nil || application.services.Events == nil {
+	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Auth == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.ExecutionStore == nil || application.services.ExecutionContext == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil || application.services.EventHub == nil || application.services.Events == nil {
 		t.Fatalf("application services were not fully wired: %+v", application.services)
 	}
 	if application.services.ControlPlane.Runners == nil {

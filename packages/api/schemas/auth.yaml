@@ -1,0 +1,31 @@
+AuthUser:
+  type: object
+  additionalProperties: false
+  required: [id, username, email, displayName, deploymentRole, status, forcePasswordChange]
+  properties:
+    id: {type: string, format: uuid}
+    username: {type: string, minLength: 1}
+    email: {type: string, format: email}
+    displayName: {type: string, minLength: 1}
+    deploymentRole: {type: string, enum: [admin, member]}
+    status: {type: string, enum: [pending, active, disabled]}
+    forcePasswordChange: {type: boolean}
+
+BootstrapStatus:
+  type: object
+  additionalProperties: false
+  required: [available]
+  properties:
+    available: {type: boolean}
+
+AuthTokens:
+  type: object
+  additionalProperties: false
+  required: [accessToken, accessTokenExpiresAt, refreshToken, refreshTokenExpiresAt, user]
+  properties:
+    accessToken: {type: string, minLength: 1}
+    accessTokenExpiresAt: {type: string, format: date-time}
+    refreshToken: {type: string, minLength: 1}
+    refreshTokenExpiresAt: {type: string, format: date-time}
+    user:
+      $ref: '#/AuthUser'
