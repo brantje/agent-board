@@ -34,6 +34,10 @@ type Services struct {
 }
 
 func NewServices(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer) (*Services, error) {
+	return newServices(controlPlaneStore, materializer, AuthServiceConfig{})
+}
+
+func newServices(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, authConfig AuthServiceConfig) (*Services, error) {
 	if controlPlaneStore == nil {
 		return nil, fmt.Errorf("control-plane store is required")
 	}
@@ -43,7 +47,7 @@ func NewServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 		return nil, err
 	}
 	services := &Services{ControlPlane: controlPlane, Workspaces: workspaces}
-	if err := configureAuth(services, controlPlaneStore); err != nil {
+	if err := configureAuth(services, controlPlaneStore, authConfig); err != nil {
 		return nil, err
 	}
 	if store.SupportsQuestionStore(controlPlaneStore) {
@@ -57,9 +61,20 @@ func NewServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 }
 
 func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, implementations map[string]runtimepkg.Implementation, secretResolvers ...executioncontext.SecretResolver) (*Services, error) {
+	return newServicesWithRuntimes(controlPlaneStore, materializer, implementations, AuthServiceConfig{}, secretResolvers...)
+}
+
+// NewServicesWithRuntimesAuthConfig is the production-capable constructor when
+// authentication needs deployment-stable signing configuration. Existing tests
+// and non-auth stores may continue using NewServicesWithRuntimes.
+func NewServicesWithRuntimesAuthConfig(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, implementations map[string]runtimepkg.Implementation, authConfig AuthServiceConfig, secretResolvers ...executioncontext.SecretResolver) (*Services, error) {
+	return newServicesWithRuntimes(controlPlaneStore, materializer, implementations, authConfig, secretResolvers...)
+}
+
+func newServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, implementations map[string]runtimepkg.Implementation, authConfig AuthServiceConfig, secretResolvers ...executioncontext.SecretResolver) (*Services, error) {
 	registry := redaction.NewRegistry()
 	securedStore := evidencepkg.NewRedactingStore(controlPlaneStore, registry)
-	services, err := NewServices(securedStore, materializer)
+	services, err := newServices(securedStore, materializer, authConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +82,7 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	// decorator intentionally exposes only the control-plane store contract.
 	// Bind auth to the authoritative base store rather than duplicating dozens
 	// of auth forwarding methods on the evidence wrapper.
-	if err := configureAuth(services, controlPlaneStore); err != nil {
+	if err := configureAuth(services, controlPlaneStore, authConfig); err != nil {
 		return nil, err
 	}
 	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
@@ -126,12 +141,12 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	return services, nil
 }
 
-func configureAuth(services *Services, candidate any) error {
+func configureAuth(services *Services, candidate any, config AuthServiceConfig) error {
 	authStore, ok := candidate.(store.AuthStore)
 	if !ok {
 		return nil
 	}
-	auth, err := NewAuthService(authStore, AuthServiceConfig{})
+	auth, err := NewAuthService(authStore, config)
 	if err != nil {
 		return fmt.Errorf("configure authentication: %w", err)
 	}
