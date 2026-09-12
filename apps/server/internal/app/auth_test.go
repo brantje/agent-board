@@ -248,12 +248,23 @@ func (m *authMemory) CompletePasswordToken(_ context.Context, hash []byte, purpo
 	return user, nil
 }
 
+type deterministicReader struct {
+	offset byte
+}
+
+func (r *deterministicReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = r.offset + byte(i)
+	}
+	r.offset += byte(len(p)) + 1
+	return len(p), nil
+}
+
 func authTestService(t *testing.T, memory *authMemory, now *time.Time) *AuthService {
 	t.Helper()
-	random := bytes.NewReader(bytes.Repeat([]byte{1, 2, 3, 4, 5, 6, 7, 8}, 1024))
 	service, err := NewAuthService(memory, AuthServiceConfig{
 		Now:        func() time.Time { return *now },
-		Random:     random,
+		Random:     &deterministicReader{},
 		SigningKey: bytes.Repeat([]byte{9}, 32),
 	})
 	if err != nil {
