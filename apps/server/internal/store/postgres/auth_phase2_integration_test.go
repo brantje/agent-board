@@ -124,6 +124,11 @@ func TestAuthPhase2StoreStatusAndPasswordChangesInvalidateCredentials(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
+	backupAdmin := authUser("backup-admin", "backup-admin@example.com", store.UserStatusActive)
+	backupAdmin.DeploymentRole = store.DeploymentRoleAdmin
+	if _, err := s.CreateUser(ctx, backupAdmin); err != nil {
+		t.Fatal(err)
+	}
 
 	now := time.Now().UTC().Truncate(time.Second)
 	hash := func(marker byte) []byte {
