@@ -116,10 +116,6 @@ func (s *brokenSequenceEvidenceStore) ListExecutionSessionsByRun(context.Context
 	return nil, nil
 }
 
-func (s *brokenSequenceEvidenceStore) GetRuntimeInstance(context.Context, string, string) (store.RuntimeInstance, error) {
-	return store.RuntimeInstance{}, store.ErrNotFound
-}
-
 func (s *brokenSequenceEvidenceStore) ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error) {
 	return []store.Event{{
 		ID: "broken", ProjectID: s.run.ProjectID, RunID: s.runRef, Type: "run.started",
