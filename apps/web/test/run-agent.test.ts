@@ -6,13 +6,12 @@ import { evidence } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
 describe('runAgentInfo', () => {
-  it('reads immutable agent, model, provider, runtime and runner from provenance context', () => {
+  it('reads immutable agent, model, provider and runner from provenance context', () => {
     expect(runAgentInfo(evidence().provenance)).toEqual({
       name: 'Coder',
       engine: 'opencode',
       model: 'openai/gpt-test',
       provider: 'OpenRouter',
-      runtime: 'Docker',
       runner: 'lab-host'
     })
   })
@@ -31,15 +30,14 @@ describe('runAgentInfo', () => {
       context: {
         agent: { name: 'Builder', engine: 'scripted' },
         model: { name: 'local-model' },
-        provider: { kind: 'openai' },
-        runtime: { kind: 'docker' }
+        provider: { kind: 'openai' }
       }
     })).toEqual({
       name: 'Builder',
       engine: 'scripted',
       model: 'local-model',
       provider: 'openai',
-      runtime: 'docker'
+      runner: undefined
     })
   })
 
@@ -69,7 +67,6 @@ describe('RunAgentCard', () => {
     expect(wrapper.text()).toContain('opencode')
     expect(wrapper.text()).toContain('openai/gpt-test')
     expect(wrapper.text()).toContain('OpenRouter')
-    expect(wrapper.text()).toContain('Docker')
     expect(wrapper.text()).toContain('Runner')
     expect(wrapper.text()).toContain('lab-host')
     expect(wrapper.text()).not.toContain('agent-1')
@@ -89,7 +86,7 @@ describe('RunAgentCard', () => {
     expect(wrapper.text()).toContain('opencode')
   })
 
-  it('omits missing engine, provider and runtime rows', () => {
+  it('omits missing engine, provider and runner rows', () => {
     const wrapper = mount(RunAgentCard, {
       props: { provenance: { context: { agent: { name: 'Coder' }, model: { name: 'gpt-test' } } } },
       global: { stubs: uiStubs }
@@ -98,6 +95,6 @@ describe('RunAgentCard', () => {
     expect(wrapper.text()).toContain('gpt-test')
     expect(wrapper.text()).not.toContain('Engine')
     expect(wrapper.text()).not.toContain('Provider')
-    expect(wrapper.text()).not.toContain('Runtime')
+    expect(wrapper.text()).not.toContain('Runner')
   })
 })
