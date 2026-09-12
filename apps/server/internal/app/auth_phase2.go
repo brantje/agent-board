@@ -194,7 +194,11 @@ func (s *AuthService) AdminSetDisabled(ctx context.Context, actor AuthenticatedU
 			status = store.UserStatusPending
 		}
 	}
-	return s.SetStatus(ctx, userID, status)
+	updated, err := s.SetStatus(ctx, userID, status)
+	if errors.Is(err, store.ErrConflict) {
+		return AuthenticatedUser{}, NewError("conflict", "at least one active deployment admin is required", err)
+	}
+	return updated, err
 }
 
 func (s *AuthService) UpdateOwnProfile(ctx context.Context, actor AuthenticatedUser, input UserProfileUpdate) (AuthenticatedUser, error) {
