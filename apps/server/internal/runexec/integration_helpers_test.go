@@ -13,6 +13,28 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func createScriptedFixtureRepository(t *testing.T, ctx context.Context) string {
+	t.Helper()
+	repositoryPath := filepath.Join(t.TempDir(), "fixture")
+	if err := os.MkdirAll(repositoryPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range [][]string{{"git", "init", "-q", "-b", "main"}, {"git", "config", "user.email", "integration@example.invalid"}, {"git", "config", "user.name", "Agent Board Integration"}} {
+		runIntegrationCommand(t, ctx, repositoryPath, command...)
+	}
+	for _, name := range []string{"staged.txt", "unstaged.txt", "delete.txt", "rename.txt"} {
+		if err := os.WriteFile(filepath.Join(repositoryPath, name), []byte("baseline\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repositoryPath, ".gitignore"), []byte("ignored-scripted.txt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runIntegrationCommand(t, ctx, repositoryPath, "git", "add", ".")
+	runIntegrationCommand(t, ctx, repositoryPath, "git", "commit", "-qm", "baseline")
+	return repositoryPath
+}
+
 func runIntegrationCommand(t *testing.T, ctx context.Context, dir string, command ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
