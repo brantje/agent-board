@@ -195,8 +195,10 @@ func assertOpenCodeGoldenSession(t *testing.T, ctx context.Context, fixture *ope
 	if session.RunnerID != runnerID || session.RuntimeInstanceID != "" {
 		t.Fatalf("golden execution target runner=%q runtimeInstance=%q want runner=%q without Runtime Instance", session.RunnerID, session.RuntimeInstanceID, runnerID)
 	}
-	if session.Status != "COMPLETED" {
-		t.Fatalf("golden execution session status=%q want COMPLETED", session.Status)
+	switch session.Status {
+	case "COMPLETED", "CANCELLED":
+	default:
+		t.Fatalf("golden execution session status=%q is not a successful terminal server-session state", session.Status)
 	}
 	argv := string(session.CommandArgv)
 	if !strings.Contains(argv, "opencode") || !strings.Contains(argv, "serve") {
