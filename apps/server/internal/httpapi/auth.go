@@ -165,7 +165,7 @@ func (a *api) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, authUserDTO(user))
+	writeSensitiveJSON(w, http.StatusOK, authUserDTO(user))
 }
 
 func bearerToken(r *http.Request) (string, bool) {
