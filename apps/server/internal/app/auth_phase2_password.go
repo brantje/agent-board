@@ -12,7 +12,7 @@ func (s *AuthService) setPasswordIfAuthVersion(ctx context.Context, userID strin
 	if err != nil {
 		return AuthenticatedUser{}, err
 	}
-	if err := ValidatePassword(password, settings.PasswordPolicy); err != nil {
+	if err := ValidatePassword(settings.PasswordPolicy, password); err != nil {
 		return AuthenticatedUser{}, err
 	}
 	passwordHash, err := s.hashPassword(password)
