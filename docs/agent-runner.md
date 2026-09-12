@@ -4,7 +4,7 @@
 
 Production v0.1 prefers **external persistent Runner hosts**: a user-managed Linux machine runs a versioned standalone `agent-runner` binary as a systemd service and connects outbound to Agent Board over protocol v2. The server-managed internal Runner uses the same protocol; it is not a second execution topology.
 
-The Runner is part of the v0.1 execution architecture. It is not an Agent, Run, Runtime, Runtime Instance or future Worker.
+The Runner is part of the v0.1 execution architecture. It is not an Agent, Run or future Worker.
 
 Install and operate external hosts with `docs/external-runner-setup.md` and `apps/agent-runner/deploy/agent-runner.service`.
 
@@ -42,7 +42,7 @@ remote Git Project
    -> normal non-force Issue-branch push
 ```
 
-External Runner execution does not create a placeholder Runtime Instance. Legacy managed Runtime support remains separate compatibility code; Agents do not select Runtimes directly.
+Runner placement is scheduler-owned; Agents select Engine and Model Profile rather than execution hosts.
 
 These identities remain separate:
 
@@ -58,7 +58,7 @@ External Runner enrollment has exactly one durable Runner identity from creation
 
 The one-time registration token is never a Runner credential and cannot authenticate `/api/runner/ws`. It is not persisted by `agent-runner` and cannot be reused after successful enrollment. The permanent Runner token is stored only as a hash server-side and is returned in plaintext only when first issued or rotated.
 
-External enrollment persists the normal runtime configuration in `/etc/agent-board/agent-runner.env` using `AGENT_BOARD_URL`, `AGENT_RUNNER_ID`, `AGENT_RUNNER_TOKEN` and `AGENT_RUNNER_WORKSPACE_ROOT`. `AGENT_RUNNER_TOKEN` always means the permanent post-registration Runner credential. Normal startup remains the existing `configFromEnv()` -> `Server.Connect()` path; there is no additional Runner state/configuration file.
+External enrollment persists the normal execution configuration in `/etc/agent-board/agent-runner.env` using `AGENT_BOARD_URL`, `AGENT_RUNNER_ID`, `AGENT_RUNNER_TOKEN` and `AGENT_RUNNER_WORKSPACE_ROOT`. `AGENT_RUNNER_TOKEN` always means the permanent post-registration Runner credential. Normal startup remains the existing `configFromEnv()` -> `Server.Connect()` path; there is no additional Runner state/configuration file.
 
 Hostname is only the initial display-name source. An administrator may rename a registered external Runner later. Reconnects and capability/health updates do not resend or overwrite that name, and the Runner process cannot rename itself.
 
@@ -71,7 +71,6 @@ Required relationships:
 - one Run may use Execution Sessions over its lifetime, but a blocking native Question continues the same live Runner Execution Session
 - one logical writer owns an Issue checkout during an active Runner execution lifecycle
 - local Issue branch authority remains server-side; remote Issue branch authority is the published Git branch plus the durably recorded Workspace revision
-- a Runtime Instance, where legacy managed compute is used, remains bound to exactly one Workspace for its lifetime
 
 ## Git-native Workspace ownership
 
@@ -85,7 +84,7 @@ The branch and Git commits are the durable code state. The Runner does not creat
 
 ### Shared finalization invariant
 
-Both server-runtime and Runner execution use the same shared Git finalization rules. At a real hand-back boundary the checkout must:
+Both local and remote Runner execution use the same shared Git finalization rules. At a real hand-back boundary the checkout must:
 
 1. still be on the expected `agent-board/<issue-key>` branch
 2. have no unresolved conflicts
@@ -224,7 +223,7 @@ The Runner does not own:
 
 External Runner hosts are user-managed, trusted execution environments. Agent Board does not claim Docker/container isolation for them. Operators decide what coding CLIs and host-level tooling are installed there.
 
-The trusted server resolves and authorizes configuration and secrets before execution. The Runner receives only execution-scoped data needed by the session and a Workspace-bounded working directory. Internal managed Runner deployment may add container isolation, but that does not change the protocol or product model.
+The trusted server resolves and authorizes configuration and secrets before execution. The Runner receives only execution-scoped data needed by the session and a Workspace-bounded working directory. Internal Runner deployment may add container isolation, but that does not change the protocol or product model.
 
 The Runner must never receive:
 
