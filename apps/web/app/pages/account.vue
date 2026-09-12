@@ -4,6 +4,7 @@ import type { AuthSession } from '../types/auth'
 
 const auth = useAuth()
 const profile = reactive({ username: '', email: '', displayName: '' })
+const currentPassword = ref('')
 const password = ref('')
 const sessionRows = ref<AuthSession[]>([])
 const busy = ref(false)
@@ -43,7 +44,8 @@ async function saveProfile() {
 
 async function savePassword() {
   await run(async () => {
-    await auth.changePassword(password.value)
+    await auth.changePassword(forced.value ? undefined : currentPassword.value, password.value)
+    currentPassword.value = ''
     password.value = ''
     await navigateTo('/auth/login')
   })
@@ -93,6 +95,7 @@ onMounted(async () => {
       <UCard>
         <template #header><h2 class="font-semibold">{{ forced ? 'Required password change' : 'Password' }}</h2></template>
         <form class="space-y-4" @submit.prevent="savePassword">
+          <UFormField v-if="!forced" label="Current password" required><UInput v-model="currentPassword" type="password" autocomplete="current-password" class="w-full" /></UFormField>
           <UFormField label="New password" required><UInput v-model="password" type="password" autocomplete="new-password" class="w-full" /></UFormField>
           <UButton type="submit" :loading="busy">Change password</UButton>
         </form>
