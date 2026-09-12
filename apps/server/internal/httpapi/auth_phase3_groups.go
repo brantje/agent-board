@@ -56,7 +56,7 @@ func (a *api) handleListGroups(w http.ResponseWriter, r *http.Request) {
 	for _, group := range groups {
 		response = append(response, groupDTO(group))
 	}
-	writeJSON(w, http.StatusOK, response)
+	writeSensitiveJSON(w, http.StatusOK, response)
 }
 
 func (a *api) handleCreateGroup(w http.ResponseWriter, r *http.Request) {

@@ -40,6 +40,9 @@ collection:
     responses:
       '200':
         description: Deployment groups visible to a deployment administrator.
+        headers:
+          Cache-Control:
+            schema: {type: string, const: no-store}
         content:
           application/json:
             schema: {type: array, items: {$ref: ../schemas/groups.yaml#/Group}}

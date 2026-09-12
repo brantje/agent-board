@@ -2,9 +2,11 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const groupColumns = `id::text,name,created_at,updated_at`
@@ -101,6 +103,13 @@ func (s *Store) ListGroupMembers(ctx context.Context, groupID string) ([]store.U
 
 func (s *Store) AddGroupMember(ctx context.Context, groupID, userID string) error {
 	_, err := s.pool.Exec(ctx, `INSERT INTO group_members (group_id,user_id) VALUES ($1,$2)`, groupID, userID)
+	if err == nil {
+		return nil
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "group_members_group_id_fkey" {
+		return store.ErrNotFound
+	}
 	return notFound(err)
 }
 
