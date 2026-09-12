@@ -1,7 +1,7 @@
 import { computed } from 'vue'
 import { ApiError, apiRequest } from '../utils/api'
 import { clearAuthStorage, readAuthStorage, writeAuthStorage } from '../utils/auth-storage'
-import type { AuthSession, AuthSettings, AuthTokens, AuthUser, PasswordTokenResult, PendingUserResult, StoredAuth } from '../types/auth'
+import type { AuthSession, AuthSettings, AuthTokens, AuthUser, Group, PasswordTokenResult, PendingUserResult, StoredAuth } from '../types/auth'
 
 type RefreshOutcome = 'success' | 'rejected' | 'retryable' | 'stale'
 
@@ -197,12 +197,31 @@ export function useAuth() {
     return request<AuthSettings>('/api/auth/settings', { method: 'PUT', body: value })
   }
 
+  async function groups() { return request<Group[]>('/api/groups') }
+  async function createGroup(name: string) { return request<Group>('/api/groups', { method: 'POST', body: { name } }) }
+  async function updateGroup(groupId: string, name: string) {
+    return request<Group>(`/api/groups/${encodeURIComponent(groupId)}`, { method: 'PATCH', body: { name } })
+  }
+  async function deleteGroup(groupId: string) {
+    return request<void>(`/api/groups/${encodeURIComponent(groupId)}`, { method: 'DELETE' })
+  }
+  async function groupMembers(groupId: string) {
+    return request<AuthUser[]>(`/api/groups/${encodeURIComponent(groupId)}/members`)
+  }
+  async function addGroupMember(groupId: string, userId: string) {
+    return request<void>(`/api/groups/${encodeURIComponent(groupId)}/members`, { method: 'POST', body: { userID: userId } })
+  }
+  async function removeGroupMember(groupId: string, userId: string) {
+    return request<void>(`/api/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`, { method: 'DELETE' })
+  }
+
   return {
     user, credentials, persistent, initialized,
     isAuthenticated: computed(() => Boolean(user.value && credentials.value)),
     isAdmin: computed(() => user.value?.deploymentRole === 'admin'),
     initialize, bootstrapAvailable, register, login, logout, completePasswordToken,
     request, refresh, updateProfile, changePassword, sessions, revokeSession, logoutOthers,
-    users, createUser, passwordToken, setUserPassword, setUserDisabled, settings, updateSettings
+    users, createUser, passwordToken, setUserPassword, setUserDisabled, settings, updateSettings,
+    groups, createGroup, updateGroup, deleteGroup, groupMembers, addGroupMember, removeGroupMember
   }
 }
