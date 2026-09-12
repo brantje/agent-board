@@ -39,12 +39,11 @@ func TestInteractiveQuestionCreatedEvidenceUsesPersistedRedactedOptions(t *testi
 		}
 		lifecycle := &interactiveLifecycleStore{openResult: store.OpenInteractiveQuestionResult{Question: persisted, Created: true}}
 		q := &interactiveQuestioner{
-			store:             &interactiveQuestionReadStore{},
-			interactive:       lifecycle,
-			events:            recorder,
-			safe:              interactiveSafeContext(),
-			runtimeInstanceID: "runtime-instance-1",
-			engine:            "opencode",
+			store:       &interactiveQuestionReadStore{},
+			interactive: lifecycle,
+			events:      recorder,
+			safe:        interactiveSafeContext(),
+			engine:      "opencode",
 		}
 		if _, err := q.Open(context.Background(), "ses/req/0", request); err != nil {
 			t.Fatalf("Open() error=%v", err)
@@ -62,12 +61,11 @@ func TestInteractiveQuestionCreatedEvidenceUsesPersistedRedactedOptions(t *testi
 			Questions: []store.OpenInteractiveQuestionResult{{Question: persisted, Created: true}},
 		}}
 		q := &interactiveQuestioner{
-			store:             &interactiveQuestionReadStore{},
-			interactive:       lifecycle,
-			events:            recorder,
-			safe:              interactiveSafeContext(),
-			runtimeInstanceID: "runtime-instance-1",
-			engine:            "opencode",
+			store:       &interactiveQuestionReadStore{},
+			interactive: lifecycle,
+			events:      recorder,
+			safe:        interactiveSafeContext(),
+			engine:      "opencode",
 		}
 		if _, err := q.OpenBatch(context.Background(), []engine.CorrelatedQuestionRequest{{CorrelationKey: "ses/req/0", Question: request}}); err != nil {
 			t.Fatalf("OpenBatch() error=%v", err)
