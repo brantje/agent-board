@@ -159,6 +159,53 @@ func TestListProviderModelsResolvesOwnedProviderCredentialInOwnerScope(t *testin
 	}
 }
 
+func TestListProviderModelsRejectsMissingCredentialValue(t *testing.T) {
+	ref := "provider:" + testProviderID
+	store := &providerModelStore{provider: store.Provider{
+		ID:            testProviderID,
+		Kind:          "openai",
+		CredentialRef: &ref,
+		Enabled:       true,
+		SafeMetadata:  store.EmptyObject,
+	}}
+	service := New(store)
+	_, err := service.ListProviderModels(context.Background(), nil, testProviderID, &fakeProviderModelSecretResolver{values: map[string][]byte{}}, nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "provider_credential_unavailable" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestListProviderModelsRejectsUpstreamDiscoveryFailure(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer upstream.Close()
+
+	ref := "provider:" + testProviderID
+	store := &providerModelStore{provider: store.Provider{
+		ID:            testProviderID,
+		Kind:          "openai-compatible",
+		BaseURL:       &[]string{upstream.URL}[0],
+		CredentialRef: &ref,
+		Enabled:       true,
+		SafeMetadata:  store.EmptyObject,
+	}}
+	service := New(store)
+	resolver := &fakeProviderModelSecretResolver{values: map[string][]byte{ref: []byte("secret")}}
+	_, err := service.ListProviderModels(context.Background(), nil, testProviderID, resolver, upstream.Client())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "provider_model_discovery_failed" {
+		t.Fatalf("err=%v", err)
+	}
+}
+
 func TestListProviderModelsRejectsUnconfiguredCustomProvider(t *testing.T) {
 	store := &providerModelStore{provider: store.Provider{
 		ID:           testProviderID,

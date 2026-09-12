@@ -198,6 +198,19 @@ func (s *multiProviderHealthStore) UpdateProviderHealth(_ context.Context, id st
 	return nil
 }
 
+func TestPersistProviderHealthLogsStoreErrors(t *testing.T) {
+	store := &failingUpdateProviderHealthStore{
+		providerHealthStore: providerHealthStore{
+			provider: store.Provider{ID: testProviderID, Kind: "test", Enabled: true, SafeMetadata: store.EmptyObject},
+		},
+		err: errors.New("update failed"),
+	}
+	service := New(store)
+	service.persistProviderHealth(context.Background(), testProviderID, true, 2)
+	service.persistProviderHealth(context.Background(), testProviderID, false, 0)
+	service.persistProviderHealth(context.Background(), "", true, 0)
+}
+
 func TestServiceListAllProviders(t *testing.T) {
 	store := &providerHealthStore{provider: store.Provider{ID: testProviderID, Kind: "test", Enabled: true, SafeMetadata: store.EmptyObject}}
 	service := New(store)
@@ -299,6 +312,15 @@ func TestProviderHealthWorkerNilReceiverIsSafe(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 	worker.Enqueue("id")
+}
+
+type failingUpdateProviderHealthStore struct {
+	providerHealthStore
+	err error
+}
+
+func (s *failingUpdateProviderHealthStore) UpdateProviderHealth(context.Context, string, string, *int, *int) error {
+	return s.err
 }
 
 type failingListProviderHealthStore struct {
