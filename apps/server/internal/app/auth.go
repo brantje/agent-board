@@ -32,6 +32,7 @@ const (
 	argonMemoryKiB    = uint32(19 * 1024)
 	argonThreads      = uint8(1)
 	argonKeyLength    = uint32(32)
+	dummyPasswordHash = "$argon2id$v=19$m=19456,t=2,p=1$YWdlbnQtYm9hcmQtZHVtbQ$60YCWxb2Pw+vr0ewbP9Ek5/RTYsRn9Ek+rvE7mcQ3Qk"
 )
 
 var (
@@ -169,12 +170,14 @@ func (s *AuthService) Login(ctx context.Context, login, password string) (AuthTo
 	if login == "" || password == "" {
 		return AuthTokens{}, authFailure()
 	}
-	user, err := s.store.GetUserByLogin(ctx, login)
-	if err != nil || user.Status != store.UserStatusActive || user.PasswordHash == "" {
-		return AuthTokens{}, authFailure()
+	user, lookupErr := s.store.GetUserByLogin(ctx, login)
+	eligible := lookupErr == nil && user.Status == store.UserStatusActive && user.PasswordHash != ""
+	passwordHash := dummyPasswordHash
+	if eligible {
+		passwordHash = user.PasswordHash
 	}
-	ok, err := verifyPassword(user.PasswordHash, password)
-	if err != nil || !ok {
+	ok, verifyErr := verifyPassword(passwordHash, password)
+	if !eligible || verifyErr != nil || !ok {
 		return AuthTokens{}, authFailure()
 	}
 	return s.startSession(ctx, user)
