@@ -9,7 +9,6 @@ import (
 
 type SecretRequest struct {
 	ProviderCredentialEnv   string
-	RuntimeSecretRefs       map[string]string
 	RedactAuthorizedSecrets bool
 }
 
@@ -52,41 +51,20 @@ func (p *Preparer) Prepare(ctx context.Context, projectID, runID string, request
 		return Prepared{}, fail("execution_secret_target_invalid", "Provider credential environment target is invalid", nil)
 	}
 
-	requestedRefs := make([]string, 0, len(request.RuntimeSecretRefs))
-	for envName, ref := range request.RuntimeSecretRefs {
-		if !validEnvName(envName) {
-			return Prepared{}, fail("execution_secret_target_invalid", "Runtime secret environment target is invalid", nil)
-		}
-		if providerEnv != "" && envName == providerEnv {
-			return Prepared{}, fail("execution_secret_target_invalid", "Execution secret environment targets must be unique", nil)
-		}
-		requestedRefs = append(requestedRefs, ref)
-	}
-
 	resolved, err := p.resolver.Resolve(ctx, projectID, runID)
 	if err != nil {
 		return Prepared{}, err
 	}
-	if request.RedactAuthorizedSecrets {
-		requestedRefs = append(requestedRefs, resolved.AllowedSecretRefs...)
-	}
 	includeProvider := providerEnv != "" || (request.RedactAuthorizedSecrets && resolved.ProviderCredentialRef != nil && strings.TrimSpace(*resolved.ProviderCredentialRef) != "")
-	material, err := ResolveSecretMaterial(ctx, p.secretResolver, projectID, resolved, includeProvider, requestedRefs)
+	material, err := ResolveSecretMaterial(ctx, p.secretResolver, projectID, resolved, includeProvider)
 	if err != nil {
 		return Prepared{}, err
 	}
 	redactionValues := material.Values()
 
-	executionSecrets := make(map[string]string, len(request.RuntimeSecretRefs)+1)
+	executionSecrets := make(map[string]string, 1)
 	if providerEnv != "" {
 		executionSecrets[providerEnv] = string(material.ProviderCredential)
-	}
-	for envName, ref := range request.RuntimeSecretRefs {
-		value, ok := material.Runtime[strings.TrimSpace(ref)]
-		if !ok {
-			return Prepared{}, fail("execution_secret_unavailable", "Runtime secret is unavailable for execution", nil)
-		}
-		executionSecrets[envName] = string(value)
 	}
 
 	if err := EnsureProvenance(ctx, p.provenance, projectID, runID, resolved.Safe); err != nil {
