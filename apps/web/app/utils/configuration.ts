@@ -69,7 +69,7 @@ export function isBuiltInProviderKind(kind: string) {
 }
 
 export function providerKindSelectValue(kind: string) {
-  const trimmed = String(kind ?? '').trim()
+  const trimmed = kind.trim()
   if (!trimmed) return ''
   return isBuiltInProviderKind(trimmed) ? trimmed : CUSTOM_PROVIDER_KIND
 }
