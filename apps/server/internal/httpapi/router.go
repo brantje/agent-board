@@ -119,8 +119,6 @@ func newRouterWithProjectAccess(service *app.Service, runEvidence *app.RunEviden
 	router.Route("/api", func(r chi.Router) {
 		if a.auth != nil {
 			r.Use(a.deploymentGlobalAuthorizationMiddleware)
-		}
-		if a.auth != nil && a.projectAccess != nil {
 			r.Use(a.projectAuthorizationMiddleware)
 		}
 		if a.auth != nil {
