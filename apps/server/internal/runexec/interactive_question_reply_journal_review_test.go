@@ -42,12 +42,11 @@ func TestInteractiveQuestionReplyJournalTracksOnlyUnresolvedAcceptedBindings(t *
 	}
 	lifecycle := &interactiveLifecycleStore{}
 	q := &interactiveQuestioner{
-		interactive:       lifecycle,
-		events:            recorder,
-		eventReader:       journal,
-		safe:              interactiveSafeContext(),
-		runtimeInstanceID: "runtime-instance-1",
-		engine:            "opencode",
+		interactive: lifecycle,
+		events:      recorder,
+		eventReader: journal,
+		safe:        interactiveSafeContext(),
+		engine:      "opencode",
 	}
 	accepted := []engine.AcceptedInteractiveQuestionReply{
 		{QuestionID: "question-1", CorrelationKey: "ses_1/que_1/0"},
