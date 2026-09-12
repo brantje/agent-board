@@ -67,7 +67,7 @@ func (w *ProviderHealthWorker) Enqueue(providerID string) {
 	select {
 	case w.enqueue <- providerID:
 	default:
-		go w.probeByID(context.Background(), providerID)
+		slog.Debug("provider health: probe queue full, deferring to periodic probe", "providerId", providerID)
 	}
 }
 

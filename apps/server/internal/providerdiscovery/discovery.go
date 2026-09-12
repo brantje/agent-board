@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -85,14 +86,28 @@ func modelsEndpoint(baseURL string) string {
 	return normalizeBaseURL(baseURL) + "/models"
 }
 
-func ListModels(ctx context.Context, client *http.Client, baseURL string, apiKey []byte) ([]Model, error) {
+func requireHTTPSForCredentialedDiscovery(baseURL string, apiKey []byte) error {
+	if len(apiKey) == 0 {
+		return nil
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme != "https" {
+		return fmt.Errorf("provider model discovery: https URL is required when credentials are configured")
+	}
+	return nil
+}
+
+func ListModels(ctx context.Context, client *http.Client, baseURL string, apiKey []byte) ([]Model, int, error) {
 	if client == nil {
-		return nil, fmt.Errorf("provider model discovery: HTTP client is required")
+		return nil, 0, fmt.Errorf("provider model discovery: HTTP client is required")
+	}
+	if err := requireHTTPSForCredentialedDiscovery(baseURL, apiKey); err != nil {
+		return nil, 0, err
 	}
 	endpoint := modelsEndpoint(baseURL)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
-		return nil, fmt.Errorf("provider model discovery: build request: %w", err)
+		return nil, 0, fmt.Errorf("provider model discovery: build request: %w", err)
 	}
 	request.Header.Set("Accept", "application/json")
 	if len(apiKey) > 0 {
@@ -100,15 +115,15 @@ func ListModels(ctx context.Context, client *http.Client, baseURL string, apiKey
 	}
 	response, err := client.Do(request)
 	if err != nil {
-		return nil, fmt.Errorf("provider model discovery: request failed: %w", err)
+		return nil, 0, fmt.Errorf("provider model discovery: request failed: %w", err)
 	}
 	defer response.Body.Close()
 	body, err := io.ReadAll(io.LimitReader(response.Body, 4<<20))
 	if err != nil {
-		return nil, fmt.Errorf("provider model discovery: read response: %w", err)
+		return nil, 0, fmt.Errorf("provider model discovery: read response: %w", err)
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return nil, fmt.Errorf("provider model discovery: upstream returned HTTP %d", response.StatusCode)
+		return nil, 0, fmt.Errorf("provider model discovery: upstream returned HTTP %d", response.StatusCode)
 	}
 	var payload struct {
 		Data []struct {
@@ -117,8 +132,9 @@ func ListModels(ctx context.Context, client *http.Client, baseURL string, apiKey
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, fmt.Errorf("provider model discovery: decode response: %w", err)
+		return nil, 0, fmt.Errorf("provider model discovery: decode response: %w", err)
 	}
+	upstreamTotal := len(payload.Data)
 	seen := make(map[string]struct{}, len(payload.Data))
 	models := make([]Model, 0, len(payload.Data))
 	for _, item := range payload.Data {
@@ -140,13 +156,13 @@ func ListModels(ctx context.Context, client *http.Client, baseURL string, apiKey
 		models = append(models, model)
 	}
 	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
-	return models, nil
+	return models, upstreamTotal, nil
 }
 
-func Discover(ctx context.Context, client *http.Client, provider store.Provider, apiKey []byte) ([]Model, error) {
+func Discover(ctx context.Context, client *http.Client, provider store.Provider, apiKey []byte) ([]Model, int, error) {
 	baseURL, err := ResolveBaseURL(provider)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	if client == nil {
 		client = &http.Client{Timeout: requestTimeout}

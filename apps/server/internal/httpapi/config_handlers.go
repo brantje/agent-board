@@ -290,16 +290,16 @@ func (a *api) listProviderModels(w http.ResponseWriter, r *http.Request, scope *
 	if !ok {
 		return
 	}
-	models, err := a.service.ListProviderModels(r.Context(), scope, id, a.secretResolver, nil)
+	result, err := a.service.ListProviderModels(r.Context(), scope, id, a.secretResolver, nil)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	out := make([]ProviderModelDTO, 0, len(models))
-	for _, model := range models {
+	out := make([]ProviderModelDTO, 0, len(result.Models))
+	for _, model := range result.Models {
 		out = append(out, ProviderModelDTO{ID: model.ID, Name: model.Name})
 	}
-	writeJSON(w, 200, ProviderModelListDTO{Models: out, Total: len(out)})
+	writeJSON(w, 200, ProviderModelListDTO{Models: out, Total: result.Total})
 }
 func (a *api) listGlobalProviders(w http.ResponseWriter, r *http.Request) {
 	a.listProviders(w, r, nil)

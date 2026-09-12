@@ -116,12 +116,12 @@ func (s *Service) ListAllProviders(ctx context.Context) ([]store.Provider, error
 	return s.store.ListAllProviders(ctx)
 }
 
-func (s *Service) persistProviderHealth(ctx context.Context, providerID string, healthy bool, modelCount int) {
+func (s *Service) persistProviderHealth(ctx context.Context, providerID string, healthy bool, filtered, total *int) {
 	if s == nil || s.store == nil || providerID == "" {
 		return
 	}
 	if healthy {
-		if err := s.store.UpdateProviderHealth(ctx, providerID, "HEALTHY", &modelCount, &modelCount); err != nil {
+		if err := s.store.UpdateProviderHealth(ctx, providerID, "HEALTHY", filtered, total); err != nil {
 			slog.Error("persist provider health", "providerId", providerID, "error", err)
 		}
 		return

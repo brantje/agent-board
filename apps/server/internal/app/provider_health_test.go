@@ -64,7 +64,7 @@ func (s *providerHealthStore) lastHealthUpdate() providerHealthUpdate {
 }
 
 func TestListProviderModelsPersistsHealthyCounts(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]string{{"id": "model-a"}, {"id": "model-b"}, {"id": "model-c"}},
 		})
@@ -83,12 +83,12 @@ func TestListProviderModelsPersistsHealthyCounts(t *testing.T) {
 	service := New(store)
 	resolver := &fakeProviderModelSecretResolver{values: map[string][]byte{ref: []byte("secret")}}
 
-	models, err := service.ListProviderModels(context.Background(), nil, testProviderID, resolver, upstream.Client())
+	result, err := service.ListProviderModels(context.Background(), nil, testProviderID, resolver, upstream.Client())
 	if err != nil {
 		t.Fatalf("err=%v", err)
 	}
-	if len(models) != 3 {
-		t.Fatalf("models=%v", models)
+	if len(result.Models) != 3 || result.Total != 3 {
+		t.Fatalf("result=%+v", result)
 	}
 	update := store.lastHealthUpdate()
 	if update.health != "HEALTHY" || update.filtered == nil || *update.filtered != 3 || update.total == nil || *update.total != 3 {
@@ -123,7 +123,7 @@ func TestListProviderModelsPersistsUnhealthyAndKeepsPriorCounts(t *testing.T) {
 }
 
 func TestProviderHealthWorkerProbesAllProviders(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"data": []map[string]string{{"id": "model-a"}},
 		})
@@ -206,9 +206,10 @@ func TestPersistProviderHealthLogsStoreErrors(t *testing.T) {
 		err: errors.New("update failed"),
 	}
 	service := New(store)
-	service.persistProviderHealth(context.Background(), testProviderID, true, 2)
-	service.persistProviderHealth(context.Background(), testProviderID, false, 0)
-	service.persistProviderHealth(context.Background(), "", true, 0)
+	filtered, total := 2, 4
+	service.persistProviderHealth(context.Background(), testProviderID, true, &filtered, &total)
+	service.persistProviderHealth(context.Background(), testProviderID, false, nil, nil)
+	service.persistProviderHealth(context.Background(), "", true, &filtered, &total)
 }
 
 func TestServiceListAllProviders(t *testing.T) {
@@ -280,24 +281,20 @@ func TestProviderHealthWorkerRunProcessesEnqueueAndTicker(t *testing.T) {
 	}
 }
 
-func TestProviderHealthWorkerEnqueueOverflowUsesFallbackProbe(t *testing.T) {
+func TestProviderHealthWorkerEnqueueOverflowDefersWithoutSpawningProbe(t *testing.T) {
 	store := &providerHealthStore{provider: store.Provider{ID: testProviderID, Kind: "llamarack", Enabled: true, SafeMetadata: store.EmptyObject}}
 	service := New(store)
 	worker := NewProviderHealthWorker(service, store, nil, nil)
 	for range 65 {
 		worker.Enqueue(testProviderID)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		store.healthUpdatesMu.Lock()
-		count := len(store.healthUpdates)
-		store.healthUpdatesMu.Unlock()
-		if count > 0 {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
+	store.healthUpdatesMu.Lock()
+	count := len(store.healthUpdates)
+	store.healthUpdatesMu.Unlock()
+	if count != 0 {
+		t.Fatalf("expected overflow enqueue to defer without spawning probes, updates=%d", count)
 	}
-	t.Fatal("expected fallback probe to persist health")
 }
 
 func TestProviderHealthWorkerProbeAllHandlesListError(t *testing.T) {

@@ -2,14 +2,18 @@ import { flushPromises } from '@vue/test-utils'
 import { effectScope, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('../app/utils/api', () => ({
-  apiRequest: vi.fn(),
-  providerModelsPath: (id: string, projectId?: string) => (
-    projectId ? `/api/projects/${projectId}/providers/${id}/models` : `/api/providers/${id}/models`
-  )
-}))
+vi.mock('../app/utils/api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../app/utils/api')>()
+  return {
+    ...actual,
+    apiRequest: vi.fn(),
+    providerModelsPath: (id: string, projectId?: string) => (
+      projectId ? `/api/projects/${projectId}/providers/${id}/models` : `/api/providers/${id}/models`
+    )
+  }
+})
 
-import { apiRequest } from '../app/utils/api'
+import { ApiError, apiRequest } from '../app/utils/api'
 import { useProviderListHealth, type ProviderHealthOverlay } from '../app/composables/useProviderListHealth'
 
 describe('useProviderListHealth', () => {
@@ -26,7 +30,7 @@ describe('useProviderListHealth', () => {
       overlays = useProviderListHealth(providers).overlays
     })
     await flushPromises()
-    expect(overlays.value.p1).toEqual({ checking: false, healthStatus: 'HEALTHY', filtered: 5, total: 5 })
+    expect(overlays.value.p1).toEqual({ checking: false, healthStatus: 'HEALTHY', filtered: 2, total: 5 })
     scope.stop()
   })
 
@@ -43,8 +47,8 @@ describe('useProviderListHealth', () => {
     scope.stop()
   })
 
-  it('marks providers unhealthy when probing fails', async () => {
-    vi.mocked(apiRequest).mockRejectedValue(new Error('probe failed'))
+  it('marks providers unhealthy only for discovery failures', async () => {
+    vi.mocked(apiRequest).mockRejectedValue(new ApiError(502, 'provider_model_discovery_failed', 'Unable to discover models from the Provider API.'))
     const providers = ref([{ id: 'p1' }])
     const scope = effectScope()
     let overlays = ref<Record<string, ProviderHealthOverlay>>({})
@@ -53,6 +57,19 @@ describe('useProviderListHealth', () => {
     })
     await flushPromises()
     expect(overlays.value.p1).toEqual({ checking: false, healthStatus: 'UNHEALTHY' })
+    scope.stop()
+  })
+
+  it('does not mark providers unhealthy for non-discovery probe failures', async () => {
+    vi.mocked(apiRequest).mockRejectedValue(new ApiError(0, 'network', 'Unable to reach the Agent Board API.'))
+    const providers = ref([{ id: 'p1', healthStatus: 'HEALTHY' }])
+    const scope = effectScope()
+    let overlays = ref<Record<string, ProviderHealthOverlay>>({})
+    scope.run(() => {
+      overlays = useProviderListHealth(providers).overlays
+    })
+    await flushPromises()
+    expect(overlays.value.p1).toEqual({ checking: false })
     scope.stop()
   })
 

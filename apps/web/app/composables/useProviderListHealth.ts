@@ -1,5 +1,5 @@
 import { shallowRef, watch, onBeforeUnmount, toValue, type MaybeRefOrGetter } from 'vue'
-import { apiRequest, providerModelsPath } from '../utils/api'
+import { ApiError, apiRequest, providerModelsPath } from '../utils/api'
 import type { ConfigRecord } from '../utils/configuration'
 
 type ProviderModelList = { models: Array<{ id: string }>; total: number }
@@ -29,19 +29,29 @@ export function useProviderListHealth(providers: MaybeRefOrGetter<ConfigRecord[]
     try {
       const result = await apiRequest<ProviderModelList>(providerModelsPath(id, scope), { signal: controller.signal })
       if (current !== generation) return
-      const total = result.total ?? result.models?.length ?? 0
+      const filtered = result.models?.length ?? 0
+      const total = result.total ?? filtered
       overlays.value = {
         ...overlays.value,
-        [id]: { checking: false, healthStatus: 'HEALTHY', filtered: total, total }
+        [id]: { checking: false, healthStatus: 'HEALTHY', filtered, total }
       }
     } catch (failure) {
       if (current !== generation || controller.signal.aborted) return
-      overlays.value = {
-        ...overlays.value,
-        [id]: { checking: false, healthStatus: 'UNHEALTHY' }
+      const prior = overlays.value[id]
+      if (failure instanceof ApiError && failure.code === 'provider_model_discovery_failed') {
+        overlays.value = {
+          ...overlays.value,
+          [id]: { checking: false, healthStatus: 'UNHEALTHY' }
+        }
+      } else {
+        const next: ProviderHealthOverlay = { checking: false }
+        if (prior?.healthStatus) next.healthStatus = prior.healthStatus
+        if (prior?.filtered != null) next.filtered = prior.filtered
+        if (prior?.total != null) next.total = prior.total
+        overlays.value = { ...overlays.value, [id]: next }
       }
     } finally {
-      controllers.delete(id)
+      if (controllers.get(id) === controller) controllers.delete(id)
     }
   }
 
