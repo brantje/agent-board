@@ -37,7 +37,6 @@ HTTP             chi
 Database         PostgreSQL + pgvector
 Live updates     Server-Sent Events
 Runner transport WebSocket (runner -> server protocol v2)
-Legacy compute   Docker Runtime/Runtime Instance where existing internal code still uses it
 API contracts    OpenAPI + intentional public DTOs
 Blob storage     local filesystem first; S3-compatible later
 ```
@@ -71,13 +70,12 @@ The Go backend owns:
 - Event persistence and SSE
 - provenance, raw output and Artifact metadata
 - authentication/authorization and secret resolution
-- legacy Runtime/Runtime Instance configuration/lifecycle only where internal managed-compute code still uses it
 
-HTTP handlers are adapters around separable application/domain/store/runtime logic.
+HTTP handlers are adapters around separable application/domain/store/execution logic.
 
 ### Agent runner
 
-`agent-runner` is the Engine-neutral execution-plane binary. Production v0.1 prefers external persistent hosts; the server also supervises an internal runner. Both connect outbound to Agent Board over protocol v2 and use the same Runner/Execution Session path.
+`agent-runner` is the Engine-neutral execution-plane binary. Production v0.1 prefers external persistent hosts; the server also supervises an internal Runner. Both connect outbound to Agent Board over protocol v2 and use the same Runner/Execution Session path.
 
 For local Projects the Runner materializes a branch-only transfer from the server. For remote Git Projects it owns an execution-side bare cache plus per-Run worktrees and publishes the Agent Board Issue branch with normal Git push.
 
@@ -102,9 +100,9 @@ Provider -> Model Profile
 Engine + Model Profile -> Agent
 ```
 
-Agents do not configure Runtime, Runtime Instance, Runner, Executor Profile or Runner Profile. Runner placement is scheduler-owned. Project policy may restrict eligible external Runners, but that is not Agent configuration.
+Agents do not configure execution hosts. Runner placement is scheduler-owned. Project policy may restrict eligible external Runners, but that is not Agent configuration.
 
-## Preferred v0.1 execution path
+## v0.1 execution path
 
 ```text
 Run
@@ -118,17 +116,7 @@ Run
 
 Runner selection uses live authenticated protocol-v2 capability state plus Project policy. External persistent Runners are preferred for production. The server-managed internal Runner is fallback when `allow_internal_runner` permits it. The same protocol/session path is used for both.
 
-External Runner execution does not create a Runtime Instance.
-
-## Legacy/internal managed compute
-
-Runtime and Runtime Instance remain supported only where existing internal managed-compute code still uses them. They are not the normal v0.1 Agent configuration or preferred production execution path.
-
-A Runtime describes reusable managed-compute policy such as implementation kind, image, resources, timeout, network policy, Workspace policy and allowed secret references. A Runtime Instance is disposable compute materialized from that Runtime and, on this legacy path, is bound to exactly one Workspace for its lifetime.
-
-Engine adapters still execute through `agent-runner`; they never receive Docker clients, Docker sockets, provider-specific runtime handles or raw WebSocket framing. The trusted backend may access Docker for this internal legacy implementation, while Agent-executed code never receives Docker daemon credentials.
-
-See `runtime-contract.md` and `runtime-execution.md` for this compatibility boundary.
+Engine adapters receive only the selected Runner execution capability; they never receive Docker clients, Docker sockets or raw WebSocket framing. External Runner hosts own any host-level tooling they choose to install, while Agent Board never forwards daemon credentials through the Runner protocol.
 
 ## Project source and Git-native Issue state
 
@@ -207,7 +195,7 @@ See `scheduler.md`.
 
 ## Execution context and secrets
 
-One trusted Go resolver composes safe Project/Issue/Agent/Engine/Model/Provider/Workspace data plus explicit resume/Review context. Runner identity is selected by scheduling, not read from Agent configuration. Legacy Runtime data is included only when the internal managed-compute path actually uses it.
+One trusted Go resolver composes safe Project/Issue/Agent/Engine/Model/Provider/Workspace data plus explicit resume/Review context. Runner identity is selected by scheduling, not read from Agent configuration.
 
 Secret material is separate and ephemeral:
 
@@ -231,13 +219,11 @@ Engine / Runner
  -> SSE
 ```
 
-Legacy Runtime lifecycle may also emit infrastructure Events when that path is used.
-
 The browser reconstructs live state from persisted reads plus SSE and is never the sole owner of important activity. Nuxt/Nitro process state is never authoritative for Run state.
 
 ## Provenance and Review evidence
 
-Every Run stores immutable safe execution provenance including the selected Runner and resolved Engine/Model/Provider configuration. Runtime/Runtime Instance provenance is recorded only for an attempt that actually used legacy internal managed compute.
+Every Run stores immutable safe execution provenance including the selected Runner and resolved Engine/Model/Provider configuration.
 
 Review pins exact Git identity:
 
@@ -281,25 +267,24 @@ Plugins are deliberately late roadmap work.
 1. Issue is the durable unit of work.
 2. Agent identity is not process identity.
 3. Run identity is not Runner or Execution Session identity.
-4. Workspace lifetime is independent from Runner transport lifetime and any legacy Runtime Instance lifetime.
+4. Workspace lifetime is independent from Runner transport lifetime.
 5. Every Issue has one deterministic `agent-board/<issue-key>` branch; Git commits/branches are the durable code state.
 6. One logical writer owns an Issue checkout during an active Runner execution lifecycle.
 7. One Runner may execute many Execution Sessions over time; default advertised capacity is 5 concurrent sessions.
 8. One Execution Session owns one process tree.
-9. Runner placement is scheduler-owned; Agents select Engine and Model Profile, not Runner or Runtime.
-10. Runtime/Runtime Instance are legacy internal managed-compute concepts, not canonical production placement.
-11. PostgreSQL owns durable scheduling/session state and records Git identity; it does not replace Git source history.
-12. Browser/request lifetime never owns execution or continuation.
-13. Engine processes execute on the selected Runner through `agent-runner`.
-14. Engine adapters remain server-side.
-15. Runner/server transport is protocol-v2 WebSocket and session-scoped.
-16. Shared finalization enforces expected Issue branch, ancestry, conflict safety and clean boundaries for both server and Runner paths.
-17. Remote Issue publication is normal/non-force and is not remote target integration.
-18. Review identity is `base_revision` + `review_revision`; no duplicate Review filesystem snapshot is authoritative.
-19. Secrets are ephemeral and redacted before persistence.
-20. Historical execution truth comes from immutable provenance plus pinned Git identities.
-21. Nuxt is presentation/application delivery, not a competing control plane.
-22. `BLOCKED` is an Issue workflow state; Run execution states remain separate.
-23. Human Review is the default v0.1 delivery gate; later autonomous delivery requires explicit Project policy.
+9. Runner placement is scheduler-owned; Agents select Engine and Model Profile, not Runner.
+10. PostgreSQL owns durable scheduling/session state and records Git identity; it does not replace Git source history.
+11. Browser/request lifetime never owns execution or continuation.
+12. Engine processes execute on the selected Runner through `agent-runner`.
+13. Engine adapters remain server-side.
+14. Runner/server transport is protocol-v2 WebSocket and session-scoped.
+15. Shared finalization enforces expected Issue branch, ancestry, conflict safety and clean boundaries for local and remote source paths.
+16. Remote Issue publication is normal/non-force and is not remote target integration.
+17. Review identity is `base_revision` + `review_revision`; no duplicate Review filesystem snapshot is authoritative.
+18. Secrets are ephemeral and redacted before persistence.
+19. Historical execution truth comes from immutable provenance plus pinned Git identities.
+20. Nuxt is presentation/application delivery, not a competing control plane.
+21. `BLOCKED` is an Issue workflow state; Run execution states remain separate.
+22. Human Review is the default v0.1 delivery gate; later autonomous delivery requires explicit Project policy.
 
 Earlier #15 snapshot/staging assumptions are superseded where they conflict with these Git-native invariants.
