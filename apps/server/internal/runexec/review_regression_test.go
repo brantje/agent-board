@@ -10,7 +10,6 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
-	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type capturingRequestSessions struct {
@@ -18,7 +17,12 @@ type capturingRequestSessions struct {
 	err     error
 }
 
-func (s *capturingRequestSessions) Start(_ context.Context, _, _, _ string, request app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error) {
+func (s *capturingRequestSessions) StartOnRunner(_ context.Context, _, _, _ string, request app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error) {
+	s.request = request
+	return nil, s.err
+}
+
+func (s *capturingRequestSessions) StartPreparedOnRunner(_ context.Context, _, _ string, request app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error) {
 	s.request = request
 	return nil, s.err
 }
@@ -29,7 +33,7 @@ func (*capturingRequestSessions) Attach(context.Context, string, string) (*app.A
 
 func (*capturingRequestSessions) ReconcileAll(context.Context) error { return nil }
 
-func TestProcessLauncherPreservesCredentialAndSecretSelectors(t *testing.T) {
+func TestProcessLauncherPreservesCredentialAndEnvironmentSelectors(t *testing.T) {
 	safe := processTestSafeContext(t.TempDir())
 	evidenceStore := &processTestStore{}
 	recorder, err := evidence.NewRecorder(evidenceStore, nil)
@@ -38,19 +42,19 @@ func TestProcessLauncherPreservesCredentialAndSecretSelectors(t *testing.T) {
 	}
 	sessions := &capturingRequestSessions{err: errors.New("stop after capture")}
 	launcher := &processLauncher{
-		sessions:          sessions,
-		events:            recorder,
-		safe:              safe,
-		runtimeInstanceID: "runtime-instance",
-		scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
+		sessions: sessions,
+		events:   recorder,
+		safe:     safe,
+		runnerID: "runner-1",
+		scope:    evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
 	}
-	refs := map[string]string{"SERVICE_TOKEN": "project/service-token"}
+	env := map[string]string{"MODE": "test"}
 	_, err = launcher.Start(t.Context(), engine.ProcessRequest{
 		Kind:                  "tool",
 		Name:                  "credentialed",
 		Command:               []string{"fixture"},
+		Env:                   env,
 		ProviderCredentialEnv: "PROVIDER_API_KEY",
-		RuntimeSecretRefs:     refs,
 	})
 	if err == nil {
 		t.Fatal("expected captured start error")
@@ -58,51 +62,20 @@ func TestProcessLauncherPreservesCredentialAndSecretSelectors(t *testing.T) {
 	if sessions.request.ProviderCredentialEnv != "PROVIDER_API_KEY" {
 		t.Fatalf("provider credential env=%q", sessions.request.ProviderCredentialEnv)
 	}
-	if got := sessions.request.RuntimeSecretRefs["SERVICE_TOKEN"]; got != "project/service-token" {
-		t.Fatalf("runtime secret ref=%q", got)
+	if got := sessions.request.Env["MODE"]; got != "test" {
+		t.Fatalf("environment=%q", got)
 	}
-	refs["SERVICE_TOKEN"] = "mutated"
-	if got := sessions.request.RuntimeSecretRefs["SERVICE_TOKEN"]; got != "project/service-token" {
-		t.Fatalf("runtime secret refs were not copied: %q", got)
+	env["MODE"] = "mutated"
+	if got := sessions.request.Env["MODE"]; got != "test" {
+		t.Fatalf("environment was not copied: %q", got)
 	}
 }
 
 func TestProcessLauncherWaitDoesNotRequireStreamConsumers(t *testing.T) {
 	safe := processTestSafeContext(t.TempDir())
 	evidenceStore := &processTestStore{}
-	blobs, err := evidence.NewFileBlobStore(t.TempDir(), 1<<20)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recorder, err := evidence.NewRecorder(evidenceStore, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	output, err := evidence.NewOutputRecorder(evidenceStore, blobs, 16)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sessionStore := &launcherSessionStore{
-		run:      store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID},
-		instance: store.RuntimeInstance{ID: "runtime-instance", ProjectID: safe.Project.ID, WorkspaceID: safe.Workspace.ID, Status: "RUNNING"},
-	}
 	client := newLauncherClient(strings.Repeat("stdout-", 128), strings.Repeat("stderr-", 128), 0, nil)
-	transportSessions, err := newLauncherExecutionSessionService(sessionStore, client)
-	if err != nil {
-		t.Fatal(err)
-	}
-	authorized, err := app.NewAuthorizedExecutionSessionService(transportSessions, launcherPreparer{runtimeID: safe.Runtime.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	launcher := &processLauncher{
-		sessions:          authorized,
-		events:            recorder,
-		output:            output,
-		safe:              safe,
-		runtimeInstanceID: "runtime-instance",
-		scope:             evidence.RunScope{ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, RunID: safe.Run.ID},
-	}
+	launcher := newLauncher(t, safe, evidenceStore, client)
 	process, err := launcher.Start(t.Context(), engine.ProcessRequest{Kind: "tool", Name: "no-stream-consumer", Command: []string{"fixture"}})
 	if err != nil {
 		t.Fatal(err)
