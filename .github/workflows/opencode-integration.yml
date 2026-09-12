@@ -95,25 +95,25 @@ jobs:
           fi
 
           printf 'AGENT_BOARD_TEST_OPENCODE_MODEL=%s\n' "$selected" >> "$GITHUB_ENV"
-      - name: Build OpenCode Runtime image
+      - name: Build OpenCode runner image
         run: >-
           docker build
           --build-arg AGENT_BOARD_UID="$(id -u)"
           --file apps/agent-runner/Dockerfile
-          --tag agent-board-opencode-runtime:ci
+          --tag agent-board-opencode-runner:ci
           .
       - name: Run real OpenCode/OpenRouter integration suite
         working-directory: apps/server
         env:
           AGENT_BOARD_TEST_OPENCODE: "1"
           AGENT_BOARD_TEST_DOCKER: "1"
-          AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE: agent-board-opencode-runtime:ci
+          AGENT_BOARD_TEST_OPENCODE_RUNNER_IMAGE: agent-board-opencode-runner:ci
           AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND: openrouter
           AGENT_BOARD_TEST_OPENCODE_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: |
           set -euo pipefail
           if timeout --signal=TERM --kill-after=10s 480s \
-            go test -count=1 -failfast -run '^TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)$' -v ./internal/runexec; then
+            go test -count=1 -failfast -run '^TestOpenCodeRunnerContainer(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)$' -v ./internal/runexec; then
             exit 0
           fi
 
