@@ -21,11 +21,10 @@ Include where applicable:
 - exact execution-start revision where applicable
 - Source Connection identity without credentials when that feature exists
 - relevant workflow/config revision metadata
-- Runtime ID/name/kind/image/effective policy and Runtime Instance identity only when the legacy internal managed-compute path was actually used
 
-Runner identity is execution provenance because the scheduler selected that Runner for the attempt. It is not Agent configuration. Runtime/Runtime Instance evidence is conditional legacy provenance, not a required canonical Runner execution field.
+Runner identity is execution provenance because the scheduler selected that Runner for the attempt. It is not Agent configuration.
 
-Never persist secret plaintext in public execution evidence. Editing current Agent/Model/Provider/Runner configuration does not alter historical Run provenance. Editing legacy Runtime configuration likewise does not rewrite provenance for attempts that used it.
+Never persist secret plaintext in public execution evidence. Editing current Agent/Model/Provider/Runner configuration does not alter historical Run provenance.
 
 ## Raw output
 
@@ -73,7 +72,6 @@ Show:
 - Git branch/change evidence
 - tests/checks
 - selected Runner and Execution Session diagnostics/provenance
-- legacy Runtime/Runtime Instance lifecycle only for attempts that actually used internal managed compute
 - raw logs where useful
 - Artifacts
 - blocking/Review guidance
@@ -111,7 +109,7 @@ There is no backend-only Review delivery filesystem snapshot, candidate snapshot
 
 The UI/API may derive safe file/change summaries from the Git diff between the pinned revisions and may show commands, tests, messages and Artifacts from the Run. These are evidence about the reviewed commit range.
 
-Ignored/runtime-private/transport-private files are not part of the reviewed Git tree. Runner transfer refs, bare-cache internals and temporary worktree paths must not appear as product-visible source history.
+Ignored/private/transport-private files are not part of the reviewed Git tree. Runner transfer refs, bare-cache internals and temporary worktree paths must not appear as product-visible source history.
 
 If evidence generation is retried, the Review SHAs stay immutable. A retry may regenerate a safe projection from the same Git identities; it must not silently move to a later Issue branch HEAD.
 
