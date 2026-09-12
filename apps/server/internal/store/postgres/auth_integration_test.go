@@ -218,18 +218,20 @@ func TestAuthStorePasswordTokenReplacementExpiryAndSingleUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	now := time.Now().UTC().Truncate(time.Second)
+	issuedAt := time.Now().UTC()
 	oldHash := make([]byte, 32)
 	oldHash[0] = 6
 	newHash := make([]byte, 32)
 	newHash[0] = 7
-	if _, err := s.CreatePasswordToken(ctx, store.PasswordToken{UserID: pending.ID, Purpose: store.PasswordTokenPurposeSetup, TokenHash: oldHash, ExpiresAt: now.Add(24 * time.Hour)}); err != nil {
+	if _, err := s.CreatePasswordToken(ctx, store.PasswordToken{UserID: pending.ID, Purpose: store.PasswordTokenPurposeSetup, TokenHash: oldHash, ExpiresAt: issuedAt.Add(24 * time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePasswordToken(ctx, store.PasswordToken{UserID: pending.ID, Purpose: store.PasswordTokenPurposeSetup, TokenHash: newHash, ExpiresAt: now.Add(24 * time.Hour)}); err != nil {
+	replacement, err := s.CreatePasswordToken(ctx, store.PasswordToken{UserID: pending.ID, Purpose: store.PasswordTokenPurposeSetup, TokenHash: newHash, ExpiresAt: issuedAt.Add(24 * time.Hour)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CompletePasswordToken(ctx, oldHash, store.PasswordTokenPurposeSetup, "$argon2id$old", now); !errors.Is(err, store.ErrNotFound) {
+	completionTime := replacement.CreatedAt.Add(time.Second)
+	if _, err := s.CompletePasswordToken(ctx, oldHash, store.PasswordTokenPurposeSetup, "$argon2id$old", completionTime); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("replaced setup token completed: %v", err)
 	}
 
@@ -240,7 +242,7 @@ func TestAuthStorePasswordTokenReplacementExpiryAndSingleUse(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := s.CompletePasswordToken(ctx, newHash, store.PasswordTokenPurposeSetup, "$argon2id$new", now)
+			_, err := s.CompletePasswordToken(ctx, newHash, store.PasswordTokenPurposeSetup, "$argon2id$new", completionTime)
 			results <- err
 		}()
 	}
@@ -267,10 +269,11 @@ func TestAuthStorePasswordTokenReplacementExpiryAndSingleUse(t *testing.T) {
 
 	resetHash := make([]byte, 32)
 	resetHash[0] = 8
-	if _, err := s.CreatePasswordToken(ctx, store.PasswordToken{UserID: pending.ID, Purpose: store.PasswordTokenPurposeReset, TokenHash: resetHash, ExpiresAt: now.Add(time.Hour)}); err != nil {
+	reset, err := s.CreatePasswordToken(ctx, store.PasswordToken{UserID: pending.ID, Purpose: store.PasswordTokenPurposeReset, TokenHash: resetHash, ExpiresAt: completionTime.Add(time.Hour)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CompletePasswordToken(ctx, resetHash, store.PasswordTokenPurposeReset, "$argon2id$reset", now.Add(time.Hour+time.Second)); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.CompletePasswordToken(ctx, resetHash, store.PasswordTokenPurposeReset, "$argon2id$reset", reset.ExpiresAt.Add(time.Second)); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("expired reset token completed: %v", err)
 	}
 }
