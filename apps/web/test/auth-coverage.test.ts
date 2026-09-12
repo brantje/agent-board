@@ -122,7 +122,7 @@ describe('auth composable alternate paths', () => {
     expect(auth.credentials.value?.accessToken).toBe('test-access-two')
   })
 
-  it('initializes stored credentials, refreshes 401s and clears non-auth failures', async () => {
+  it('initializes stored credentials, refreshes 401s and preserves transient failures', async () => {
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(stored('stored')))
     installState()
     const successfulFetch = vi.fn(async (input: RequestInfo | URL) => {
@@ -163,8 +163,10 @@ describe('auth composable alternate paths', () => {
     }))
     const failed = useAuth()
     await failed.initialize()
-    expect(failed.credentials.value).toBeNull()
+    expect(failed.credentials.value?.refreshToken).toBe('test-refresh-bad')
     expect(failed.user.value).toBeNull()
+    expect(failed.initialized.value).toBe(false)
+    expect(localStorage.getItem(AUTH_STORAGE_KEY)).not.toBeNull()
   })
 
   it('clears local auth even when server logout fails', async () => {
