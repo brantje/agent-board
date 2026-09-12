@@ -85,7 +85,7 @@ onMounted(() => run(reload))
                   <UButton v-if="user.status === 'pending'" size="xs" variant="soft" @click="issueToken(user, 'setup')">New setup token</UButton>
                   <UButton size="xs" variant="soft" @click="issueToken(user, 'reset')">Reset token</UButton>
                   <UButton size="xs" variant="soft" @click="passwordForm.userId = user.id">Set password</UButton>
-                  <UButton size="xs" :color="user.status === 'disabled' ? 'success' : 'error'" variant="soft" @click="toggleDisabled(user)">{{ user.status === 'disabled' ? 'Re-enable' : 'Disable' }}</UButton>
+                  <UButton v-if="user.status !== 'pending'" size="xs" :color="user.status === 'disabled' ? 'success' : 'error'" variant="soft" @click="toggleDisabled(user)">{{ user.status === 'disabled' ? 'Re-enable' : 'Disable' }}</UButton>
                 </div></td>
               </tr></tbody>
             </table>
