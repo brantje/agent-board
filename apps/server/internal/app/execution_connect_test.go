@@ -26,7 +26,7 @@ func (c *sessionDialExecutionClient) DialSession(_ context.Context, sessionID, n
 	return c.conn, c.err
 }
 
-func TestExecutionSessionServiceDialsRunnerOwnedSessionWithoutRuntimeInstance(t *testing.T) {
+func TestExecutionSessionServiceDialsBoundRunnerSession(t *testing.T) {
 	local, remote := net.Pipe()
 	t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
 
@@ -43,7 +43,7 @@ func TestExecutionSessionServiceDialsRunnerOwnedSessionWithoutRuntimeInstance(t 
 		t.Fatal(err)
 	}
 
-	conn, err := service.DialSession(context.Background(), "project-1", "", "session-1", "tcp", "127.0.0.1:4096")
+	conn, err := service.DialSession(context.Background(), "project-1", "session-1", "tcp", "127.0.0.1:4096")
 	if err != nil {
 		t.Fatalf("dial runner session: %v", err)
 	}
@@ -52,68 +52,26 @@ func TestExecutionSessionServiceDialsRunnerOwnedSessionWithoutRuntimeInstance(t 
 	}
 }
 
-func TestExecutionSessionServiceRejectsRuntimeDialOnRunnerOwnedSession(t *testing.T) {
-	storeFake := &executionSessionStoreFake{session: store.ExecutionSession{
-		ID: "session-1", ProjectID: "project-1", RunID: "run-1", RunnerID: "runner-1", Status: "RUNNING",
-	}}
-	service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: &fakeExecutionClient{done: make(chan struct{})}}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
-		t.Fatal("runtime dial on runner-owned session accepted")
-	}
-}
-
-func TestExecutionSessionServiceDialsOnlyThroughBoundRunningSession(t *testing.T) {
-	local, remote := net.Pipe()
-	t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
-
-	storeFake := &executionSessionStoreFake{session: store.ExecutionSession{
-		ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING",
-	}}
-	client := &sessionDialExecutionClient{
-		fakeExecutionClient: &fakeExecutionClient{done: make(chan struct{})},
-		conn:                local,
-	}
-	service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	conn, err := service.DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096")
-	if err != nil {
-		t.Fatalf("dial session: %v", err)
-	}
-	if conn != local || client.sessionID != "session-1" || client.network != "tcp" || client.address != "127.0.0.1:4096" {
-		t.Fatalf("conn=%v session=%q network=%q address=%q", conn, client.sessionID, client.network, client.address)
-	}
-}
-
 func TestExecutionSessionServiceRejectsInvalidSessionDialBindings(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		session   store.ExecutionSession
-		runtimeID string
-		client    runner.Client
+		name    string
+		session store.ExecutionSession
+		client  runner.Client
 	}{
 		{
-			name:      "runtime mismatch",
-			session:   store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
-			runtimeID: "runtime-2",
-			client:    &fakeExecutionClient{done: make(chan struct{})},
+			name:    "missing runner",
+			session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", Status: "RUNNING"},
+			client:  &fakeExecutionClient{done: make(chan struct{})},
 		},
 		{
-			name:      "not running",
-			session:   store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RuntimeInstanceID: "runtime-1", Status: "COMPLETED"},
-			runtimeID: "runtime-1",
-			client:    &fakeExecutionClient{done: make(chan struct{})},
+			name:    "not running",
+			session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunnerID: "runner-1", Status: "COMPLETED"},
+			client:  &fakeExecutionClient{done: make(chan struct{})},
 		},
 		{
-			name:      "runner capability missing",
-			session:   store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING"},
-			runtimeID: "runtime-1",
-			client:    &fakeExecutionClient{done: make(chan struct{})},
+			name:    "runner capability missing",
+			session: store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunnerID: "runner-1", Status: "RUNNING"},
+			client:  &fakeExecutionClient{done: make(chan struct{})},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,7 +80,7 @@ func TestExecutionSessionServiceRejectsInvalidSessionDialBindings(t *testing.T) 
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = service.DialSession(context.Background(), "project-1", tc.runtimeID, "session-1", "tcp", "127.0.0.1:4096")
+			_, err = service.DialSession(context.Background(), "project-1", "session-1", "tcp", "127.0.0.1:4096")
 			if err == nil {
 				t.Fatal("expected dial rejection")
 			}
@@ -137,7 +95,7 @@ func TestAuthorizedExecutionSessionServiceForwardsSessionDial(t *testing.T) {
 	local, remote := net.Pipe()
 	t.Cleanup(func() { _ = local.Close(); _ = remote.Close() })
 	storeFake := &executionSessionStoreFake{session: store.ExecutionSession{
-		ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "runtime-1", Status: "RUNNING",
+		ID: "session-1", ProjectID: "project-1", RunID: "run-1", RunnerID: "runner-1", Status: "RUNNING",
 	}}
 	client := &sessionDialExecutionClient{
 		fakeExecutionClient: &fakeExecutionClient{done: make(chan struct{})},
@@ -149,7 +107,7 @@ func TestAuthorizedExecutionSessionServiceForwardsSessionDial(t *testing.T) {
 	}
 	authorized := &AuthorizedExecutionSessionService{sessions: service}
 
-	conn, err := authorized.DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096")
+	conn, err := authorized.DialSession(context.Background(), "project-1", "session-1", "tcp", "127.0.0.1:4096")
 	if err != nil {
 		t.Fatalf("authorized dial: %v", err)
 	}
@@ -160,17 +118,17 @@ func TestAuthorizedExecutionSessionServiceForwardsSessionDial(t *testing.T) {
 
 func TestAuthorizedExecutionSessionServiceRejectsUnavailableService(t *testing.T) {
 	var nilService *AuthorizedExecutionSessionService
-	if _, err := nilService.DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
+	if _, err := nilService.DialSession(context.Background(), "project-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
 		t.Fatal("nil authorized service unexpectedly dialed")
 	}
-	if _, err := (&AuthorizedExecutionSessionService{}).DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
+	if _, err := (&AuthorizedExecutionSessionService{}).DialSession(context.Background(), "project-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
 		t.Fatal("authorized service without sessions unexpectedly dialed")
 	}
 }
 
 func TestExecutionSessionServiceRejectsMissingDialIdentity(t *testing.T) {
 	var service *ExecutionSessionService
-	if _, err := service.DialSession(context.Background(), "project-1", "runtime-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
+	if _, err := service.DialSession(context.Background(), "project-1", "session-1", "tcp", "127.0.0.1:4096"); err == nil {
 		t.Fatal("nil execution session service unexpectedly dialed")
 	}
 	storeFake := &executionSessionStoreFake{}
@@ -178,8 +136,8 @@ func TestExecutionSessionServiceRejectsMissingDialIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][3]string{{"", "runtime-1", "session-1"}, {"project-1", "", "session-1"}, {"project-1", "runtime-1", ""}} {
-		if _, err := valid.DialSession(context.Background(), args[0], args[1], args[2], "tcp", "127.0.0.1:4096"); err == nil {
+	for _, args := range [][2]string{{"", "session-1"}, {"project-1", ""}} {
+		if _, err := valid.DialSession(context.Background(), args[0], args[1], "tcp", "127.0.0.1:4096"); err == nil {
 			t.Fatalf("missing identity %+v unexpectedly accepted", args)
 		}
 	}
