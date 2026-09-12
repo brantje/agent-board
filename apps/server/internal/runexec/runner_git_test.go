@@ -113,8 +113,9 @@ func TestPublishRemoteGitWorkspacePersistsRevisionBeforeAcknowledgement(t *testi
 	safe.Project.CloneURL = &cloneURL
 	safe.Workspace.WorkingBranch = "agent-board/AB-42"
 	base := &runnerSyncStore{}
+	startRevision := "0123456789012345678901234567890123456789"
 	published := "fedcba9876543210fedcba9876543210fedcba98"
-	payload, err := json.Marshal(runnerprotocol.GitPublished{Revision: published})
+	payload, err := json.Marshal(runnerprotocol.GitPublished{StartRevision: startRevision, Revision: published})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +146,10 @@ func TestPublishRemoteGitWorkspacePersistenceFailureDoesNotAcknowledge(t *testin
 	safe.Project.CloneURL = &cloneURL
 	safe.Workspace.WorkingBranch = "agent-board/AB-42"
 	base := &runnerSyncStore{}
-	payload, err := json.Marshal(runnerprotocol.GitPublished{Revision: "fedcba9876543210fedcba9876543210fedcba98"})
+	payload, err := json.Marshal(runnerprotocol.GitPublished{
+		StartRevision: "0123456789012345678901234567890123456789",
+		Revision:      "fedcba9876543210fedcba9876543210fedcba98",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +173,10 @@ func TestSyncWorkspaceFromRunnerSelectsRemoteGitPublication(t *testing.T) {
 	safe.Project.CloneURL = &cloneURL
 	safe.Workspace.WorkingBranch = "agent-board/AB-42"
 	base := &runnerSyncStore{}
-	payload, err := json.Marshal(runnerprotocol.GitPublished{Revision: "fedcba9876543210fedcba9876543210fedcba98"})
+	payload, err := json.Marshal(runnerprotocol.GitPublished{
+		StartRevision: "0123456789012345678901234567890123456789",
+		Revision:      "fedcba9876543210fedcba9876543210fedcba98",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
