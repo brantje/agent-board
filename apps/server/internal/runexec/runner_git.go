@@ -52,21 +52,21 @@ func (p *Processor) prepareRemoteGitWorkspace(ctx context.Context, safe executio
 		return fmt.Errorf("encode remote Git workspace request: %w", err)
 	}
 	transferID := fmt.Sprintf("%s-git-prepare-%d", safe.Run.ID, time.Now().UnixNano())
-	if err := p.record(ctx, safe, "workspace.transfer.started", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPrepare, nil), nil, nil); err != nil {
+	if err := p.record(ctx, safe, "workspace.transfer.started", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPrepare, nil), nil); err != nil {
 		return err
 	}
 	client, err := p.runners.Connect(ctx, safe.Project.ID, runnerID)
 	if err != nil {
-		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPrepare, map[string]any{"reason": err.Error()}), nil, nil)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPrepare, map[string]any{"reason": err.Error()}), nil)
 		return err
 	}
 	if err := client.SendTransfer(ctx, sessionID, transferID, runnerprotocol.TransferDirectionGitPrepare, payload, nil); err != nil {
-		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPrepare, map[string]any{"reason": err.Error()}), nil, nil)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPrepare, map[string]any{"reason": err.Error()}), nil)
 		return err
 	}
 	return p.record(ctx, safe, "workspace.transfer.completed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPrepare, map[string]any{
 		"bytesTransferred": len(payload), "totalBytes": len(payload),
-	}), nil, nil)
+	}), nil)
 }
 
 func (p *Processor) publishRemoteGitWorkspace(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
@@ -92,21 +92,21 @@ func (p *Processor) publishRemoteGitWorkspace(ctx context.Context, safe executio
 
 func (p *Processor) publishRemoteGitWorkspaceAttempt(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string, revisions store.WorkspaceRevisionStore) error {
 	transferID := fmt.Sprintf("%s-git-publish-%d", sessionID, time.Now().UnixNano())
-	if err := p.record(ctx, safe, "workspace.transfer.started", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, nil), nil, nil); err != nil {
+	if err := p.record(ctx, safe, "workspace.transfer.started", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, nil), nil); err != nil {
 		return err
 	}
 	client, err := p.runners.Connect(ctx, safe.Project.ID, runnerID)
 	if err != nil {
-		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil)
 		return err
 	}
 	if err := client.SendTransfer(ctx, sessionID, transferID, runnerprotocol.TransferDirectionGitPublish, nil, nil); err != nil {
-		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil)
 		return err
 	}
 	receivedID, payload, err := client.ReceiveTransfer(ctx, sessionID, nil)
 	if err != nil {
-		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil)
 		return err
 	}
 	if receivedID != "" {
@@ -117,25 +117,25 @@ func (p *Processor) publishRemoteGitWorkspaceAttempt(ctx context.Context, safe e
 		if err == nil {
 			err = fmt.Errorf("published start/review revision is empty")
 		}
-		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil)
 		return fmt.Errorf("decode remote Git publication: %w", err)
 	}
 	if err := p.ensureRemoteWorkspaceReady(ctx, safe, published.StartRevision); err != nil {
-		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil)
 		return fmt.Errorf("persist remote Issue base revision: %w", err)
 	}
 	if _, err := revisions.UpdateWorkspaceCurrentRevision(ctx, safe.Project.ID, safe.Workspace.ID, published.Revision); err != nil {
-		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil)
 		return fmt.Errorf("persist published Issue revision: %w", err)
 	}
 	if err := client.ConfirmTransferApplied(ctx, sessionID, transferID); err != nil {
 		wrapped := fmt.Errorf("acknowledge persisted remote Git publication: %w", err)
-		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": wrapped.Error()}), nil, nil)
+		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": wrapped.Error()}), nil)
 		return wrapped
 	}
 	return p.record(ctx, safe, "workspace.transfer.completed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{
 		"revision": published.Revision, "bytesTransferred": len(payload), "totalBytes": len(payload),
-	}), nil, nil)
+	}), nil)
 }
 
 func (p *Processor) ensureRemoteWorkspaceReady(ctx context.Context, safe executioncontext.SafeContext, startRevision string) error {
