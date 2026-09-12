@@ -24,8 +24,6 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
 	"github.com/brantje/agent-board/apps/server/internal/runexec"
-	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
-	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/secrets"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
@@ -67,12 +65,6 @@ func main() {
 			stop()
 			os.Exit(1)
 		}
-	}
-	if err := reconcileRuntimeInstances(ctx, handler); err != nil {
-		slog.Error("reconcile Runtime Instance", "error", err)
-		closeStore()
-		stop()
-		os.Exit(1)
 	}
 	if err := reconcileExecutionSessions(ctx, handler); err != nil {
 		slog.Error("reconcile Execution Session", "error", err)
@@ -198,16 +190,6 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 	return &applicationHandler{Handler: httpapi.NewRouterWithApplication(services, secretWriteAuthorizer), services: services}, closeApplication, nil
 }
 
-func reconcileRuntimeInstances(ctx context.Context, handler http.Handler) error {
-	application, ok := handler.(*applicationHandler)
-	if !ok || application.services == nil || application.services.RuntimeInstances == nil {
-		return fmt.Errorf("runtime instance service is unavailable")
-	}
-	return application.services.RuntimeInstances.ReconcileAllWithReporter(ctx, func(err error) {
-		slog.Error("reconcile Runtime Instance", "error", err)
-	})
-}
-
 func reconcileExecutionSessions(ctx context.Context, handler http.Handler) error {
 	application, ok := handler.(*applicationHandler)
 	if !ok || application.services == nil || application.services.ExecutionSessions == nil {
@@ -265,26 +247,12 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 	if err != nil {
 		return nil, err
 	}
-	dockerRuntime, dockerErr := dockerruntime.New()
-	if dockerErr != nil {
-		slog.Warn("Docker runtime unavailable; runner execution remains available", "error", dockerErr)
-	}
 	secretResolver, err := configuredSecretResolver(database)
 	if err != nil {
-		if dockerRuntime != nil {
-			_ = dockerRuntime.Close()
-		}
 		return nil, err
 	}
-	implementations := map[string]runtimepkg.Implementation{}
-	if dockerRuntime != nil {
-		implementations["docker"] = dockerRuntime
-	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, implementations, secretResolver)
+	services, err := app.NewExecutionServices(database, materializer, secretResolver)
 	if err != nil {
-		if dockerRuntime != nil {
-			_ = dockerRuntime.Close()
-		}
 		return nil, err
 	}
 	if err := services.ConfigureRunnerReconnectTimeout(runnerReconnectTimeout); err != nil {
@@ -303,7 +271,7 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 }
 
 func configureExecutionScheduler(services *app.Services, git workspace.Git) error {
-	if services == nil || services.ExecutionStore == nil || services.ExecutionContext == nil || services.RuntimeInstances == nil || services.ExecutionSessions == nil || services.Redaction == nil {
+	if services == nil || services.ExecutionStore == nil || services.ExecutionContext == nil || services.ExecutionSessions == nil || services.Redaction == nil {
 		return fmt.Errorf("execution services are incomplete")
 	}
 	baseBlobs, err := evidence.NewFileBlobStore(configuredEvidenceRoot(), defaultEvidenceBlobLimit)
@@ -351,7 +319,7 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
 		runnerConnector = runexec.NewRegistryConnector(services.ControlPlane.Runners.Connections)
 	}
-	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.RuntimeInstances, services.ExecutionSessions, engines, events, output, git, runnerConnector)
+	processor, err := runexec.NewProcessor(services.ExecutionStore, services.ExecutionContext, services.ExecutionSessions, engines, events, output, git, runnerConnector)
 	if err != nil {
 		return err
 	}
