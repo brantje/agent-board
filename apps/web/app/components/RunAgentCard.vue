@@ -27,10 +27,6 @@ const agent = computed(() => runAgentInfo(props.provenance))
           <dt class="shrink-0 text-muted">Provider</dt>
           <dd class="min-w-0 text-right">{{ agent.provider }}</dd>
         </div>
-        <div v-if="agent.runtime" class="flex items-start justify-between gap-3">
-          <dt class="shrink-0 text-muted">Runtime</dt>
-          <dd class="min-w-0 text-right">{{ agent.runtime }}</dd>
-        </div>
         <div v-if="agent.runner" class="flex items-start justify-between gap-3">
           <dt class="shrink-0 text-muted">Runner</dt>
           <dd class="min-w-0 text-right">{{ agent.runner }}</dd>
