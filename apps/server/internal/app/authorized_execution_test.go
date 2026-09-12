@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
-	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -32,7 +31,7 @@ func TestAuthorizedExecutionConstructorAndPreparationErrors(t *testing.T) {
 	if _, err := NewAuthorizedExecutionSessionService(nil, preparer); err == nil {
 		t.Fatal("expected nil session service rejection")
 	}
-	lowLevel, _, _ := executionServiceFixture(t)
+	lowLevel, _, _, _ := runnerOwnedExecutionService(t)
 	if _, err := NewAuthorizedExecutionSessionService(lowLevel, nil); err == nil {
 		t.Fatal("expected nil preparer rejection")
 	}
@@ -43,29 +42,20 @@ func TestAuthorizedExecutionConstructorAndPreparationErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.Start(context.Background(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"true"}})
+	_, err = service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", AuthorizedExecutionRequest{Command: []string{"true"}})
 	apiErr, ok := AsError(err)
 	if !ok || apiErr.Code != "execution_context_unavailable" || !errors.Is(err, cause) {
 		t.Fatalf("translated preparation error=%v api=%+v", err, apiErr)
 	}
 }
 
-func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput(t *testing.T) {
-	transport := newFakeExecutionTransport("session-1")
+func TestAuthorizedExecutionResolvesProviderSecretAndRedactsRunnerOutput(t *testing.T) {
+	lowLevel, _, transport, client := runnerOwnedExecutionService(t)
 	transport.stdout = "before plain-secret after"
 	transport.stderr = "runner-error plain-secret"
-	client := &requestCapturingClient{fakeExecutionClient: &fakeExecutionClient{transport: transport, done: make(chan struct{})}}
-	storeFake := &executionSessionStoreFake{
-		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
-	}
-	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	released := make(chan struct{})
 	preparer := &fakeExecutionPreparer{prepared: executioncontext.Prepared{
-				Secrets:          map[string]string{"TOKEN": "plain-secret"},
+		Secrets:          map[string]string{"PROVIDER_TOKEN": "plain-secret"},
 		RedactionValues:  []string{"plain-secret"},
 		ReleaseRedaction: func() { close(released) },
 	}}
@@ -73,19 +63,19 @@ func TestAuthorizedExecutionResolvesBeforeInjectingSecretsAndRedactsRunnerOutput
 	if err != nil {
 		t.Fatal(err)
 	}
-	process, err := service.Start(context.Background(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{
-		Command:           []string{"true"},
-		Env:               map[string]string{"SAFE": "value"},
-		RuntimeSecretRefs: map[string]string{"TOKEN": "runtime-token"},
+	process, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", AuthorizedExecutionRequest{
+		Command:               []string{"true"},
+		Env:                   map[string]string{"SAFE": "value"},
+		ProviderCredentialEnv: "PROVIDER_TOKEN",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if preparer.calls != 1 || preparer.request.RuntimeSecretRefs["TOKEN"] != "runtime-token" {
+	if preparer.calls != 1 || preparer.request.ProviderCredentialEnv != "PROVIDER_TOKEN" {
 		t.Fatalf("preparer calls=%d request=%+v", preparer.calls, preparer.request)
 	}
-	if client.request.Secrets["TOKEN"] != "plain-secret" || client.request.Env["SAFE"] != "value" {
-		t.Fatalf("runner request = %+v", client.request)
+	if client.request.Secrets["PROVIDER_TOKEN"] != "plain-secret" || client.request.Env["SAFE"] != "value" {
+		t.Fatalf("runner request=%+v", client.request)
 	}
 	stdout, err := io.ReadAll(process.Stdout())
 	if err != nil {
@@ -115,23 +105,11 @@ func TestAuthorizedExecutionProcessDoesNotExposeRawProcess(t *testing.T) {
 }
 
 func TestAuthorizedExecutionRedactsStartErrorsAndReleasesRegistration(t *testing.T) {
-	transport := newFakeExecutionTransport("session-1")
-	client := &fakeExecutionClient{
-		transport: transport,
-		startErr:  errors.New("runner rejected plain-secret"),
-		done:      make(chan struct{}),
-	}
-	storeFake := &executionSessionStoreFake{
-		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
-	}
-	lowLevel, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	lowLevel, _, _, client := runnerOwnedExecutionService(t)
+	client.startErr = errors.New("runner rejected plain-secret")
 	releases := 0
 	preparer := &fakeExecutionPreparer{prepared: executioncontext.Prepared{
-				Secrets:          map[string]string{"TOKEN": "plain-secret"},
+		Secrets:          map[string]string{"PROVIDER_TOKEN": "plain-secret"},
 		RedactionValues:  []string{"plain-secret"},
 		ReleaseRedaction: func() { releases++ },
 	}}
@@ -139,7 +117,7 @@ func TestAuthorizedExecutionRedactsStartErrorsAndReleasesRegistration(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = service.Start(context.Background(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"true"}})
+	_, err = service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", AuthorizedExecutionRequest{Command: []string{"true"}})
 	if err == nil {
 		t.Fatal("expected runner start failure")
 	}
@@ -151,41 +129,12 @@ func TestAuthorizedExecutionRedactsStartErrorsAndReleasesRegistration(t *testing
 	}
 }
 
-func TestAuthorizedExecutionStartOnRunnerRejectsRuntimeSecretRefs(t *testing.T) {
-	lowLevel, err := NewExecutionSessionService(&executionSessionStoreFake{}, &fakeExecutionManager{}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", AuthorizedExecutionRequest{
-		Command:           []string{"true"},
-		RuntimeSecretRefs: map[string]string{"TOKEN": "runtime-token"},
-	})
-	apiErr, ok := AsError(err)
-	if !ok || apiErr.Code != "execution_secret_unavailable" {
-		t.Fatalf("err=%v api=%+v", err, apiErr)
-	}
-	_, err = service.StartPreparedOnRunner(context.Background(), "project-1", "session-1", AuthorizedExecutionRequest{
-		Command:           []string{"true"},
-		RuntimeSecretRefs: map[string]string{"TOKEN": "runtime-token"},
-	})
-	apiErr, ok = AsError(err)
-	if !ok || apiErr.Code != "execution_secret_unavailable" {
-		t.Fatalf("prepared err=%v api=%+v", err, apiErr)
-	}
-}
-
 func TestAuthorizedCreateAndStartPreparedRunnerSession(t *testing.T) {
 	transport := newFakeExecutionTransport("session-1")
 	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
-	manager := &fakeExecutionManager{client: client}
-	storeFake := &executionSessionStoreFake{
-		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-	}
-	lowLevel, err := NewExecutionSessionService(storeFake, manager, manager)
+	registry := &fakeExecutionManager{client: client}
+	storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"}}
+	lowLevel, err := NewExecutionSessionService(storeFake, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,14 +145,14 @@ func TestAuthorizedCreateAndStartPreparedRunnerSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	session, err := service.CreateRunnerSession(context.Background(), "project-1", "run-1", "runner-1")
-	if err != nil || session.RunnerID != "runner-1" || session.RuntimeInstanceID != "" {
+	if err != nil || session.RunnerID != "runner-1" {
 		t.Fatalf("session=%+v err=%v", session, err)
 	}
 	process, err := service.StartPreparedOnRunner(context.Background(), "project-1", session.ID, AuthorizedExecutionRequest{Command: []string{"true"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if process.Record().RunnerID != "runner-1" || process.Record().RuntimeInstanceID != "" {
+	if process.Record().RunnerID != "runner-1" {
 		t.Fatalf("record=%+v", process.Record())
 	}
 	close(transport.resultCh)
@@ -234,13 +183,20 @@ func assertRunRedactionRetainedAndRelease(t *testing.T, service *AuthorizedExecu
 	service.ReleaseRunRedaction(runID)
 }
 
-func TestAuthorizedExecutionAttachReusesLiveSession(t *testing.T) {
-	lowLevel, storeFake, transport := executionServiceFixture(t)
+func TestAuthorizedExecutionAttachReusesLiveRunnerSession(t *testing.T) {
+	transport := newFakeExecutionTransport("session-1")
+	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
+	registry := &fakeExecutionManager{client: client, reconcile: transport, active: true}
+	storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"}}
+	lowLevel, err := NewExecutionSessionService(storeFake, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
 	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := service.Start(t.Context(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"sleep", "10"}})
+	started, err := service.StartOnRunner(t.Context(), "project-1", "run-1", "runner-1", AuthorizedExecutionRequest{Command: []string{"sleep", "10"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,26 +204,29 @@ func TestAuthorizedExecutionAttachReusesLiveSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if attached.ID() != started.ID() {
-		t.Fatalf("attached=%q started=%q", attached.ID(), started.ID())
-	}
-	if storeFake.session.ID != started.ID() {
-		t.Fatalf("attach created a new session: %+v", storeFake.session)
+	if attached.ID() != started.ID() || storeFake.session.ID != started.ID() {
+		t.Fatalf("attached=%q started=%q session=%+v", attached.ID(), started.ID(), storeFake.session)
 	}
 	close(transport.resultCh)
 }
 
 func TestAuthorizedExecutionAttachPreparesAuthorizedSecretRedaction(t *testing.T) {
-	lowLevel, _, transport := executionServiceFixture(t)
+	transport := newFakeExecutionTransport("session-1")
+	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
+	registry := &fakeExecutionManager{client: client, reconcile: transport, active: true}
+	storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"}}
+	lowLevel, err := NewExecutionSessionService(storeFake, registry)
+	if err != nil {
+		t.Fatal(err)
+	}
 	preparer := &fakeExecutionPreparer{prepared: executioncontext.Prepared{}}
 	service, err := NewAuthorizedExecutionSessionService(lowLevel, preparer)
 	if err != nil {
 		t.Fatal(err)
 	}
-	started, err := service.Start(t.Context(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{
+	started, err := service.StartOnRunner(t.Context(), "project-1", "run-1", "runner-1", AuthorizedExecutionRequest{
 		Command:               []string{"sleep", "10"},
 		ProviderCredentialEnv: "PROVIDER_TOKEN",
-		RuntimeSecretRefs:     map[string]string{"RUNTIME_TOKEN": "runtime-token"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -296,31 +255,16 @@ func TestAuthorizedExecutionAttachFailureBoundaries(t *testing.T) {
 	})
 
 	t.Run("session not running", func(t *testing.T) {
-		lowLevel, storeFake, transport := executionServiceFixture(t)
+		lowLevel, storeFake, _, _ := runnerOwnedExecutionService(t)
+		storeFake.session = store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RunnerID: "runner-1", Status: "COMPLETED"}
 		service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		started, err := service.Start(t.Context(), "project-1", "run-1", "runtime-1", AuthorizedExecutionRequest{Command: []string{"sleep", "10"}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		storeFake.session.Status = "COMPLETED"
-		_, err = service.Attach(t.Context(), "project-1", started.ID())
+		_, err = service.Attach(t.Context(), "project-1", "session-1")
 		apiErr, ok := AsError(err)
 		if !ok || apiErr.Code != "execution_session_not_running" {
 			t.Fatalf("err=%v api=%+v", err, apiErr)
 		}
-		close(transport.resultCh)
 	})
-}
-
-type requestCapturingClient struct {
-	*fakeExecutionClient
-	request runner.Request
-}
-
-func (c *requestCapturingClient) Start(ctx context.Context, sessionID string, request runner.Request) (runner.ProcessSession, error) {
-	c.request = request
-	return c.fakeExecutionClient.Start(ctx, sessionID, request)
 }
