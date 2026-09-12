@@ -71,10 +71,13 @@ describe('intentional configuration inputs', () => {
     expect(validateDraft('projects', { ...draft, issuePrefix: '1A' }).map(error => error.name)).toContain('issuePrefix')
   })
 
-  it('validates required, numeric and JSON inputs', () => {
+  it('validates required, numeric, enum and JSON inputs', () => {
     expect(validateDraft('projects', draftFor('projects')).length).toBeGreaterThan(0)
     expect(validateDraft('model-profiles', { ...draftFor('model-profiles'), name: 'M', providerId: 'p', model: 'm', temperature: 3, maxTokens: 0 }).length).toBe(2)
+    expect(validateDraft('model-profiles', { ...draftFor('model-profiles'), name: 'M', providerId: 'p', model: 'm', maxTokens: 'not-a-number' }).map(error => error.name)).toContain('maxTokens')
+    expect(validateDraft('agents', { ...draftFor('agents'), name: 'Agent', modelProfileId: 'm', engine: 'unknown', concurrencyLimit: 1, state: 'ENABLED' }).map(error => error.name)).toContain('engine')
     expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', safeMetadata: '[]' }).map(error => error.name)).toContain('safeMetadata')
+    expect(validateDraft('providers', { ...draftFor('providers'), name: 'P', safeMetadata: 'null' }).map(error => error.name)).toContain('safeMetadata')
   })
 
   it('labels scope and marks directly unrunnable choices unavailable', () => {
