@@ -18,18 +18,24 @@ import (
 type executionSessionStoreFake struct {
 	mu               sync.Mutex
 	run              store.Run
-	instance         store.RuntimeInstance
 	session          store.ExecutionSession
 	sessionsByRunner []store.ExecutionSession
+	getRunErr        error
+	createErr        error
+	transitionErr    error
+	mutateTransition bool
 }
 
 func (s *executionSessionStoreFake) GetRun(context.Context, string, string) (store.Run, error) {
+	if s.getRunErr != nil {
+		return store.Run{}, s.getRunErr
+	}
 	return s.run, nil
 }
-func (s *executionSessionStoreFake) GetRuntimeInstance(context.Context, string, string) (store.RuntimeInstance, error) {
-	return s.instance, nil
-}
 func (s *executionSessionStoreFake) CreateExecutionSession(_ context.Context, input store.ExecutionSession) (store.ExecutionSession, error) {
+	if s.createErr != nil {
+		return store.ExecutionSession{}, s.createErr
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	input.ID = "session-1"
@@ -44,45 +50,39 @@ func (s *executionSessionStoreFake) GetExecutionSession(context.Context, string,
 func (s *executionSessionStoreFake) ListExecutionSessionsByRunner(_ context.Context, runnerID string, statuses []string) ([]store.ExecutionSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.sessionsByRunner) > 0 {
-		sessions := make([]store.ExecutionSession, 0, len(s.sessionsByRunner))
-		for _, session := range s.sessionsByRunner {
-			if runnerID == "" || session.RunnerID != runnerID {
-				continue
-			}
-			if len(statuses) == 0 {
+	candidates := s.sessionsByRunner
+	if len(candidates) == 0 && s.session.ID != "" {
+		candidates = []store.ExecutionSession{s.session}
+	}
+	sessions := make([]store.ExecutionSession, 0, len(candidates))
+	for _, session := range candidates {
+		if runnerID == "" || session.RunnerID != runnerID {
+			continue
+		}
+		if len(statuses) == 0 {
+			sessions = append(sessions, session)
+			continue
+		}
+		for _, status := range statuses {
+			if session.Status == status {
 				sessions = append(sessions, session)
-				continue
-			}
-			for _, status := range statuses {
-				if session.Status == status {
-					sessions = append(sessions, session)
-					break
-				}
+				break
 			}
 		}
-		return sessions, nil
 	}
-	if runnerID == "" || s.session.RunnerID != runnerID {
-		return nil, nil
-	}
-	if len(statuses) == 0 {
-		return []store.ExecutionSession{s.session}, nil
-	}
-	for _, status := range statuses {
-		if s.session.Status == status {
-			return []store.ExecutionSession{s.session}, nil
-		}
-	}
-	return nil, nil
+	return sessions, nil
 }
 func (s *executionSessionStoreFake) TransitionExecutionSession(_ context.Context, tr store.ExecutionSessionTransition) (store.ExecutionSession, error) {
+	if s.transitionErr != nil {
+		return store.ExecutionSession{}, s.transitionErr
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	allowed := len(tr.FromStatuses) == 0
 	for _, status := range tr.FromStatuses {
 		if s.session.Status == status {
 			allowed = true
+			break
 		}
 	}
 	if !allowed {
@@ -93,13 +93,11 @@ func (s *executionSessionStoreFake) TransitionExecutionSession(_ context.Context
 	if len(tr.CommandArgv) > 0 {
 		s.session.CommandArgv = append(json.RawMessage(nil), tr.CommandArgv...)
 	}
-	return s.session, nil
-}
-func (s *executionSessionStoreFake) UpdateRuntimeInstanceRunnerStatus(_ context.Context, _, _ string, status string) (store.RuntimeInstance, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.instance.RunnerStatus = status
-	return s.instance, nil
+	updated := s.session
+	if s.mutateTransition {
+		updated.RunID = "mutated-run"
+	}
+	return updated, nil
 }
 
 type fakeExecutionTransport struct {
@@ -139,13 +137,15 @@ type fakeExecutionClient struct {
 	transport runner.ProcessSession
 	startErr  error
 	done      chan struct{}
+	request   runner.Request
 }
 
 func (c *fakeExecutionClient) Capabilities() protocol.Capabilities {
 	return protocol.Capabilities{MaxActiveSessions: 1}
 }
 func (c *fakeExecutionClient) Health() protocol.Health { return protocol.Health{Status: "ok"} }
-func (c *fakeExecutionClient) Start(context.Context, string, runner.Request) (runner.ProcessSession, error) {
+func (c *fakeExecutionClient) Start(_ context.Context, _ string, request runner.Request) (runner.ProcessSession, error) {
+	c.request = request
 	return c.transport, c.startErr
 }
 func (c *fakeExecutionClient) Attach(string) (runner.ProcessSession, error) { return c.transport, nil }
@@ -154,56 +154,154 @@ func (c *fakeExecutionClient) Err() error                                   { re
 func (c *fakeExecutionClient) Close() error                                 { return nil }
 
 type fakeExecutionManager struct {
-	client runner.Client
-	err    error
+	client       runner.Client
+	err          error
+	reconcile   runner.ProcessSession
+	active      bool
+	reconcileErr error
 }
 
 func (m *fakeExecutionManager) Connect(context.Context, string, string) (runner.Client, error) {
 	return m.client, m.err
 }
 func (m *fakeExecutionManager) Reconcile(context.Context, string, string, string) (runner.ProcessSession, bool, error) {
-	return nil, false, nil
+	return m.reconcile, m.active, m.reconcileErr
 }
 
-func executionServiceFixture(t *testing.T) (*ExecutionSessionService, *executionSessionStoreFake, *fakeExecutionTransport) {
+func runnerOwnedExecutionService(t *testing.T) (*ExecutionSessionService, *executionSessionStoreFake, *fakeExecutionTransport, *fakeExecutionClient) {
 	t.Helper()
 	transport := newFakeExecutionTransport("session-1")
 	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
-	storeFake := &executionSessionStoreFake{
-		run:      store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-		instance: store.RuntimeInstance{ID: "runtime-1", ProjectID: "project-1", WorkspaceID: "workspace-1", Status: "RUNNING", RunnerStatus: "READY"},
-	}
-	service, err := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client}, nil)
+	registry := &fakeExecutionManager{client: client}
+	storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"}}
+	service, err := NewExecutionSessionService(storeFake, registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return service, storeFake, transport
+	return service, storeFake, transport, client
 }
 
-func TestExecutionSessionServiceStartsAndPersistsCompletion(t *testing.T) {
-	service, storeFake, transport := executionServiceFixture(t)
-	process, err := service.Start(context.Background(), "project-1", "run-1", "runtime-1", ExecutionRequest{Command: []string{"sh", "-c", "exit 5"}, CWD: "/workspace/sub"})
+func TestExecutionSessionConstructorAndValidation(t *testing.T) {
+	if _, err := NewExecutionSessionService(nil, nil); err == nil {
+		t.Fatal("expected nil store rejection")
+	}
+	storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1", ProjectID: "project-1"}}
+	service, err := NewExecutionSessionService(storeFake, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if process.Record().Status != "RUNNING" || storeFake.instance.RunnerStatus != "BUSY" {
-		t.Fatalf("record=%+v instance=%+v", process.Record(), storeFake.instance)
+	for _, request := range []ExecutionRequest{
+		{},
+		{Command: []string{""}},
+		{Command: []string{"true"}, CWD: "/tmp"},
+		{Command: []string{"true"}, CWD: "/workspace/../tmp"},
+	} {
+		if _, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", request); err == nil {
+			t.Fatalf("request %+v unexpectedly succeeded", request)
+		}
+	}
+	if _, err := service.StartOnRunner(context.Background(), "", "run-1", "runner-1", ExecutionRequest{Command: []string{"true"}}); err == nil {
+		t.Fatal("blank project accepted")
+	}
+	if cloneMap(nil) != nil {
+		t.Fatal("cloneMap(nil) must stay nil")
+	}
+	original := map[string]string{"A": "one"}
+	cloned := cloneMap(original)
+	cloned["A"] = "two"
+	if original["A"] != "one" {
+		t.Fatal("cloneMap aliased input")
+	}
+}
+
+func TestStartOnRunnerPersistsCompletionAndRequest(t *testing.T) {
+	service, storeFake, transport, client := runnerOwnedExecutionService(t)
+	process, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{
+		Command: []string{"sh", "-c", "exit 5"},
+		CWD:     "/workspace/sub",
+		Env:     map[string]string{"A": "B"},
+		Secrets: map[string]string{"TOKEN": "secret"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process.Record().Status != "RUNNING" || process.Record().RunnerID != "runner-1" {
+		t.Fatalf("record=%+v", process.Record())
 	}
 	var argv []string
 	if err := json.Unmarshal(storeFake.session.CommandArgv, &argv); err != nil || len(argv) != 3 {
 		t.Fatalf("argv=%v err=%v", argv, err)
 	}
+	if client.request.Dir != "/workspace/sub" || client.request.Env["A"] != "B" || client.request.Secrets["TOKEN"] != "secret" {
+		t.Fatalf("request=%+v", client.request)
+	}
 	transport.result = runner.Result{ExitCode: 5}
 	close(transport.resultCh)
 	result, err := process.Wait(context.Background())
-	if err != nil || result.ExitCode != 5 || process.Record().Status != "COMPLETED" || storeFake.instance.RunnerStatus != "READY" {
-		t.Fatalf("result=%+v record=%+v instance=%+v err=%v", result, process.Record(), storeFake.instance, err)
+	if err != nil || result.ExitCode != 5 || process.Record().Status != "COMPLETED" {
+		t.Fatalf("result=%+v record=%+v err=%v", result, process.Record(), err)
 	}
 }
 
+func TestStartOnRunnerFailureBranches(t *testing.T) {
+	t.Run("run lookup", func(t *testing.T) {
+		storeFake := &executionSessionStoreFake{getRunErr: store.ErrNotFound}
+		service, _ := NewExecutionSessionService(storeFake, &fakeExecutionManager{})
+		if _, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"true"}}); err == nil {
+			t.Fatal("expected run lookup error")
+		}
+	})
+
+	t.Run("create conflict", func(t *testing.T) {
+		storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1"}, createErr: store.ErrConflict}
+		service, _ := NewExecutionSessionService(storeFake, &fakeExecutionManager{})
+		if _, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"true"}}); err == nil {
+			t.Fatal("expected create conflict")
+		}
+	})
+
+	t.Run("immutable binding", func(t *testing.T) {
+		transport := newFakeExecutionTransport("session-1")
+		client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
+		storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1"}, mutateTransition: true}
+		service, _ := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+		if _, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"true"}}); err == nil {
+			t.Fatal("expected immutable binding error")
+		}
+	})
+
+	t.Run("connect failure persists failed", func(t *testing.T) {
+		storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1"}}
+		service, _ := NewExecutionSessionService(storeFake, &fakeExecutionManager{err: errors.New("dial failed")})
+		if _, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"true"}}); err == nil || storeFake.session.Status != "FAILED" {
+			t.Fatalf("session=%+v err=%v", storeFake.session, err)
+		}
+	})
+
+	t.Run("protocol start failure persists failed", func(t *testing.T) {
+		transport := newFakeExecutionTransport("session-1")
+		client := &fakeExecutionClient{transport: transport, startErr: &runner.ProtocolError{Code: "rejected", Message: "no"}, done: make(chan struct{})}
+		storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1"}}
+		service, _ := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+		if _, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"true"}}); err == nil || storeFake.session.Status != "FAILED" {
+			t.Fatalf("session=%+v err=%v", storeFake.session, err)
+		}
+	})
+
+	t.Run("transport start failure stays uncertain", func(t *testing.T) {
+		transport := newFakeExecutionTransport("session-1")
+		client := &fakeExecutionClient{transport: transport, startErr: runner.ErrDisconnected, done: make(chan struct{})}
+		storeFake := &executionSessionStoreFake{run: store.Run{ID: "run-1"}}
+		service, _ := NewExecutionSessionService(storeFake, &fakeExecutionManager{client: client})
+		if _, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"true"}}); err == nil || storeFake.session.Status != "STARTING" {
+			t.Fatalf("session=%+v err=%v", storeFake.session, err)
+		}
+	})
+}
+
 func TestExecutionSessionDisconnectRemainsNonTerminal(t *testing.T) {
-	service, _, transport := executionServiceFixture(t)
-	process, err := service.Start(context.Background(), "project-1", "run-1", "runtime-1", ExecutionRequest{Command: []string{"sleep", "10"}})
+	service, _, transport, _ := runnerOwnedExecutionService(t)
+	process, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"sleep", "10"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,8 +314,8 @@ func TestExecutionSessionDisconnectRemainsNonTerminal(t *testing.T) {
 }
 
 func TestExecutionSessionCancellationTargetsSession(t *testing.T) {
-	service, _, transport := executionServiceFixture(t)
-	process, err := service.Start(context.Background(), "project-1", "run-1", "runtime-1", ExecutionRequest{Command: []string{"sleep", "10"}})
+	service, _, transport, _ := runnerOwnedExecutionService(t)
+	process, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"sleep", "10"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,49 +330,22 @@ func TestExecutionSessionCancellationTargetsSession(t *testing.T) {
 	}
 }
 
-func TestExecutionSessionRejectsWorkspaceMismatchBeforeLaunch(t *testing.T) {
-	service, storeFake, _ := executionServiceFixture(t)
-	storeFake.instance.WorkspaceID = "other"
-	_, err := service.Start(context.Background(), "project-1", "run-1", "runtime-1", ExecutionRequest{Command: []string{"true"}})
-	if err == nil || storeFake.session.ID != "" {
-		t.Fatalf("session=%+v err=%v", storeFake.session, err)
-	}
-}
-
-func runnerOwnedExecutionService(t *testing.T) (*ExecutionSessionService, *executionSessionStoreFake, *fakeExecutionTransport) {
-	t.Helper()
-	transport := newFakeExecutionTransport("session-1")
-	client := &fakeExecutionClient{transport: transport, done: make(chan struct{})}
-	manager := &fakeExecutionManager{client: client}
-	storeFake := &executionSessionStoreFake{
-		run: store.Run{ID: "run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"},
-	}
-	service, err := NewExecutionSessionService(storeFake, manager, manager)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return service, storeFake, transport
-}
-
-func TestCreateRunnerSessionPersistsRunnerOwnershipWithoutRuntimeInstance(t *testing.T) {
-	service, storeFake, _ := runnerOwnedExecutionService(t)
+func TestCreateRunnerSessionPersistsRunnerOwnership(t *testing.T) {
+	service, storeFake, _, _ := runnerOwnedExecutionService(t)
 	session, err := service.CreateRunnerSession(context.Background(), "project-1", "run-1", "runner-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if session.RunnerID != "runner-1" || session.RuntimeInstanceID != "" || session.Status != "PENDING" {
-		t.Fatalf("session=%+v", session)
-	}
-	if storeFake.session.RunnerID != "runner-1" || storeFake.session.RuntimeInstanceID != "" {
-		t.Fatalf("persisted=%+v", storeFake.session)
+	if session.RunnerID != "runner-1" || session.Status != "PENDING" || storeFake.session.RunnerID != "runner-1" {
+		t.Fatalf("session=%+v persisted=%+v", session, storeFake.session)
 	}
 	if _, err := service.CreateRunnerSession(context.Background(), "", "run-1", "runner-1"); err == nil {
 		t.Fatal("blank ids accepted")
 	}
 }
 
-func TestStartPreparedOnRunnerUsesLiveRegistryAndSelectedRunner(t *testing.T) {
-	service, _, transport := runnerOwnedExecutionService(t)
+func TestStartPreparedOnRunnerUsesSelectedRunner(t *testing.T) {
+	service, _, transport, _ := runnerOwnedExecutionService(t)
 	session, err := service.CreateRunnerSession(context.Background(), "project-1", "run-1", "runner-1")
 	if err != nil {
 		t.Fatal(err)
@@ -283,74 +354,29 @@ func TestStartPreparedOnRunnerUsesLiveRegistryAndSelectedRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if process.Record().Status != "RUNNING" || process.Record().RunnerID != "runner-1" || process.Record().RuntimeInstanceID != "" {
+	if process.Record().Status != "RUNNING" || process.Record().RunnerID != "runner-1" {
 		t.Fatalf("record=%+v", process.Record())
 	}
 	if !strings.Contains(string(process.Record().CommandArgv), "true") {
-		t.Fatalf("prepared start did not persist command argv=%s", process.Record().CommandArgv)
+		t.Fatalf("command argv=%s", process.Record().CommandArgv)
 	}
 	transport.result = runner.Result{ExitCode: 0}
 	close(transport.resultCh)
-	result, err := process.Wait(context.Background())
-	if err != nil || result.ExitCode != 0 || process.Record().Status != "COMPLETED" {
-		t.Fatalf("result=%+v record=%+v err=%v", result, process.Record(), err)
+	if _, err := process.Wait(context.Background()); err != nil || process.Record().Status != "COMPLETED" {
+		t.Fatalf("record=%+v err=%v", process.Record(), err)
 	}
 }
 
-func TestStartOnRunnerConnectsLiveRegistryWithoutRuntimeInstance(t *testing.T) {
-	service, storeFake, transport := runnerOwnedExecutionService(t)
-	process, err := service.StartOnRunner(context.Background(), "project-1", "run-1", "runner-1", ExecutionRequest{Command: []string{"sh", "-c", "true"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if process.Record().RunnerID != "runner-1" || process.Record().RuntimeInstanceID != "" || storeFake.session.RunnerID != "runner-1" {
-		t.Fatalf("record=%+v persisted=%+v", process.Record(), storeFake.session)
-	}
-	transport.result = runner.Result{ExitCode: 0}
-	close(transport.resultCh)
-	if _, err := process.Wait(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestStartPreparedOnRunnerRejectsRuntimeOwnedSession(t *testing.T) {
-	service, storeFake, _ := runnerOwnedExecutionService(t)
-	storeFake.session = store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", RuntimeInstanceID: "instance-1", Status: "PENDING"}
-	_, err := service.StartPreparedOnRunner(context.Background(), "project-1", "session-1", ExecutionRequest{Command: []string{"true"}})
-	if err == nil {
-		t.Fatal("runtime-owned session accepted")
-	}
-}
-
-func TestStartPreparedOnRunnerRestartsCompletedSessionForSequentialProcesses(t *testing.T) {
-	service, _, transport := runnerOwnedExecutionService(t)
-	session, err := service.CreateRunnerSession(context.Background(), "project-1", "run-1", "runner-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	process, err := service.StartPreparedOnRunner(context.Background(), "project-1", session.ID, ExecutionRequest{Command: []string{"true"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	transport.result = runner.Result{ExitCode: 0}
-	close(transport.resultCh)
-	if _, err := process.Wait(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	if process.Record().Status != "COMPLETED" {
-		t.Fatalf("status=%q", process.Record().Status)
-	}
-	restarted, err := service.StartPreparedOnRunner(context.Background(), "project-1", session.ID, ExecutionRequest{Command: []string{"true"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if restarted.Record().Status != "RUNNING" || restarted.Record().ID != session.ID || restarted.Record().RunnerID != "runner-1" {
-		t.Fatalf("restarted=%+v", restarted.Record())
+func TestStartPreparedOnRunnerRejectsSessionWithoutRunner(t *testing.T) {
+	service, storeFake, _, _ := runnerOwnedExecutionService(t)
+	storeFake.session = store.ExecutionSession{ID: "session-1", ProjectID: "project-1", RunID: "run-1", Status: "PENDING"}
+	if _, err := service.StartPreparedOnRunner(context.Background(), "project-1", "session-1", ExecutionRequest{Command: []string{"true"}}); err == nil {
+		t.Fatal("session without Runner accepted")
 	}
 }
 
 func TestStartPreparedOnRunnerRejectsRunningSession(t *testing.T) {
-	service, _, _ := runnerOwnedExecutionService(t)
+	service, _, _, _ := runnerOwnedExecutionService(t)
 	session, err := service.CreateRunnerSession(context.Background(), "project-1", "run-1", "runner-1")
 	if err != nil {
 		t.Fatal(err)
