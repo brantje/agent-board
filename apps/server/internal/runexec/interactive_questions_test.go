@@ -72,12 +72,11 @@ func TestInteractiveQuestionerOpenPersistsCanonicalLifecycleEvidence(t *testing.
 		EnteredWaiting: true,
 	}}
 	q := &interactiveQuestioner{
-		store:             &interactiveQuestionReadStore{},
-		interactive:       lifecycle,
-		events:            recorder,
-		safe:              interactiveSafeContext(),
-		runtimeInstanceID: "runtime-instance-1",
-		engine:            "opencode",
+		store:       &interactiveQuestionReadStore{},
+		interactive: lifecycle,
+		events:      recorder,
+		safe:        interactiveSafeContext(),
+		engine:      "opencode",
 	}
 
 	opened, err := q.Open(context.Background(), "ses_1/que_1/0", engine.QuestionRequest{
@@ -166,11 +165,10 @@ func TestInteractiveQuestionerResolveRecordsResumeOnlyWhenRunResumes(t *testing.
 		}
 		lifecycle := &interactiveLifecycleStore{resolveResult: store.ResolveInteractiveQuestionResult{Resumed: resumed}}
 		q := &interactiveQuestioner{
-			interactive:       lifecycle,
-			events:            recorder,
-			safe:              interactiveSafeContext(),
-			runtimeInstanceID: "runtime-instance-1",
-			engine:            "opencode",
+			interactive: lifecycle,
+			events:      recorder,
+			safe:        interactiveSafeContext(),
+			engine:      "opencode",
 		}
 		if err := q.Resolve(context.Background(), "question-1"); err != nil {
 			t.Fatalf("Resolve() resumed=%v error=%v", resumed, err)
