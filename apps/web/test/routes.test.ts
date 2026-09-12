@@ -29,7 +29,18 @@ const authSettings = {
 
 it('binds configuration routes to the correct scope and resource',()=>{
   vi.stubGlobal('useRoute',()=>({params:{projectID:'project-a'}}))
-  vi.stubGlobal('useAuth',()=>({ users: async()=>[], settings: async()=>authSettings, updateSettings: async()=>authSettings }))
+  vi.stubGlobal('useAuth',()=>({
+    users: async()=>[],
+    settings: async()=>authSettings,
+    updateSettings: async()=>authSettings,
+    groups: async()=>[],
+    groupMembers: async()=>[],
+    createGroup: async()=>({}),
+    updateGroup: async()=>({}),
+    deleteGroup: async()=>undefined,
+    addGroupMember: async()=>undefined,
+    removeGroupMember: async()=>undefined
+  }))
   for(const [path,page] of Object.entries(pages)) {
     if(!isConfigPage(path)) continue
     const wrapper = mount(page, {
@@ -62,7 +73,7 @@ it('binds configuration routes to the correct scope and resource',()=>{
       expect(wrapper.find('[data-kind]').exists()).toBe(false)
       continue
     }
-    if(path.endsWith('/settings/users.vue') || path.endsWith('/settings/authentication.vue')) {
+    if(path.endsWith('/settings/users.vue') || path.endsWith('/settings/groups.vue') || path.endsWith('/settings/authentication.vue')) {
       expect(wrapper.find('[data-settings-shell]').exists()).toBe(true)
       expect(wrapper.find('[data-kind]').exists()).toBe(false)
       continue
@@ -76,6 +87,7 @@ it('binds configuration routes to the correct scope and resource',()=>{
   expect(Object.keys(pages).some(path => path.endsWith('/settings/agents.vue') && !path.includes('[projectID]'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/settings/runners.vue') && !path.includes('[projectID]'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/settings/users.vue') && !path.includes('[projectID]'))).toBe(true)
+  expect(Object.keys(pages).some(path => path.endsWith('/settings/groups.vue') && !path.includes('[projectID]'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/settings/authentication.vue') && !path.includes('[projectID]'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/pages/account.vue'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/pages/agents.vue'))).toBe(false)
