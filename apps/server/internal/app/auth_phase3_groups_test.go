@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"sort"
 	"testing"
@@ -22,6 +23,19 @@ func newGroupAuthMemory() *groupAuthMemory {
 		groups:     map[string]store.Group{},
 		members:    map[string]map[string]struct{}{},
 	}
+}
+
+func groupAuthTestService(t *testing.T, memory *groupAuthMemory, now *time.Time) *AuthService {
+	t.Helper()
+	service, err := NewAuthService(memory, AuthServiceConfig{
+		Now:        func() time.Time { return *now },
+		Random:     &deterministicReader{},
+		SigningKey: bytes.Repeat([]byte{9}, 32),
+	})
+	if err != nil {
+		t.Fatalf("new group auth service: %v", err)
+	}
+	return service
 }
 
 func (m *groupAuthMemory) ListGroups(context.Context) ([]store.Group, error) {
@@ -127,7 +141,7 @@ func TestPhase3GroupAdministrationAndMembership(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(100, 0).UTC()
 	memory := newGroupAuthMemory()
-	service := authTestService(t, memory, &now)
+	service := groupAuthTestService(t, memory, &now)
 	admin := phase2Admin()
 	member := AuthenticatedUser{ID: "member", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive}
 
@@ -200,7 +214,7 @@ func TestPhase3GroupAdministrationAndMembership(t *testing.T) {
 
 func TestPhase3GroupAdministrationRequiresNormalDeploymentAdmin(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
-	service := authTestService(t, newGroupAuthMemory(), &now)
+	service := groupAuthTestService(t, newGroupAuthMemory(), &now)
 	ctx := context.Background()
 	forced := AuthenticatedUser{ID: "admin", DeploymentRole: store.DeploymentRoleAdmin, Status: store.UserStatusActive, ForcePasswordChange: true}
 
