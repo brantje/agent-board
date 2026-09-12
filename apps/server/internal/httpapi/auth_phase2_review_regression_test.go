@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestAuthPhase2HTTPPendingDirectPasswordAndDisableLifecycle(t *testing.T) {
+func TestAuthPhase2HTTPOneTimeTokenPlaintextOnlyAtResponseBoundary(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	handler, _, _ := newAuthHTTPHandler(t, &now)
 	registerAuthHTTPUser(t, handler)
@@ -24,64 +24,40 @@ func TestAuthPhase2HTTPPendingDirectPasswordAndDisableLifecycle(t *testing.T) {
 	if err := json.Unmarshal(createdResponse.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
+	if created.SetupToken == "" {
+		t.Fatal("create response did not return one-time setup secret")
+	}
 	list := authHTTPRequest(t, handler, http.MethodGet, "/api/auth/users", "", adminHeaders)
 	if strings.Contains(list.Body.String(), created.SetupToken) {
 		t.Fatal("user list exposed previously returned setup token plaintext")
 	}
 
-	setPassword := authHTTPRequest(t, handler, http.MethodPut, fmt.Sprintf("/api/auth/users/%s/password", created.User.ID), `{"password":"temporary-member-password"}`, adminHeaders)
-	if setPassword.Code != http.StatusOK {
-		t.Fatalf("pending direct password status=%d body=%s", setPassword.Code, setPassword.Body.String())
+	replacementResponse := authHTTPRequest(t, handler, http.MethodPost, fmt.Sprintf("/api/auth/users/%s/setup-token", created.User.ID), "", adminHeaders)
+	if replacementResponse.Code != http.StatusCreated {
+		t.Fatalf("replacement setup status=%d body=%s", replacementResponse.Code, replacementResponse.Body.String())
 	}
-	var assigned authUserResponse
-	if err := json.Unmarshal(setPassword.Body.Bytes(), &assigned); err != nil {
+	var replacement passwordTokenResponse
+	if err := json.Unmarshal(replacementResponse.Body.Bytes(), &replacement); err != nil {
 		t.Fatal(err)
 	}
-	if assigned.Status != "active" || !assigned.ForcePasswordChange {
-		t.Fatalf("pending direct password response = %+v", assigned)
+	if replacement.Token == "" || replacement.Token == created.SetupToken {
+		t.Fatalf("unexpected replacement token: %+v", replacement)
 	}
-	oldSetup := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/setup/complete", fmt.Sprintf(`{"token":%q,"password":"replacement-member-password"}`, created.SetupToken), nil)
+	oldSetup := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/setup/complete", fmt.Sprintf(`{"token":%q,"password":"member-long-password"}`, created.SetupToken), nil)
 	if oldSetup.Code == http.StatusOK {
-		t.Fatal("setup token remained usable after direct password assignment")
+		t.Fatal("superseded setup token remained usable")
 	}
-	login := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/login", `{"login":"member","password":"temporary-member-password"}`, nil)
-	if login.Code != http.StatusOK {
-		t.Fatalf("temporary password login status=%d body=%s", login.Code, login.Body.String())
+	setup := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/setup/complete", fmt.Sprintf(`{"token":%q,"password":"member-long-password"}`, replacement.Token), nil)
+	if setup.Code != http.StatusOK {
+		t.Fatalf("setup status=%d body=%s", setup.Code, setup.Body.String())
 	}
-	var forced authTokensResponse
-	if err := json.Unmarshal(login.Body.Bytes(), &forced); err != nil {
-		t.Fatal(err)
+	reuse := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/setup/complete", fmt.Sprintf(`{"token":%q,"password":"another-long-password"}`, replacement.Token), nil)
+	if reuse.Code == http.StatusOK {
+		t.Fatal("consumed setup token remained reusable")
 	}
-	if !forced.User.ForcePasswordChange {
-		t.Fatalf("temporary password login did not require change: %+v", forced.User)
-	}
-
-	pendingResponse := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/users", `{"username":"pending2","email":"pending2@example.com","displayName":"Pending Two"}`, adminHeaders)
-	var pending pendingUserResponse
-	if err := json.Unmarshal(pendingResponse.Body.Bytes(), &pending); err != nil {
-		t.Fatal(err)
-	}
-	disable := authHTTPRequest(t, handler, http.MethodPost, fmt.Sprintf("/api/auth/users/%s/disable", pending.User.ID), "", adminHeaders)
-	if disable.Code != http.StatusOK {
-		t.Fatalf("pending disable status=%d body=%s", disable.Code, disable.Body.String())
-	}
-	var disabled authUserResponse
-	if err := json.Unmarshal(disable.Body.Bytes(), &disabled); err != nil {
-		t.Fatal(err)
-	}
-	if disabled.Status != "disabled" {
-		t.Fatalf("pending disable response = %+v", disabled)
-	}
-	enable := authHTTPRequest(t, handler, http.MethodPost, fmt.Sprintf("/api/auth/users/%s/enable", pending.User.ID), "", adminHeaders)
-	if enable.Code != http.StatusOK {
-		t.Fatalf("pending re-enable status=%d body=%s", enable.Code, enable.Body.String())
-	}
-	var reenabled authUserResponse
-	if err := json.Unmarshal(enable.Body.Bytes(), &reenabled); err != nil {
-		t.Fatal(err)
-	}
-	if reenabled.Status != "pending" {
-		t.Fatalf("passwordless re-enable status=%q want pending", reenabled.Status)
+	list = authHTTPRequest(t, handler, http.MethodGet, "/api/auth/users", "", adminHeaders)
+	if strings.Contains(list.Body.String(), replacement.Token) {
+		t.Fatal("user list exposed consumed setup token plaintext")
 	}
 }
 

@@ -71,7 +71,29 @@ func (a *api) registerAuthPhase2Routes(r chi.Router) {
 	r.Put("/auth/settings", a.handleUpdateAuthSettings)
 }
 
+func writeAuthBoundaryError(w http.ResponseWriter, err error) {
+	if apiErr, ok := app.AsError(err); ok && (apiErr.Code == "forbidden" || apiErr.Code == "password_change_required") {
+		writeError(w, http.StatusForbidden, apiErr.Code, apiErr.Message)
+		return
+	}
+	writeAppError(w, err)
+}
+
 func (a *api) authActor(w http.ResponseWriter, r *http.Request) (app.AuthenticatedUser, bool) {
+	token, ok := bearerToken(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+		return app.AuthenticatedUser{}, false
+	}
+	user, err := a.auth.AuthenticateNormalAccess(r.Context(), token)
+	if err != nil {
+		writeAuthBoundaryError(w, err)
+		return app.AuthenticatedUser{}, false
+	}
+	return user, true
+}
+
+func (a *api) authActorAllowForcedPasswordChange(w http.ResponseWriter, r *http.Request) (app.AuthenticatedUser, bool) {
 	token, ok := bearerToken(r)
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
@@ -93,11 +115,7 @@ func (a *api) adminActor(w http.ResponseWriter, r *http.Request) (app.Authentica
 	}
 	user, err := a.auth.AuthenticateDeploymentAdmin(r.Context(), token)
 	if err != nil {
-		if apiErr, ok := app.AsError(err); ok && apiErr.Code == "forbidden" {
-			writeError(w, http.StatusForbidden, apiErr.Code, apiErr.Message)
-			return app.AuthenticatedUser{}, false
-		}
-		writeAppError(w, err)
+		writeAuthBoundaryError(w, err)
 		return app.AuthenticatedUser{}, false
 	}
 	return user, true
@@ -170,7 +188,7 @@ func (a *api) handleUpdateOwnProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *api) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request) {
-	actor, ok := a.authActor(w, r)
+	actor, ok := a.authActorAllowForcedPasswordChange(w, r)
 	if !ok { return }
 	var input passwordChangeRequest
 	if !decodeJSON(w, r, &input) { return }
@@ -224,10 +242,6 @@ func (a *api) handleUpdateAuthSettings(w http.ResponseWriter, r *http.Request) {
 	if !ok { return }
 	var input authSettingsResponse
 	if !decodeJSON(w, r, &input) { return }
-	if input.AccessTokenLifetimeSeconds < 300 || input.AccessTokenLifetimeSeconds > 86400 || input.RefreshTokenLifetimeSeconds < 3600 || input.RefreshTokenLifetimeSeconds > 31536000 {
-		writeError(w, http.StatusBadRequest, "auth_settings_invalid", "token lifetime is outside the supported range")
-		return
-	}
 	settings, err := a.auth.UpdateAuthSettings(r.Context(), actor, store.AuthSettings{
 		AccessTokenLifetime: time.Duration(input.AccessTokenLifetimeSeconds) * time.Second,
 		RefreshTokenLifetime: time.Duration(input.RefreshTokenLifetimeSeconds) * time.Second,

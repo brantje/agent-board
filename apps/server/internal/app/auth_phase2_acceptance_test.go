@@ -35,14 +35,13 @@ func TestPhase2UserLifecycleInvalidatesAuthenticationAndForcesAdminPasswordChang
 	if _, err := service.AdminCreatePasswordToken(ctx, admin, pending.User.ID, store.PasswordTokenPurposeReset); err == nil {
 		t.Fatal("pending user received reset token before setup")
 	}
-	if _, err := service.AdminSetPassword(ctx, admin, pending.User.ID, "admin-assigned-password"); err == nil {
-		t.Fatal("pending user received direct password before setup")
+	disabledPending, err := service.AdminSetDisabled(ctx, admin, pending.User.ID, true)
+	if err != nil || disabledPending.Status != store.UserStatusDisabled {
+		t.Fatalf("disable pending user = %+v, %v", disabledPending, err)
 	}
-	if _, err := service.AdminSetDisabled(ctx, admin, pending.User.ID, true); err == nil {
-		t.Fatal("pending user was disabled before setup")
-	}
-	if _, err := service.AdminSetDisabled(ctx, admin, pending.User.ID, false); err == nil {
-		t.Fatal("pending user was enabled before setup")
+	reenabledPending, err := service.AdminSetDisabled(ctx, admin, pending.User.ID, false)
+	if err != nil || reenabledPending.Status != store.UserStatusPending {
+		t.Fatalf("re-enable pending user = %+v, %v", reenabledPending, err)
 	}
 
 	replacement, err := service.AdminCreatePasswordToken(ctx, admin, pending.User.ID, store.PasswordTokenPurposeSetup)

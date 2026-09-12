@@ -214,7 +214,11 @@ func (s *Store) SetUserPassword(ctx context.Context, id, passwordHash string, fo
 
 	value, err := scanUser(tx.QueryRow(ctx, `
 		UPDATE users
-		SET password_hash=$2,force_password_change=$3,auth_version=auth_version+1,updated_at=now()
+		SET password_hash=$2,
+		    status=CASE WHEN status='pending' THEN 'active' ELSE status END,
+		    force_password_change=$3,
+		    auth_version=auth_version+1,
+		    updated_at=now()
 		WHERE id=$1
 		RETURNING `+userColumns, id, passwordHash, forcePasswordChange))
 	if err != nil {

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
@@ -8,11 +9,53 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+type phase2LifecycleMemory struct {
+	*authMemory
+}
+
+func (m *phase2LifecycleMemory) SetUserPassword(_ context.Context, id, passwordHash string, force bool) (store.User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	user, ok := m.users[id]
+	if !ok {
+		return store.User{}, store.ErrNotFound
+	}
+	user.PasswordHash = passwordHash
+	if user.Status == store.UserStatusPending {
+		user.Status = store.UserStatusActive
+	}
+	user.ForcePasswordChange = force
+	user.AuthVersion++
+	m.users[id] = user
+	now := time.Unix(2, 0).UTC()
+	m.revokeUserSessionsLocked(id, now)
+	for key, token := range m.tokens {
+		if token.UserID == id && token.ConsumedAt == nil && token.RevokedAt == nil {
+			token.RevokedAt = &now
+			m.tokens[key] = token
+		}
+	}
+	return user, nil
+}
+
+func phase2ReviewAuthTestService(t *testing.T, authStore store.AuthStore, now *time.Time) *AuthService {
+	t.Helper()
+	service, err := NewAuthService(authStore, AuthServiceConfig{
+		Now:        func() time.Time { return *now },
+		Random:     &deterministicReader{},
+		SigningKey: bytes.Repeat([]byte{9}, 32),
+	})
+	if err != nil {
+		t.Fatalf("new auth service: %v", err)
+	}
+	return service
+}
+
 func TestPhase2AdminDirectPasswordActivatesPendingAndInvalidatesSetup(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	memory := newAuthMemory()
-	service := authTestService(t, memory, &now)
+	memory := &phase2LifecycleMemory{authMemory: newAuthMemory()}
+	service := phase2ReviewAuthTestService(t, memory, &now)
 	admin := bootstrapTestUser(t, service)
 
 	pending, err := service.CreatePendingUser(ctx, admin, PendingUserRegistration{
@@ -115,6 +158,9 @@ func TestPhase2ForcedPasswordChangeBlocksNormalApplicationAccess(t *testing.T) {
 	}
 	if _, err := service.AuthenticateAccessToken(ctx, forced.AccessToken); err != nil {
 		t.Fatalf("minimal self authentication should remain available: %v", err)
+	}
+	if _, err := service.AuthenticateNormalAccess(ctx, forced.AccessToken); err == nil {
+		t.Fatal("forced-change user retained normal authenticated access")
 	}
 	if _, err := service.AuthenticateDeploymentAdmin(ctx, forced.AccessToken); err == nil {
 		t.Fatal("forced-change admin retained deployment-admin access")

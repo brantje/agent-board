@@ -96,8 +96,8 @@ onMounted(() => run(reload))
               <div class="flex flex-wrap gap-2">
                 <UButton v-if="row.original.status === 'pending'" size="xs" variant="soft" @click="issueToken(row.original, 'setup')">New setup token</UButton>
                 <UButton v-if="row.original.status !== 'pending'" size="xs" variant="soft" @click="issueToken(row.original, 'reset')">Reset token</UButton>
-                <UButton v-if="row.original.status !== 'pending'" size="xs" variant="soft" @click="passwordForm.userId = row.original.id">Set password</UButton>
-                <UButton v-if="row.original.status !== 'pending'" size="xs" :color="row.original.status === 'disabled' ? 'success' : 'error'" variant="soft" @click="toggleDisabled(row.original)">{{ row.original.status === 'disabled' ? 'Re-enable' : 'Disable' }}</UButton>
+                <UButton size="xs" variant="soft" @click="passwordForm.userId = row.original.id">Set password</UButton>
+                <UButton size="xs" :color="row.original.status === 'disabled' ? 'success' : 'error'" variant="soft" @click="toggleDisabled(row.original)">{{ row.original.status === 'disabled' ? 'Re-enable' : 'Disable' }}</UButton>
               </div>
             </template>
           </UTable>

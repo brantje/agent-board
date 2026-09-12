@@ -137,7 +137,7 @@ describe('account and deployment admin pages', () => {
     expect(navigateTo).toHaveBeenCalledWith('/auth/login')
   })
 
-  it('shows one-time user setup material only until dismissed and keeps pending users on setup-only actions', async () => {
+  it('shows one-time user setup material only until dismissed and exposes pending lifecycle actions', async () => {
     const users = vi.fn(async () => [pendingUser])
     const createUser = vi.fn(async () => ({
       user: pendingUser,
@@ -152,9 +152,9 @@ describe('account and deployment admin pages', () => {
     const wrapper = mount(UsersPage, { global })
     await flushPromises()
     expect(wrapper.text()).toContain('New setup token')
+    expect(wrapper.text()).toContain('Set password')
+    expect(wrapper.text()).toContain('Disable')
     expect(wrapper.text()).not.toContain('Reset token')
-    expect(wrapper.text()).not.toContain('Set password')
-    expect(wrapper.text()).not.toContain('Disable')
     expect(wrapper.text()).not.toContain('Re-enable')
 
     const inputs = wrapper.findAll('input').slice(0, 3)

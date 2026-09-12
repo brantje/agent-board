@@ -18,6 +18,7 @@ export function useAuth() {
   const persistent = useState('auth-persistent', () => false)
   const initialized = useState('auth-initialized', () => false)
   const refreshing = useState<Promise<boolean> | null>('auth-refreshing', () => null)
+  const generation = useState('auth-generation', () => 0)
 
   function store(tokens: AuthTokens, remember: boolean) {
     user.value = tokens.user
@@ -33,18 +34,32 @@ export function useAuth() {
     if (import.meta.client) clearAuthStorage(localStorage, sessionStorage)
   }
 
+  async function revokeRefreshToken(refreshToken: string) {
+    try {
+      await apiRequest<void>('/api/auth/logout', { method: 'POST', body: { refreshToken } })
+    } catch {
+      // Logout is best-effort. Local state remains authoritative for this client.
+    }
+  }
+
   async function refresh() {
-    if (!credentials.value?.refreshToken) return false
+    const refreshToken = credentials.value?.refreshToken
+    if (!refreshToken) return false
     if (refreshing.value) return refreshing.value
+    const refreshGeneration = generation.value
     refreshing.value = (async () => {
       try {
         const tokens = await apiRequest<AuthTokens>('/api/auth/refresh', {
-          method: 'POST', body: { refreshToken: credentials.value?.refreshToken }
+          method: 'POST', body: { refreshToken }
         })
+        if (generation.value !== refreshGeneration) {
+          await revokeRefreshToken(tokens.refreshToken)
+          return false
+        }
         store(tokens, persistent.value)
         return true
       } catch {
-        clear()
+        if (generation.value === refreshGeneration) clear()
         return false
       } finally {
         refreshing.value = null
@@ -101,9 +116,13 @@ export function useAuth() {
   }
 
   async function logout() {
+    generation.value++
     const refreshToken = credentials.value?.refreshToken
+    const inFlightRefresh = refreshing.value
+    clear()
     try {
-      if (refreshToken) await apiRequest<void>('/api/auth/logout', { method: 'POST', body: { refreshToken } })
+      if (refreshToken) await revokeRefreshToken(refreshToken)
+      if (inFlightRefresh) await inFlightRefresh
     } finally {
       clear()
     }

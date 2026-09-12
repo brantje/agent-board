@@ -32,8 +32,28 @@ type AuthSessionInfo struct {
 	LastUsedAt *time.Time
 }
 
+func requireAuthenticatedUser(actor AuthenticatedUser) error {
+	if actor.ID == "" || actor.Status != store.UserStatusActive {
+		return NewError("forbidden", "authenticated user access is required", store.ErrInvalidArgument)
+	}
+	return nil
+}
+
+func requireNormalAuthenticatedUser(actor AuthenticatedUser) error {
+	if err := requireAuthenticatedUser(actor); err != nil {
+		return err
+	}
+	if actor.ForcePasswordChange {
+		return NewError("password_change_required", "password change is required", store.ErrInvalidArgument)
+	}
+	return nil
+}
+
 func requireDeploymentAdmin(actor AuthenticatedUser) error {
-	if actor.ID == "" || actor.DeploymentRole != store.DeploymentRoleAdmin || actor.Status != store.UserStatusActive {
+	if err := requireNormalAuthenticatedUser(actor); err != nil {
+		return err
+	}
+	if actor.DeploymentRole != store.DeploymentRoleAdmin {
 		return NewError("forbidden", "deployment admin access is required", store.ErrInvalidArgument)
 	}
 	return nil
@@ -45,6 +65,17 @@ func (s *AuthService) phase2Store() (store.AuthPhase2Store, error) {
 		return nil, NewError("auth_management_unavailable", "authentication management is unavailable", store.ErrInvalidArgument)
 	}
 	return extended, nil
+}
+
+func (s *AuthService) AuthenticateNormalAccess(ctx context.Context, accessToken string) (AuthenticatedUser, error) {
+	user, err := s.AuthenticateAccessToken(ctx, accessToken)
+	if err != nil {
+		return AuthenticatedUser{}, err
+	}
+	if err := requireNormalAuthenticatedUser(user); err != nil {
+		return AuthenticatedUser{}, err
+	}
+	return user, nil
 }
 
 func (s *AuthService) AuthenticateDeploymentAdmin(ctx context.Context, accessToken string) (AuthenticatedUser, error) {
@@ -130,13 +161,6 @@ func (s *AuthService) AdminSetPassword(ctx context.Context, actor AuthenticatedU
 	if err := requireDeploymentAdmin(actor); err != nil {
 		return AuthenticatedUser{}, err
 	}
-	user, err := s.store.GetUser(ctx, userID)
-	if err != nil {
-		return AuthenticatedUser{}, err
-	}
-	if user.Status == store.UserStatusPending {
-		return AuthenticatedUser{}, NewError("invalid_user_status", "pending users must complete setup before direct password assignment", store.ErrInvalidArgument)
-	}
 	return s.SetPassword(ctx, userID, password, true)
 }
 
@@ -148,20 +172,20 @@ func (s *AuthService) AdminSetDisabled(ctx context.Context, actor AuthenticatedU
 	if err != nil {
 		return AuthenticatedUser{}, err
 	}
-	if user.Status == store.UserStatusPending {
-		return AuthenticatedUser{}, NewError("invalid_user_status", "pending users must complete setup before they can be disabled or re-enabled", store.ErrInvalidArgument)
-	}
-	if !disabled && user.PasswordHash == "" {
-		return AuthenticatedUser{}, NewError("invalid_user_status", "user cannot be enabled without a password", store.ErrInvalidArgument)
-	}
-	status := store.UserStatusActive
-	if disabled {
-		status = store.UserStatusDisabled
+	status := store.UserStatusDisabled
+	if !disabled {
+		status = store.UserStatusActive
+		if user.PasswordHash == "" {
+			status = store.UserStatusPending
+		}
 	}
 	return s.SetStatus(ctx, userID, status)
 }
 
 func (s *AuthService) UpdateOwnProfile(ctx context.Context, actor AuthenticatedUser, input UserProfileUpdate) (AuthenticatedUser, error) {
+	if err := requireNormalAuthenticatedUser(actor); err != nil {
+		return AuthenticatedUser{}, err
+	}
 	username, email, displayName, err := normalizeIdentity(input.Username, input.Email, input.DisplayName)
 	if err != nil {
 		return AuthenticatedUser{}, err
@@ -181,10 +205,16 @@ func (s *AuthService) UpdateOwnProfile(ctx context.Context, actor AuthenticatedU
 }
 
 func (s *AuthService) ChangeOwnPassword(ctx context.Context, actor AuthenticatedUser, password string) (AuthenticatedUser, error) {
+	if err := requireAuthenticatedUser(actor); err != nil {
+		return AuthenticatedUser{}, err
+	}
 	return s.SetPassword(ctx, actor.ID, password, false)
 }
 
 func (s *AuthService) ListOwnSessions(ctx context.Context, actor AuthenticatedUser) ([]AuthSessionInfo, error) {
+	if err := requireNormalAuthenticatedUser(actor); err != nil {
+		return nil, err
+	}
 	extended, err := s.phase2Store()
 	if err != nil {
 		return nil, err
@@ -206,6 +236,9 @@ func (s *AuthService) ListOwnSessions(ctx context.Context, actor AuthenticatedUs
 }
 
 func (s *AuthService) RevokeOwnSession(ctx context.Context, actor AuthenticatedUser, sessionID string) error {
+	if err := requireNormalAuthenticatedUser(actor); err != nil {
+		return err
+	}
 	extended, err := s.phase2Store()
 	if err != nil {
 		return err
@@ -214,6 +247,9 @@ func (s *AuthService) RevokeOwnSession(ctx context.Context, actor AuthenticatedU
 }
 
 func (s *AuthService) LogoutOtherSessions(ctx context.Context, actor AuthenticatedUser, currentRefreshToken string) error {
+	if err := requireNormalAuthenticatedUser(actor); err != nil {
+		return err
+	}
 	hash, err := hashOpaqueToken(currentRefreshToken)
 	if err != nil {
 		return authFailure()

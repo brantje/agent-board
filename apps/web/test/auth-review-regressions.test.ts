@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useAuth } from '../app/composables/useAuth'
 import UsersPage from '../app/pages/settings/users.vue'
 import AuthenticationPage from '../app/pages/settings/authentication.vue'
-import { AUTH_STORAGE_KEY } from '../app/utils/auth-storage'
 import { uiStubs } from './ui-stubs'
 
 const activeUser = {
@@ -93,15 +92,9 @@ describe('phase 2 auth review regressions', () => {
     const wrapper = mount(AuthenticationPage, { global: pageGlobal })
     await flushPromises()
     expect(wrapper.text()).toContain('settings load failed')
-
-    const form = wrapper.find('form')
-    if (form.exists()) {
-      await form.trigger('submit')
-      await flushPromises()
-    }
-
-    expect(updateSettings).not.toHaveBeenCalled()
     expect(wrapper.find('form').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Retry')
+    expect(updateSettings).not.toHaveBeenCalled()
   })
 
   it('keeps logout authoritative over an in-flight refresh and revokes the rotated token', async () => {
@@ -129,7 +122,7 @@ describe('phase 2 auth review regressions', () => {
 
     const auth = useAuth()
     await auth.login('admin', 'test-password-value', true)
-    expect(localStorage.getItem(AUTH_STORAGE_KEY)).toContain('test-refresh-one')
+    expect(auth.credentials.value?.refreshToken).toBe('test-refresh-one')
 
     const refreshPromise = auth.refresh()
     await refreshStarted
@@ -140,11 +133,12 @@ describe('phase 2 auth review regressions', () => {
     await logoutPromise
     await flushPromises()
 
+    expect(revokedRefreshTokens).toContain('test-refresh-one')
     expect(revokedRefreshTokens).toContain('test-refresh-two')
     expect(auth.user.value).toBeNull()
     expect(auth.credentials.value).toBeNull()
     expect(auth.isAuthenticated.value).toBe(false)
-    expect(localStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
-    expect(sessionStorage.getItem(AUTH_STORAGE_KEY)).toBeNull()
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
   })
 })
