@@ -22,32 +22,32 @@ type ProjectDirectoryGroup struct {
 	Name string
 }
 
-func (s *Service) projectAccessStore() (store.ProjectAccessStore, error) {
-	if s == nil {
-		return nil, errors.New("control-plane service is required")
-	}
-	value, ok := s.store.(store.ProjectAccessStore)
-	if !ok {
-		return nil, errors.New("project access store is required")
-	}
-	return value, nil
+type ProjectAccessService struct {
+	controlPlane *Service
+	store        store.ProjectAccessStore
 }
 
-func (s *Service) ListProjectsForActor(ctx context.Context, actor AuthenticatedUser) ([]store.Project, error) {
+func NewProjectAccessService(controlPlane *Service, accessStore store.ProjectAccessStore) (*ProjectAccessService, error) {
+	if controlPlane == nil {
+		return nil, errors.New("control-plane service is required")
+	}
+	if accessStore == nil {
+		return nil, errors.New("project access store is required")
+	}
+	return &ProjectAccessService{controlPlane: controlPlane, store: accessStore}, nil
+}
+
+func (s *ProjectAccessService) ListProjects(ctx context.Context, actor AuthenticatedUser) ([]store.Project, error) {
 	if err := requireNormalAuthenticatedUser(actor); err != nil {
 		return nil, err
 	}
 	if actor.DeploymentRole == store.DeploymentRoleAdmin {
-		return s.ListProjects(ctx)
+		return s.controlPlane.ListProjects(ctx)
 	}
-	accessStore, err := s.projectAccessStore()
-	if err != nil {
-		return nil, err
-	}
-	return accessStore.ListProjectsForUser(ctx, actor.ID)
+	return s.store.ListProjectsForUser(ctx, actor.ID)
 }
 
-func (s *Service) CreateProjectForActor(ctx context.Context, actor AuthenticatedUser, input store.Project) (store.Project, error) {
+func (s *ProjectAccessService) CreateProject(ctx context.Context, actor AuthenticatedUser, input store.Project) (store.Project, error) {
 	if err := requireNormalAuthenticatedUser(actor); err != nil {
 		return store.Project{}, err
 	}
@@ -57,33 +57,25 @@ func (s *Service) CreateProjectForActor(ctx context.Context, actor Authenticated
 	if err := validateProject(input); err != nil {
 		return store.Project{}, err
 	}
-	prepared, err := s.ensureProjectRepository(ctx, input)
+	prepared, err := s.controlPlane.ensureProjectRepository(ctx, input)
 	if err != nil {
 		return store.Project{}, err
 	}
-	accessStore, err := s.projectAccessStore()
-	if err != nil {
-		return store.Project{}, err
-	}
-	project, err := accessStore.CreateProjectWithAdmin(ctx, prepared, actor.ID)
+	project, err := s.store.CreateProjectWithAdmin(ctx, prepared, actor.ID)
 	return project, translateStoreError(err, "project")
 }
 
-func (s *Service) EffectiveProjectRole(ctx context.Context, actor AuthenticatedUser, projectID string) (string, error) {
+func (s *ProjectAccessService) EffectiveRole(ctx context.Context, actor AuthenticatedUser, projectID string) (string, error) {
 	if err := requireNormalAuthenticatedUser(actor); err != nil {
 		return "", err
 	}
 	if actor.DeploymentRole == store.DeploymentRoleAdmin {
-		if _, err := s.GetProject(ctx, projectID); err != nil {
+		if _, err := s.controlPlane.GetProject(ctx, projectID); err != nil {
 			return "", err
 		}
 		return store.ProjectRoleAdmin, nil
 	}
-	accessStore, err := s.projectAccessStore()
-	if err != nil {
-		return "", err
-	}
-	role, err := accessStore.EffectiveProjectRole(ctx, projectID, actor.ID)
+	role, err := s.store.EffectiveProjectRole(ctx, projectID, actor.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		return "", NewError("project_not_found", "project not found", err)
 	}
@@ -93,11 +85,11 @@ func (s *Service) EffectiveProjectRole(ctx context.Context, actor AuthenticatedU
 	return role, nil
 }
 
-func (s *Service) RequireProjectRole(ctx context.Context, actor AuthenticatedUser, projectID, minimumRole string) (string, error) {
+func (s *ProjectAccessService) RequireRole(ctx context.Context, actor AuthenticatedUser, projectID, minimumRole string) (string, error) {
 	if !store.ValidProjectRole(minimumRole) {
 		return "", NewError("invalid_argument", "project role is invalid", store.ErrInvalidArgument)
 	}
-	role, err := s.EffectiveProjectRole(ctx, actor, projectID)
+	role, err := s.EffectiveRole(ctx, actor, projectID)
 	if err != nil {
 		return "", err
 	}
@@ -107,94 +99,70 @@ func (s *Service) RequireProjectRole(ctx context.Context, actor AuthenticatedUse
 	return role, nil
 }
 
-func (s *Service) GetProjectForActor(ctx context.Context, actor AuthenticatedUser, projectID string) (store.Project, string, error) {
-	role, err := s.RequireProjectRole(ctx, actor, projectID, store.ProjectRoleViewer)
+func (s *ProjectAccessService) GetProject(ctx context.Context, actor AuthenticatedUser, projectID string) (store.Project, string, error) {
+	role, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleViewer)
 	if err != nil {
 		return store.Project{}, "", err
 	}
-	project, err := s.GetProject(ctx, projectID)
+	project, err := s.controlPlane.GetProject(ctx, projectID)
 	return project, role, err
 }
 
-func (s *Service) UpdateProjectForActor(ctx context.Context, actor AuthenticatedUser, input store.Project) (store.Project, error) {
-	if _, err := s.RequireProjectRole(ctx, actor, input.ID, store.ProjectRoleAdmin); err != nil {
+func (s *ProjectAccessService) UpdateProject(ctx context.Context, actor AuthenticatedUser, input store.Project) (store.Project, error) {
+	if _, err := s.RequireRole(ctx, actor, input.ID, store.ProjectRoleAdmin); err != nil {
 		return store.Project{}, err
 	}
-	return s.UpdateProject(ctx, input)
+	return s.controlPlane.UpdateProject(ctx, input)
 }
 
-func (s *Service) ListProjectUserAccessForActor(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.ProjectUserAccessView, error) {
-	if _, err := s.RequireProjectRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+func (s *ProjectAccessService) ListUserAccess(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.ProjectUserAccessView, error) {
+	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
 		return nil, err
 	}
-	accessStore, err := s.projectAccessStore()
-	if err != nil {
-		return nil, err
-	}
-	values, err := accessStore.ListProjectUserAccess(ctx, projectID)
+	values, err := s.store.ListProjectUserAccess(ctx, projectID)
 	return values, projectAccessStoreError(err)
 }
 
-func (s *Service) UpsertProjectUserAccessForActor(ctx context.Context, actor AuthenticatedUser, input store.ProjectUserAccess) (store.ProjectUserAccess, error) {
-	if _, err := s.RequireProjectRole(ctx, actor, input.ProjectID, store.ProjectRoleAdmin); err != nil {
+func (s *ProjectAccessService) UpsertUserAccess(ctx context.Context, actor AuthenticatedUser, input store.ProjectUserAccess) (store.ProjectUserAccess, error) {
+	if _, err := s.RequireRole(ctx, actor, input.ProjectID, store.ProjectRoleAdmin); err != nil {
 		return store.ProjectUserAccess{}, err
 	}
 	if !store.ValidProjectRole(input.Role) {
 		return store.ProjectUserAccess{}, NewError("invalid_argument", "project role must be admin, member, or viewer", store.ErrInvalidArgument)
 	}
-	authStore, ok := s.store.(store.AuthStore)
-	if !ok {
-		return store.ProjectUserAccess{}, errors.New("auth store is required")
-	}
-	if _, err := authStore.GetUser(ctx, input.UserID); err != nil {
+	if _, err := s.store.GetProjectAccessUser(ctx, input.UserID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			return store.ProjectUserAccess{}, NewError("user_not_found", "user not found", err)
 		}
 		return store.ProjectUserAccess{}, err
 	}
-	accessStore, err := s.projectAccessStore()
-	if err != nil {
-		return store.ProjectUserAccess{}, err
-	}
-	value, err := accessStore.UpsertProjectUserAccess(ctx, input)
+	value, err := s.store.UpsertProjectUserAccess(ctx, input)
 	return value, projectAccessStoreError(err)
 }
 
-func (s *Service) DeleteProjectUserAccessForActor(ctx context.Context, actor AuthenticatedUser, projectID, userID string) error {
-	if _, err := s.RequireProjectRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+func (s *ProjectAccessService) DeleteUserAccess(ctx context.Context, actor AuthenticatedUser, projectID, userID string) error {
+	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
 		return err
 	}
-	accessStore, err := s.projectAccessStore()
-	if err != nil {
-		return err
-	}
-	return projectAccessStoreError(accessStore.DeleteProjectUserAccess(ctx, projectID, userID))
+	return projectAccessStoreError(s.store.DeleteProjectUserAccess(ctx, projectID, userID))
 }
 
-func (s *Service) ListProjectGroupAccessForActor(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.ProjectGroupAccessView, error) {
-	if _, err := s.RequireProjectRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+func (s *ProjectAccessService) ListGroupAccess(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.ProjectGroupAccessView, error) {
+	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
 		return nil, err
 	}
-	accessStore, err := s.projectAccessStore()
-	if err != nil {
-		return nil, err
-	}
-	values, err := accessStore.ListProjectGroupAccess(ctx, projectID)
+	values, err := s.store.ListProjectGroupAccess(ctx, projectID)
 	return values, projectAccessStoreError(err)
 }
 
-func (s *Service) UpsertProjectGroupAccessForActor(ctx context.Context, actor AuthenticatedUser, input store.ProjectGroupAccess) (store.ProjectGroupAccess, error) {
-	if _, err := s.RequireProjectRole(ctx, actor, input.ProjectID, store.ProjectRoleAdmin); err != nil {
+func (s *ProjectAccessService) UpsertGroupAccess(ctx context.Context, actor AuthenticatedUser, input store.ProjectGroupAccess) (store.ProjectGroupAccess, error) {
+	if _, err := s.RequireRole(ctx, actor, input.ProjectID, store.ProjectRoleAdmin); err != nil {
 		return store.ProjectGroupAccess{}, err
 	}
 	if !store.ValidProjectRole(input.Role) {
 		return store.ProjectGroupAccess{}, NewError("invalid_argument", "project role must be admin, member, or viewer", store.ErrInvalidArgument)
 	}
-	groupStore, ok := s.store.(store.GroupStore)
-	if !ok {
-		return store.ProjectGroupAccess{}, errors.New("group store is required")
-	}
-	groups, err := groupStore.ListGroups(ctx)
+	groups, err := s.store.ListProjectAccessGroups(ctx)
 	if err != nil {
 		return store.ProjectGroupAccess{}, err
 	}
@@ -208,34 +176,22 @@ func (s *Service) UpsertProjectGroupAccessForActor(ctx context.Context, actor Au
 	if !found {
 		return store.ProjectGroupAccess{}, NewError("group_not_found", "group not found", store.ErrNotFound)
 	}
-	accessStore, err := s.projectAccessStore()
-	if err != nil {
-		return store.ProjectGroupAccess{}, err
-	}
-	value, err := accessStore.UpsertProjectGroupAccess(ctx, input)
+	value, err := s.store.UpsertProjectGroupAccess(ctx, input)
 	return value, projectAccessStoreError(err)
 }
 
-func (s *Service) DeleteProjectGroupAccessForActor(ctx context.Context, actor AuthenticatedUser, projectID, groupID string) error {
-	if _, err := s.RequireProjectRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+func (s *ProjectAccessService) DeleteGroupAccess(ctx context.Context, actor AuthenticatedUser, projectID, groupID string) error {
+	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
 		return err
 	}
-	accessStore, err := s.projectAccessStore()
-	if err != nil {
-		return err
-	}
-	return projectAccessStoreError(accessStore.DeleteProjectGroupAccess(ctx, projectID, groupID))
+	return projectAccessStoreError(s.store.DeleteProjectGroupAccess(ctx, projectID, groupID))
 }
 
-func (s *Service) SearchProjectUsersForActor(ctx context.Context, actor AuthenticatedUser, projectID, query string) ([]ProjectDirectoryUser, error) {
-	if _, err := s.RequireProjectRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+func (s *ProjectAccessService) SearchUsers(ctx context.Context, actor AuthenticatedUser, projectID, query string) ([]ProjectDirectoryUser, error) {
+	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
 		return nil, err
 	}
-	userStore, ok := s.store.(store.AuthPhase2Store)
-	if !ok {
-		return nil, errors.New("user directory store is required")
-	}
-	users, err := userStore.ListUsers(ctx)
+	users, err := s.store.ListProjectAccessUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -256,15 +212,11 @@ func (s *Service) SearchProjectUsersForActor(ctx context.Context, actor Authenti
 	return result, nil
 }
 
-func (s *Service) SearchProjectGroupsForActor(ctx context.Context, actor AuthenticatedUser, projectID, query string) ([]ProjectDirectoryGroup, error) {
-	if _, err := s.RequireProjectRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
+func (s *ProjectAccessService) SearchGroups(ctx context.Context, actor AuthenticatedUser, projectID, query string) ([]ProjectDirectoryGroup, error) {
+	if _, err := s.RequireRole(ctx, actor, projectID, store.ProjectRoleAdmin); err != nil {
 		return nil, err
 	}
-	groupStore, ok := s.store.(store.GroupStore)
-	if !ok {
-		return nil, errors.New("group store is required")
-	}
-	groups, err := groupStore.ListGroups(ctx)
+	groups, err := s.store.ListProjectAccessGroups(ctx)
 	if err != nil {
 		return nil, err
 	}
