@@ -39,9 +39,6 @@ func (s *reviewFeedbackStore) GetModelProfile(context.Context, *string, string) 
 func (s *reviewFeedbackStore) GetProvider(context.Context, *string, string) (store.Provider, error) {
 	return store.Provider{}, store.ErrNotFound
 }
-func (s *reviewFeedbackStore) GetRuntime(context.Context, *string, string) (store.Runtime, error) {
-	return store.Runtime{}, store.ErrNotFound
-}
 func (s *reviewFeedbackStore) GetReview(context.Context, string, string) (store.Review, error) {
 	return store.Review{}, store.ErrNotFound
 }
