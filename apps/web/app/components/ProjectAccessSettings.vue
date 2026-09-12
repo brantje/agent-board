@@ -10,13 +10,12 @@ import type {
 } from '../types/project-access'
 import { ApiError, apiQuery, apiRequest } from '../utils/api'
 
-const props = defineProps<{ projectId: string }>()
+const props = defineProps<{ projectId: string; effectiveRole: ProjectRole }>()
 const roles: { label: string; value: ProjectRole }[] = [
   { label: 'Viewer', value: 'viewer' },
   { label: 'Member', value: 'member' },
   { label: 'Admin', value: 'admin' }
 ]
-const effectiveRole = ref<ProjectRole>()
 const users = ref<ProjectUserAccess[]>([])
 const groups = ref<ProjectGroupAccess[]>([])
 const userQuery = ref('')
@@ -28,7 +27,7 @@ const actionError = ref('')
 const loadingKey = ref('')
 
 const base = computed(() => `/api/projects/${props.projectId}/access`)
-const isAdmin = computed(() => effectiveRole.value === 'admin')
+const isAdmin = computed(() => props.effectiveRole === 'admin')
 
 function accessError(error: unknown) {
   if (error instanceof ApiError && error.code === 'last_project_admin') {
@@ -41,9 +40,7 @@ async function load() {
   pending.value = true
   actionError.value = ''
   try {
-    const role = await apiRequest<ProjectRoleResponse>(`${base.value}/effective-role`)
-    effectiveRole.value = role.role
-    if (role.role === 'admin') {
+    if (props.effectiveRole === 'admin') {
       const [userAccess, groupAccess] = await Promise.all([
         apiRequest<ProjectUserAccess[]>(`${base.value}/users`),
         apiRequest<ProjectGroupAccess[]>(`${base.value}/groups`)
@@ -177,15 +174,14 @@ onMounted(load)
     <template v-else>
       <UAlert v-if="actionError" title="Project access update failed" :description="actionError" color="error" class="mb-4" />
       <UAlert
-        v-if="effectiveRole"
         :title="`Your effective role is ${effectiveRole}`"
         description="Viewer can read, Member can perform normal workflow mutations, and Admin can manage Project settings and access."
         color="neutral"
         class="mb-4"
       />
-      <p v-if="!isAdmin" class="text-sm text-muted">Only Project admins can manage User and Group grants.</p>
+      <p v-if="!isAdmin" data-testid="access-readonly" class="text-sm text-muted">Only Project admins can manage User and Group grants.</p>
 
-      <div v-else class="space-y-6">
+      <div v-else data-testid="access-management" class="space-y-6">
         <section>
           <h3 class="font-medium">Users</h3>
           <div class="mt-2 flex gap-2">
