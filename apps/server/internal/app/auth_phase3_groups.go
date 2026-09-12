@@ -143,6 +143,9 @@ func (s *AuthService) RemoveGroupMember(ctx context.Context, actor Authenticated
 		return err
 	}
 	if err := groups.RemoveGroupMember(ctx, groupID, userID); err != nil {
+		if errors.Is(err, store.ErrGroupMemberNotFound) {
+			return NewError("group_member_not_found", "group member not found", err)
+		}
 		return groupStoreError(err, "group membership conflict")
 	}
 	return nil

@@ -131,7 +131,7 @@ func (m *groupAuthMemory) RemoveGroupMember(_ context.Context, groupID, userID s
 		return store.ErrNotFound
 	}
 	if _, exists := m.members[groupID][userID]; !exists {
-		return store.ErrNotFound
+		return store.ErrGroupMemberNotFound
 	}
 	delete(m.members[groupID], userID)
 	return nil

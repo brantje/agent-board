@@ -74,6 +74,8 @@ func TestPhase3GroupApplicationErrorContracts(t *testing.T) {
 	requirePhase3ErrorCode(t, err, "group_not_found")
 	err = service.RemoveGroupMember(ctx, admin, "missing", "active")
 	requirePhase3ErrorCode(t, err, "group_not_found")
+	err = service.RemoveGroupMember(ctx, admin, group.ID, "active")
+	requirePhase3ErrorCode(t, err, "group_member_not_found")
 
 	if _, err := service.UpdateGroup(ctx, admin, group.ID, "   "); err == nil {
 		t.Fatal("blank group rename was accepted")

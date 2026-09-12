@@ -3,6 +3,7 @@ package httpapi
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 )
@@ -105,18 +106,20 @@ func TestPhase3GroupHTTPValidationAndNotFoundContracts(t *testing.T) {
 		method string
 		path   string
 		body   string
+		code   string
 	}{
-		{name: "update group", method: http.MethodPatch, path: "/api/groups/" + missingGroup, body: `{"name":"missing"}`},
-		{name: "delete group", method: http.MethodDelete, path: "/api/groups/" + missingGroup},
-		{name: "list members", method: http.MethodGet, path: "/api/groups/" + missingGroup + "/members"},
-		{name: "add missing user", method: http.MethodPost, path: "/api/groups/" + group.ID + "/members", body: `{"userID":"` + missingUser + `"}`},
-		{name: "remove absent membership", method: http.MethodDelete, path: "/api/groups/" + group.ID + "/members/" + missingUser},
+		{name: "update group", method: http.MethodPatch, path: "/api/groups/" + missingGroup, body: `{"name":"missing"}`, code: "group_not_found"},
+		{name: "delete group", method: http.MethodDelete, path: "/api/groups/" + missingGroup, code: "group_not_found"},
+		{name: "list members", method: http.MethodGet, path: "/api/groups/" + missingGroup + "/members", code: "group_not_found"},
+		{name: "add missing user", method: http.MethodPost, path: "/api/groups/" + group.ID + "/members", body: `{"userID":"` + missingUser + `"}`, code: "user_not_found"},
+		{name: "remove missing group", method: http.MethodDelete, path: "/api/groups/" + missingGroup + "/members/" + missingUser, code: "group_not_found"},
+		{name: "remove absent membership", method: http.MethodDelete, path: "/api/groups/" + group.ID + "/members/" + missingUser, code: "group_member_not_found"},
 	}
 	for _, tt := range notFoundRequests {
 		t.Run("not found "+tt.name, func(t *testing.T) {
 			response := authHTTPRequest(t, handler, tt.method, tt.path, tt.body, headers)
-			if response.Code != http.StatusNotFound {
-				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), `"code":"`+tt.code+`"`) {
+				t.Fatalf("status=%d code=%q body=%s", response.Code, tt.code, response.Body.String())
 			}
 		})
 	}

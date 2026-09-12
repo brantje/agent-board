@@ -114,12 +114,24 @@ func (s *Store) AddGroupMember(ctx context.Context, groupID, userID string) erro
 }
 
 func (s *Store) RemoveGroupMember(ctx context.Context, groupID, userID string) error {
-	tag, err := s.pool.Exec(ctx, `DELETE FROM group_members WHERE group_id=$1 AND user_id=$2`, groupID, userID)
-	if err != nil {
+	var groupExists, removed bool
+	if err := s.pool.QueryRow(ctx, `
+        WITH deleted AS (
+            DELETE FROM group_members
+            WHERE group_id=$1 AND user_id=$2
+            RETURNING 1
+        )
+        SELECT
+            EXISTS (SELECT 1 FROM groups WHERE id=$1),
+            EXISTS (SELECT 1 FROM deleted)
+    `, groupID, userID).Scan(&groupExists, &removed); err != nil {
 		return notFound(err)
 	}
-	if tag.RowsAffected() == 0 {
+	if !groupExists {
 		return store.ErrNotFound
+	}
+	if !removed {
+		return store.ErrGroupMemberNotFound
 	}
 	return nil
 }

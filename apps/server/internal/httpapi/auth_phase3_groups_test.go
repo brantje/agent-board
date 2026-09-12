@@ -110,7 +110,7 @@ func (s *phase3GroupHTTPStore) RemoveGroupMember(_ context.Context, groupID, use
 		return store.ErrNotFound
 	}
 	if _, exists := s.members[groupID][userID]; !exists {
-		return store.ErrNotFound
+		return store.ErrGroupMemberNotFound
 	}
 	delete(s.members[groupID], userID)
 	return nil

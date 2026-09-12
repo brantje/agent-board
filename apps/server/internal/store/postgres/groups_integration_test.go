@@ -64,7 +64,7 @@ func TestGroupStoreCRUDMembershipAndDeletion(t *testing.T) {
 	if err := s.RemoveGroupMember(ctx, group.ID, active.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.RemoveGroupMember(ctx, group.ID, active.ID); !errors.Is(err, store.ErrNotFound) {
+	if err := s.RemoveGroupMember(ctx, group.ID, active.ID); !errors.Is(err, store.ErrGroupMemberNotFound) {
 		t.Fatalf("remove missing membership = %v", err)
 	}
 
@@ -111,6 +111,9 @@ func TestGroupStoreConstraints(t *testing.T) {
 	missingGroupID := "00000000-0000-0000-0000-000000000999"
 	if err := s.AddGroupMember(ctx, missingGroupID, user.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("missing group membership = %v", err)
+	}
+	if err := s.RemoveGroupMember(ctx, missingGroupID, user.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("remove from missing group = %v", err)
 	}
 	missingUserID := "00000000-0000-0000-0000-000000000998"
 	if err := s.AddGroupMember(ctx, group.ID, missingUserID); !errors.Is(err, store.ErrInvalidArgument) {

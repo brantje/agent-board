@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+var ErrGroupMemberNotFound = errors.New("store: group member not found")
 
 type Group struct {
 	ID        string
