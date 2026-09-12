@@ -18,9 +18,8 @@ import (
 const (
 	evidenceChunkID    = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 	evidenceArtifactID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-	evidenceRuntimeID  = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	evidenceRunnerID   = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 	evidenceSessionID  = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
-	evidenceRuntimeCfg = "ffffffff-ffff-4fff-8fff-ffffffffffff"
 )
 
 type httpRunEvidenceStore struct {
@@ -41,18 +40,14 @@ func (s *httpRunEvidenceStore) GetRunProvenance(context.Context, string, string)
 	return json.RawMessage(`{"schemaVersion":1}`), nil
 }
 
-func (s *httpRunEvidenceStore) ListExecutionSessions(context.Context, string, []string) ([]store.ExecutionSession, error) {
+func (s *httpRunEvidenceStore) ListExecutionSessionsByRun(_ context.Context, pid, id string, _ []string) ([]store.ExecutionSession, error) {
+	if pid != projectID || id != runID {
+		return nil, store.ErrNotFound
+	}
 	return []store.ExecutionSession{{
-		ID: evidenceSessionID, ProjectID: projectID, RunID: runID, RuntimeInstanceID: evidenceRuntimeID,
+		ID: evidenceSessionID, ProjectID: projectID, RunID: runID, RunnerID: evidenceRunnerID,
 		Status: "COMPLETED", CWD: "/workspace", CommandArgv: json.RawMessage(`["go","test","./..."]`),
 	}}, nil
-}
-
-func (s *httpRunEvidenceStore) GetRuntimeInstance(_ context.Context, pid, id string) (store.RuntimeInstance, error) {
-	if pid != projectID || id != evidenceRuntimeID {
-		return store.RuntimeInstance{}, store.ErrNotFound
-	}
-	return store.RuntimeInstance{ID: id, ProjectID: pid, RuntimeID: evidenceRuntimeCfg, Status: "DESTROYED", RunnerStatus: "UNAVAILABLE"}, nil
 }
 
 func (s *httpRunEvidenceStore) ListRunEvents(_ context.Context, pid, id string, after int64, _ int) ([]store.Event, error) {
@@ -60,28 +55,49 @@ func (s *httpRunEvidenceStore) ListRunEvents(_ context.Context, pid, id string, 
 		return nil, nil
 	}
 	one, two := int64(1), int64(2)
-	runtimeInstanceID := evidenceRuntimeID
 	return []store.Event{
-		{ID: "11111111-aaaa-4aaa-8aaa-111111111111", SchemaVersion: 1, Type: "test.completed", ProjectID: projectID, RunID: httpEvidenceStringPtr(runID), RuntimeInstanceID: &runtimeInstanceID, Sequence: &one, Actor: store.EmptyObject, Payload: json.RawMessage(`{"status":"passed"}`)},
-		{ID: "22222222-aaaa-4aaa-8aaa-222222222222", SchemaVersion: 1, Type: "file.modified", ProjectID: projectID, RunID: httpEvidenceStringPtr(runID), RuntimeInstanceID: &runtimeInstanceID, Sequence: &two, Actor: store.EmptyObject, Payload: json.RawMessage(`{"path":"README.md"}`)},
+		{ID: "11111111-aaaa-4aaa-8aaa-111111111111", SchemaVersion: 1, Type: "test.completed", ProjectID: projectID, RunID: httpEvidenceStringPtr(runID), Sequence: &one, Actor: store.EmptyObject, Payload: json.RawMessage(`{"status":"passed"}`)},
+		{ID: "22222222-aaaa-4aaa-8aaa-222222222222", SchemaVersion: 1, Type: "file.modified", ProjectID: projectID, RunID: httpEvidenceStringPtr(runID), Sequence: &two, Actor: store.EmptyObject, Payload: json.RawMessage(`{"path":"README.md"}`)},
+	}, nil
+}
+
+func (s *httpRunEvidenceStore) GetRawOutputChunk(_ context.Context, pid, id, chunkID string) (store.RawOutputChunk, error) {
+	if pid != projectID || id != runID || chunkID != evidenceChunkID {
+		return store.RawOutputChunk{}, store.ErrNotFound
+	}
+	digest := "sha256:raw"
+	return store.RawOutputChunk{
+		ID: evidenceChunkID, ProjectID: projectID, IssueID: issueID, RunID: runID, Stream: "STDOUT", Sequence: 1,
+		StorageRef: s.rawRef, SizeBytes: s.rawSize, Digest: &digest,
 	}, nil
 }
 
 func (s *httpRunEvidenceStore) ListRawOutputChunks(context.Context, string, string) ([]store.RawOutputChunk, error) {
-	digest := "sha256:raw"
-	return []store.RawOutputChunk{{
-		ID: evidenceChunkID, ProjectID: projectID, IssueID: issueID, RunID: runID, Stream: "STDOUT", Sequence: 1,
-		StorageRef: s.rawRef, SizeBytes: s.rawSize, Digest: &digest,
-	}}, nil
+	chunk, err := s.GetRawOutputChunk(context.Background(), projectID, runID, evidenceChunkID)
+	if err != nil {
+		return nil, err
+	}
+	return []store.RawOutputChunk{chunk}, nil
+}
+
+func (s *httpRunEvidenceStore) GetArtifact(_ context.Context, pid, id, artifactID string) (store.Artifact, error) {
+	if pid != projectID || id != runID || artifactID != evidenceArtifactID {
+		return store.Artifact{}, store.ErrNotFound
+	}
+	mediaType := "application/json"
+	digest := "sha256:artifact"
+	return store.Artifact{
+		ID: evidenceArtifactID, ProjectID: projectID, IssueID: issueID, RunID: runID, Name: "candidate.json", Kind: "candidate_manifest",
+		MediaType: &mediaType, SizeBytes: s.artifactSize, Digest: &digest, StorageRef: s.artifactRef, SafeMetadata: store.EmptyObject,
+	}, nil
 }
 
 func (s *httpRunEvidenceStore) ListArtifacts(context.Context, string, string) ([]store.Artifact, error) {
-	mediaType := "application/json"
-	digest := "sha256:artifact"
-	return []store.Artifact{{
-		ID: evidenceArtifactID, ProjectID: projectID, IssueID: issueID, RunID: runID, Name: "candidate.json", Kind: "candidate_manifest",
-		MediaType: &mediaType, SizeBytes: s.artifactSize, Digest: &digest, StorageRef: s.artifactRef, SafeMetadata: store.EmptyObject,
-	}}, nil
+	artifact, err := s.GetArtifact(context.Background(), projectID, runID, evidenceArtifactID)
+	if err != nil {
+		return nil, err
+	}
+	return []store.Artifact{artifact}, nil
 }
 
 func TestRunEvidenceRoutesExposeScopedMetadataAndContent(t *testing.T) {
@@ -112,13 +128,13 @@ func TestRunEvidenceRoutesExposeScopedMetadataAndContent(t *testing.T) {
 			t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 		}
 		body := rec.Body.String()
-		for _, want := range []string{"\"tests\"", "\"fileChanges\"", "\"contentPath\"", "\"runtimeId\"", evidenceChunkID, evidenceArtifactID, evidenceRuntimeCfg} {
+		for _, want := range []string{"\"tests\"", "\"fileChanges\"", "\"contentPath\"", "\"runnerId\"", evidenceChunkID, evidenceArtifactID, evidenceRunnerID} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("response missing %s: %s", want, body)
 			}
 		}
-		if strings.Contains(body, "blob:") || strings.Contains(body, "storageRef") {
-			t.Fatalf("response exposed storage reference: %s", body)
+		if strings.Contains(body, "runtimeId") || strings.Contains(body, "blob:") || strings.Contains(body, "storageRef") {
+			t.Fatalf("response exposed removed or internal metadata: %s", body)
 		}
 	})
 
