@@ -1,6 +1,7 @@
 package evidence
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -36,8 +37,9 @@ func TestCredentialSentinelsAreAbsentFromPersistedEvidenceAndFailures(t *testing
 	if err := secured.PutRunProvenance(t.Context(), "project", runID, json.RawMessage(`{"credentials":"`+joined+`"}`)); err != nil {
 		t.Fatal(err)
 	}
+	runRef := runID
 	if _, err := secured.AppendEvent(t.Context(), store.Event{
-		RunID: &[]string{runID}[0], Actor: json.RawMessage(`{"identity":"`+joined+`"}`), Payload: json.RawMessage(`{"message":"`+joined+`"}`),
+		RunID: &runRef, Actor: json.RawMessage(`{"identity":"`+joined+`"}`), Payload: json.RawMessage(`{"message":"`+joined+`"}`),
 	}); err != nil {
 		t.Fatal(err)
 	}
