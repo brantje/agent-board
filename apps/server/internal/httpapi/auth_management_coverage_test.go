@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -113,18 +114,25 @@ func TestAuthPhase2HTTPAlternateAndErrorPaths(t *testing.T) {
 
 	// The in-memory store predates UUID-constrained session routes. Give its two
 	// sessions routable IDs so this HTTP test reaches the ownership/revoke path.
+	firstDigest := sha256.Sum256([]byte(first.RefreshToken))
+	firstKey := authHTTPHashKey(firstDigest[:])
+	firstSessionID := "00000000-0000-0000-0000-000000000111"
+	secondSessionID := "00000000-0000-0000-0000-000000000112"
+	foundFirst := false
 	authStore.mu.Lock()
-	sessionIDs := []string{
-		"00000000-0000-0000-0000-000000000111",
-		"00000000-0000-0000-0000-000000000112",
-	}
-	i := 0
 	for key, session := range authStore.sessions {
-		session.ID = sessionIDs[i]
+		if key == firstKey {
+			session.ID = firstSessionID
+			foundFirst = true
+		} else {
+			session.ID = secondSessionID
+		}
 		authStore.sessions[key] = session
-		i++
 	}
 	authStore.mu.Unlock()
+	if !foundFirst {
+		t.Fatal("first login session not found")
+	}
 
 	for _, path := range []string{"/api/auth/users", "/api/auth/me/sessions", "/api/auth/settings"} {
 		response := authHTTPRequest(t, handler, http.MethodGet, path, "", nil)
@@ -166,7 +174,7 @@ func TestAuthPhase2HTTPAlternateAndErrorPaths(t *testing.T) {
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("missing session status=%d body=%s", missing.Code, missing.Body.String())
 	}
-	revoked := authHTTPRequest(t, handler, http.MethodDelete, "/api/auth/me/sessions/"+sessions[0].ID, "", headers)
+	revoked := authHTTPRequest(t, handler, http.MethodDelete, "/api/auth/me/sessions/"+firstSessionID, "", headers)
 	if revoked.Code != http.StatusNoContent {
 		t.Fatalf("revoke status=%d body=%s", revoked.Code, revoked.Body.String())
 	}
