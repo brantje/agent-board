@@ -2,12 +2,20 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func (s *Service) recordIssueEvent(ctx context.Context, eventType string, issue store.Issue, payload any) (store.Event, error) {
+func issueCreatorActor(issue store.Issue) (json.RawMessage, error) {
+	if issue.CreatedByType == nil || issue.CreatedByID == nil {
+		return append(json.RawMessage(nil), store.EmptyObject...), nil
+	}
+	return evidence.EncodePayload(map[string]string{"type": *issue.CreatedByType, "id": *issue.CreatedByID})
+}
+
+func (s *Service) recordIssueEvent(ctx context.Context, eventType string, issue store.Issue, actor json.RawMessage, payload any) (store.Event, error) {
 	if s == nil || s.events == nil {
 		return store.Event{}, nil
 	}
@@ -15,12 +23,15 @@ func (s *Service) recordIssueEvent(ctx context.Context, eventType string, issue 
 	if err != nil {
 		return store.Event{}, err
 	}
+	if len(actor) == 0 {
+		actor = store.EmptyObject
+	}
 	issueID := issue.ID
 	return s.events.Record(ctx, store.Event{
 		Type:      eventType,
 		ProjectID: issue.ProjectID,
 		IssueID:   &issueID,
-		Actor:     store.EmptyObject,
+		Actor:     actor,
 		Payload:   encoded,
 	})
 }

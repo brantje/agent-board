@@ -57,7 +57,7 @@ func (s *QuestionService) Answer(ctx context.Context, projectID, questionID stri
 		ProjectID:  projectID,
 		QuestionID: questionID,
 		Answer:     answer,
-		ActorType:  "HUMAN",
+		ActorType:  store.ActorTypeHuman,
 		ActorID:    actorID,
 	})
 	if err != nil {

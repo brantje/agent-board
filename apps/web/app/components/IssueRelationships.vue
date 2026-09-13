@@ -4,7 +4,7 @@ import type { Issue, IssueRelationship } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { useResource } from '../composables/useResource'
 
-const props = defineProps<{ projectId: string; issueId: string }>()
+const props = withDefaults(defineProps<{ projectId: string; issueId: string; canMutate?: boolean }>(), { canMutate: true })
 const issues = useResource<Issue[]>(() => apiPath('issues', props.projectId))
 const relationships = useResource<IssueRelationship[]>(() => `${apiPath('issues', props.projectId, props.issueId)}/relationships`)
 const state = reactive({ targetIssueId: '', type: 'blocks' })
@@ -31,7 +31,7 @@ async function refreshAll() {
 }
 
 async function createRelationship() {
-  if (!state.targetIssueId || saving.value) return
+  if (!props.canMutate || !state.targetIssueId || saving.value) return
   saving.value = true
   mutationError.value = undefined
   try {
@@ -49,7 +49,7 @@ async function createRelationship() {
 }
 
 async function removeRelationship(id: string) {
-  if (deleting.value) return
+  if (!props.canMutate || deleting.value) return
   deleting.value = id
   mutationError.value = undefined
   try {
@@ -80,21 +80,23 @@ async function removeRelationship(id: string) {
                 {{ targetName(relationship.targetIssueId) }}
               </NuxtLink>
             </div>
-            <UButton label="Remove" color="neutral" variant="outline" size="xs" :loading="deleting === relationship.id" :disabled="Boolean(deleting)" @click="removeRelationship(relationship.id)" />
+            <UButton v-if="canMutate" label="Remove" color="neutral" variant="outline" size="xs" :loading="deleting === relationship.id" :disabled="Boolean(deleting)" @click="removeRelationship(relationship.id)" />
           </div>
         </div>
         <p v-else class="text-sm text-muted">No relationships authored from this Issue.</p>
 
-        <UForm :state="state" class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" @submit="createRelationship">
-          <UFormField label="Relationship" name="relationshipType">
-            <USelect v-model="state.type" :items="typeItems" :disabled="saving" class="w-full" />
-          </UFormField>
-          <UFormField label="Target Issue" name="relationshipTarget">
-            <USelect v-model="state.targetIssueId" :items="targetItems" :disabled="saving || !targetItems.length" class="w-full" />
-          </UFormField>
-          <UButton label="Add relationship" type="submit" :loading="saving" :disabled="!state.targetIssueId" />
-        </UForm>
-        <p v-if="!targetItems.length" class="text-xs text-muted">Create another Issue in this Project before adding a relationship.</p>
+        <template v-if="canMutate">
+          <UForm :state="state" class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end" @submit="createRelationship">
+            <UFormField label="Relationship" name="relationshipType">
+              <USelect v-model="state.type" :items="typeItems" :disabled="saving" class="w-full" />
+            </UFormField>
+            <UFormField label="Target Issue" name="relationshipTarget">
+              <USelect v-model="state.targetIssueId" :items="targetItems" :disabled="saving || !targetItems.length" class="w-full" />
+            </UFormField>
+            <UButton label="Add relationship" type="submit" :loading="saving" :disabled="!state.targetIssueId" />
+          </UForm>
+          <p v-if="!targetItems.length" class="text-xs text-muted">Create another Issue in this Project before adding a relationship.</p>
+        </template>
       </div>
     </AsyncState>
   </UCard>

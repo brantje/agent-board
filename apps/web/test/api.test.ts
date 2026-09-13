@@ -1,7 +1,21 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apiRequest, ApiError, apiPath, apiQuery, apiText, providerModelsPath } from '../app/utils/api'
+import { AUTH_STORAGE_KEY } from '../app/utils/auth-storage'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.unstubAllGlobals()
+  localStorage.clear()
+  sessionStorage.clear()
+})
+
+function storeSessionCredentials(accessToken = 'access-token') {
+  sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify({
+    accessToken,
+    accessTokenExpiresAt: '2026-09-13T09:00:00Z',
+    refreshToken: 'refresh-token',
+    refreshTokenExpiresAt: '2026-10-13T09:00:00Z'
+  }))
+}
 
 describe('Go API transport', () => {
   it('encodes scoped paths and refuses unsafe path segments', () => {
@@ -13,12 +27,29 @@ describe('Go API transport', () => {
     expect(() => apiPath('../secrets')).toThrow()
   })
 
-  it('sends JSON mutations to the same-origin Go API without ambient privilege', async () => {
+  it('sends stored bearer credentials with ordinary same-origin API requests', async () => {
+    storeSessionCredentials('stored-access')
     const fetch = vi.fn().mockResolvedValue(new Response('{"id":"saved"}'))
     vi.stubGlobal('fetch', fetch)
+
     expect(await apiRequest('/api/projects', { method: 'POST', body: { name: 'P' } })).toEqual({ id: 'saved' })
-    expect(fetch).toHaveBeenCalledWith('/api/projects', expect.objectContaining({ method: 'POST', body: '{"name":"P"}', credentials: 'same-origin' }))
-    expect(() => apiPath('providers', '..')).toThrow()
+    expect(fetch).toHaveBeenCalledWith('/api/projects', expect.objectContaining({
+      method: 'POST',
+      body: '{"name":"P"}',
+      credentials: 'same-origin',
+      headers: expect.objectContaining({ Authorization: 'Bearer stored-access' })
+    }))
+  })
+
+  it('allows an explicit authorization header to override browser storage', async () => {
+    storeSessionCredentials('stored-access')
+    const fetch = vi.fn().mockResolvedValue(new Response('{}'))
+    vi.stubGlobal('fetch', fetch)
+
+    await apiRequest('/api/projects', { headers: { Authorization: 'Bearer current-access' } })
+    expect(fetch).toHaveBeenCalledWith('/api/projects', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer current-access' })
+    }))
   })
 
   it('uses stable backend error codes for actionable messages without reflecting server payload text', async () => {
@@ -77,13 +108,17 @@ describe('Go API transport', () => {
     await expect(apiRequest('/api/../private')).rejects.toThrow('API path')
   })
 
-  it('encodes query strings and reads bounded raw-output text', async () => {
+  it('encodes query strings and sends bearer credentials for bounded raw-output text', async () => {
     expect(apiQuery('/api/projects/p/questions', { issueId: 'AB-1', status: 'OPEN' })).toBe('/api/projects/p/questions?issueId=AB-1&status=OPEN')
     expect(apiQuery('/api/projects/p/runs/r/events', { afterSequence: '3' })).toBe('/api/projects/p/runs/r/events?afterSequence=3')
     expect(() => apiQuery('/api/../x')).toThrow()
+    storeSessionCredentials('raw-output-access')
     const fetch = vi.fn().mockResolvedValue(new Response('log chunk', { headers: { 'Content-Type': 'text/plain' } }))
     vi.stubGlobal('fetch', fetch)
     expect(await apiText('/api/projects/p/runs/r/raw-output/chunk-1')).toBe('log chunk')
-    expect(fetch).toHaveBeenCalledWith('/api/projects/p/runs/r/raw-output/chunk-1', expect.objectContaining({ credentials: 'same-origin' }))
+    expect(fetch).toHaveBeenCalledWith('/api/projects/p/runs/r/raw-output/chunk-1', expect.objectContaining({
+      credentials: 'same-origin',
+      headers: expect.objectContaining({ Authorization: 'Bearer raw-output-access' })
+    }))
   })
 })

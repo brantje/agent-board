@@ -211,7 +211,8 @@ describe('RunDetail', () => {
     expect(wrapper.text()).toContain('go test')
     expect(wrapper.text()).toContain('Questions for run-1')
     expect(wrapper.get('a[href="/projects/project-a/issues/AB-1"]').exists()).toBe(true)
-    expect(wrapper.get('a[href="/api/projects/project-a/runs/run-1/artifacts/art-1"]').exists()).toBe(true)
+    expect(wrapper.find('a[href^="/api/projects/"][href*="/artifacts/"]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some(value => value.text() === 'README.md')).toBe(true)
 
     const workCard = wrapper.get('[data-run-work]')
     expect(workCard.get('[data-run-status=RUNNING]').attributes('data-icon')).toBe('i-lucide-play')

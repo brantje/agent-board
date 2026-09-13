@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -34,6 +35,13 @@ const issueSelectColumns = `
 	i.assigned_agent_id::text,
 	i.number,
 	p.issue_prefix,
+	i.created_by_type,
+	i.created_by_id::text,
+	CASE
+		WHEN i.created_by_type = 'HUMAN' THEN (SELECT u.display_name FROM users AS u WHERE u.id = i.created_by_id)
+		WHEN i.created_by_type = 'AGENT' THEN (SELECT a.name FROM agents AS a WHERE a.id = i.created_by_id)
+		ELSE NULL
+	END,
 	i.created_at,
 	i.updated_at
 `
@@ -116,6 +124,11 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	creatorName, err := issueCreatorName(ctx, tx, input.ProjectID, input.CreatedByType, input.CreatedByID)
+	if err != nil {
+		return store.Issue{}, err
+	}
+
 	var prefix string
 	var number int
 	if err := tx.QueryRow(ctx, `
@@ -128,19 +141,43 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 	}
 
 	issue, err := scanIssueWithPriority(tx.QueryRow(ctx, `
-		INSERT INTO issues (project_id, number, title, description, status, priority, assigned_agent_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, number, created_at, updated_at
-	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, input.AssignedAgentID))
+		INSERT INTO issues (project_id, number, title, description, status, priority, assigned_agent_id, created_by_type, created_by_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, number, created_by_type, created_by_id::text, created_at, updated_at
+	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, input.AssignedAgentID, input.CreatedByType, input.CreatedByID))
 	if err != nil {
 		return store.Issue{}, err
 	}
 	issue.Key = store.FormatIssueKey(prefix, issue.Number)
+	issue.CreatedByName = creatorName
 
 	if err := tx.Commit(ctx); err != nil {
 		return store.Issue{}, err
 	}
 	return issue, nil
+}
+
+func issueCreatorName(ctx context.Context, tx pgx.Tx, projectID string, creatorType, creatorID *string) (*string, error) {
+	if creatorType == nil || creatorID == nil {
+		return nil, nil
+	}
+	var name string
+	var err error
+	switch *creatorType {
+	case store.ActorTypeHuman:
+		err = tx.QueryRow(ctx, `SELECT display_name FROM users WHERE id=$1`, *creatorID).Scan(&name)
+	case store.ActorTypeAgent:
+		err = tx.QueryRow(ctx, `SELECT name FROM agents WHERE id=$1 AND (project_id IS NULL OR project_id=$2)`, *creatorID, projectID).Scan(&name)
+	default:
+		return nil, store.ErrInvalidArgument
+	}
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, store.ErrInvalidArgument
+		}
+		return nil, err
+	}
+	return &name, nil
 }
 
 func (s *Store) GetIssue(ctx context.Context, projectID, issueID string) (store.Issue, error) {
@@ -200,7 +237,7 @@ func scanProject(row pgx.Row) (store.Project, error) {
 
 func scanIssueWithPriority(row pgx.Row) (store.Issue, error) {
 	var value store.Issue
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.AssignedAgentID, &value.Number, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.AssignedAgentID, &value.Number, &value.CreatedByType, &value.CreatedByID, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Issue{}, notFound(err)
 	}
 	return value, nil
@@ -211,7 +248,7 @@ func scanIssueJoined(row pgx.Row) (store.Issue, error) {
 	var prefix string
 	if err := row.Scan(
 		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
-		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedAt, &value.UpdatedAt,
+		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedByName, &value.CreatedAt, &value.UpdatedAt,
 	); err != nil {
 		return store.Issue{}, notFound(err)
 	}
@@ -233,7 +270,7 @@ func scanIssueJoinedWithLastEvent(row pgx.Row) (store.Issue, error) {
 	)
 	if err := row.Scan(
 		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
-		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedAt, &value.UpdatedAt,
+		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedByName, &value.CreatedAt, &value.UpdatedAt,
 		&value.CurrentBranch,
 		&eventID, &schemaVersion, &eventType, &occurredAt, &eventProjectID, &eventIssueID, &eventRunID,
 		&eventAgentID, &eventWorkspaceID, &eventRuntimeInstanceID, &eventCorrelationID, &eventParentID,

@@ -1,3 +1,5 @@
+import { readAuthStorage } from './auth-storage'
+
 export type ProviderModel = { id: string; name?: string | null }
 
 export function providerModelsPath(providerId: string, projectId?: string) {
@@ -75,6 +77,12 @@ function assertApiPath(path: string) {
   if (!path.startsWith('/api/') || path.includes('..') || path.includes('\\')) throw new Error('Invalid API path')
 }
 
+export function browserAuthorizationHeaders(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  const { credentials } = readAuthStorage(window.localStorage, window.sessionStorage)
+  return credentials?.accessToken ? { Authorization: `Bearer ${credentials.accessToken}` } : {}
+}
+
 export function apiQuery(path: string, params: Record<string, string | undefined | null> = {}) {
   assertApiPath(path)
   const search = new URLSearchParams()
@@ -101,6 +109,7 @@ export async function apiRequest<T>(path: string, options: { method?: string; bo
       headers: {
         Accept: 'application/json',
         ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...browserAuthorizationHeaders(),
         ...options.headers
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
@@ -125,7 +134,10 @@ export async function apiText(path: string, options: { signal?: AbortSignal } = 
       method: 'GET',
       credentials: 'same-origin',
       signal: options.signal,
-      headers: { Accept: 'text/plain' }
+      headers: {
+        Accept: 'text/plain',
+        ...browserAuthorizationHeaders()
+      }
     })
   } catch {
     throw new ApiError(0, 'network', 'Unable to reach the server. Check your connection and retry.')
@@ -135,5 +147,47 @@ export async function apiText(path: string, options: { signal?: AbortSignal } = 
     return await response.text()
   } catch {
     throw new ApiError(502, 'invalid_response', 'The server returned an invalid response. Retry or check deployment configuration.')
+  }
+}
+
+export async function apiBlob(path: string, options: { signal?: AbortSignal } = {}): Promise<Blob> {
+  assertApiPath(path)
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: 'GET',
+      credentials: 'same-origin',
+      signal: options.signal,
+      headers: {
+        Accept: 'application/octet-stream',
+        ...browserAuthorizationHeaders()
+      }
+    })
+  } catch {
+    throw new ApiError(0, 'network', 'Unable to reach the server. Check your connection and retry.')
+  }
+  if (!response.ok) await parseFailedResponse(response)
+  try {
+    return await response.blob()
+  } catch {
+    throw new ApiError(502, 'invalid_response', 'The server returned invalid binary content. Retry or check deployment configuration.')
+  }
+}
+
+export async function downloadApiFile(path: string, filename: string) {
+  if (typeof document === 'undefined') throw new ApiError(0, 'browser_required', 'Downloads are only available in the browser.')
+  const blob = await apiBlob(path)
+  const href = URL.createObjectURL(blob)
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = href
+    anchor.download = filename
+    anchor.rel = 'noopener'
+    anchor.style.display = 'none'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  } finally {
+    URL.revokeObjectURL(href)
   }
 }

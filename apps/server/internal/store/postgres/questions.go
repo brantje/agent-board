@@ -68,7 +68,7 @@ func (s *Store) GetOpenBlockingQuestion(ctx context.Context, projectID, runID st
 }
 
 func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCommand) (store.AnswerQuestionResult, error) {
-	if strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.QuestionID) == "" || input.ActorType != "HUMAN" {
+	if strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.QuestionID) == "" || input.ActorType != store.ActorTypeHuman {
 		return store.AnswerQuestionResult{}, store.ErrInvalidArgument
 	}
 

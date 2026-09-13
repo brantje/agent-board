@@ -25,11 +25,13 @@ describe('application foundation', () => {
   it('renders only canonical navigation, adding project routes in project context', async () => {
     const route = reactive({ params: {} as Record<string,string> })
     vi.stubGlobal('useRoute', () => route)
+    vi.stubGlobal('useState', () => ({ value: { deploymentRole: 'admin' } }))
     const wrapper = mount(Shell, { global })
     expect(wrapper.findAll('nav').length).toBe(2)
     expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="settings-main-nav"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Inbox')
+    expect(wrapper.text()).toContain('Account')
     expect(wrapper.find('a[href="/agents"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Plugins')
     expect(wrapper.find('[aria-label="Back to projects"]').exists()).toBe(false)
@@ -44,11 +46,26 @@ describe('application foundation', () => {
     expect(wrapper.find('a[href="/projects/project-1/board"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="Back to projects"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
-    expect(navigation().global.map(item => item.label)).toEqual(['Projects','Runs','Inbox'])
-    expect(navigation().settings.map(item => item.label)).toEqual(['Settings'])
+    expect(navigation().global.map(item => item.label)).toEqual(['Projects','Runs','Inbox','Account'])
+    expect(navigation(undefined, { deploymentAdmin: true }).settings.map(item => item.label)).toEqual(['Settings'])
   })
+  it('renders authentication routes without the application sidebar', async () => {
+    const route = reactive({ path: '/auth/login', params: {} as Record<string, string> })
+    vi.stubGlobal('useRoute', () => route)
+    vi.stubGlobal('useState', () => ({ value: null }))
+    const wrapper = mount(Shell, { slots: { default: '<main>Sign in</main>' }, global })
+    expect(wrapper.text()).toContain('Sign in')
+    expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Agent Board')
+
+    route.path = '/projects'
+    await flushPromises()
+    expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
+  })
+
   it('pins Settings above the sidebar footer divider', () => {
     vi.stubGlobal('useRoute', () => ({ params: {} }))
+    vi.stubGlobal('useState', () => ({ value: { deploymentRole: 'admin' } }))
     const sidebar = {
       template: '<aside><div data-testid="sidebar-body"><slot name="default" :collapsed="false" /></div><div data-testid="sidebar-footer"><slot name="footer" :collapsed="false" /></div></aside>'
     }

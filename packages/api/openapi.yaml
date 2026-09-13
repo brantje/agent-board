@@ -7,9 +7,59 @@ servers:
 - url: /
 components:
   securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
     SecretWriteCapability:
       $ref: ./components/api-components.yaml#/securitySchemes/SecretWriteCapability
 paths:
+  /api/auth/bootstrap:
+    $ref: ./paths/auth.yaml#/bootstrapStatus
+  /api/auth/bootstrap/register:
+    $ref: ./paths/auth.yaml#/bootstrapRegister
+  /api/auth/login:
+    $ref: ./paths/auth.yaml#/login
+  /api/auth/refresh:
+    $ref: ./paths/auth.yaml#/refresh
+  /api/auth/logout:
+    $ref: ./paths/auth.yaml#/logout
+  /api/auth/setup/complete:
+    $ref: ./paths/auth.yaml#/setupComplete
+  /api/auth/reset/complete:
+    $ref: ./paths/auth.yaml#/resetComplete
+  /api/auth/me:
+    $ref: ./paths/auth.yaml#/me
+  /api/auth/users:
+    $ref: ./paths/auth.yaml#/users
+  /api/auth/users/{userID}/setup-token:
+    $ref: ./paths/auth.yaml#/userSetupToken
+  /api/auth/users/{userID}/reset-token:
+    $ref: ./paths/auth.yaml#/userResetToken
+  /api/auth/users/{userID}/password:
+    $ref: ./paths/auth.yaml#/userPassword
+  /api/auth/users/{userID}/disable:
+    $ref: ./paths/auth.yaml#/userDisable
+  /api/auth/users/{userID}/enable:
+    $ref: ./paths/auth.yaml#/userEnable
+  /api/auth/me/password:
+    $ref: ./paths/auth.yaml#/mePassword
+  /api/auth/me/sessions:
+    $ref: ./paths/auth.yaml#/meSessions
+  /api/auth/me/sessions/{sessionID}:
+    $ref: ./paths/auth.yaml#/meSession
+  /api/auth/me/sessions/logout-others:
+    $ref: ./paths/auth.yaml#/meLogoutOthers
+  /api/auth/settings:
+    $ref: ./paths/auth.yaml#/authSettings
+  /api/groups:
+    $ref: ./paths/groups.yaml#/collection
+  /api/groups/{groupID}:
+    $ref: ./paths/groups.yaml#/resource
+  /api/groups/{groupID}/members:
+    $ref: ./paths/groups.yaml#/members
+  /api/groups/{groupID}/members/{userID}:
+    $ref: ./paths/groups.yaml#/member
   /api/runners:
     $ref: ./paths/runners.yaml#/collection
   /api/runner/register:
@@ -26,6 +76,20 @@ paths:
     $ref: ./paths/projects.yaml#/path1
   /api/projects/{projectID}:
     $ref: ./paths/projects.yaml#/path2
+  /api/projects/{projectID}/access/effective-role:
+    $ref: ./paths/project-access.yaml#/effectiveRole
+  /api/projects/{projectID}/access/users:
+    $ref: ./paths/project-access.yaml#/users
+  /api/projects/{projectID}/access/users/{userID}:
+    $ref: ./paths/project-access.yaml#/user
+  /api/projects/{projectID}/access/groups:
+    $ref: ./paths/project-access.yaml#/groups
+  /api/projects/{projectID}/access/groups/{groupID}:
+    $ref: ./paths/project-access.yaml#/group
+  /api/projects/{projectID}/access/directory/users:
+    $ref: ./paths/project-access.yaml#/directoryUsers
+  /api/projects/{projectID}/access/directory/groups:
+    $ref: ./paths/project-access.yaml#/directoryGroups
   /api/projects/{projectID}/runners:
     $ref: ./paths/project-runners.yaml
   /api/secrets:

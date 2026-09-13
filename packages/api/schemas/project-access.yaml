@@ -1,0 +1,50 @@
+ProjectRole:
+  type: string
+  enum: [viewer, member, admin]
+ProjectRoleResponse:
+  type: object
+  additionalProperties: false
+  required: [role]
+  properties:
+    role: {$ref: '#/ProjectRole'}
+ProjectAccessRoleRequest:
+  type: object
+  additionalProperties: false
+  required: [role]
+  properties:
+    role: {$ref: '#/ProjectRole'}
+ProjectUserAccess:
+  type: object
+  additionalProperties: false
+  required: [id, username, email, displayName, status, role]
+  properties:
+    id: {type: string, format: uuid}
+    username: {type: string}
+    email: {type: string, format: email}
+    displayName: {type: string}
+    status: {type: string, enum: [pending, active, disabled]}
+    role: {$ref: '#/ProjectRole'}
+ProjectGroupAccess:
+  type: object
+  additionalProperties: false
+  required: [id, name, role]
+  properties:
+    id: {type: string, format: uuid}
+    name: {type: string}
+    role: {$ref: '#/ProjectRole'}
+ProjectDirectoryUser:
+  type: object
+  additionalProperties: false
+  required: [id, username, email, displayName]
+  properties:
+    id: {type: string, format: uuid}
+    username: {type: string}
+    email: {type: string, format: email}
+    displayName: {type: string}
+ProjectDirectoryGroup:
+  type: object
+  additionalProperties: false
+  required: [id, name]
+  properties:
+    id: {type: string, format: uuid}
+    name: {type: string}

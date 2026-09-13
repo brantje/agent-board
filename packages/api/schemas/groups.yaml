@@ -1,0 +1,9 @@
+Group:
+  type: object
+  additionalProperties: false
+  required: [id, name, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    name: {type: string, minLength: 1}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}

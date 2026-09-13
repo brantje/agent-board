@@ -240,9 +240,17 @@ AgentInput:
     engineSettings: {$ref: '#/JSONMap'}
     concurrencyLimit: {type: integer, minimum: 1, default: 1}
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}
+IssueCreator:
+  type: object
+  additionalProperties: false
+  required: [type, id, name]
+  properties:
+    type: {type: string, enum: [HUMAN, AGENT]}
+    id: {type: string, format: uuid}
+    name: {type: [string, 'null']}
 Issue:
   type: object
-  required: [id, projectId, number, title, description, status, priority, assignedAgentId, createdAt, updatedAt, lastEvent]
+  required: [id, projectId, number, title, description, status, priority, assignedAgentId, createdBy, createdAt, updatedAt, lastEvent]
   properties:
     id: {$ref: '#/IssueKey'}
     projectId: {type: string, format: uuid}
@@ -256,6 +264,10 @@ Issue:
       maximum: 4
       description: Numeric v0.1 priority. 0 is the default/base priority and larger values mean higher relative priority.
     assignedAgentId: {type: [string, 'null'], format: uuid}
+    createdBy:
+      oneOf:
+        - $ref: '#/IssueCreator'
+        - type: 'null'
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
     currentBranch:

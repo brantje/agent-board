@@ -1,0 +1,103 @@
+groupIdParameter:
+  name: groupID
+  in: path
+  required: true
+  schema: {type: string, format: uuid}
+userIdParameter:
+  name: userID
+  in: path
+  required: true
+  schema: {type: string, format: uuid}
+groupInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [name]
+        properties:
+          name: {type: string, minLength: 1}
+memberInput:
+  required: true
+  content:
+    application/json:
+      schema:
+        type: object
+        additionalProperties: false
+        required: [userID]
+        properties:
+          userID: {type: string, format: uuid}
+groupResponse:
+  description: Deployment-global human access group.
+  content:
+    application/json:
+      schema: {$ref: ../schemas/groups.yaml#/Group}
+collection:
+  get:
+    operationId: listDeploymentGroups
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Deployment groups visible to a deployment administrator.
+        headers:
+          Cache-Control:
+            schema: {type: string, const: no-store}
+        content:
+          application/json:
+            schema: {type: array, items: {$ref: ../schemas/groups.yaml#/Group}}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  post:
+    operationId: createDeploymentGroup
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/groupInput'}
+    responses:
+      '201': {$ref: '#/groupResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+resource:
+  parameters: [{$ref: '#/groupIdParameter'}]
+  patch:
+    operationId: updateDeploymentGroup
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/groupInput'}
+    responses:
+      '200': {$ref: '#/groupResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  delete:
+    operationId: deleteDeploymentGroup
+    security: [{BearerAuth: []}]
+    responses:
+      '204': {description: Group and its memberships deleted.}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+members:
+  parameters: [{$ref: '#/groupIdParameter'}]
+  get:
+    operationId: listDeploymentGroupMembers
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: User members of the Group.
+        headers:
+          Cache-Control:
+            schema: {type: string, const: no-store}
+        content:
+          application/json:
+            schema: {type: array, items: {$ref: ../schemas/auth.yaml#/AuthUser}}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  post:
+    operationId: addDeploymentGroupMember
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/memberInput'}
+    responses:
+      '204': {description: User added to the Group.}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+member:
+  parameters:
+  - {$ref: '#/groupIdParameter'}
+  - {$ref: '#/userIdParameter'}
+  delete:
+    operationId: removeDeploymentGroupMember
+    security: [{BearerAuth: []}]
+    responses:
+      '204': {description: User removed from the Group.}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}

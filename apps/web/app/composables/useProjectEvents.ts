@@ -2,6 +2,7 @@ import { onBeforeUnmount, onMounted, toValue, watch, type MaybeRefOrGetter } fro
 import type { EventEvidence } from '../types/api'
 import { apiPath, apiQuery } from '../utils/api'
 import { parseEventMessage } from '../utils/events'
+import { openSSE, type SSESource } from '../utils/sse'
 import { SSE_RECONNECT_MS } from './useRunEvents'
 
 type ProjectEventHandler = (event: EventEvidence, projectId: string) => void | Promise<void>
@@ -16,7 +17,7 @@ export function useProjectEvents(
   onEvent: ProjectEventHandler
 ) {
   const lastIds = new Map<string, string>()
-  const sources = new Map<string, EventSource>()
+  const sources = new Map<string, SSESource>()
   const reconnectTimers = new Map<string, ReturnType<typeof setTimeout>>()
   let disposed = false
   let generation = 0
@@ -43,48 +44,60 @@ export function useProjectEvents(
     for (const id of [...sources.keys(), ...reconnectTimers.keys()]) closeOne(id)
   }
 
+  function resync(id: string, current: number) {
+    if (disposed || current !== generation) return
+    lastIds.delete(id)
+    notify({
+      id: `resync:${id}`,
+      schemaVersion: 1,
+      type: 'project.resync',
+      occurredAt: new Date().toISOString(),
+      projectId: id,
+      issueId: null,
+      runId: null,
+      sequence: null,
+      agentId: null,
+      workspaceId: null,
+      runtimeInstanceId: null,
+      correlationId: null,
+      parentEventId: null,
+      actor: { type: 'SYSTEM' },
+      payload: {}
+    }, id, current)
+  }
+
+  function scheduleReconnect(id: string, current: number) {
+    if (disposed || current !== generation) return
+    closeOne(id)
+    reconnectTimers.set(id, setTimeout(() => {
+      reconnectTimers.delete(id)
+      if (!disposed && current === generation) openOne(id, current)
+    }, SSE_RECONNECT_MS))
+  }
+
   function openOne(id: string, current: number) {
-    if (disposed || current !== generation || typeof EventSource === 'undefined') return
+    if (disposed || current !== generation) return
     closeOne(id)
     const afterId = lastIds.get(id)
-    const source = new EventSource(apiQuery(`${apiPath('projects', undefined, id)}/events`, { afterId }))
-    sources.set(id, source)
-    source.addEventListener('resync', () => {
-      if (disposed || current !== generation) return
-      lastIds.delete(id)
-      notify({
-        id: `resync:${id}`,
-        schemaVersion: 1,
-        type: 'project.resync',
-        occurredAt: new Date().toISOString(),
-        projectId: id,
-        issueId: null,
-        runId: null,
-        sequence: null,
-        agentId: null,
-        workspaceId: null,
-        runtimeInstanceId: null,
-        correlationId: null,
-        parentEventId: null,
-        actor: { type: 'SYSTEM' },
-        payload: {}
-      }, id, current)
+    const source = openSSE(apiQuery(`${apiPath('projects', undefined, id)}/events`, { afterId }), {
+      onEvent: name => {
+        if (name === 'resync') resync(id, current)
+      },
+      onMessage: data => {
+        if (disposed || current !== generation) return
+        const incoming = parseEventMessage(data)
+        if (!incoming) return
+        if (incoming.type === 'project.resync') {
+          resync(id, current)
+          scheduleReconnect(id, current)
+          return
+        }
+        lastIds.set(id, incoming.id)
+        notify(incoming, id, current)
+      },
+      onError: () => scheduleReconnect(id, current)
     })
-    source.onmessage = message => {
-      if (disposed || current !== generation) return
-      const incoming = parseEventMessage(message.data)
-      if (!incoming) return
-      lastIds.set(id, incoming.id)
-      notify(incoming, id, current)
-    }
-    source.onerror = () => {
-      if (disposed || current !== generation) return
-      closeOne(id)
-      reconnectTimers.set(id, setTimeout(() => {
-        reconnectTimers.delete(id)
-        if (!disposed && current === generation) openOne(id, current)
-      }, SSE_RECONNECT_MS))
-    }
+    sources.set(id, source)
   }
 
   function sync() {

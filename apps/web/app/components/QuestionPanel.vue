@@ -6,7 +6,7 @@ import { refetchTargets } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
 
-const props = defineProps<{ projectId: string; issueId?: string; runId?: string }>()
+const props = withDefaults(defineProps<{ projectId: string; issueId?: string; runId?: string; canMutate?: boolean }>(), { canMutate: true })
 const path = computed(() => apiQuery(apiPath('questions', props.projectId), {
   issueId: props.issueId,
   runId: props.runId,
@@ -64,6 +64,7 @@ useProjectEvents(() => props.projectId, async event => {
 })
 
 async function answer(question: Question) {
+  if (!props.canMutate) return
   const body = answerBody(question)
   if (!body || answering.value) return
   answering.value = question.id
@@ -98,7 +99,7 @@ defineExpose({ refresh })
           </div>
           <p class="mb-3 whitespace-pre-wrap break-words">{{ question.prompt }}</p>
           <UAlert v-if="recommendedLabel(question)" title="Recommended" :description="`Recommended: ${recommendedLabel(question)}`" color="neutral" class="mb-3" />
-          <UForm :state="draftFor(question)" class="space-y-3" @submit="answer(question)">
+          <UForm v-if="canMutate" :state="draftFor(question)" class="space-y-3" @submit="answer(question)">
             <UFormField v-if="question.kind === 'TEXT'" label="Answer" name="text">
               <UTextarea v-model="draftFor(question).text" class="w-full" :disabled="!!answering" />
             </UFormField>
@@ -117,6 +118,7 @@ defineExpose({ refresh })
             </UFormField>
             <UButton label="Answer" type="submit" :loading="answering === question.id" :disabled="!answerBody(question) || !!answering" />
           </UForm>
+          <p v-else class="text-sm text-muted">Your Project role is read-only.</p>
         </UCard>
       </div>
       </AsyncState>

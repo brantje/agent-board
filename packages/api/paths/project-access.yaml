@@ -1,0 +1,144 @@
+projectIdParameter:
+  name: projectID
+  in: path
+  required: true
+  schema: {type: string, format: uuid}
+userIdParameter:
+  name: userID
+  in: path
+  required: true
+  schema: {type: string, format: uuid}
+groupIdParameter:
+  name: groupID
+  in: path
+  required: true
+  schema: {type: string, format: uuid}
+searchParameter:
+  name: q
+  in: query
+  required: false
+  schema: {type: string}
+roleInput:
+  required: true
+  content:
+    application/json:
+      schema: {$ref: ../schemas/project-access.yaml#/ProjectAccessRoleRequest}
+effectiveRole:
+  parameters: [{$ref: '#/projectIdParameter'}]
+  get:
+    operationId: getEffectiveProjectRole
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Highest effective Project role for the authenticated user.
+        content:
+          application/json:
+            schema: {$ref: ../schemas/project-access.yaml#/ProjectRoleResponse}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+users:
+  parameters: [{$ref: '#/projectIdParameter'}]
+  get:
+    operationId: listProjectUserAccess
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Direct User grants for the Project, including disabled attached users.
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: ../schemas/project-access.yaml#/ProjectUserAccess}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+user:
+  parameters:
+  - {$ref: '#/projectIdParameter'}
+  - {$ref: '#/userIdParameter'}
+  put:
+    operationId: upsertProjectUserAccess
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/roleInput'}
+    responses:
+      '200':
+        description: Direct User grant was created or updated.
+        content:
+          application/json:
+            schema: {$ref: ../schemas/project-access.yaml#/ProjectRoleResponse}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  delete:
+    operationId: deleteProjectUserAccess
+    security: [{BearerAuth: []}]
+    responses:
+      '204': {description: Direct User grant removed.}
+      '409':
+        description: The grant is the final active direct User administrator for the Project.
+        content:
+          application/json:
+            schema: {$ref: ../components/api-components.yaml#/schemas/Error}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+groups:
+  parameters: [{$ref: '#/projectIdParameter'}]
+  get:
+    operationId: listProjectGroupAccess
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Group grants for the Project.
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: ../schemas/project-access.yaml#/ProjectGroupAccess}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+group:
+  parameters:
+  - {$ref: '#/projectIdParameter'}
+  - {$ref: '#/groupIdParameter'}
+  put:
+    operationId: upsertProjectGroupAccess
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/roleInput'}
+    responses:
+      '200':
+        description: Group grant was created or updated.
+        content:
+          application/json:
+            schema: {$ref: ../schemas/project-access.yaml#/ProjectRoleResponse}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  delete:
+    operationId: deleteProjectGroupAccess
+    security: [{BearerAuth: []}]
+    responses:
+      '204': {description: Group grant removed.}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+directoryUsers:
+  parameters:
+  - {$ref: '#/projectIdParameter'}
+  - {$ref: '#/searchParameter'}
+  get:
+    operationId: searchProjectAccessUsers
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Active Users matching the Project-admin directory search.
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: ../schemas/project-access.yaml#/ProjectDirectoryUser}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+directoryGroups:
+  parameters:
+  - {$ref: '#/projectIdParameter'}
+  - {$ref: '#/searchParameter'}
+  get:
+    operationId: searchProjectAccessGroups
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Groups matching the Project-admin directory search.
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: ../schemas/project-access.yaml#/ProjectDirectoryGroup}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}

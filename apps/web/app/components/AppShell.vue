@@ -1,19 +1,31 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { AuthUser } from '../types/auth'
+import { useProjectPermissions } from '../composables/useProjectPermissions'
 import { navigation } from '../utils/navigation'
+import { isPublicAuthPath } from '../utils/auth-route'
+
 const route = useRoute()
+const publicAuthPage = computed(() => isPublicAuthPath(route.path))
+const currentUser = useState<AuthUser | null>('auth-user')
 const projectId = computed(() => typeof route.params.projectID === 'string' ? route.params.projectID : undefined)
-const links = computed(() => navigation(projectId.value))
+const permissions = useProjectPermissions(projectId)
+const deploymentAdmin = computed(() => currentUser.value?.deploymentRole === 'admin')
+const links = computed(() => navigation(projectId.value, {
+  deploymentAdmin: deploymentAdmin.value,
+  projectAdmin: permissions.canAdmin.value
+}))
 </script>
 <template>
-  <UDashboardGroup unit="px">
+  <slot v-if="publicAuthPage" />
+  <UDashboardGroup v-else unit="px">
     <UDashboardSidebar collapsible resizable :default-size="224" :min-size="180" :max-size="320" :collapsed-size="64">
       <template #header="{ collapsed }"><UButton to="/projects" icon="i-lucide-panels-top-left" :label="collapsed ? undefined : 'Agent Board'" aria-label="Agent Board projects" color="neutral" variant="ghost" /></template>
       <template #default="{ collapsed }">
         <UNavigationMenu v-if="!projectId" aria-label="Primary navigation" orientation="vertical" :collapsed="collapsed" :items="links.global" />
         <UButton v-else to="/projects" icon="i-lucide-arrow-left" :label="collapsed ? undefined : 'Back to projects'" aria-label="Back to projects" color="neutral" variant="ghost" block class="justify-start" />
         <template v-if="projectId"><USeparator label="Project" /><UNavigationMenu aria-label="Project navigation" orientation="vertical" :collapsed="collapsed" :items="links.project" /></template>
-        <UNavigationMenu aria-label="Settings navigation" orientation="vertical" :collapsed="collapsed" :items="links.settings" class="mt-auto" data-testid="settings-main-nav" />
+        <UNavigationMenu v-if="links.settings.length" aria-label="Settings navigation" orientation="vertical" :collapsed="collapsed" :items="links.settings" class="mt-auto" data-testid="settings-main-nav" />
       </template>
       <template #footer>
         <ThemeSelector />

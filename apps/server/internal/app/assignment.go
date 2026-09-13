@@ -48,7 +48,7 @@ func (s *Service) AssignIssue(ctx context.Context, projectID, issueID, agentID s
 		assigned.LastEvent = issue.LastEvent
 		return assigned, run, nil
 	}
-	event, err := s.recordIssueEvent(ctx, "issue.assigned", assigned, map[string]any{"agentId": agentID})
+	event, err := s.recordIssueEvent(ctx, "issue.assigned", assigned, store.EmptyObject, map[string]any{"agentId": agentID})
 	if err != nil {
 		return store.Issue{}, store.Run{}, err
 	}

@@ -10,6 +10,7 @@ For implementation work, read the relevant canonical docs:
 - `docs/roadmap.md` — current/planned/later ordering
 - `docs/domain-model.md` — durable concepts/invariants
 - `docs/architecture.md` — Go implementation architecture
+- `docs/authorization.md` — implemented local Users/Groups/authentication and fixed Project authorization model
 - `docs/scheduler.md` — durable scheduling/capacity
 - `docs/source-control.md` — repositories and Source Connections
 - `docs/execution-context.md` — canonical execution context/secrets
@@ -73,6 +74,12 @@ After the answers, finalize the plan and proceed. Avoid extended question trees 
 ## Product invariants
 
 - Multi-project isolation is mandatory.
+- Human identity is a durable deployment-global User; caller-controlled identity/admin headers never establish authority.
+- Deployment roles are fixed as `admin | member`; Project roles are fixed as `admin > member > viewer`.
+- Project access is derived from the authenticated User plus the highest direct User or inherited Group grant; deployment admins have implicit Project-admin authority.
+- New Projects are private and every Project retains at least one active direct individual User admin.
+- Inaccessible Projects are omitted from listings; direct/nested inaccessible Project resources use not-found semantics.
+- UI role checks are presentation only; the shared Go authorization boundary is authoritative.
 - Issue is the durable unit of work.
 - Agent is durable configuration, not a process/container.
 - Run is a durable execution attempt, not a Runtime Instance, Runner or Execution Session.
@@ -173,7 +180,7 @@ pnpm build
 ## Backend rules
 
 - Keep HTTP adapters separate from application/domain/store/runtime logic.
-- Every Project-scoped operation verifies ownership; IDs are not authorization.
+- Every Project-scoped human operation authenticates the User and resolves the shared effective Project role; IDs are never authorization.
 - Use explicit runtime-validated request/response contracts.
 - PostgreSQL owns durable scheduling state; process-local semaphores/maps are not authoritative.
 - Human decisions requiring continuation persist that continuation durably before success returns.
@@ -294,13 +301,29 @@ The project configures the Nuxt UI MCP server in `.cursor/mcp.json` at `https://
 - Dark mode is default; light mode remains complete.
 - Preserve keyboard/focus/accessibility behavior provided by Nuxt UI/Reka UI.
 
+## Implemented multi-user authorization
+
+The fixed local multi-user foundation from #74–#79 is implemented. Do not treat Users, Groups or Project roles as unspecified future concepts.
+
+- Users are deployment-global durable human identities with local username/email + password authentication.
+- Deployment roles are exactly `admin | member`.
+- Groups contain Users only and grant Project access, never deployment roles.
+- Project roles are exactly `admin > member > viewer`, resolved as the highest direct User or inherited Group grant.
+- Deployment admins have implicit Project-admin authority everywhere.
+- New Projects are private; the creator receives a direct Project-admin grant and every Project retains at least one active direct individual User admin.
+- The Go backend is authoritative for authentication, effective-role resolution, Project isolation and human actor attribution. Frontend checks only control presentation.
+- Normal listings omit inaccessible Projects; direct/nested inaccessible Project resources and Project SSE use not-found isolation.
+- Existing HUMAN Question/Review attribution uses the authenticated durable User ID.
+
+Read `docs/authorization.md` before changing authentication, Users, Groups, Project access, session invalidation or authorization behavior. External identity providers, MFA, custom roles/permissions, organizations/tenants and a generalized audit-log/policy engine remain future work and must not be introduced implicitly.
+
 ## Planned features
 
 Planning strategy, Automations, Agent-created Issues, Source Connections, delivery automation, delegation, Squads and worker pools reuse the canonical Issue/Run/scheduler/Workspace model.
 
 Future Worker Pools supply/place Runner capacity but do not replace Agent, Runner or Execution Session identities. Legacy Runtime Instance identity remains separate wherever that compatibility path still exists.
 
-Users, groups, roles/permissions and broader multi-user administration are expected later but are not yet designed; do not invent their product contracts.
+Future identity/administration work may add explicitly designed external identity providers or richer administration, but it must extend rather than silently replace the fixed model in `docs/authorization.md`.
 
 ## Plugins
 

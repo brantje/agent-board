@@ -26,12 +26,22 @@ func TestIssueMutationsRecordPersistBeforePublishEvents(t *testing.T) {
 	recorder := &capturingIssueRecorder{}
 	svc.SetEventRecorder(recorder)
 
-	created, err := svc.CreateIssue(context.Background(), coverageIssue())
+	creatorType, creatorID := store.ActorTypeAgent, "agent-creator"
+	createInput := coverageIssue()
+	createInput.CreatedByType, createInput.CreatedByID = &creatorType, &creatorID
+	created, err := svc.CreateIssue(context.Background(), createInput)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if created.LastEvent == nil || created.LastEvent.Type != "issue.created" {
 		t.Fatalf("create lastEvent=%+v", created.LastEvent)
+	}
+	var createActor map[string]string
+	if err := json.Unmarshal(created.LastEvent.Actor, &createActor); err != nil {
+		t.Fatal(err)
+	}
+	if createActor["type"] != store.ActorTypeAgent || createActor["id"] != creatorID {
+		t.Fatalf("create actor=%s", created.LastEvent.Actor)
 	}
 
 	updated := created

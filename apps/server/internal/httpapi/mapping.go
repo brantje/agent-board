@@ -20,7 +20,22 @@ func projectDTO(v store.Project) ProjectDTO {
 }
 
 func issueDTO(v store.Issue) IssueDTO {
-	dto := IssueDTO{v.Key, v.ProjectID, v.Number, v.Title, v.Description, v.Status, v.Priority, v.AssignedAgentID, v.CreatedAt, v.UpdatedAt, v.CurrentBranch, nil}
+	dto := IssueDTO{
+		ID:              v.Key,
+		ProjectID:       v.ProjectID,
+		Number:          v.Number,
+		Title:           v.Title,
+		Description:     v.Description,
+		Status:          v.Status,
+		Priority:        v.Priority,
+		AssignedAgentID: v.AssignedAgentID,
+		CreatedAt:       v.CreatedAt,
+		UpdatedAt:       v.UpdatedAt,
+		CurrentBranch:   v.CurrentBranch,
+	}
+	if v.CreatedByType != nil && v.CreatedByID != nil {
+		dto.CreatedBy = &IssueCreatorDTO{Type: *v.CreatedByType, ID: *v.CreatedByID, Name: v.CreatedByName}
+	}
 	if v.LastEvent != nil {
 		event := eventEvidenceDTO(*v.LastEvent)
 		dto.LastEvent = &event

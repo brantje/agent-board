@@ -288,7 +288,11 @@ func (s *Service) CreateIssue(ctx context.Context, input store.Issue) (store.Iss
 	if err != nil {
 		return store.Issue{}, translateStoreError(err, "issue")
 	}
-	event, err := s.recordIssueEvent(ctx, "issue.created", value, issueMutationPayload(value))
+	creatorActor, err := issueCreatorActor(value)
+	if err != nil {
+		return store.Issue{}, err
+	}
+	event, err := s.recordIssueEvent(ctx, "issue.created", value, creatorActor, issueMutationPayload(value))
 	if err != nil {
 		return store.Issue{}, err
 	}
@@ -319,7 +323,7 @@ func (s *Service) UpdateIssue(ctx context.Context, input store.Issue) (store.Iss
 		eventType = "issue.status_changed"
 		payload["previousStatus"] = previousStatus
 	}
-	event, err := s.recordIssueEvent(ctx, eventType, value, payload)
+	event, err := s.recordIssueEvent(ctx, eventType, value, store.EmptyObject, payload)
 	if err != nil {
 		return store.Issue{}, err
 	}
@@ -591,6 +595,12 @@ func validateAgent(v store.Agent) error {
 func validateIssue(v store.Issue) error {
 	if strings.TrimSpace(v.Title) == "" {
 		return invalid("issue title is required")
+	}
+	if (v.CreatedByType == nil) != (v.CreatedByID == nil) {
+		return invalid("issue creator type and id must be provided together")
+	}
+	if v.CreatedByType != nil && (!store.ValidActorType(*v.CreatedByType) || strings.TrimSpace(*v.CreatedByID) == "") {
+		return invalid("issue creator must be a HUMAN or AGENT with an id")
 	}
 	switch v.Status {
 	case "BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "REVIEW", "DONE":
