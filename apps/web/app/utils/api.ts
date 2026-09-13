@@ -149,3 +149,27 @@ export async function apiText(path: string, options: { signal?: AbortSignal } = 
     throw new ApiError(502, 'invalid_response', 'The server returned an invalid response. Retry or check deployment configuration.')
   }
 }
+
+export async function apiBlob(path: string, options: { signal?: AbortSignal } = {}): Promise<Blob> {
+  assertApiPath(path)
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: 'GET',
+      credentials: 'same-origin',
+      signal: options.signal,
+      headers: {
+        Accept: 'application/octet-stream',
+        ...browserAuthorizationHeaders()
+      }
+    })
+  } catch {
+    throw new ApiError(0, 'network', 'Unable to reach the server. Check your connection and retry.')
+  }
+  if (!response.ok) await parseFailedResponse(response)
+  try {
+    return await response.blob()
+  } catch {
+    throw new ApiError(502, 'invalid_response', 'The server returned invalid binary content. Retry or check deployment configuration.')
+  }
+}
