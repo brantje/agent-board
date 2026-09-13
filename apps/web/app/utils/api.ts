@@ -173,3 +173,21 @@ export async function apiBlob(path: string, options: { signal?: AbortSignal } = 
     throw new ApiError(502, 'invalid_response', 'The server returned invalid binary content. Retry or check deployment configuration.')
   }
 }
+
+export async function downloadApiFile(path: string, filename: string) {
+  if (typeof document === 'undefined') throw new ApiError(0, 'browser_required', 'Downloads are only available in the browser.')
+  const blob = await apiBlob(path)
+  const href = URL.createObjectURL(blob)
+  try {
+    const anchor = document.createElement('a')
+    anchor.href = href
+    anchor.download = filename
+    anchor.rel = 'noopener'
+    anchor.style.display = 'none'
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+  } finally {
+    URL.revokeObjectURL(href)
+  }
+}
