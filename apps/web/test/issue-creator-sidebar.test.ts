@@ -36,7 +36,7 @@ it.each([
       description: '',
       status: 'TODO',
       priority: 0,
-      assignedAgentId: null,
+      assignedTo: null,
       createdBy,
       createdAt: '',
       updatedAt: '',

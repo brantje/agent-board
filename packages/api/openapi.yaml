@@ -128,6 +128,8 @@ paths:
     $ref: ./paths/runtimes.yaml#/path3
   /api/projects/{projectID}/runtimes/{resourceID}:
     $ref: ./paths/runtimes.yaml#/path4
+  /api/projects/{projectID}/assignees:
+    $ref: ./paths/issues-runs.yaml#/assignees
   /api/projects/{projectID}/agents:
     $ref: ./paths/agents.yaml#/path3
   /api/projects/{projectID}/agents/{resourceID}:

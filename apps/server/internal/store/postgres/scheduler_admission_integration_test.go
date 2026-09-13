@@ -158,7 +158,7 @@ func createQueuedFixtureRun(t *testing.T, s *Store, f runFixture, suffix string)
 		ProjectID:       f.project.ID,
 		Title:           "issue " + suffix,
 		Status:          "IN_PROGRESS",
-		AssignedAgentID: &f.agent.ID,
+		AssigneeType: stringPtrPG("AGENT"), AssigneeID: &f.agent.ID,
 	})
 	if err != nil {
 		t.Fatalf("create issue %s: %v", suffix, err)

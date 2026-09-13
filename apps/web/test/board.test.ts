@@ -7,7 +7,7 @@ const issue = (id: string, status: string) => ({
   title: id,
   projectId: 'p',
   description: '',
-  assignedAgentId: null,
+  assignedTo: null,
   createdAt: '',
   updatedAt: ''
 })

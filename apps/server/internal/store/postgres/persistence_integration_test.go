@@ -67,7 +67,7 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "issue " + suffix, Status: "TODO", AssignedAgentID: &agent.ID})
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "issue " + suffix, Status: "TODO", AssigneeType: stringPtrPG("AGENT"), AssigneeID: &agent.ID})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}

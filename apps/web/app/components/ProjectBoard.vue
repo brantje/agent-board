@@ -22,7 +22,7 @@ const error = computed(() => project.error.value || issues.error.value || agents
 const runsError = computed(() => runs.error.value)
 
 function agentName(issue: Issue) {
-  return agents.data.value?.find(agent => agent.id === issue.assignedAgentId)?.name
+  return issue.assignedTo?.name
 }
 
 function runStatus(issue: Issue) {

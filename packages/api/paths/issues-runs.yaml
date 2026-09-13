@@ -43,11 +43,11 @@ path3:
   - $ref: ../components/api-components.yaml#/parameters/IssueID
   post:
     operationId: assignIssue
-    description: Persists durable assignment and scheduling intent. Request lifetime never executes the Run.
+    description: Changes current ownership and atomically records its Event. Does not change Board status or Runs.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/Assignment
     responses:
-      '202':
+      '200':
         $ref: ../components/api-components.yaml#/responses/Assignment
       default:
         $ref: ../components/api-components.yaml#/responses/Error
@@ -103,5 +103,22 @@ path7:
     responses:
       '204':
         description: Issue relationship deleted.
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+assignees:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listIssueAssignees
+    description: Active effective Project members/admins and enabled visible Agents, independent of execution readiness.
+    responses:
+      '200':
+        description: Eligible Issue owners
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: '../schemas/control-plane.yaml#/Assignee'}
       default:
         $ref: ../components/api-components.yaml#/responses/Error

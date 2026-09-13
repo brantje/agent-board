@@ -74,7 +74,7 @@ func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID str
 
 	issue, err = scanIssueJoined(tx.QueryRow(ctx, `
         UPDATE issues AS i
-        SET assigned_agent_id=$3, status='IN_PROGRESS', updated_at=now()
+        SET assignee_type='AGENT', assignee_id=$3, status='IN_PROGRESS', updated_at=now()
         FROM projects AS p
         WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
         RETURNING `+issueSelectColumns+`
@@ -116,7 +116,7 @@ func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID stri
         FOR UPDATE OF i
     `, projectID, issueID).Scan(
 		&issue.ID, &issue.ProjectID, &issue.Title, &issue.Description, &issue.Status, &issue.Priority,
-		&issue.AssignedAgentID, &issue.Number, &prefix, &issue.CreatedByType, &issue.CreatedByID, &issue.CreatedByName, &issue.CreatedAt, &issue.UpdatedAt,
+		&issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName, &issue.Number, &prefix, &issue.CreatedByType, &issue.CreatedByID, &issue.CreatedByName, &issue.CreatedAt, &issue.UpdatedAt,
 		&repositoryPath, &defaultBranch,
 	)
 	if err != nil {

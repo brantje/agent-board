@@ -22,7 +22,7 @@ const latest = computed(() => latestRun(runs.data.value || [], props.issueId))
 const choices = computed(() => agents.data.value
   ?.filter(agent => agent.state === 'ENABLED')
   .map(agent => ({ label: agent.name, value: agent.id })) || [])
-const assignedAgentName = computed(() => agents.data.value?.find(agent => agent.id === issue.value?.assignedAgentId)?.name)
+const assignedName = computed(() => issue.value?.assignedTo?.name)
 const creatorLabel = computed(() => {
   const creator = issue.value?.createdBy
   if (!creator) return 'Unknown'
@@ -32,7 +32,7 @@ const creatorLabel = computed(() => {
 const assignmentDescription = computed(() => {
   if (!assignmentResult.value) return undefined
   const result = assignmentResult.value
-  return `Board status: ${statusLabel(result.issue.status)}. Run attempt ${result.run.attempt}: ${statusLabel(result.run.status)}. Execution continues server-side.`
+  return `Board status: ${statusLabel(result.issue.status)}. Ownership updated.`
 })
 
 const questionsPanel = ref<{ refresh?: () => Promise<unknown> }>()
@@ -61,11 +61,10 @@ async function assign() {
   try {
     const result = await apiRequest<AssignmentResponse>(`${apiPath('issues', props.projectId, props.issueId)}/assignment`, {
       method: 'POST',
-      body: { agentId: selected.value }
+      body: { assignedTo: { type: 'AGENT', id: selected.value } }
     })
     assignmentResult.value = result
     issue.value = result.issue
-    runs.data.value = [result.run, ...(runs.data.value || []).filter(run => run.id !== result.run.id)]
     selected.value = ''
     await reload()
   } catch (failure) {
@@ -101,7 +100,7 @@ async function saved(savedIssue: Issue) {
 
           <UCard>
             <h2 class="section-label mb-3">Latest Run</h2>
-            <AsyncState :pending="runs.pending.value" :error="runs.error.value" :empty="!latest" empty-title="No Runs yet" empty-description="Assign an Agent to this Issue to schedule the first Run." @retry="runs.refresh">
+            <AsyncState :pending="runs.pending.value" :error="runs.error.value" :empty="!latest" empty-title="No Runs yet" empty-description="Execution attempts will appear here." @retry="runs.refresh">
               <template v-if="latest">
                 <div class="flex flex-wrap items-center gap-3">
                   <RunStatus :status="latest.status" :label="statusLabel(latest.status)" />
@@ -138,11 +137,11 @@ async function saved(savedIssue: Issue) {
               <div>
                 <dt class="text-muted">Assigned Agent</dt>
                 <dd class="flex items-center gap-2">
-                  <template v-if="assignedAgentName">
-                    <IdentityAvatar kind="agent" :name="assignedAgentName" size="xs" />
-                    <span>{{ assignedAgentName }}</span>
+                  <template v-if="assignedName">
+                    <IdentityAvatar :kind="issue.assignedTo?.type === 'USER' ? 'user' : 'agent'" :name="assignedName" size="xs" />
+                    <span>{{ assignedName }}</span>
                   </template>
-                  <span v-else-if="issue.assignedAgentId">Assigned Agent unavailable</span>
+                  <span v-else-if="issue.assignedTo?.id">Assignee unavailable</span>
                   <span v-else>Unassigned</span>
                 </dd>
               </div>
@@ -181,12 +180,12 @@ async function saved(savedIssue: Issue) {
                 <UAlert v-if="assignmentError" title="Unable to assign" :description="assignmentError.message" color="error" />
                 <UAlert v-if="assignmentResult" title="Assignment accepted" :description="assignmentDescription" color="success" />
                 <UAlert v-if="!choices.length && issue.status !== 'DONE'" title="No enabled Agents" description="Create or enable an Agent in this Project before assigning work." color="neutral" />
-                <UFormField label="Enabled Agent" name="agent" description="The backend performs full execution preflight when you assign work.">
+                <UFormField label="Enabled Agent" name="agent" description="Assign ownership to an enabled Agent in this Project.">
                   <USelect v-model="selected" :items="choices" :disabled="assigning || issue.status === 'DONE' || !choices.length" class="w-full" />
                 </UFormField>
                 <p v-if="issue.status === 'DONE'" class="text-sm text-muted">Reopen this Issue before assigning work.</p>
-                <p v-else-if="issue.assignedAgentId" class="text-sm text-muted">Changing Agent may cancel and replace the current attempt on the same Issue Workspace.</p>
-                <p v-else class="text-sm text-muted">Assignment persists scheduling intent. Execution continues server-side after this request returns.</p>
+                <p v-else-if="issue.assignedTo?.id" class="text-sm text-muted">Assignment changes Issue ownership.</p>
+                <p v-else class="text-sm text-muted">Assignment updates the current Issue owner.</p>
                 <UButton label="Assign Agent" type="submit" :loading="assigning" :disabled="!selected || issue.status === 'DONE'" />
               </UForm>
             </AsyncState>

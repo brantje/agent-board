@@ -91,7 +91,7 @@ func TestAssignIssueSkipsEventWhenAgentAlreadyOwnsIssue(t *testing.T) {
 	pid := coverageProjectID()
 	agentID := coverageAgent().ID
 	issue := coverageIssue()
-	issue.AssignedAgentID = &agentID
+	issue.AssigneeID = &agentID
 	existing := store.Event{ID: "evt-assigned", Type: "issue.assigned", ProjectID: pid, IssueID: &issue.ID}
 	issue.LastEvent = &existing
 	base := &stickyIssueStore{
@@ -106,7 +106,7 @@ func TestAssignIssueSkipsEventWhenAgentAlreadyOwnsIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if assigned.AssignedAgentID == nil || *assigned.AssignedAgentID != agentID {
+	if assigned.AssigneeID == nil || *assigned.AssigneeID != agentID {
 		t.Fatalf("assigned=%+v", assigned)
 	}
 	if assigned.LastEvent == nil || assigned.LastEvent.ID != existing.ID {
@@ -154,7 +154,7 @@ func (s *stickyIssueStore) GetIssue(context.Context, string, string) (store.Issu
 }
 
 func (s *stickyIssueStore) AssignIssue(_ context.Context, _, _, agentID string) (store.Issue, store.Run, error) {
-	s.issue.AssignedAgentID = &agentID
+	s.issue.AssigneeID = &agentID
 	s.issue.Status = "IN_PROGRESS"
 	locked := s.issue
 	locked.LastEvent = nil

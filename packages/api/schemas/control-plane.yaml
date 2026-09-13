@@ -250,7 +250,7 @@ IssueCreator:
     name: {type: [string, 'null']}
 Issue:
   type: object
-  required: [id, projectId, number, title, description, status, priority, assignedAgentId, createdBy, createdAt, updatedAt, lastEvent]
+  required: [id, projectId, number, title, description, status, priority, assignedTo, createdBy, createdAt, updatedAt, lastEvent]
   properties:
     id: {$ref: '#/IssueKey'}
     projectId: {type: string, format: uuid}
@@ -263,7 +263,10 @@ Issue:
       minimum: 0
       maximum: 4
       description: Numeric v0.1 priority. 0 is the default/base priority and larger values mean higher relative priority.
-    assignedAgentId: {type: [string, 'null'], format: uuid}
+    assignedTo:
+      oneOf:
+      - {$ref: '#/Assignee'}
+      - {type: 'null'}
     createdBy:
       oneOf:
         - $ref: '#/IssueCreator'
@@ -349,18 +352,33 @@ Run:
     currentBranch:
       type: [string, 'null']
       description: Live Issue Workspace Git checkout for this Run.
+Assignee:
+  type: object
+  additionalProperties: false
+  required: [type, id, name]
+  properties:
+    type: {type: string, enum: [USER, AGENT]}
+    id: {type: string, format: uuid}
+    name: {type: string}
 AssignmentInput:
   type: object
   additionalProperties: false
-  required: [agentId]
+  required: [assignedTo]
   properties:
-    agentId: {type: string, format: uuid}
+    assignedTo:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required: [type, id]
+        properties:
+          type: {type: string, enum: [USER, AGENT]}
+          id: {type: string, format: uuid}
+      - {type: 'null'}
 AssignmentResponse:
   type: object
-  required: [issue, run]
+  required: [issue]
   properties:
     issue: {$ref: '#/Issue'}
-    run: {$ref: '#/Run'}
 ErrorResponse:
   type: object
   required: [error]

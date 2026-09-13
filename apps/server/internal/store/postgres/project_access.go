@@ -102,8 +102,12 @@ func (s *Store) ListProjectsForUser(ctx context.Context, userID string) ([]store
 }
 
 func (s *Store) EffectiveProjectRole(ctx context.Context, projectID, userID string) (string, error) {
+	return effectiveProjectRole(ctx, s.pool, projectID, userID)
+}
+
+func effectiveProjectRole(ctx context.Context, q assigneeQuerier, projectID, userID string) (string, error) {
 	var role string
-	if err := s.pool.QueryRow(ctx, `
+	if err := q.QueryRow(ctx, `
 		SELECT role
 		FROM (
 			SELECT pua.role

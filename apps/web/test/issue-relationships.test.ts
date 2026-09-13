@@ -11,7 +11,7 @@ const source = {
   description: '',
   status: 'TODO',
   priority: 0,
-  assignedAgentId: null,
+  assignedTo: null,
   createdAt: '',
   updatedAt: ''
 }

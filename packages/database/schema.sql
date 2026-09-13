@@ -272,7 +272,9 @@ CREATE TABLE issues (
     description text NOT NULL DEFAULT '',
     status text NOT NULL DEFAULT 'BACKLOG' CHECK (status IN ('BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE')),
     priority integer NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 4),
-    assigned_agent_id uuid REFERENCES agents(id) ON DELETE SET NULL,
+    assignee_type text,
+    assignee_id uuid,
+    CONSTRAINT issues_assignee_pair CHECK ((assignee_type IS NULL AND assignee_id IS NULL) OR (assignee_type IS NOT NULL AND assignee_type IN ('USER','AGENT') AND assignee_id IS NOT NULL)),
     created_by_type text CHECK (created_by_type IS NULL OR created_by_type IN ('HUMAN', 'AGENT')),
     created_by_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -283,7 +285,7 @@ CREATE TABLE issues (
 );
 
 CREATE INDEX issues_project_status_idx ON issues (project_id, status, created_at);
-CREATE INDEX issues_assigned_agent_idx ON issues (assigned_agent_id) WHERE assigned_agent_id IS NOT NULL;
+CREATE INDEX issues_assignee_idx ON issues (assignee_type, assignee_id) WHERE assignee_id IS NOT NULL;
 
 CREATE TABLE issue_relationships (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -654,11 +656,15 @@ BEGIN
             RAISE EXCEPTION 'agent cannot reference model profile from another project' USING ERRCODE = '23514';
         END IF;
     ELSIF TG_TABLE_NAME = 'issues' THEN
-        IF NEW.assigned_agent_id IS NOT NULL THEN
-            SELECT project_id INTO referenced_project_id FROM agents WHERE id = NEW.assigned_agent_id;
+        IF NEW.assignee_type = 'AGENT' THEN
+            SELECT project_id INTO referenced_project_id FROM agents WHERE id = NEW.assignee_id;
+            IF NOT FOUND THEN RAISE EXCEPTION 'invalid agent assignee' USING ERRCODE = '23514'; END IF;
             IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
                 RAISE EXCEPTION 'issue cannot reference agent from another project' USING ERRCODE = '23514';
             END IF;
+        ELSIF NEW.assignee_type = 'USER' THEN
+            PERFORM 1 FROM users WHERE id = NEW.assignee_id;
+            IF NOT FOUND THEN RAISE EXCEPTION 'invalid user assignee' USING ERRCODE = '23514'; END IF;
         END IF;
     ELSIF TG_TABLE_NAME = 'runs' THEN
         IF NEW.agent_id IS NOT NULL THEN
@@ -706,7 +712,7 @@ CREATE TRIGGER model_profiles_owner_change_check BEFORE UPDATE OF project_id ON 
 CREATE TRIGGER runtimes_owner_change_check BEFORE UPDATE OF project_id ON runtimes FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 
 CREATE TRIGGER agents_scope_check BEFORE INSERT OR UPDATE OF project_id, model_profile_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
-CREATE TRIGGER issues_scope_check BEFORE INSERT OR UPDATE OF project_id, assigned_agent_id ON issues FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
+CREATE TRIGGER issues_scope_check BEFORE INSERT OR UPDATE OF project_id, assignee_type, assignee_id ON issues FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER runs_scope_check BEFORE INSERT OR UPDATE OF project_id, agent_id ON runs FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER runtime_instances_scope_check BEFORE INSERT OR UPDATE OF project_id, runtime_id ON runtime_instances FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 

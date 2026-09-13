@@ -138,7 +138,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if assigned.Status != "IN_PROGRESS" || assigned.AssignedAgentID == nil || *assigned.AssignedAgentID != agent.ID {
+	if assigned.Status != "IN_PROGRESS" || assigned.AssigneeID == nil || *assigned.AssigneeID != agent.ID {
 		t.Fatalf("unexpected assigned issue: %+v", assigned)
 	}
 	if run.Status != "QUEUED" || run.Attempt != 1 || run.WorkspaceID == "" {

@@ -98,11 +98,11 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 	}
 
 	updated, err := scanIssueJoined(tx.QueryRow(ctx, `
-		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, assigned_agent_id=$7, updated_at=now()
+		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, updated_at=now()
 		FROM projects AS p
 		WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
 		RETURNING `+issueSelectColumns+`
-	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.Priority, input.AssignedAgentID))
+	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.Priority))
 	if err != nil {
 		return store.Issue{}, err
 	}

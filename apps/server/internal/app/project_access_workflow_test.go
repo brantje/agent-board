@@ -129,7 +129,7 @@ func (s *projectWorkflowAuthorizationStore) AssignIssue(_ context.Context, proje
 	if err != nil {
 		return store.Issue{}, store.Run{}, err
 	}
-	issue.AssignedAgentID = &agentID
+	issue.AssigneeID = &agentID
 	s.issues[issueID] = issue
 	run := store.Run{ID: "run-1", ProjectID: projectID, IssueID: issueID, Status: "QUEUED"}
 	s.runs[run.ID] = run
@@ -175,7 +175,7 @@ func TestProjectAccessMemberRunsExistingWorkflowMutations(t *testing.T) {
 	}
 
 	assigned, run, err := access.AssignIssue(t.Context(), member, projectID, "issue-existing", "agent-1")
-	if err != nil || assigned.AssignedAgentID == nil || *assigned.AssignedAgentID != "agent-1" || run.ID != "run-1" || fake.assignIssueCalls != 1 {
+	if err != nil || assigned.AssigneeID == nil || *assigned.AssigneeID != "agent-1" || run.ID != "run-1" || fake.assignIssueCalls != 1 {
 		t.Fatalf("member AssignIssue() issue=%+v run=%+v calls=%d err=%v", assigned, run, fake.assignIssueCalls, err)
 	}
 

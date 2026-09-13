@@ -182,9 +182,9 @@ Board status and Run status are separate. Run states such as `QUEUED`, `RUNNING`
 
 Issue priority uses one numeric v0.1 vocabulary: `0`, `1`, `2`, `3`, `4`. `0` is the default/base priority and larger values mean higher relative priority. Priority is durable Issue metadata; by itself it does not bypass blockers, change Board state, create/cancel a Run or override scheduler admission policy.
 
-Assigning a runnable Agent normally creates/schedules a Run and moves the Issue into active work. The request returns after durable scheduling; execution continues server-side.
+Issue ownership is one User, Agent or nobody. The assignment API changes ownership without changing Board status or cancelling Runs. Enabled Project-visible Agents remain assignable while their execution configuration is temporarily unavailable.
 
-Changing assignee during active work cancels the current attempt and starts a new attempt on the same Issue branch/Workspace identity.
+Implementation is staged under #99: #100 provides ownership persistence/API/Events; #101 supplies automatic enqueue policy and #102 readiness recovery/explicit execution. The legacy internal execution entry point remains until that enqueue-policy change; the public ownership command does not invoke it.
 
 Done Issues cannot start Runs. Reopen returns Done -> Todo without auto-starting.
 

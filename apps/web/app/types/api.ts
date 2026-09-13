@@ -51,7 +51,7 @@ export interface Issue {
   description: string
   status: string
   priority: number
-  assignedAgentId: string | null
+  assignedTo: Assignee | null
   createdBy: IssueCreator | null
   createdAt: string
   updatedAt: string
@@ -85,9 +85,14 @@ export interface Run {
   currentBranch: string | null
 }
 
+export interface Assignee {
+  type: 'USER' | 'AGENT'
+  id: string
+  name: string
+}
+
 export interface AssignmentResponse {
   issue: Issue
-  run: Run
 }
 
 export interface Agent {

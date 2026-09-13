@@ -18,7 +18,7 @@ const issue = {
   description: 'Persist leases',
   status: 'TODO',
   priority: 0,
-  assignedAgentId: null,
+  assignedTo: null,
   createdBy: null,
   createdAt: '',
   updatedAt: '2026-09-13T14:59:00.000Z',
@@ -101,14 +101,14 @@ describe('Issue workflow components', () => {
     expect(wrapper.text()).not.toContain('Question Created')
     expect(wrapper.text()).not.toContain('TODO')
 
-    await wrapper.setProps({ issue: { ...issue, assignedAgentId: 'a', priority: 3, description: '' }, runStatus: 'QUEUED' })
+    await wrapper.setProps({ issue: { ...issue, assignedTo: { type: 'AGENT', id: 'a', name: 'Agent' }, priority: 3, description: '' }, runStatus: 'QUEUED' })
     expect(wrapper.find('[aria-label="High"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('Persist leases')
-    expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(true)
+    expect(wrapper.find('[aria-label="Agent"]').exists()).toBe(true)
     expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(true)
     expect(wrapper.get('[data-issue-run-status]').text()).toBe('Queued')
 
-    await wrapper.setProps({ agentName: 'Coder', runStatus: 'RUNNING' })
+    await wrapper.setProps({ issue: { ...issue, assignedTo: { type: 'AGENT', id: 'a', name: 'Coder' } }, runStatus: 'RUNNING' })
     expect(wrapper.find('[aria-label="Coder"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Coder')
@@ -124,6 +124,15 @@ describe('Issue workflow components', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('renders the public User assignee without an Agent lookup', () => {
+    const wrapper = mount(IssueCard, {
+      props: { issue: { ...issue, assignedTo: { type: 'USER', id: 'user-1', name: 'Alex' } } }, global
+    })
+    expect(wrapper.text()).toContain('Alex')
+    expect(wrapper.find('[aria-label="Alex"]').exists()).toBe(true)
+    expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(false)
   })
 
   it('creates only valid Issues, round-trips priority, and cannot submit protected Review/Done transitions', async () => {
@@ -305,15 +314,14 @@ describe('Issue workflow components', () => {
         if (fail) {
           return new Response(JSON.stringify({ error: { code: 'execution_configuration_invalid', message: 'unsafe backend detail' } }), { status: 422 })
         }
-        status = 'IN_PROGRESS'
         assigned = true
-        return new Response(JSON.stringify({ issue: { ...issue, status, assignedAgentId: 'a' }, run }), { status: 202 })
+        return new Response(JSON.stringify({ issue: { ...issue, status, assignedTo: { type: 'AGENT', id: 'a', name: 'Agent' } } }), { status: 200 })
       }
       if (path.endsWith('/agents')) {
         return new Response(JSON.stringify([agent, { ...agent, id: 'draft', name: 'Draft', state: 'DRAFT' }, { ...agent, id: 'disabled', name: 'Disabled', state: 'DISABLED' }]))
       }
       if (path.endsWith('/runs')) return new Response(JSON.stringify(assigned ? [run] : []))
-      return new Response(JSON.stringify({ ...issue, status, assignedAgentId: assigned ? 'a' : null }))
+      return new Response(JSON.stringify({ ...issue, status, assignedTo: assigned ? { type: 'AGENT', id: 'a', name: 'Agent' } : null }))
     })
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
@@ -321,7 +329,7 @@ describe('Issue workflow components', () => {
 
     expect(wrapper.text()).toContain('Priority 0')
     expect(wrapper.text()).toContain('No Runs yet')
-    expect(wrapper.text()).toContain('Assign an Agent to this Issue to schedule the first Run.')
+    expect(wrapper.text()).toContain('Execution attempts will appear here.')
     expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
     expect(wrapper.text()).toContain('Questions')
     expect(wrapper.find('option[value=draft]').exists()).toBe(false)
@@ -340,8 +348,10 @@ describe('Issue workflow components', () => {
     await formForField(wrapper, 'agent').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Assignment accepted')
-    expect(wrapper.text()).toContain('Board status: In Progress')
-    expect(wrapper.text()).toContain('Run attempt 1: Queued')
+    expect(wrapper.text()).toContain('Board status: Todo')
+    expect(wrapper.text()).toContain('Ownership updated.')
+    const assignmentCall = fetch.mock.calls.find(([, options]) => options.method === 'POST')!
+    expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: { type: 'AGENT', id: 'a' } })
     expect(wrapper.text()).toContain('Attempt 1 · Queued')
     expect(wrapper.text()).toContain('Queue reason: capacity')
     expect(fetch.mock.calls.filter(([, options]) => options.method === 'GET').length).toBeGreaterThanOrEqual(6)

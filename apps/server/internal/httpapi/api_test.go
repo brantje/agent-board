@@ -222,7 +222,7 @@ func (f *fakeControlPlaneStore) GetRun(_ context.Context, pid, id string) (store
 }
 func (f *fakeControlPlaneStore) AssignIssue(context.Context, string, string, string) (store.Issue, store.Run, error) {
 	issue := issueFixture("IN_PROGRESS")
-	issue.AssignedAgentID = stringPtr(agentID)
+	issue.AssigneeID = stringPtr(agentID)
 	return issue, store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 1, Status: "QUEUED"}, nil
 }
 func stringPtr(v string) *string { return &v }
@@ -298,7 +298,7 @@ func TestControlPlaneRoutes(t *testing.T) {
 		struct {
 			name, method, path, body string
 			status                   int
-		}{"assign issue", "POST", "/api/projects/" + projectID + "/issues/" + issueKey + "/assignment", `{"agentId":"` + agentID + `"}`, 202},
+		}{"assign issue", "POST", "/api/projects/" + projectID + "/issues/" + issueKey + "/assignment", `{"assignedTo":{"type":"AGENT","id":"` + agentID + `"}}`, 200},
 		struct {
 			name, method, path, body string
 			status                   int
@@ -342,7 +342,7 @@ func TestControlPlaneRejectsInvalidRequestsAndInaccessibleIDs(t *testing.T) {
 		{"cross project issue", "GET", "/api/projects/" + projectID + "/issues/" + missingIssueKey, "", "issue_not_found", 404},
 		{"uuid issue id rejected", "GET", "/api/projects/" + projectID + "/issues/" + issueID, "", "invalid_id", 400},
 		{"missing provider", "GET", "/api/providers/" + otherID, "", "provider_not_found", 404},
-		{"invalid assignment agent", "POST", "/api/projects/" + projectID + "/issues/" + issueKey + "/assignment", `{"agentId":"bad"}`, "invalid_id", 400},
+		{"invalid assignment agent", "POST", "/api/projects/" + projectID + "/issues/" + issueKey + "/assignment", `{"assignedTo":{"type":"AGENT","id":"bad"}}`, "invalid_argument", 400},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
