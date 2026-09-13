@@ -11,10 +11,9 @@ const currentUser = useState<AuthUser | null>('auth-user')
 const projectId = computed(() => typeof route.params.projectID === 'string' ? route.params.projectID : undefined)
 const permissions = useProjectPermissions(projectId)
 const deploymentAdmin = computed(() => currentUser.value?.deploymentRole === 'admin')
-const projectAdmin = computed(() => deploymentAdmin.value || permissions.canAdmin.value)
 const links = computed(() => navigation(projectId.value, {
   deploymentAdmin: deploymentAdmin.value,
-  projectAdmin: projectAdmin.value
+  projectAdmin: permissions.canAdmin.value
 }))
 </script>
 <template>
