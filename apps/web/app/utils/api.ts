@@ -77,7 +77,7 @@ function assertApiPath(path: string) {
   if (!path.startsWith('/api/') || path.includes('..') || path.includes('\\')) throw new Error('Invalid API path')
 }
 
-function storedAuthorizationHeader(): Record<string, string> {
+export function browserAuthorizationHeaders(): Record<string, string> {
   if (typeof window === 'undefined') return {}
   const { credentials } = readAuthStorage(window.localStorage, window.sessionStorage)
   return credentials?.accessToken ? { Authorization: `Bearer ${credentials.accessToken}` } : {}
@@ -109,7 +109,7 @@ export async function apiRequest<T>(path: string, options: { method?: string; bo
       headers: {
         Accept: 'application/json',
         ...(options.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...storedAuthorizationHeader(),
+        ...browserAuthorizationHeaders(),
         ...options.headers
       },
       body: options.body === undefined ? undefined : JSON.stringify(options.body)
@@ -136,7 +136,7 @@ export async function apiText(path: string, options: { signal?: AbortSignal } = 
       signal: options.signal,
       headers: {
         Accept: 'text/plain',
-        ...storedAuthorizationHeader()
+        ...browserAuthorizationHeaders()
       }
     })
   } catch {
