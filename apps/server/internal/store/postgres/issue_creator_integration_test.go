@@ -42,6 +42,8 @@ func TestIssueCreatorIdentityAndDisplayName(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Creator names are resolved from the authoritative identity record; callers
+	// persist only actor type + ID and cannot supply presentation text.
 	humanType := store.ActorTypeHuman
 	humanIssue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "Human-created", Status: "TODO", CreatedByType: &humanType, CreatedByID: &user.ID})
 	if err != nil {
