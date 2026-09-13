@@ -76,6 +76,9 @@ func TestAuthPhase2HTTPAdminLifecycleAndPasswordInvalidation(t *testing.T) {
 	}
 
 	postReset := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/login", `{"login":"member","password":"reset-long-password"}`, nil)
+	if postReset.Code != http.StatusOK {
+		t.Fatalf("post-reset login status=%d body=%s", postReset.Code, postReset.Body.String())
+	}
 	var postResetTokens authTokensResponse
 	if err := json.Unmarshal(postReset.Body.Bytes(), &postResetTokens); err != nil {
 		t.Fatal(err)
