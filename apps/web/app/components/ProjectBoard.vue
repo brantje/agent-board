@@ -6,8 +6,10 @@ import { boardColumns } from '../utils/issues'
 import { isBoardActivityEvent, applyCurrentBranchToIssues } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
+import { useProjectPermissions } from '../composables/useProjectPermissions'
 
 const props = defineProps<{ projectId: string }>()
+const permissions = useProjectPermissions(() => props.projectId)
 const project = useResource<Project>(() => apiPath('projects', undefined, props.projectId))
 const issues = useResource<Issue[]>(() => apiPath('issues', props.projectId))
 const agents = useResource<Agent[]>(() => apiPath('agents', props.projectId))
@@ -24,7 +26,7 @@ function agentName(issue: Issue) {
 }
 
 async function refreshAll() {
-  await Promise.all([project.refresh(), issues.refresh(), agents.refresh()])
+  await Promise.all([project.refresh(), issues.refresh(), agents.refresh(), permissions.refresh()])
 }
 
 async function created() {
@@ -50,7 +52,7 @@ useProjectEvents(() => props.projectId, async event => {
     <template #actions>
       <UInput v-model="search" aria-label="Filter issues" placeholder="Filter issues…" icon="i-lucide-search" />
       <UButton label="Refresh" variant="outline" color="neutral" @click="refreshAll" />
-      <UButton label="New issue" icon="i-lucide-plus" @click="open = true" />
+      <UButton v-if="permissions.canMutate.value" label="New issue" icon="i-lucide-plus" @click="open = true" />
     </template>
 
     <AsyncState :pending="pending" :error="error" @retry="refreshAll">
@@ -76,7 +78,7 @@ useProjectEvents(() => props.projectId, async event => {
       </div>
     </AsyncState>
 
-    <UModal v-model:open="open" title="New issue" description="Create work in this Project.">
+    <UModal v-if="permissions.canMutate.value" v-model:open="open" title="New issue" description="Create work in this Project.">
       <template #body>
         <IssueEditor :project-id="projectId" @saved="created" @cancel="open = false" />
       </template>
