@@ -6,7 +6,7 @@ import { projectRunActivity } from '../utils/events'
 import { commandLabel, formatElapsed, runStatusLabel } from '../utils/runs'
 import { useRunEvents } from '../composables/useRunEvents'
 
-const props = defineProps<{ projectId: string; runId: string }>()
+const props = withDefaults(defineProps<{ projectId: string; runId: string; canMutate?: boolean }>(), { canMutate: true })
 const { evidence, events, reviews, connection, pending, error, refresh } = useRunEvents(() => props.projectId, () => props.runId)
 const logs = ref<Record<string, string>>({})
 const logError = ref<Error>()
@@ -101,7 +101,7 @@ function provenanceText() {
             <ActivityTimeline :items="activityItems" />
           </UCard>
 
-          <QuestionPanel :project-id="projectId" :run-id="runId" />
+          <QuestionPanel :project-id="projectId" :run-id="runId" :can-mutate="canMutate" />
 
           <details class="border border-default bg-default/40">
             <summary class="cursor-pointer select-none px-4 py-3 text-sm font-medium">Run details</summary>
