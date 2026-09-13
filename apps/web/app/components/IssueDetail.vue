@@ -137,11 +137,26 @@ async function saved(savedIssue: Issue) {
               </div>
               <div>
                 <dt class="text-muted">Assigned Agent</dt>
-                <dd>{{ assignedAgentName || (issue.assignedAgentId ? 'Assigned Agent unavailable' : 'Unassigned') }}</dd>
+                <dd class="flex items-center gap-2">
+                  <template v-if="assignedAgentName">
+                    <IdentityAvatar kind="agent" :name="assignedAgentName" size="xs" />
+                    <span>{{ assignedAgentName }}</span>
+                  </template>
+                  <span v-else-if="issue.assignedAgentId">Assigned Agent unavailable</span>
+                  <span v-else>Unassigned</span>
+                </dd>
               </div>
               <div>
                 <dt class="text-muted">Created by</dt>
-                <dd>{{ creatorLabel }}</dd>
+                <dd class="flex items-center gap-2">
+                  <IdentityAvatar
+                    v-if="issue.createdBy"
+                    :kind="issue.createdBy.type === 'AGENT' ? 'agent' : 'user'"
+                    :name="issue.createdBy.name || creatorLabel"
+                    size="xs"
+                  />
+                  <span>{{ creatorLabel }}</span>
+                </dd>
               </div>
               <div>
                 <dt class="text-muted">Latest Run</dt>

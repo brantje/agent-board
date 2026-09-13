@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boardColumnSurface, boardColumns, editableStatuses, issuePriority, issueStatusPresentation, latestRun, statusLabel } from '../app/utils/issues'
+import { boardColumnSurface, boardColumns, editableStatuses, formatUpdatedLabel, isFailedIssueRun, isLiveIssueRun, issueCardRunStatus, issuePriority, issueStatusPresentation, latestRun, statusLabel } from '../app/utils/issues'
 
 const issue = (id: string, status: string) => ({
   id,
@@ -70,5 +70,25 @@ describe('durable Issue board projection', () => {
   it('formats Issue and Run states as readable text without relying on color', () => {
     expect(statusLabel('WAITING_FOR_INPUT')).toBe('Waiting For Input')
     expect(statusLabel('IN_PROGRESS')).toBe('In Progress')
+  })
+
+  it('projects assigned Issue card run status and live execution state', () => {
+    expect(issueCardRunStatus(null, 'QUEUED')).toBeNull()
+    expect(issueCardRunStatus('a', 'QUEUED')).toBe('Queued')
+    expect(issueCardRunStatus('a', 'RUNNING')).toBe('Running')
+    expect(issueCardRunStatus('a', 'FAILED')).toBe('Failed')
+    expect(issueCardRunStatus('a', 'COMPLETED')).toBeNull()
+    expect(isFailedIssueRun('FAILED')).toBe(true)
+    expect(isLiveIssueRun('RUNNING')).toBe(true)
+    expect(isLiveIssueRun('STARTING')).toBe(true)
+    expect(isLiveIssueRun('QUEUED')).toBe(false)
+  })
+
+  it('formats relative updated labels and omits invalid timestamps', () => {
+    const now = Date.parse('2026-09-13T15:00:00.000Z')
+    expect(formatUpdatedLabel('2026-09-13T14:59:00.000Z', now)).toBe('Updated 1m ago')
+    expect(formatUpdatedLabel('2026-09-13T13:00:00.000Z', now)).toBe('Updated 2h ago')
+    expect(formatUpdatedLabel('2026-09-10T15:00:00.000Z', now)).toBe('Updated 3d ago')
+    expect(formatUpdatedLabel('not-a-date', now)).toBe('')
   })
 })

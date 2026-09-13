@@ -21,19 +21,6 @@ function toolExpandable(item: ToolActivityItem) {
   return Boolean(toolResultText(item) || item.reason)
 }
 
-function todoStatusIcon(status: string) {
-  if (status === 'completed') return 'i-lucide-circle-check'
-  if (status === 'in_progress') return 'i-lucide-loader-circle'
-  if (status === 'cancelled') return 'i-lucide-circle-x'
-  return 'i-lucide-circle'
-}
-
-function todoStatusClass(status: string) {
-  if (status === 'in_progress') return 'text-default'
-  if (status === 'completed' || status === 'cancelled') return 'text-muted line-through'
-  return 'text-muted'
-}
-
 function workspaceTransferPercent(item: GenericActivityItem) {
   if (item.event.type !== 'workspace.transfer.progress') return undefined
   const transferred = item.event.payload?.bytesTransferred
@@ -81,28 +68,11 @@ function workspaceTransferIcon(type: string) {
         >
           <div class="flex min-w-0 items-center gap-2 overflow-hidden">
             <UIcon name="i-lucide-list-todo" class="size-3.5 shrink-0" aria-hidden="true" />
-            <span class="min-w-0 truncate font-medium">Todo</span>
-            <span class="min-w-0 truncate text-xs text-muted">{{ item.target }}</span>
+            <span class="min-w-0 truncate font-medium">{{ item.target }}</span>
             <UIcon v-if="item.status === 'running'" name="i-lucide-loader-circle" class="ml-auto size-3 shrink-0 animate-spin text-primary" aria-hidden="true" />
             <span v-else-if="item.status === 'failed'" class="ml-auto text-xs text-error">failed</span>
             <span v-else-if="item.status === 'stopped'" class="ml-auto text-xs text-muted">stopped</span>
           </div>
-          <ul class="run-activity-todo-list ml-5 mt-1 space-y-1 p-2">
-            <li
-              v-for="(todo, index) in item.todos"
-              :key="`${item.id}-${index}`"
-              class="flex min-w-0 items-start gap-2"
-              :data-todo-status="todo.status"
-            >
-              <UIcon
-                :name="todoStatusIcon(todo.status)"
-                class="mt-0.5 size-3.5 shrink-0"
-                :class="todo.status === 'in_progress' ? 'animate-spin text-primary' : 'text-muted'"
-                aria-hidden="true"
-              />
-              <span class="min-w-0 leading-5" :class="todoStatusClass(todo.status)">{{ todo.content }}</span>
-            </li>
-          </ul>
           <p v-if="item.status === 'failed' && item.reason" class="ml-5 mt-1 font-mono text-xs text-error">
             <span class="font-medium">error:</span> {{ item.reason }}
           </p>

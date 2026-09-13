@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import RunList from '../app/components/RunList.vue'
 import RunAgentCard from '../app/components/RunAgentCard.vue'
 import RunChangedFilesCard from '../app/components/RunChangedFilesCard.vue'
+import RunTodoCard from '../app/components/RunTodoCard.vue'
+import ActivityTimeline from '../app/components/ActivityTimeline.vue'
 import RunDetail from '../app/components/RunDetail.vue'
 import RunStatus from '../app/components/RunStatus.vue'
 import QuestionPanel from '../app/components/QuestionPanel.vue'
@@ -18,7 +20,7 @@ const global = {
     ActivityTimeline: { props: ['events'], template: '<ol><li v-for="item in events" :key="item.id">{{item.type}} {{item.payload?.kind}} {{item.payload?.message}}</li></ol>' },
     RunUsageCard: { props: ['usage'], template: '<section data-run-usage>Usage</section>' }
   },
-  components: { RunStatus, RunAgentCard, RunChangedFilesCard }
+  components: { RunStatus, RunAgentCard, RunChangedFilesCard, RunTodoCard }
 }
 
 afterEach(() => {
@@ -224,6 +226,75 @@ describe('RunDetail', () => {
     expect(fetch.mock.calls.some(([path]) => path === '/api/projects/project-a/runs/run-1/raw-output/chunk-1')).toBe(true)
     expect(wrapper.text()).toContain('hello log')
     expect(wrapper.text()).toContain('live')
+    wrapper.unmount()
+  })
+
+  it('renders the Todo sidebar card with the latest checklist and keeps activity compact', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    const todos = [
+      { content: 'Create project structure', status: 'in progress' },
+      { content: 'Build core habit tracking', status: 'pending' },
+      { content: 'Polish UI/UX', status: 'completed' }
+    ]
+    const snapshot = evidence({
+      events: [
+        event({
+          id: 'todo-start',
+          type: 'tool.started',
+          sequence: 1,
+          payload: { toolCallId: 'todo-1', name: 'Todowrite', input: { todos } }
+        }),
+        event({
+          id: 'todo-done',
+          type: 'tool.completed',
+          sequence: 2,
+          payload: { toolCallId: 'todo-1', name: 'Todowrite' }
+        })
+      ]
+    })
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/evidence')) return new Response(JSON.stringify(snapshot))
+      if (path.includes('/questions')) return new Response(JSON.stringify([]))
+      if (path.includes('/reviews')) return new Response(JSON.stringify([]))
+      return new Response(JSON.stringify(snapshot.run))
+    }))
+    const wrapper = mount(RunDetail, {
+      props: { projectId: 'project-a', runId: 'run-1' },
+      global: {
+        stubs: { ...global.stubs, ActivityTimeline: false },
+        components: { ActivityTimeline, RunStatus, RunAgentCard, RunChangedFilesCard, RunTodoCard }
+      }
+    })
+    await flushPromises()
+
+    const sidebar = wrapper.get('.detail-grid > aside')
+    const todoCard = sidebar.get('[data-run-todo]')
+    expect(todoCard.text()).toContain('Create project structure')
+    expect(todoCard.text()).toContain('Build core habit tracking')
+    expect(todoCard.text()).toContain('Polish UI/UX')
+    expect(sidebar.text().indexOf('Coder')).toBeLessThan(sidebar.text().indexOf('Todo'))
+    expect(sidebar.text().indexOf('Todo')).toBeLessThan(sidebar.text().indexOf('Usage'))
+
+    const workCard = wrapper.get('[data-run-work]')
+    expect(workCard.text()).toContain('Started todo 1 of 3')
+    expect(workCard.text()).not.toContain('Create project structure')
+    wrapper.unmount()
+  })
+
+  it('omits the Todo sidebar card when the run has no Todowrite snapshots', async () => {
+    vi.stubGlobal('EventSource', MockEventSource)
+    const snapshot = evidence({
+      events: [event({ id: 'one', type: 'agent.message', sequence: 1, payload: { kind: 'progress', message: 'Editing files' } })]
+    })
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/evidence')) return new Response(JSON.stringify(snapshot))
+      if (path.includes('/questions')) return new Response(JSON.stringify([]))
+      if (path.includes('/reviews')) return new Response(JSON.stringify([]))
+      return new Response(JSON.stringify(snapshot.run))
+    }))
+    const wrapper = mount(RunDetail, { props: { projectId: 'project-a', runId: 'run-1' }, global })
+    await flushPromises()
+    expect(wrapper.find('[data-run-todo]').exists()).toBe(false)
     wrapper.unmount()
   })
 
