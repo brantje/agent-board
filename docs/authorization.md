@@ -8,7 +8,7 @@ A deployment-global `User` has a unique normalized username and email, durable U
 
 Local login accepts username or email plus password. Access tokens are JWTs; refresh tokens are opaque random secrets stored only as hashes. Access authentication re-loads authoritative User state and validates the token authentication version, so disabling a User or changing/resetting/admin-assigning their password invalidates already-issued access and refresh authentication immediately.
 
-The first successful registration in a zero-User deployment race-safely creates the deployment administrator and closes public registration. Additional Users are created by deployment administrators as `pending` and activate through one-time hashed setup tokens. Setup/reset tokens expire after 24 hours.
+The first successful registration in a zero-User deployment race-safely creates the deployment administrator and closes public registration. The browser then signs that administrator in immediately instead of sending them back through the login form. Additional Users are created by deployment administrators as `pending` and activate through one-time hashed setup tokens. Setup/reset tokens expire after 24 hours.
 
 Normal protected application access requires an active User who is not currently forced to change their password. The account password-change endpoint remains available to an authenticated User in the forced-change state.
 

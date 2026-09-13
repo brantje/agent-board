@@ -55,7 +55,7 @@ async function submitAuthForm(event: FormSubmitEvent<Record<string, unknown>>) {
     const data = event.data
     if (mode.value === 'login') {
       await auth.login(String(data.login ?? ''), String(data.password ?? ''), data.stayLoggedIn === true)
-      await navigateTo('/account')
+      await navigateTo('/')
       return
     }
     if (mode.value === 'register') {
@@ -65,7 +65,7 @@ async function submitAuthForm(event: FormSubmitEvent<Record<string, unknown>>) {
         displayName: String(data.displayName ?? ''),
         password: String(data.password ?? '')
       })
-      await navigateTo('/auth/login')
+      await navigateTo('/')
     }
   })
 }

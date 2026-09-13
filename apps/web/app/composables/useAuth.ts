@@ -116,7 +116,8 @@ export function useAuth() {
   }
 
   async function register(input: { username: string; email: string; displayName: string; password: string }) {
-    return apiRequest<AuthUser>('/api/auth/bootstrap/register', { method: 'POST', body: input })
+    await apiRequest<AuthUser>('/api/auth/bootstrap/register', { method: 'POST', body: input })
+    return login(input.username, input.password, false)
   }
 
   async function login(loginValue: string, password: string, stayLoggedIn: boolean) {

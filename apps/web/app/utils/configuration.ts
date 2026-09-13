@@ -6,8 +6,6 @@ export interface ConfigRecord {
   enabled?: boolean
   state?: string
   healthStatus?: string
-  filteredModelCount?: number | null
-  totalModelCount?: number | null
   [key: string]: unknown
 }
 
@@ -85,8 +83,7 @@ export const definitions: Record<ConfigKind, Definition> = {
       name,
       { key: 'issuePrefix', label: 'Issue prefix', required: true, immutable: true, help: 'Immutable public prefix for Issue keys such as AB-12. Use 2-10 uppercase letters and digits; must start with a letter.' },
       { key: 'repositoryPath', label: 'Local repository path', required: true, help: 'Backend-visible path within deployment-authorized repository roots. If the directory does not exist, Agent Board creates it and initializes a new Git repository on save.' },
-      { key: 'defaultBranch', label: 'Default branch', initial: 'main', required: true },
-      { key: 'workflowSettings', label: 'Workflow settings', type: 'json', initial: '{}', help: 'Optional workflow policy overrides supported by your Go server.' }
+      { key: 'defaultBranch', label: 'Default branch', initial: 'main', required: true }
     ]
   },
   providers: {

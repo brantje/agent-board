@@ -64,6 +64,7 @@ describe('auth route policy', () => {
   it('requires authentication and keeps deployment settings admin-only', () => {
     expect(authRedirect('/projects', false, false, false)).toBe('/auth/login')
     expect(authRedirect('/auth/login', false, false, false)).toBeNull()
+    expect(authRedirect('/auth/login', true, false, false)).toBe('/')
     expect(authRedirect('/settings', true, false, false)).toBe('/account')
     expect(authRedirect('/settings/users', true, false, false)).toBe('/account')
     expect(authRedirect('/settings', true, false, true)).toBeNull()
