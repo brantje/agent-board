@@ -8,7 +8,7 @@ import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
 import IssueRelationships from './IssueRelationships.vue'
 
-const props = defineProps<{ projectId: string; issueId: string }>()
+const props = withDefaults(defineProps<{ projectId: string; issueId: string; canMutate?: boolean }>(), { canMutate: true })
 const { data: issue, pending, error, refresh } = useResource<Issue>(() => apiPath('issues', props.projectId, props.issueId))
 const agents = useResource<Agent[]>(() => apiPath('agents', props.projectId))
 const runs = useResource<Run[]>(() => apiPath('runs', props.projectId))
@@ -48,7 +48,7 @@ useProjectEvents(() => props.projectId, async event => {
 })
 
 async function assign() {
-  if (!selected.value || assigning.value || issue.value?.status === 'DONE') return
+  if (!props.canMutate || !selected.value || assigning.value || issue.value?.status === 'DONE') return
   assigning.value = true
   assignmentError.value = undefined
   assignmentResult.value = undefined
@@ -80,7 +80,7 @@ async function saved(savedIssue: Issue) {
   <PageFrame :title="issue?.title || 'Issue'">
     <template #actions>
       <UButton label="Board" :to="`/projects/${projectId}/board`" variant="outline" />
-      <UButton v-if="issue" label="Edit issue" @click="editing = true" />
+      <UButton v-if="issue && canMutate" label="Edit issue" @click="editing = true" />
     </template>
 
     <AsyncState :pending="pending" :error="error" @retry="reload">
@@ -91,7 +91,7 @@ async function saved(savedIssue: Issue) {
             <p class="whitespace-pre-wrap break-words">{{ issue.description || 'No description provided.' }}</p>
           </UCard>
 
-          <IssueRelationships :project-id="projectId" :issue-id="issueId" />
+          <IssueRelationships :project-id="projectId" :issue-id="issueId" :can-mutate="canMutate" />
 
           <UCard>
             <h2 class="section-label mb-3">Latest Run</h2>
@@ -109,7 +109,7 @@ async function saved(savedIssue: Issue) {
           </UCard>
 
           <slot name="questions">
-            <QuestionPanel ref="questionsPanel" :project-id="projectId" :issue-id="issueId" />
+            <QuestionPanel ref="questionsPanel" :project-id="projectId" :issue-id="issueId" :can-mutate="canMutate" />
           </slot>
         </section>
 
@@ -149,7 +149,7 @@ async function saved(savedIssue: Issue) {
             </dl>
           </UCard>
 
-          <UCard>
+          <UCard v-if="canMutate">
             <h2 class="section-label mb-3">Assignment</h2>
             <AsyncState :pending="agents.pending.value" :error="agents.error.value" @retry="agents.refresh">
               <UForm :state="{ selected }" class="space-y-3" @submit="assign">
@@ -170,7 +170,7 @@ async function saved(savedIssue: Issue) {
       </div>
     </AsyncState>
 
-    <UModal v-model:open="editing" title="Edit issue" description="Update the durable Issue.">
+    <UModal v-if="canMutate" v-model:open="editing" title="Edit issue" description="Update the durable Issue.">
       <template #body>
         <IssueEditor v-if="issue" :project-id="projectId" :issue="issue" @saved="saved" @cancel="editing = false" />
       </template>
