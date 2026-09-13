@@ -24,7 +24,8 @@ func coverageAgent() store.Agent {
 	return store.Agent{ID: "agent", ProjectID: coverageScope(), Name: "Agent", Engine: "test", ModelProfileID: "model", EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"}
 }
 func coverageIssue() store.Issue {
-	return store.Issue{ID: "issue", ProjectID: coverageProjectID(), Key: "AB-1", Number: 1, Title: "Issue", Status: "TODO"}
+	creatorType, creatorID := store.ActorTypeAgent, coverageAgent().ID
+	return store.Issue{ID: "issue", ProjectID: coverageProjectID(), Key: "AB-1", Number: 1, Title: "Issue", Status: "TODO", CreatedByType: &creatorType, CreatedByID: &creatorID}
 }
 func coverageRun() store.Run {
 	a := "agent"
