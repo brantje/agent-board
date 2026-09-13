@@ -64,6 +64,24 @@ CREATE TABLE group_members (
     PRIMARY KEY (group_id, user_id)
 );
 
+CREATE TABLE project_user_access (
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    role text NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
+    PRIMARY KEY (project_id, user_id)
+);
+
+CREATE INDEX project_user_access_user_idx ON project_user_access (user_id, project_id);
+
+CREATE TABLE project_group_access (
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    role text NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
+    PRIMARY KEY (project_id, group_id)
+);
+
+CREATE INDEX project_group_access_group_idx ON project_group_access (group_id, project_id);
+
 CREATE TABLE auth_settings (
     singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
     access_token_lifetime_seconds integer NOT NULL DEFAULT 3600 CHECK (access_token_lifetime_seconds BETWEEN 300 AND 86400),

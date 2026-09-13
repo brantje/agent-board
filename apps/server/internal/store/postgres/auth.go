@@ -186,12 +186,11 @@ func (s *Store) setUserStatus(ctx context.Context, id, status string, deriveEnab
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// Deployment-admin availability is a deployment-global invariant. This
-	// table lock serializes status mutations so two admins cannot concurrently
-	// disable each other after both observing that another active admin exists.
-	// It also serializes re-enable with password writes so the target status is
-	// derived from the password state that is current at mutation time.
-	if _, err := tx.Exec(ctx, `LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE`); err != nil {
+	// Deployment-admin availability and direct Project-admin availability are
+	// both global invariants affected by User status. Use the same lock order as
+	// direct Project access mutations so concurrent changes cannot each observe
+	// a different qualifying admin and leave a Project unowned.
+	if err := lockDirectProjectAdminState(ctx, tx); err != nil {
 		return store.User{}, err
 	}
 	var current, deploymentRole, passwordHash string
@@ -210,6 +209,15 @@ func (s *Store) setUserStatus(ctx context.Context, id, status string, deriveEnab
 			return store.User{}, err
 		}
 		return value, nil
+	}
+	if current == store.UserStatusActive && status != store.UserStatusActive {
+		soleProjectAdmin, err := s.userIsSoleActiveDirectAdmin(ctx, tx, id)
+		if err != nil {
+			return store.User{}, err
+		}
+		if soleProjectAdmin {
+			return store.User{}, store.ErrLastProjectAdmin
+		}
 	}
 	if current == store.UserStatusActive && deploymentRole == store.DeploymentRoleAdmin && status != store.UserStatusActive {
 		var activeAdmins int

@@ -76,6 +76,20 @@ paths:
     $ref: ./paths/projects.yaml#/path1
   /api/projects/{projectID}:
     $ref: ./paths/projects.yaml#/path2
+  /api/projects/{projectID}/access/effective-role:
+    $ref: ./paths/project-access.yaml#/effectiveRole
+  /api/projects/{projectID}/access/users:
+    $ref: ./paths/project-access.yaml#/users
+  /api/projects/{projectID}/access/users/{userID}:
+    $ref: ./paths/project-access.yaml#/user
+  /api/projects/{projectID}/access/groups:
+    $ref: ./paths/project-access.yaml#/groups
+  /api/projects/{projectID}/access/groups/{groupID}:
+    $ref: ./paths/project-access.yaml#/group
+  /api/projects/{projectID}/access/directory/users:
+    $ref: ./paths/project-access.yaml#/directoryUsers
+  /api/projects/{projectID}/access/directory/groups:
+    $ref: ./paths/project-access.yaml#/directoryGroups
   /api/projects/{projectID}/runners:
     $ref: ./paths/project-runners.yaml
   /api/secrets:

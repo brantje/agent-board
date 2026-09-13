@@ -18,6 +18,7 @@ import (
 type Services struct {
 	ControlPlane      *Service
 	Auth              *AuthService
+	ProjectAccess     *ProjectAccessService
 	Questions         *QuestionService
 	Workspaces        *WorkspaceService
 	RuntimeInstances  *RuntimeInstanceService
@@ -50,6 +51,9 @@ func newServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 	if err := configureAuth(services, controlPlaneStore, authConfig); err != nil {
 		return nil, err
 	}
+	if err := configureProjectAccess(services, controlPlaneStore); err != nil {
+		return nil, err
+	}
 	if store.SupportsQuestionStore(controlPlaneStore) {
 		questions, err := NewQuestionService(controlPlaneStore.(store.QuestionStore))
 		if err != nil {
@@ -78,11 +82,13 @@ func newServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	if err != nil {
 		return nil, err
 	}
-	// Authentication persistence is not execution evidence and the redacting
-	// decorator intentionally exposes only the control-plane store contract.
-	// Bind auth to the authoritative base store rather than duplicating dozens
-	// of auth forwarding methods on the evidence wrapper.
+	// Authentication and Project access persistence are control-plane security
+	// state, not execution evidence. Bind both to the authoritative base store
+	// instead of teaching the evidence redaction decorator unrelated methods.
 	if err := configureAuth(services, controlPlaneStore, authConfig); err != nil {
+		return nil, err
+	}
+	if err := configureProjectAccess(services, controlPlaneStore); err != nil {
 		return nil, err
 	}
 	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
@@ -151,6 +157,19 @@ func configureAuth(services *Services, candidate any, config AuthServiceConfig) 
 		return fmt.Errorf("configure authentication: %w", err)
 	}
 	services.Auth = auth
+	return nil
+}
+
+func configureProjectAccess(services *Services, candidate any) error {
+	accessStore, ok := candidate.(store.ProjectAccessStore)
+	if !ok {
+		return nil
+	}
+	access, err := NewProjectAccessService(services.ControlPlane, accessStore)
+	if err != nil {
+		return fmt.Errorf("configure project access: %w", err)
+	}
+	services.ProjectAccess = access
 	return nil
 }
 

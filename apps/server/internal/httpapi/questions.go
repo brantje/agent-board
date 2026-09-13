@@ -76,9 +76,20 @@ func (a *api) listQuestions(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	questions, err := a.questions.List(r.Context(), projectID, filter)
+	var questions []store.Question
+	var err error
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		questions, err = a.projectAccess.ListQuestions(r.Context(), actor, a.questions, projectID, filter)
+	} else {
+		questions, err = a.questions.List(r.Context(), projectID, filter)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	keys, err := a.issueKeyMap(r.Context(), projectID)
@@ -102,9 +113,20 @@ func (a *api) getQuestion(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	question, err := a.questions.Get(r.Context(), projectID, questionID)
+	var question store.Question
+	var err error
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		question, err = a.projectAccess.GetQuestion(r.Context(), actor, a.questions, projectID, questionID)
+	} else {
+		question, err = a.questions.Get(r.Context(), projectID, questionID)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	keys, err := a.issueKeyMap(r.Context(), projectID)
@@ -133,13 +155,20 @@ func (a *api) answerQuestion(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	result, err := a.questions.Answer(r.Context(), projectID, questionID, store.QuestionAnswer{
-		Kind:      request.Kind,
-		Text:      request.Text,
-		OptionIDs: append([]string(nil), request.OptionIDs...),
-	}, nil)
+	answer := store.QuestionAnswer{Kind: request.Kind, Text: request.Text, OptionIDs: append([]string(nil), request.OptionIDs...)}
+	var result store.AnswerQuestionResult
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		result, err = a.projectAccess.AnswerQuestion(r.Context(), actor, a.questions, projectID, questionID, answer)
+	} else {
+		result, err = a.questions.Answer(r.Context(), projectID, questionID, answer, nil)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	var resumeJobID *string
