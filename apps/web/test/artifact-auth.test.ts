@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { apiBlob } from '../app/utils/api'
+import { apiBlob, downloadApiFile } from '../app/utils/api'
 import { clearAuthStorage, writeAuthStorage } from '../app/utils/auth-storage'
 
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   clearAuthStorage(localStorage, sessionStorage)
 })
@@ -29,6 +30,31 @@ describe('authenticated artifact transport', () => {
         Authorization: 'Bearer artifact-access-token'
       })
     }))
+  })
+
+  it('downloads the authenticated blob without putting credentials in the URL', async () => {
+    writeAuthStorage(localStorage, sessionStorage, {
+      accessToken: 'download-access-token',
+      accessTokenExpiresAt: '2026-09-13T12:00:00Z',
+      refreshToken: 'download-refresh-token',
+      refreshTokenExpiresAt: '2026-10-13T12:00:00Z'
+    }, false)
+    const fetch = vi.fn().mockResolvedValue(new Response(new Blob(['download-me'])))
+    vi.stubGlobal('fetch', fetch)
+    const createObjectURL = vi.fn().mockReturnValue('blob:artifact')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', { createObjectURL, revokeObjectURL })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    await downloadApiFile('/api/projects/p/runs/r/artifacts/a', 'candidate.patch')
+
+    expect(fetch).toHaveBeenCalledWith('/api/projects/p/runs/r/artifacts/a', expect.objectContaining({
+      headers: expect.objectContaining({ Authorization: 'Bearer download-access-token' })
+    }))
+    expect(createObjectURL).toHaveBeenCalledOnce()
+    expect(click).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:artifact')
+    expect(document.querySelector('a[download="candidate.patch"]')).toBeNull()
   })
 
   it('preserves not-found isolation for protected binary content', async () => {
