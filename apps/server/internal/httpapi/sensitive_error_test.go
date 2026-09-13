@@ -20,7 +20,7 @@ func TestAuthenticationSecretsAreNotEchoedInErrorPayloads(t *testing.T) {
 	responses := []*httptest.ResponseRecorder{
 		authHTTPRequest(t, handler, http.MethodPost, "/api/auth/login", `{"login":"missing-user","password":"`+passwordSentinel+`"}`, nil),
 		authHTTPRequest(t, handler, http.MethodPost, "/api/auth/refresh", `{"refreshToken":"`+refreshSentinel+`"}`, nil),
-		authHTTPRequest(t, handler, http.MethodGet, "/api/projects", "", map[string]string{"Authorization": "Bearer " + accessSentinel}),
+		authHTTPRequest(t, handler, http.MethodGet, "/api/auth/me", "", map[string]string{"Authorization": "Bearer " + accessSentinel}),
 	}
 	for index, response := range responses {
 		if response.Code != http.StatusUnauthorized {
