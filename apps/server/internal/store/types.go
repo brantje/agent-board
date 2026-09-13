@@ -45,6 +45,7 @@ type Issue struct {
 	AssignedAgentID *string
 	CreatedByType   *string
 	CreatedByID     *string
+	CreatedByName   *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	LastEvent       *Event
@@ -78,16 +79,16 @@ type Provider struct {
 type ModelProfile struct {
 	ID                 string
 	ProjectID          *string
-	ProviderID         string
-	Name               string
-	Model              string
+	ProviderID          string
+	Name                string
+	Model               string
 	Temperature        *float64
-	MaxTokens          *int
-	MaxConcurrent      *int
+	MaxTokens           *int
+	MaxConcurrent       *int
 	GenerationSettings json.RawMessage
-	Enabled            bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	Enabled             bool
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type Runtime struct {
