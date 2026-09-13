@@ -14,6 +14,7 @@ import (
 const (
 	foreignProjectID  = "20202020-2020-4020-8020-202020202020"
 	foreignIssueID    = "21212121-2121-4121-8121-212121212121"
+	foreignIssueKey   = "FB-1"
 	foreignRunID      = "22222222-aaaa-4222-8222-222222222222"
 	foreignQuestionID = "23232323-2323-4323-8323-232323232323"
 	foreignReviewID   = "24242424-2424-4424-8424-242424242424"
@@ -41,8 +42,8 @@ func (s *nestedIsolationControlPlaneStore) GetIssue(_ context.Context, pid, id s
 	if pid == projectID && id == issueID {
 		return issueFixture("TODO"), nil
 	}
-	if pid == foreignProjectID && id == foreignIssueID {
-		return store.Issue{ID: foreignIssueID, ProjectID: foreignProjectID, Key: "FB-1", Number: 1, Title: "Foreign Issue", Status: "TODO"}, nil
+	if pid == foreignProjectID && id == foreignIssueKey {
+		return store.Issue{ID: foreignIssueID, ProjectID: foreignProjectID, Key: foreignIssueKey, Number: 1, Title: "Foreign Issue", Status: "TODO"}, nil
 	}
 	return store.Issue{}, store.ErrNotFound
 }
@@ -203,10 +204,10 @@ func TestNestedResourceIDsCannotCrossProjectBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Prove the foreign IDs identify real resources in Project B before trying
-	// them through authorized Project A routes.
-	if _, err := controlStore.GetIssue(t.Context(), foreignProjectID, foreignIssueID); err != nil {
-		t.Fatalf("foreign issue fixture does not exist: %v", err)
+	// Prove the foreign identifiers identify real resources in Project B before
+	// trying them through authorized Project A routes.
+	if issue, err := controlStore.GetIssue(t.Context(), foreignProjectID, foreignIssueKey); err != nil || issue.ID != foreignIssueID {
+		t.Fatalf("foreign issue fixture=%+v err=%v", issue, err)
 	}
 	if _, err := controlStore.GetRun(t.Context(), foreignProjectID, foreignRunID); err != nil {
 		t.Fatalf("foreign run fixture does not exist: %v", err)
@@ -244,8 +245,8 @@ func TestNestedResourceIDsCannotCrossProjectBoundaries(t *testing.T) {
 	cases := []struct {
 		name, method, path, body string
 	}{
-		{name: "issue read", method: http.MethodGet, path: "/api/projects/" + projectID + "/issues/" + foreignIssueID},
-		{name: "issue mutation", method: http.MethodPatch, path: "/api/projects/" + projectID + "/issues/" + foreignIssueID, body: `{"title":"must not cross scope"}`},
+		{name: "issue read", method: http.MethodGet, path: "/api/projects/" + projectID + "/issues/" + foreignIssueKey},
+		{name: "issue mutation", method: http.MethodPatch, path: "/api/projects/" + projectID + "/issues/" + foreignIssueKey, body: `{"title":"must not cross scope"}`},
 		{name: "run read", method: http.MethodGet, path: "/api/projects/" + projectID + "/runs/" + foreignRunID},
 		{name: "run evidence read", method: http.MethodGet, path: "/api/projects/" + projectID + "/runs/" + foreignRunID + "/evidence"},
 		{name: "run event subscription", method: http.MethodGet, path: "/api/projects/" + projectID + "/runs/" + foreignRunID + "/events"},
