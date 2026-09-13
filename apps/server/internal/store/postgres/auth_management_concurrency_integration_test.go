@@ -18,7 +18,7 @@ type disabledUserMutator interface {
 	SetUserDisabled(context.Context, string, bool) (store.User, error)
 }
 
-func TestAuthPhase2PasswordCASRejectsStaleAuthorizationState(t *testing.T) {
+func TestPasswordCASRejectsStaleAuthorizationState(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	user := authUser("member", "member@example.com", store.UserStatusActive)
@@ -48,7 +48,7 @@ func TestAuthPhase2PasswordCASRejectsStaleAuthorizationState(t *testing.T) {
 	}
 }
 
-func TestAuthPhase2ConcurrentPasswordCASAllowsOnlyOneWinner(t *testing.T) {
+func TestConcurrentPasswordCASAllowsOnlyOneWinner(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	user := authUser("concurrent-member", "concurrent-member@example.com", store.UserStatusActive)
@@ -95,7 +95,7 @@ func TestAuthPhase2ConcurrentPasswordCASAllowsOnlyOneWinner(t *testing.T) {
 	}
 }
 
-func TestAuthPhase2ConcurrentEnableAndPasswordAssignmentCannotLeavePendingPasswordUser(t *testing.T) {
+func TestConcurrentEnableAndPasswordAssignmentCannotLeavePendingPasswordUser(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	disabledStore, ok := any(s).(disabledUserMutator)
@@ -149,7 +149,7 @@ func TestAuthPhase2ConcurrentEnableAndPasswordAssignmentCannotLeavePendingPasswo
 	}
 }
 
-func TestAuthPhase2AtomicEnableDerivesStatusFromCurrentPasswordState(t *testing.T) {
+func TestAtomicEnableDerivesStatusFromCurrentPasswordState(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	disabledStore, ok := any(s).(disabledUserMutator)
