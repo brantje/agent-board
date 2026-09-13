@@ -93,16 +93,20 @@ The v0.1 runner contract is intentionally compatible with future fleets: a healt
 
 ## Phase 4 — multi-user administration
 
-Future areas include:
+The first fixed multi-user foundation is implemented by #74–#79:
 
-- users
-- groups
-- roles and permissions
-- organization/deployment administration
-- sharing/access policy
-- audit/admin UX
+- local deployment-global Users with race-safe first-admin bootstrap
+- JWT access tokens plus hashed opaque refresh sessions and immediate invalidation
+- deployment roles `admin | member`
+- deployment-global human Groups
+- fixed Project roles `admin > member > viewer`
+- direct User and Group Project grants with highest-role resolution
+- private-by-default Projects with a race-safe direct-User-admin invariant
+- shared trusted Go authorization with not-found Project isolation
+- authenticated durable User IDs for existing human actor attribution
+- account/session, deployment administration and Project Access UI
 
-These are not yet fully designed. Do not invent detailed contracts from this roadmap entry alone.
+The authoritative model is documented in `authorization.md`. OIDC, MFA, custom roles/permissions, organizations/tenants, generalized audit logging and other identity-provider/product expansion remain follow-up work rather than implicit extensions of this foundation.
 
 ## Phase 5 — integrations/product breadth
 
