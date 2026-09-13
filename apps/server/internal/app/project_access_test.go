@@ -18,6 +18,7 @@ type projectAccessServiceStore struct {
 	groups        []store.Group
 	listAllCalls  int
 	listUserCalls int
+	createdIssue  store.Issue
 }
 
 func (s *projectAccessServiceStore) ListProjects(context.Context) ([]store.Project, error) {
@@ -37,6 +38,13 @@ func (s *projectAccessServiceStore) GetProject(_ context.Context, id string) (st
 func (s *projectAccessServiceStore) ListProjectsForUser(context.Context, string) ([]store.Project, error) {
 	s.listUserCalls++
 	return append([]store.Project(nil), s.visible...), nil
+}
+
+func (s *projectAccessServiceStore) CreateIssue(_ context.Context, input store.Issue) (store.Issue, error) {
+	s.createdIssue = input
+	input.ID = "issue-1"
+	input.Key = "AB-1"
+	return input, nil
 }
 
 func (s *projectAccessServiceStore) EffectiveProjectRole(_ context.Context, projectID, userID string) (string, error) {
@@ -85,6 +93,26 @@ func TestProjectAccessListsOnlyAccessibleProjectsForMembers(t *testing.T) {
 	}
 	if fake.listUserCalls != 1 || fake.listAllCalls != 0 {
 		t.Fatalf("list calls: scoped=%d all=%d", fake.listUserCalls, fake.listAllCalls)
+	}
+}
+
+func TestProjectAccessCreateIssueAttributesAuthenticatedHuman(t *testing.T) {
+	project := store.Project{ID: "project-1", Name: "Project"}
+	fake := &projectAccessServiceStore{
+		projects: []store.Project{project},
+		roles:    map[string]string{project.ID + ":user-1": store.ProjectRoleMember},
+	}
+	service := newProjectAccessServiceForTest(t, fake)
+	actor := activeProjectActor("user-1", store.DeploymentRoleMember)
+
+	created, err := service.CreateIssue(t.Context(), actor, store.Issue{ProjectID: project.ID, Title: "Attributed", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, issue := range map[string]store.Issue{"input": fake.createdIssue, "result": created} {
+		if issue.CreatedByType == nil || *issue.CreatedByType != store.ActorTypeHuman || issue.CreatedByID == nil || *issue.CreatedByID != actor.ID {
+			t.Fatalf("%s creator = type=%v id=%v", name, issue.CreatedByType, issue.CreatedByID)
+		}
 	}
 }
 

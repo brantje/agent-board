@@ -49,6 +49,20 @@ describe('application foundation', () => {
     expect(navigation().global.map(item => item.label)).toEqual(['Projects','Runs','Inbox','Account'])
     expect(navigation(undefined, { deploymentAdmin: true }).settings.map(item => item.label)).toEqual(['Settings'])
   })
+  it('renders authentication routes without the application sidebar', async () => {
+    const route = reactive({ path: '/auth/login', params: {} as Record<string, string> })
+    vi.stubGlobal('useRoute', () => route)
+    vi.stubGlobal('useState', () => ({ value: null }))
+    const wrapper = mount(Shell, { slots: { default: '<main>Sign in</main>' }, global })
+    expect(wrapper.text()).toContain('Sign in')
+    expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Agent Board')
+
+    route.path = '/projects'
+    await flushPromises()
+    expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
+  })
+
   it('pins Settings above the sidebar footer divider', () => {
     vi.stubGlobal('useRoute', () => ({ params: {} }))
     vi.stubGlobal('useState', () => ({ value: { deploymentRole: 'admin' } }))

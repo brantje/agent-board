@@ -34,6 +34,8 @@ const issueSelectColumns = `
 	i.assigned_agent_id::text,
 	i.number,
 	p.issue_prefix,
+	i.created_by_type,
+	i.created_by_id::text,
 	i.created_at,
 	i.updated_at
 `
@@ -128,10 +130,10 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 	}
 
 	issue, err := scanIssueWithPriority(tx.QueryRow(ctx, `
-		INSERT INTO issues (project_id, number, title, description, status, priority, assigned_agent_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, number, created_at, updated_at
-	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, input.AssignedAgentID))
+		INSERT INTO issues (project_id, number, title, description, status, priority, assigned_agent_id, created_by_type, created_by_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, number, created_by_type, created_by_id::text, created_at, updated_at
+	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, input.AssignedAgentID, input.CreatedByType, input.CreatedByID))
 	if err != nil {
 		return store.Issue{}, err
 	}
@@ -200,7 +202,7 @@ func scanProject(row pgx.Row) (store.Project, error) {
 
 func scanIssueWithPriority(row pgx.Row) (store.Issue, error) {
 	var value store.Issue
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.AssignedAgentID, &value.Number, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.AssignedAgentID, &value.Number, &value.CreatedByType, &value.CreatedByID, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Issue{}, notFound(err)
 	}
 	return value, nil
@@ -211,7 +213,7 @@ func scanIssueJoined(row pgx.Row) (store.Issue, error) {
 	var prefix string
 	if err := row.Scan(
 		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
-		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedAt, &value.UpdatedAt,
+		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedAt, &value.UpdatedAt,
 	); err != nil {
 		return store.Issue{}, notFound(err)
 	}
@@ -233,7 +235,7 @@ func scanIssueJoinedWithLastEvent(row pgx.Row) (store.Issue, error) {
 	)
 	if err := row.Scan(
 		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
-		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedAt, &value.UpdatedAt,
+		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedAt, &value.UpdatedAt,
 		&value.CurrentBranch,
 		&eventID, &schemaVersion, &eventType, &occurredAt, &eventProjectID, &eventIssueID, &eventRunID,
 		&eventAgentID, &eventWorkspaceID, &eventRuntimeInstanceID, &eventCorrelationID, &eventParentID,

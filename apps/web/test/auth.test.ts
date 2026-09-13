@@ -54,6 +54,13 @@ describe('auth route policy', () => {
     expect(authRedirect('/account', true, true, false)).toBeNull()
   })
 
+  it('routes a zero-user deployment directly to first administrator registration', () => {
+    expect(authRedirect('/projects', false, false, false, true)).toBe('/auth/register')
+    expect(authRedirect('/auth/login', false, false, false, true)).toBe('/auth/register')
+    expect(authRedirect('/auth/register', false, false, false, true)).toBeNull()
+    expect(authRedirect('/auth/register', false, false, false, false)).toBe('/auth/login')
+  })
+
   it('requires authentication and keeps deployment settings admin-only', () => {
     expect(authRedirect('/projects', false, false, false)).toBe('/auth/login')
     expect(authRedirect('/auth/login', false, false, false)).toBeNull()

@@ -104,6 +104,8 @@ Role/grant changes are authoritative on the next request; frontend state is not 
 
 Existing durable domain records that support human attribution continue using their existing `actor_type = HUMAN` shape. New authenticated human actions populate the existing `actor_id` with the durable authenticated User ID. Question answers and Review approve/request-changes paths use this identity.
 
+Issues store their creator as the same durable actor reference (`HUMAN` or `AGENT` plus actor ID). Authenticated browser/API Issue creation is stamped as `HUMAN` with the authenticated User ID by the shared Project authorization application boundary; callers cannot choose a different human creator. The same Issue domain shape supports Agent-created follow-up Issues without introducing a user-only creator model.
+
 Historical records are preserved when a User is renamed, disabled or re-enabled. This is not a generalized deployment-wide audit-log product.
 
 ## Browser behavior

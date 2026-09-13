@@ -29,6 +29,11 @@ type ProjectDTO struct {
 	UpdatedAt           time.Time       `json:"updatedAt"`
 }
 
+type IssueCreatorDTO struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+}
+
 type IssueDTO struct {
 	ID              string            `json:"id"`
 	ProjectID       string            `json:"projectId"`
@@ -38,6 +43,7 @@ type IssueDTO struct {
 	Status          string            `json:"status"`
 	Priority        int               `json:"priority"`
 	AssignedAgentID *string           `json:"assignedAgentId"`
+	CreatedBy       *IssueCreatorDTO  `json:"createdBy"`
 	CreatedAt       time.Time         `json:"createdAt"`
 	UpdatedAt       time.Time         `json:"updatedAt"`
 	CurrentBranch   *string           `json:"currentBranch"`
@@ -216,7 +222,7 @@ type UpdateProviderRequest struct {
 	Name          *string          `json:"name"`
 	Kind          *string          `json:"kind"`
 	BaseURL       *string          `json:"baseUrl"`
-	CredentialRef *string         `json:"credentialRef"`
+	CredentialRef *string          `json:"credentialRef"`
 	Enabled       *bool            `json:"enabled"`
 	SafeMetadata  *json.RawMessage `json:"safeMetadata"`
 }

@@ -34,15 +34,8 @@ const authSubmit = computed(() => ({
   block: true
 }))
 
-onMounted(async () => {
+onMounted(() => {
   if (!allowed.has(mode.value)) return navigateTo('/auth/login')
-  if (mode.value === 'login') {
-    try {
-      if (await auth.bootstrapAvailable()) return navigateTo('/auth/register')
-    } catch {
-      // Login remains available when bootstrap status cannot be loaded.
-    }
-  }
 })
 
 async function runAuthentication(action: () => Promise<void>) {

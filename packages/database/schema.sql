@@ -266,10 +266,13 @@ CREATE TABLE issues (
     status text NOT NULL DEFAULT 'BACKLOG' CHECK (status IN ('BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE')),
     priority integer NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 4),
     assigned_agent_id uuid REFERENCES agents(id) ON DELETE SET NULL,
+    created_by_type text CHECK (created_by_type IS NULL OR created_by_type IN ('HUMAN', 'AGENT')),
+    created_by_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (project_id, id),
-    UNIQUE (project_id, number)
+    UNIQUE (project_id, number),
+    CHECK ((created_by_type IS NULL) = (created_by_id IS NULL))
 );
 
 CREATE INDEX issues_project_status_idx ON issues (project_id, status, created_at);

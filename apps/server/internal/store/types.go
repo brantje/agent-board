@@ -10,7 +10,13 @@ var EmptyObject = json.RawMessage(`{}`)
 const (
 	ProjectSourceLocal = "local"
 	ProjectSourceGit   = "git"
+	ActorTypeHuman     = "HUMAN"
+	ActorTypeAgent     = "AGENT"
 )
+
+func ValidActorType(value string) bool {
+	return value == ActorTypeHuman || value == ActorTypeAgent
+}
 
 type Project struct {
 	AllowInternalRunner *bool
@@ -37,6 +43,8 @@ type Issue struct {
 	Status          string
 	Priority        int
 	AssignedAgentID *string
+	CreatedByType   *string
+	CreatedByID     *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	LastEvent       *Event

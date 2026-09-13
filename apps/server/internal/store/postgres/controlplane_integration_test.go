@@ -113,7 +113,8 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: p1.ID, Title: "Issue", Status: "TODO"})
+	creatorType := store.ActorTypeAgent
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: p1.ID, Title: "Issue", Status: "TODO", CreatedByType: &creatorType, CreatedByID: &agent.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,9 +122,16 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if err != nil || len(issues) != 1 {
 		t.Fatalf("issues=%d err=%v", len(issues), err)
 	}
+	if issues[0].CreatedByType == nil || *issues[0].CreatedByType != store.ActorTypeAgent || issues[0].CreatedByID == nil || *issues[0].CreatedByID != agent.ID {
+		t.Fatalf("persisted issue creator = type=%v id=%v", issues[0].CreatedByType, issues[0].CreatedByID)
+	}
 	issue.Description = "updated"
-	if _, err = s.UpdateIssue(ctx, issue); err != nil {
+	issue, err = s.UpdateIssue(ctx, issue)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if issue.CreatedByType == nil || *issue.CreatedByType != store.ActorTypeAgent || issue.CreatedByID == nil || *issue.CreatedByID != agent.ID {
+		t.Fatalf("updated issue creator = type=%v id=%v", issue.CreatedByType, issue.CreatedByID)
 	}
 
 	assigned, run, err := s.AssignIssue(ctx, p1.ID, issue.ID, agent.ID)

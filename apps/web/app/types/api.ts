@@ -37,6 +37,11 @@ export interface RepositorySettings {
   repositoryRoots: string[]
 }
 
+export interface IssueCreator {
+  type: 'HUMAN' | 'AGENT'
+  id: string
+}
+
 export interface Issue {
   id: string
   projectId: string
@@ -46,6 +51,7 @@ export interface Issue {
   status: string
   priority: number
   assignedAgentId: string | null
+  createdBy: IssueCreator | null
   createdAt: string
   updatedAt: string
   currentBranch: string | null

@@ -3,8 +3,10 @@ import { computed } from 'vue'
 import type { AuthUser } from '../types/auth'
 import { useProjectPermissions } from '../composables/useProjectPermissions'
 import { navigation } from '../utils/navigation'
+import { isPublicAuthPath } from '../utils/auth-route'
 
 const route = useRoute()
+const publicAuthPage = computed(() => isPublicAuthPath(route.path))
 const currentUser = useState<AuthUser | null>('auth-user')
 const projectId = computed(() => typeof route.params.projectID === 'string' ? route.params.projectID : undefined)
 const permissions = useProjectPermissions(projectId)
@@ -16,7 +18,8 @@ const links = computed(() => navigation(projectId.value, {
 }))
 </script>
 <template>
-  <UDashboardGroup unit="px">
+  <slot v-if="publicAuthPage" />
+  <UDashboardGroup v-else unit="px">
     <UDashboardSidebar collapsible resizable :default-size="224" :min-size="180" :max-size="320" :collapsed-size="64">
       <template #header="{ collapsed }"><UButton to="/projects" icon="i-lucide-panels-top-left" :label="collapsed ? undefined : 'Agent Board'" aria-label="Agent Board projects" color="neutral" variant="ghost" /></template>
       <template #default="{ collapsed }">

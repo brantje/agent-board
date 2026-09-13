@@ -166,6 +166,8 @@ func (s *ProjectAccessService) CreateIssue(ctx context.Context, actor Authentica
 	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
 		return store.Issue{}, err
 	}
+	actorType, actorID := store.ActorTypeHuman, actor.ID
+	input.CreatedByType, input.CreatedByID = &actorType, &actorID
 	return s.controlPlane.CreateIssue(ctx, input)
 }
 
