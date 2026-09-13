@@ -92,7 +92,6 @@ export function useRunEvents(projectId: MaybeRefOrGetter<string>, runId: MaybeRe
         }, SSE_RECONNECT_MS)
       }
     })
-    if (current === generation) connection.value = 'live'
   }
 
   async function refresh() {
