@@ -11,7 +11,7 @@ import (
 func TestPasswordMutationRevokesOutstandingPasswordTokens(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
-	service := reviewAuthService(t, s)
+	service := authSecurityTestService(t, s)
 	ctx := context.Background()
 
 	admin, err := service.Bootstrap(ctx, app.BootstrapRegistration{
@@ -42,7 +42,7 @@ func TestPasswordMutationRevokesOutstandingPasswordTokens(t *testing.T) {
 func TestPasswordTokenCompletionRevokesOtherOutstandingPasswordTokens(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
-	service := reviewAuthService(t, s)
+	service := authSecurityTestService(t, s)
 	ctx := context.Background()
 
 	pending, err := s.CreateUser(ctx, store.User{
