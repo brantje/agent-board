@@ -6,17 +6,13 @@ import { AUTH_STORAGE_KEY } from '../app/utils/auth-storage'
 import { useAuth } from '../app/composables/useAuth'
 import AccountPage from '../app/pages/account.vue'
 import UsersPage from '../app/pages/settings/users.vue'
+import {
+  activeAuthUser as activeUser,
+  authTokens,
+  installAuthState as installState,
+  jsonResponse as json
+} from './auth-test-helpers'
 import { uiStubs } from './ui-stubs'
-
-const activeUser = {
-  id: '00000000-0000-0000-0000-000000000001',
-  username: 'admin',
-  email: 'admin@example.com',
-  displayName: 'Admin',
-  deploymentRole: 'admin' as const,
-  status: 'active' as const,
-  forcePasswordChange: false
-}
 
 const memberUser = {
   ...activeUser,
@@ -30,16 +26,6 @@ const memberUser = {
 const disabledUser = { ...memberUser, id: '00000000-0000-0000-0000-000000000003', username: 'disabled', status: 'disabled' as const }
 const pendingUser = { ...memberUser, id: '00000000-0000-0000-0000-000000000004', username: 'pending', status: 'pending' as const }
 
-function authTokens(suffix: string) {
-  return {
-    accessToken: `test-access-${suffix}`,
-    accessTokenExpiresAt: '2026-09-12T14:00:00Z',
-    refreshToken: `test-refresh-${suffix}`,
-    refreshTokenExpiresAt: '2026-10-12T12:00:00Z',
-    user: activeUser
-  }
-}
-
 function stored(suffix: string) {
   const tokens = authTokens(suffix)
   return {
@@ -48,19 +34,6 @@ function stored(suffix: string) {
     refreshToken: tokens.refreshToken,
     refreshTokenExpiresAt: tokens.refreshTokenExpiresAt
   }
-}
-
-function json(value: unknown, status = 200) {
-  return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } })
-}
-
-function installState() {
-  const states = new Map<string, ReturnType<typeof ref>>()
-  vi.stubGlobal('useState', (key: string, init: () => unknown) => {
-    if (!states.has(key)) states.set(key, ref(init()))
-    return states.get(key)
-  })
-  return states
 }
 
 const global = { stubs: { ...uiStubs, SettingsShell: { template: '<div data-settings-shell><slot /></div>' } } }
