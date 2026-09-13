@@ -116,7 +116,7 @@ func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID stri
         FOR UPDATE OF i
     `, projectID, issueID).Scan(
 		&issue.ID, &issue.ProjectID, &issue.Title, &issue.Description, &issue.Status, &issue.Priority,
-		&issue.AssignedAgentID, &issue.Number, &prefix, &issue.CreatedByType, &issue.CreatedByID, &issue.CreatedAt, &issue.UpdatedAt,
+		&issue.AssignedAgentID, &issue.Number, &prefix, &issue.CreatedByType, &issue.CreatedByID, &issue.CreatedByName, &issue.CreatedAt, &issue.UpdatedAt,
 		&repositoryPath, &defaultBranch,
 	)
 	if err != nil {
