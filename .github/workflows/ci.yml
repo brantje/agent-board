@@ -51,6 +51,9 @@ jobs:
           go tool cover -func=coverage.out
           total="$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
           awk -v coverage="$total" 'BEGIN { printf "server coverage: %.1f%%\n", coverage; if (coverage + 0 < 85) exit 1 }'
+      - name: Race test
+        working-directory: apps/server
+        run: go test -race ./...
       - name: Vet
         working-directory: apps/server
         run: go vet ./...
