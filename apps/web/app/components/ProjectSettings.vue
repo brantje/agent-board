@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { Project } from '../types/api'
-import type { ProjectRoleResponse } from '../types/project-access'
 import { apiPath } from '../utils/api'
+import { useProjectPermissions } from '../composables/useProjectPermissions'
 import { useResource } from '../composables/useResource'
 import ProjectAccessSettings from './ProjectAccessSettings.vue'
 import ProjectEditor from './ProjectEditor.vue'
@@ -10,11 +10,12 @@ import ProjectEditor from './ProjectEditor.vue'
 const props = defineProps<{ projectId: string }>()
 const { data, pending, error, refresh } = useResource<Project>(() => apiPath('projects', undefined, props.projectId))
 const {
-  data: roleData,
+  role,
   pending: rolePending,
   error: roleError,
+  canAdmin,
   refresh: refreshRole
-} = useResource<ProjectRoleResponse>(() => `/api/projects/${props.projectId}/access/effective-role`)
+} = useProjectPermissions(() => props.projectId)
 const saved = ref(false)
 const editorKey = ref(0)
 
@@ -39,14 +40,14 @@ function retry() {
     <AsyncState
       :pending="pending || rolePending"
       :error="error || roleError"
-      :empty="!data || !roleData"
+      :empty="!data || !role"
       empty-title="Project unavailable"
       empty-description="This Project is unavailable or belongs to another project scope."
       @retry="retry"
     >
-      <template v-if="data && roleData">
+      <template v-if="data && role">
         <ProjectEditor
-          v-if="roleData.role === 'admin'"
+          v-if="canAdmin"
           :key="editorKey"
           data-testid="project-settings-editor"
           :project="data"
@@ -57,7 +58,7 @@ function retry() {
           <template #header>
             <div>
               <h2 class="text-base font-semibold">Project information</h2>
-              <p class="text-sm text-muted">Project settings are read-only for your {{ roleData.role }} role.</p>
+              <p class="text-sm text-muted">Project settings are read-only for your {{ role }} role.</p>
             </div>
           </template>
           <dl class="grid gap-4 sm:grid-cols-2">
@@ -87,7 +88,7 @@ function retry() {
             </div>
           </dl>
         </UCard>
-        <ProjectAccessSettings :project-id="projectId" :effective-role="roleData.role" />
+        <ProjectAccessSettings :project-id="projectId" :effective-role="role" />
       </template>
     </AsyncState>
   </PageFrame>
