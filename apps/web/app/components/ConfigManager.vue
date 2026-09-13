@@ -6,7 +6,7 @@ import { useProviderModels } from '../composables/useProviderModels'
 import { definitions, draftFor, payloadFor, validateDraft, resourceOptions, canEdit, CUSTOM_PROVIDER_KIND, isBuiltInProviderKind, providerKindSelectValue, type ConfigKind, type ConfigRecord } from '../utils/configuration'
 import type { RepositorySettings } from '../types/api'
 
-const props = defineProps<{kind: ConfigKind; projectId?: string; resourceId?: string}>()
+const props = withDefaults(defineProps<{kind: ConfigKind; projectId?: string; resourceId?: string; canMutate?: boolean}>(), { canMutate: true })
 const definition = definitions[props.kind]
 const path = computed(() => apiPath(props.kind, props.kind === 'projects' ? undefined : props.projectId))
 const { data, pending, error, refresh } = useResource<ConfigRecord[]>(path)
@@ -48,7 +48,8 @@ const pageDescription = computed(() => {
   return props.projectId ? 'Project configuration · shared resources are read-only' : 'Shared configuration'
 })
 const editingShared = computed(() => !!selected.value && !canEdit(selected.value, props.kind === 'projects' ? undefined : props.projectId))
-const controlsDisabled = computed(() => saving.value || editingShared.value)
+const scopeReadOnly = computed(() => Boolean(props.projectId) && !props.canMutate)
+const controlsDisabled = computed(() => saving.value || editingShared.value || scopeReadOnly.value)
 const saveErrorDescription = computed(() => {
   if (!saveError.value) return undefined
   if (saveError.value instanceof ApiError && !['network', 'request_failed', 'invalid_response'].includes(saveError.value.code)) {
@@ -74,6 +75,7 @@ function setProviderKindChoice(value: string) {
 }
 
 function edit(item?: ConfigRecord) {
+  if (!item && !props.canMutate) return
   suppressProviderModelReset.value = true
   selected.value = item
   draft.value = draftFor(props.kind, item)
@@ -138,7 +140,7 @@ async function retry() {
 }
 
 async function save() {
-  if (saving.value) return
+  if (!props.canMutate || saving.value) return
   if (formErrors().length) {
     saveError.value = new Error('Check the highlighted form values.')
     return
@@ -173,7 +175,7 @@ async function save() {
 <template>
   <PageFrame :title="definition.title" :description="pageDescription">
     <template #actions>
-      <UButton :label="`New ${definition.singular.toLowerCase()}`" icon="i-lucide-plus" @click="edit()" />
+      <UButton v-if="canMutate" :label="`New ${definition.singular.toLowerCase()}`" icon="i-lucide-plus" @click="edit()" />
     </template>
 
     <UAlert v-if="saved" title="Saved" color="success" class="mb-4" />
@@ -193,7 +195,7 @@ async function save() {
             </div>
             <UBadge v-if="item.healthStatus" color="neutral" variant="subtle" :label="`Health: ${readable(item.healthStatus)}`" />
             <UButton v-if="kind === 'projects'" label="Open board" :to="`/projects/${item.id}/board`" variant="outline" />
-            <UButton :label="canEdit(item, kind === 'projects' ? undefined : projectId) ? 'Edit' : 'View shared'" color="neutral" variant="outline" @click="edit(item)" />
+            <UButton :label="scopeReadOnly ? 'View' : canEdit(item, kind === 'projects' ? undefined : projectId) ? 'Edit' : 'View shared'" color="neutral" variant="outline" @click="edit(item)" />
           </div>
 
           <p v-if="kind === 'projects'" class="mt-2 text-sm font-mono break-all">
@@ -203,12 +205,13 @@ async function save() {
       </div>
     </AsyncState>
 
-    <UModal v-model:open="open" :title="`${selected ? 'Edit' : 'New'} ${definition.singular}`" description="Changes are saved to Agent Board." :dismissible="!saving" :close="!saving">
+    <UModal v-model:open="open" :title="`${selected ? (scopeReadOnly ? 'View' : 'Edit') : 'New'} ${definition.singular}`" description="Changes are saved to Agent Board." :dismissible="!saving" :close="!saving">
       <template #body>
         <AsyncState :pending="referencesPending" :error="referenceError" @retry="retry">
           <UForm :state="draft" :validate="formErrors" class="space-y-4" @submit="save">
             <UAlert v-if="saveError" color="error" title="Unable to save" :description="saveErrorDescription" />
             <UAlert v-if="editingShared" title="Shared resource" description="Manage this resource from global Settings." color="neutral" />
+            <UAlert v-else-if="scopeReadOnly" title="Read-only Project configuration" description="Project administrators can change this configuration." color="neutral" />
 
             <div class="form-grid">
               <template v-for="field in definition.fields" :key="field.key">
@@ -267,7 +270,7 @@ async function save() {
               </template>
             </div>
 
-            <UAccordion v-if="kind === 'providers'" :items="[{ label: 'Set or replace API key', slot: 'credential' }]">
+            <UAccordion v-if="kind === 'providers' && canMutate && !editingShared" :items="[{ label: 'Set or replace API key', slot: 'credential' }]">
               <template #credential>
                 <div class="py-2">
                   <UFormField label="API key" description="Saved credentials are encrypted and never shown again after save.">
@@ -279,7 +282,7 @@ async function save() {
 
             <div class="flex justify-end gap-2">
               <UButton label="Cancel" color="neutral" variant="outline" :disabled="saving" @click="open = false" />
-              <UButton v-if="!editingShared" label="Save" type="submit" :loading="saving" />
+              <UButton v-if="!editingShared && canMutate" label="Save" type="submit" :loading="saving" />
             </div>
           </UForm>
         </AsyncState>
