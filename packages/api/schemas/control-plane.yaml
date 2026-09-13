@@ -240,10 +240,11 @@ AgentInput:
 IssueCreator:
   type: object
   additionalProperties: false
-  required: [type, id]
+  required: [type, id, name]
   properties:
     type: {type: string, enum: [HUMAN, AGENT]}
     id: {type: string, format: uuid}
+    name: {type: [string, 'null']}
 Issue:
   type: object
   required: [id, projectId, number, title, description, status, priority, assignedAgentId, createdBy, createdAt, updatedAt, lastEvent]
