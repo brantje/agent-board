@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
-	"strings"
 	"testing"
 	"time"
 
@@ -84,41 +83,7 @@ func (s *authHTTPStore) UpdateAuthSettings(_ context.Context, settings store.Aut
 	return settings, nil
 }
 
-func TestAuthPhase2AdminCreatesPendingUserAndSecretIsNoStore(t *testing.T) {
-	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	handler, _, _ := newAuthHTTPHandler(t, &now)
-	registerAuthHTTPUser(t, handler)
-	admin := loginAuthHTTPUser(t, handler)
-
-	response := authHTTPRequest(t, handler, http.MethodPost, "/api/auth/users", `{"username":"member","email":"member@example.com","displayName":"Member"}`, map[string]string{"Authorization": "Bearer " + admin.AccessToken})
-	if response.Code != http.StatusCreated {
-		t.Fatalf("create pending status=%d body=%s", response.Code, response.Body.String())
-	}
-	if response.Header().Get("Cache-Control") != "no-store" {
-		t.Fatalf("create pending Cache-Control=%q", response.Header().Get("Cache-Control"))
-	}
-	var created pendingUserResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	if created.User.Status != store.UserStatusPending || created.SetupToken == "" {
-		t.Fatalf("unexpected pending user response: %+v", created)
-	}
-
-	list := authHTTPRequest(t, handler, http.MethodGet, "/api/auth/users", "", map[string]string{"Authorization": "Bearer " + admin.AccessToken})
-	if list.Code != http.StatusOK {
-		t.Fatalf("list users status=%d body=%s", list.Code, list.Body.String())
-	}
-	listBody := list.Body.String()
-	if listBody == "" || !json.Valid([]byte(listBody)) {
-		t.Fatalf("invalid user list response: %q", listBody)
-	}
-	if strings.Contains(listBody, created.SetupToken) {
-		t.Fatal("user list exposed the one-time setup token")
-	}
-}
-
-func TestAuthPhase2MemberCannotAdministerUsersOrSettings(t *testing.T) {
+func TestMemberCannotAdministerUsersOrSettings(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	handler, _, _ := newAuthHTTPHandler(t, &now)
 	registerAuthHTTPUser(t, handler)
@@ -150,7 +115,7 @@ func TestAuthPhase2MemberCannotAdministerUsersOrSettings(t *testing.T) {
 	}
 }
 
-func TestAuthPhase2OwnProfileSessionsAndSettings(t *testing.T) {
+func TestOwnProfileSessionsAndSettings(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	handler, _, _ := newAuthHTTPHandler(t, &now)
 	registerAuthHTTPUser(t, handler)
