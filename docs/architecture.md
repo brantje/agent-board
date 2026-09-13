@@ -46,9 +46,9 @@ Blob storage     local filesystem first; S3-compatible later
 
 ### Web
 
-The Nuxt application owns presentation, routing, forms, Board/Issue/Run views, Questions, Review, and live rendering. Nuxt UI is the required generic component foundation.
+The Nuxt application owns presentation, routing, forms, Board/Issue/Run views, Questions, Review, authentication/account/administration surfaces and live rendering. Nuxt UI is the required generic component foundation.
 
-The web application is a client of the Go control plane. Nitro/server routes, server middleware, process memory and framework caches do not become an authoritative product backend.
+The web application is a client of the Go control plane. Nitro/server routes, server middleware, process memory, framework caches and permission-derived UI state do not become an authoritative product backend or authorization source.
 
 Nuxt UI components should be reused for common controls/interactions rather than recreated as custom primitives.
 
@@ -56,6 +56,8 @@ Nuxt UI components should be reused for common controls/interactions rather than
 
 The Go backend owns:
 
+- deployment-global User identity, local authentication, sessions and Groups
+- shared deployment/Project authorization and effective Project access
 - Project/Issue/Agent configuration and commands
 - Project source configuration (`local` or `git`)
 - Provider/Model Profile configuration
@@ -67,13 +69,37 @@ The Go backend owns:
 - Execution Session orchestration
 - Engine execution orchestration
 - shared Git finalization and local Review delivery
-- Questions/Decisions/Review commands
+- Questions/Decisions/Review commands and authenticated human actor attribution
 - Event persistence and SSE
 - provenance, raw output and Artifact metadata
-- authentication/authorization and secret resolution
+- secret resolution
 - legacy Runtime/Runtime Instance configuration/lifecycle only where internal managed-compute code still uses it
 
 HTTP handlers are adapters around separable application/domain/store/runtime logic.
+
+### Human authentication and authorization
+
+Human control-plane requests use one trusted Go authorization model:
+
+```text
+credentials
+ -> authenticated active User + auth version
+ -> deployment role / effective Project role
+ -> shared application authorization boundary
+ -> existing command/query
+```
+
+Access JWT validation re-checks authoritative User status/authentication version, so disabling a User or changing/resetting/admin-assigning their password immediately invalidates previously issued authentication. Forced-password-change Users are authenticated only for the account flow needed to replace that password; they cannot enter normal protected application operations.
+
+Deployment-global administration uses fixed roles `admin | member`. Project access uses fixed roles `admin > member > viewer`, resolved as the highest direct User or inherited Group grant. Deployment admins have implicit Project-admin authority. There are no deny rules, custom permissions or transport-owned policy copies.
+
+`ProjectAccessService` owns the Project policy. HTTP middleware gives exhaustive defense-in-depth coverage to `/api/projects` and `/api/projects/{projectID}/...`, including nested resources and Project SSE. Normal Users see only accessible Projects; inaccessible direct/nested resources return not-found semantics rather than revealing existence.
+
+Deployment-global configuration (Providers, Model Profiles, legacy Runtimes, Agents, Runners, repository settings and global secret writes) requires deployment admin. Runner enrollment/WebSocket endpoints remain execution-plane machine-authenticated surfaces rather than human administration.
+
+Existing durable HUMAN actor records use the authenticated durable User ID where supported; no parallel human audit identity is introduced.
+
+See `authorization.md`.
 
 ### Agent runner
 
@@ -233,7 +259,7 @@ Engine / Runner
 
 Legacy Runtime lifecycle may also emit infrastructure Events when that path is used.
 
-The browser reconstructs live state from persisted reads plus SSE and is never the sole owner of important activity. Nuxt/Nitro process state is never authoritative for Run state.
+The browser reconstructs live state from persisted reads plus SSE and is never the sole owner of important activity. Nuxt/Nitro process state is never authoritative for Run state or access control. Project SSE subscriptions pass the same viewer authorization boundary as ordinary Project reads.
 
 ## Provenance and Review evidence
 
@@ -258,6 +284,8 @@ Blocking Questions move the same Run to `WAITING_FOR_INPUT` and the Issue to `BL
 
 For native OpenCode Questions, the same live Runner Execution Session, native Engine session and checkout remain attached while waiting. The answer continues that native session; Agent Board does not finalize or publish/return the Issue branch merely because input is pending. If the Runner/transport actually fails, the server reconciles the durable Execution Session before deciding a terminal outcome or safe recovery.
 
+Authenticated human Question answers and Review decisions preserve the durable User ID in the existing HUMAN actor attribution.
+
 ## Delivery policy
 
 Human Review is the v0.1 delivery gate.
@@ -270,7 +298,7 @@ After authenticated Source Connections and provider actions exist, Projects may 
 
 ## Future layers
 
-Planning, Automations, Agent-created Issues, Source Connections, delivery automation, delegation, Squads, workers, users/groups and Plugins reuse the same Issue/Agent/Run/scheduler/Workspace/Git-branch model.
+Planning, Automations, Agent-created Issues, Source Connections, delivery automation, delegation, Squads, workers and Plugins reuse the same Issue/Agent/Run/scheduler/Workspace/Git-branch model. External identity providers and richer administration extend the fixed model in `authorization.md` rather than replacing it implicitly.
 
 Future Worker/Pool selection may supply or place Runner capacity above the existing protocol. Worker identity remains separate from Agent, Runner and Execution Session identity.
 
@@ -298,8 +326,11 @@ Plugins are deliberately late roadmap work.
 18. Review identity is `base_revision` + `review_revision`; no duplicate Review filesystem snapshot is authoritative.
 19. Secrets are ephemeral and redacted before persistence.
 20. Historical execution truth comes from immutable provenance plus pinned Git identities.
-21. Nuxt is presentation/application delivery, not a competing control plane.
+21. Nuxt is presentation/application delivery, not a competing control plane or authorization authority.
 22. `BLOCKED` is an Issue workflow state; Run execution states remain separate.
 23. Human Review is the default v0.1 delivery gate; later autonomous delivery requires explicit Project policy.
+24. Human identity is a durable deployment-global User; caller-controlled headers never establish it.
+25. Project authorization is derived from authenticated User plus shared effective-role resolution; Project/resource IDs are never authorization.
+26. Inaccessible Project resources use not-found isolation, including nested/live reads.
 
 Earlier #15 snapshot/staging assumptions are superseded where they conflict with these Git-native invariants.

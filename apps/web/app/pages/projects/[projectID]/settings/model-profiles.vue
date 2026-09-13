@@ -1,6 +1,13 @@
-<script setup lang="ts">const route = useRoute()</script>
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useProjectPermissions } from '../../../../composables/useProjectPermissions'
+
+const route = useRoute()
+const projectId = computed(() => String(route.params.projectID))
+const { canAdmin } = useProjectPermissions(projectId)
+</script>
 <template>
   <SettingsShell>
-    <ConfigManager :key="String(route.params.projectID)" kind="model-profiles" :project-id="String(route.params.projectID)" />
+    <ConfigManager :key="projectId" kind="model-profiles" :project-id="projectId" :can-mutate="canAdmin" />
   </SettingsShell>
 </template>

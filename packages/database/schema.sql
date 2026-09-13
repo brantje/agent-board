@@ -31,6 +31,107 @@ CREATE TABLE projects (
 CREATE UNIQUE INDEX projects_name_uq ON projects (lower(name));
 CREATE UNIQUE INDEX projects_issue_prefix_uq ON projects (issue_prefix);
 
+CREATE TABLE users (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    username text NOT NULL CHECK (btrim(username) <> '' AND username = lower(btrim(username))),
+    email text NOT NULL CHECK (btrim(email) <> '' AND email = lower(btrim(email))),
+    display_name text NOT NULL CHECK (btrim(display_name) <> ''),
+    password_hash text CHECK (password_hash IS NULL OR btrim(password_hash) <> ''),
+    deployment_role text NOT NULL CHECK (deployment_role IN ('admin', 'member')),
+    status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'disabled')),
+    force_password_change boolean NOT NULL DEFAULT false,
+    auth_version bigint NOT NULL DEFAULT 1 CHECK (auth_version >= 1),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (status <> 'active' OR password_hash IS NOT NULL)
+);
+
+CREATE UNIQUE INDEX users_username_uq ON users (username);
+CREATE UNIQUE INDEX users_email_uq ON users (email);
+
+CREATE TABLE groups (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL CHECK (btrim(name) <> '' AND name = lower(btrim(name))),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX groups_name_uq ON groups (name);
+
+CREATE TABLE group_members (
+    group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    PRIMARY KEY (group_id, user_id)
+);
+
+CREATE TABLE project_user_access (
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
+    role text NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
+    PRIMARY KEY (project_id, user_id)
+);
+
+CREATE INDEX project_user_access_user_idx ON project_user_access (user_id, project_id);
+
+CREATE TABLE project_group_access (
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    role text NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
+    PRIMARY KEY (project_id, group_id)
+);
+
+CREATE INDEX project_group_access_group_idx ON project_group_access (group_id, project_id);
+
+CREATE TABLE auth_settings (
+    singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
+    access_token_lifetime_seconds integer NOT NULL DEFAULT 3600 CHECK (access_token_lifetime_seconds BETWEEN 300 AND 86400),
+    refresh_token_lifetime_seconds integer NOT NULL DEFAULT 2592000 CHECK (refresh_token_lifetime_seconds BETWEEN 3600 AND 31536000),
+    password_minimum_length integer NOT NULL DEFAULT 12 CHECK (password_minimum_length BETWEEN 8 AND 256),
+    require_uppercase boolean NOT NULL DEFAULT false,
+    require_lowercase boolean NOT NULL DEFAULT false,
+    require_number boolean NOT NULL DEFAULT false,
+    require_symbol boolean NOT NULL DEFAULT false,
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+INSERT INTO auth_settings (singleton) VALUES (true);
+
+CREATE TABLE auth_sessions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    refresh_token_hash bytea NOT NULL CHECK (octet_length(refresh_token_hash) = 32),
+    expires_at timestamptz NOT NULL,
+    revoked_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    last_used_at timestamptz,
+    CHECK (expires_at > created_at),
+    CHECK (revoked_at IS NULL OR revoked_at >= created_at),
+    CHECK (last_used_at IS NULL OR last_used_at >= created_at)
+);
+
+CREATE UNIQUE INDEX auth_sessions_refresh_token_uq ON auth_sessions (refresh_token_hash);
+CREATE INDEX auth_sessions_user_idx ON auth_sessions (user_id, created_at DESC);
+
+CREATE TABLE password_tokens (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    purpose text NOT NULL CHECK (purpose IN ('setup', 'reset')),
+    token_hash bytea NOT NULL CHECK (octet_length(token_hash) = 32),
+    expires_at timestamptz NOT NULL,
+    consumed_at timestamptz,
+    revoked_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CHECK (expires_at > created_at),
+    CHECK (consumed_at IS NULL OR consumed_at >= created_at),
+    CHECK (revoked_at IS NULL OR revoked_at >= created_at),
+    CHECK (consumed_at IS NULL OR revoked_at IS NULL)
+);
+
+CREATE UNIQUE INDEX password_tokens_hash_uq ON password_tokens (token_hash);
+CREATE UNIQUE INDEX password_tokens_active_user_purpose_uq
+    ON password_tokens (user_id, purpose)
+    WHERE consumed_at IS NULL AND revoked_at IS NULL;
+
 CREATE TABLE runners (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     name text CHECK (name IS NULL OR btrim(name) <> ''),
@@ -496,6 +597,42 @@ CREATE TABLE artifacts (
 );
 
 CREATE INDEX artifacts_run_idx ON artifacts (run_id, created_at) WHERE deleted_at IS NULL;
+
+-- Usernames and email addresses share one normalized deployment-wide login
+-- namespace. Per-column unique indexes cannot protect cross-field collisions, so
+-- serialize only writes that touch the same identifiers and reject the collision
+-- at the database boundary as a uniqueness violation.
+CREATE FUNCTION enforce_user_login_namespace() RETURNS trigger AS $$
+DECLARE
+    first_identifier text := LEAST(NEW.username, NEW.email);
+    second_identifier text := GREATEST(NEW.username, NEW.email);
+BEGIN
+    PERFORM pg_advisory_xact_lock(hashtextextended('agent-board:user-login:' || first_identifier, 0));
+    IF second_identifier <> first_identifier THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended('agent-board:user-login:' || second_identifier, 0));
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM users
+        WHERE id IS DISTINCT FROM NEW.id
+          AND (
+              username IN (NEW.username, NEW.email)
+              OR email IN (NEW.username, NEW.email)
+          )
+    ) THEN
+        RAISE EXCEPTION USING
+            ERRCODE = '23505',
+            MESSAGE = 'user login identifier already exists',
+            CONSTRAINT = 'users_login_namespace_uq';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER users_login_namespace_check
+    BEFORE INSERT OR UPDATE OF username, email ON users
+    FOR EACH ROW EXECUTE FUNCTION enforce_user_login_namespace();
 
 -- Global configuration can be consumed by any Project; Project-owned configuration
 -- may only reference other global configuration or configuration owned by that Project.

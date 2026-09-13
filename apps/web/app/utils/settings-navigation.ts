@@ -12,11 +12,7 @@ export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
   const groups: NavigationMenuItem[][] = [
     [
       { label: 'Settings', type: 'label' },
-      {
-        label: projectId ? 'Project' : 'Overview',
-        to: overview,
-        exact: true
-      }
+      { label: projectId ? 'Project' : 'Overview', to: overview, exact: true }
     ],
     [
       { label: 'Models', type: 'label' },
@@ -26,6 +22,12 @@ export function settingsNavigation(projectId?: string): NavigationMenuItem[][] {
   ]
   if (!projectId) {
     groups.push(
+      [
+        { label: 'Identity', type: 'label' },
+        { label: 'Users', to: '/settings/users' },
+        { label: 'Groups', to: '/settings/groups' },
+        { label: 'Authentication / Security', to: '/settings/authentication' }
+      ],
       [
         { label: 'Execution', type: 'label' },
         { label: 'Agents', to: '/settings/agents' }

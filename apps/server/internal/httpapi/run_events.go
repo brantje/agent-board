@@ -36,6 +36,9 @@ func (a *api) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 
 	live, unsubscribe := a.eventHub.Subscribe(r.Context(), runID)
 	defer unsubscribe()
+	if !a.projectStreamAccessCurrent(r, projectID) {
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -50,6 +53,9 @@ func (a *api) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	seen := make(map[string]struct{}, len(events))
 	for _, event := range events {
+		if !a.projectStreamAccessCurrent(r, projectID) {
+			return
+		}
 		if err := writeRunSSEEvent(w, flusher, event); err != nil {
 			return
 		}
@@ -70,12 +76,18 @@ func (a *api) streamRunEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+			if !a.projectStreamAccessCurrent(r, projectID) {
+				return
+			}
 			if _, err := fmt.Fprint(w, ": heartbeat\n\n"); err != nil {
 				return
 			}
 			flusher.Flush()
 		case event, ok := <-live:
 			if !ok {
+				return
+			}
+			if !a.projectStreamAccessCurrent(r, projectID) {
 				return
 			}
 			if event.ID != "" {

@@ -16,6 +16,8 @@ import (
 
 type api struct {
 	service               *app.Service
+	auth                  *app.AuthService
+	projectAccess         *app.ProjectAccessService
 	questions             *app.QuestionService
 	reviews               *app.ReviewService
 	runEvidence           *app.RunEvidenceService
@@ -58,7 +60,7 @@ func NewRouterWithApplication(services *app.Services, authorizers ...SecretWrite
 	if len(authorizers) > 0 {
 		authorizer = authorizers[0]
 	}
-	return newRouterWithReviews(
+	return newRouterWithProjectAccess(
 		services.ControlPlane,
 		services.RunEvidence,
 		services.Secrets,
@@ -67,6 +69,8 @@ func NewRouterWithApplication(services *app.Services, authorizers ...SecretWrite
 		services.Questions,
 		app.ReviewServiceFromServices(services),
 		services.EventHub,
+		services.ProjectAccess,
+		services.Auth,
 	)
 }
 
@@ -85,7 +89,15 @@ func newRouter(service *app.Service, runEvidence *app.RunEvidenceService, secret
 	return newRouterWithReviews(service, runEvidence, secretWriter, secretResolver, secretWriteAuthorizer, questions, nil, nil)
 }
 
-func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretResolver executioncontext.SecretResolver, secretWriteAuthorizer SecretWriteAuthorizer, questions *app.QuestionService, reviews *app.ReviewService, eventHub *evidence.Hub) http.Handler {
+func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretResolver executioncontext.SecretResolver, secretWriteAuthorizer SecretWriteAuthorizer, questions *app.QuestionService, reviews *app.ReviewService, eventHub *evidence.Hub, authServices ...*app.AuthService) http.Handler {
+	var auth *app.AuthService
+	if len(authServices) > 0 {
+		auth = authServices[0]
+	}
+	return newRouterWithProjectAccess(service, runEvidence, secretWriter, secretResolver, secretWriteAuthorizer, questions, reviews, eventHub, nil, auth)
+}
+
+func newRouterWithProjectAccess(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretResolver executioncontext.SecretResolver, secretWriteAuthorizer SecretWriteAuthorizer, questions *app.QuestionService, reviews *app.ReviewService, eventHub *evidence.Hub, projectAccess *app.ProjectAccessService, auth *app.AuthService) http.Handler {
 	router := chi.NewRouter()
 	router.Get("/healthz", handleHealth)
 	if service == nil {
@@ -93,6 +105,8 @@ func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceServ
 	}
 	a := &api{
 		service:               service,
+		auth:                  auth,
+		projectAccess:         projectAccess,
 		questions:             questions,
 		reviews:               reviews,
 		runEvidence:           runEvidence,
@@ -103,6 +117,18 @@ func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceServ
 		repositorySettings:    repository.SettingsFromEnv(),
 	}
 	router.Route("/api", func(r chi.Router) {
+		if a.auth != nil {
+			r.Use(a.deploymentGlobalAuthorizationMiddleware)
+			r.Use(a.projectAuthorizationMiddleware)
+		}
+		if a.auth != nil {
+			a.registerAuthRoutes(r)
+			a.registerAuthManagementRoutes(r)
+			a.registerGroupRoutes(r)
+		}
+		if a.projectAccess != nil {
+			a.registerProjectAccessRoutes(r)
+		}
 		a.registerConfigurationRoutes(r)
 		if a.service.Runners != nil {
 			a.registerRunnerRoutes(r)
@@ -185,7 +211,11 @@ func writeAppError(w http.ResponseWriter, err error) {
 		switch {
 		case strings.HasSuffix(apiErr.Code, "_not_found"):
 			status = http.StatusNotFound
-		case apiErr.Code == "conflict", apiErr.Code == "issue_done", apiErr.Code == "agent_unavailable", apiErr.Code == "review_apply_failed", apiErr.Code == "review_evidence_invalid", apiErr.Code == "issue_relationship_exists":
+		case apiErr.Code == "authentication_failed":
+			status = http.StatusUnauthorized
+		case apiErr.Code == "forbidden", apiErr.Code == "password_change_required":
+			status = http.StatusForbidden
+		case apiErr.Code == "bootstrap_closed", apiErr.Code == "conflict", apiErr.Code == "issue_done", apiErr.Code == "agent_unavailable", apiErr.Code == "review_apply_failed", apiErr.Code == "review_evidence_invalid", apiErr.Code == "issue_relationship_exists", apiErr.Code == "last_project_admin":
 			status = http.StatusConflict
 		case apiErr.Code == "execution_configuration_invalid", apiErr.Code == "provider_model_discovery_unconfigured":
 			status = http.StatusUnprocessableEntity

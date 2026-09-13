@@ -34,13 +34,26 @@ const global = {
   }
 }
 
+const authSettings = {
+  accessTokenLifetimeSeconds: 3600,
+  refreshTokenLifetimeSeconds: 2592000,
+  minimumPasswordLength: 12,
+  requireUppercase: false,
+  requireLowercase: false,
+  requireNumber: false,
+  requireSymbol: false
+}
+
 afterEach(() => vi.unstubAllGlobals())
 
 describe('settings navigation helper', () => {
-  it('builds global settings links including Agents and Runners', () => {
+  it('builds global settings links including identity administration, Agents and Runners', () => {
     const groups = settingsNavigation()
     const links = groups.flat().filter(item => item.to)
     expect(links.find(item => item.label === 'Overview')?.to).toBe('/settings')
+    expect(links.find(item => item.label === 'Users')?.to).toBe('/settings/users')
+    expect(links.find(item => item.label === 'Groups')?.to).toBe('/settings/groups')
+    expect(links.find(item => item.label === 'Authentication / Security')?.to).toBe('/settings/authentication')
     expect(links.find(item => item.label === 'Providers')?.to).toBe('/settings/providers')
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/settings/model-profiles')
     expect(links.find(item => item.label === 'Agents')?.to).toBe('/settings/agents')
@@ -49,12 +62,15 @@ describe('settings navigation helper', () => {
     expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
   })
 
-  it('builds project-scoped settings links including providers', () => {
+  it('builds project-scoped settings links without deployment identity administration', () => {
     const groups = settingsNavigation('p')
     const links = groups.flat().filter(item => item.to)
     expect(links.find(item => item.label === 'Project')?.to).toBe('/projects/p/settings')
     expect(links.find(item => item.label === 'Providers')?.to).toBe('/projects/p/settings/providers')
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/projects/p/settings/model-profiles')
+    expect(links.find(item => item.label === 'Users')).toBeUndefined()
+    expect(links.find(item => item.label === 'Groups')).toBeUndefined()
+    expect(links.find(item => item.label === 'Authentication / Security')).toBeUndefined()
     expect(links.find(item => item.label === 'Runtimes')).toBeUndefined()
     expect(links.find(item => item.label === 'Agents')).toBeUndefined()
     expect(links.find(item => item.label === 'Runners')).toBeUndefined()
@@ -68,6 +84,8 @@ describe('settings sidebar shell', () => {
     const wrapper = mount(SettingsSidebar, { global })
     expect(wrapper.get('[data-testid="settings-secondary-nav"]').exists()).toBe(true)
     expect(wrapper.get('a[href="/settings/providers"]').text()).toBe('Providers')
+    expect(wrapper.get('a[href="/settings/users"]').text()).toBe('Users')
+    expect(wrapper.get('a[href="/settings/groups"]').text()).toBe('Groups')
     expect(wrapper.text()).not.toMatch(/back to/i)
   })
 
@@ -105,6 +123,11 @@ describe('settings route wiring', () => {
 
   it('wraps global and project settings pages with SettingsShell', () => {
     vi.stubGlobal('useRoute', () => ({ params: { projectID: 'project-a' } }))
+    vi.stubGlobal('useAuth', () => ({
+      users: async () => [], settings: async () => authSettings, updateSettings: async () => authSettings,
+      groups: async () => [], groupMembers: async () => [], createGroup: async () => ({}), updateGroup: async () => ({}), deleteGroup: async () => undefined,
+      addGroupMember: async () => undefined, removeGroupMember: async () => undefined
+    }))
     const settingsPages = Object.entries(pages).filter(([path]) => path.includes('/settings/'))
     for (const [path, page] of settingsPages) {
       const wrapper = mount(page, {
@@ -133,6 +156,10 @@ describe('settings route wiring', () => {
       }
       if (path.endsWith('/projects/[projectID]/settings/index.vue')) {
         expect(wrapper.get('[data-project-settings]').attributes('data-project')).toBe('project-a')
+        expect(wrapper.find('[data-kind]').exists()).toBe(false)
+        continue
+      }
+      if (path.endsWith('/settings/users.vue') || path.endsWith('/settings/groups.vue') || path.endsWith('/settings/authentication.vue')) {
         expect(wrapper.find('[data-kind]').exists()).toBe(false)
         continue
       }

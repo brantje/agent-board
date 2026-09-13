@@ -373,8 +373,15 @@ describe('ProjectList', () => {
 })
 
 describe('ProjectSettings', () => {
+  const settingsResponse = (path: string, value = project) => {
+    if (path === `/api/projects/${project.id}/access/effective-role`) {
+      return new Response(JSON.stringify({ role: 'admin' }))
+    }
+    return new Response(JSON.stringify(value))
+  }
+
   it('loads the shared Project editor inside project settings', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(project))))
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => settingsResponse(path)))
     const wrapper = mount(ProjectSettings, { props: { projectId: project.id }, global })
     await flushPromises()
 
@@ -393,7 +400,7 @@ describe('ProjectSettings', () => {
         const body = JSON.parse(String(options.body))
         return new Response(JSON.stringify({ ...project, allowInternalRunner: body.allowInternalRunner }))
       }
-      return new Response(JSON.stringify(project))
+      return settingsResponse(path)
     })
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(ProjectSettings, { props: { projectId: project.id }, global })
@@ -412,7 +419,7 @@ describe('ProjectSettings', () => {
   it('saves edits and discards unsaved changes on cancel', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
       if (options.method === 'PATCH') return new Response(JSON.stringify({ ...project, name: 'Renamed' }))
-      return new Response(JSON.stringify(project))
+      return settingsResponse(path)
     })
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(ProjectSettings, { props: { projectId: project.id }, global })

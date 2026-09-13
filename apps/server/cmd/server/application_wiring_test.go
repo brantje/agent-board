@@ -45,20 +45,20 @@ func TestControlPlaneHandlerWiresWorkspaceApplicationServices(t *testing.T) {
 	if !ok {
 		t.Fatalf("handler type = %T, want *applicationHandler", handler)
 	}
-	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.ExecutionStore == nil || application.services.ExecutionContext == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil || application.services.EventHub == nil || application.services.Events == nil {
+	if application.Handler == nil || application.services == nil || application.services.ControlPlane == nil || application.services.Auth == nil || application.services.Workspaces == nil || application.services.RuntimeInstances == nil || application.services.RunnerConnections == nil || application.services.ExecutionSessions == nil || application.services.RunEvidence == nil || application.services.ExecutionStore == nil || application.services.ExecutionContext == nil || application.services.Scheduler == nil || application.services.Redaction == nil || application.services.Secrets == nil || application.services.EventHub == nil || application.services.Events == nil {
 		t.Fatalf("application services were not fully wired: %+v", application.services)
 	}
 	if application.services.ControlPlane.Runners == nil {
 		t.Fatal("runner service was not wired")
 	}
 
-	// An authorized invalid request is rejected before persistence, so this
-	// verifies the production secret route and capability gate are both wired.
+	// The production Secret route is present and protected by deployment
+	// authentication before the legacy capability header is considered.
 	req := httptest.NewRequest(http.MethodPut, "/api/secrets", strings.NewReader(`{}`))
 	req.Header.Set(httpapi.SecretWriteCapabilityHeader, secretWriteToken)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
+	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("secret route status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
@@ -135,6 +135,6 @@ func TestConfiguredEvidenceRoot(t *testing.T) {
 func TestConfiguredSchedulerOwnerIDUsesExplicitValue(t *testing.T) {
 	t.Setenv("AGENT_BOARD_SCHEDULER_OWNER_ID", "worker-a")
 	if got := configuredSchedulerOwnerID(); got != "worker-a" {
-		t.Fatalf("configuredSchedulerOwnerID()=%q", got)
+		t.Fatalf("configuredSchedulerOwnerID()=%q want %q", got, "worker-a")
 	}
 }

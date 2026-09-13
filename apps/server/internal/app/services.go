@@ -17,6 +17,8 @@ import (
 // server startup constructs one coherent application boundary.
 type Services struct {
 	ControlPlane      *Service
+	Auth              *AuthService
+	ProjectAccess     *ProjectAccessService
 	Questions         *QuestionService
 	Workspaces        *WorkspaceService
 	RuntimeInstances  *RuntimeInstanceService
@@ -33,6 +35,10 @@ type Services struct {
 }
 
 func NewServices(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer) (*Services, error) {
+	return newServices(controlPlaneStore, materializer, AuthServiceConfig{})
+}
+
+func newServices(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, authConfig AuthServiceConfig) (*Services, error) {
 	if controlPlaneStore == nil {
 		return nil, fmt.Errorf("control-plane store is required")
 	}
@@ -42,6 +48,12 @@ func NewServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 		return nil, err
 	}
 	services := &Services{ControlPlane: controlPlane, Workspaces: workspaces}
+	if err := configureAuth(services, controlPlaneStore, authConfig); err != nil {
+		return nil, err
+	}
+	if err := configureProjectAccess(services, controlPlaneStore); err != nil {
+		return nil, err
+	}
 	if store.SupportsQuestionStore(controlPlaneStore) {
 		questions, err := NewQuestionService(controlPlaneStore.(store.QuestionStore))
 		if err != nil {
@@ -53,10 +65,30 @@ func NewServices(controlPlaneStore store.ControlPlaneStore, materializer Workspa
 }
 
 func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, implementations map[string]runtimepkg.Implementation, secretResolvers ...executioncontext.SecretResolver) (*Services, error) {
+	return newServicesWithRuntimes(controlPlaneStore, materializer, implementations, AuthServiceConfig{}, secretResolvers...)
+}
+
+// NewServicesWithRuntimesAuthConfig is the production-capable constructor when
+// authentication needs deployment-stable signing configuration. Existing tests
+// and non-auth stores may continue using NewServicesWithRuntimes.
+func NewServicesWithRuntimesAuthConfig(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, implementations map[string]runtimepkg.Implementation, authConfig AuthServiceConfig, secretResolvers ...executioncontext.SecretResolver) (*Services, error) {
+	return newServicesWithRuntimes(controlPlaneStore, materializer, implementations, authConfig, secretResolvers...)
+}
+
+func newServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, materializer WorkspaceMaterializer, implementations map[string]runtimepkg.Implementation, authConfig AuthServiceConfig, secretResolvers ...executioncontext.SecretResolver) (*Services, error) {
 	registry := redaction.NewRegistry()
 	securedStore := evidencepkg.NewRedactingStore(controlPlaneStore, registry)
-	services, err := NewServices(securedStore, materializer)
+	services, err := newServices(securedStore, materializer, authConfig)
 	if err != nil {
+		return nil, err
+	}
+	// Authentication and Project access persistence are control-plane security
+	// state, not execution evidence. Bind both to the authoritative base store
+	// instead of teaching the evidence redaction decorator unrelated methods.
+	if err := configureAuth(services, controlPlaneStore, authConfig); err != nil {
+		return nil, err
+	}
+	if err := configureProjectAccess(services, controlPlaneStore); err != nil {
 		return nil, err
 	}
 	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
@@ -113,6 +145,32 @@ func NewServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	services.ExecutionContext = resolver
 	services.Redaction = registry
 	return services, nil
+}
+
+func configureAuth(services *Services, candidate any, config AuthServiceConfig) error {
+	authStore, ok := candidate.(store.AuthStore)
+	if !ok {
+		return nil
+	}
+	auth, err := NewAuthService(authStore, config)
+	if err != nil {
+		return fmt.Errorf("configure authentication: %w", err)
+	}
+	services.Auth = auth
+	return nil
+}
+
+func configureProjectAccess(services *Services, candidate any) error {
+	accessStore, ok := candidate.(store.ProjectAccessStore)
+	if !ok {
+		return nil
+	}
+	access, err := NewProjectAccessService(services.ControlPlane, accessStore)
+	if err != nil {
+		return fmt.Errorf("configure project access: %w", err)
+	}
+	services.ProjectAccess = access
+	return nil
 }
 
 func (s *Services) Close() error {

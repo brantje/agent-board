@@ -4,9 +4,21 @@ Agent Board is built around durable product/domain objects. UI framework details
 
 ## Core objects
 
+### User
+
+Deployment-global durable human identity. A User owns normalized unique username/email, display name, password/authentication state, deployment role (`admin | member`) and lifecycle status (`pending | active | disabled`). Historical references use the durable User ID and survive rename/disable/re-enable.
+
+### Auth Session
+
+One durable refresh-token session for a User. Refresh secrets are opaque, random and stored only as hashes. Multiple sessions/devices are supported independently. Access JWTs carry the User/authentication version but validation re-checks authoritative User state so disable/password changes invalidate existing authentication immediately.
+
+### Group
+
+Deployment-global grouping of human Users for Project access. Groups contain Users only, never nest, and never grant deployment roles. Group membership is distinct from Agent Squads.
+
 ### Project
 
-Top-level work, repository and policy boundary.
+Top-level work, repository, policy and human-access boundary.
 
 Owns or scopes:
 
@@ -16,7 +28,16 @@ Owns or scopes:
   - `git` -> clone URL and optional source ref
 - workflow/delivery policy
 - Project-scoped Agents/configuration where supported
+- direct User and Group access grants
 - later Source Connection/provider-action binding without replacing the source model
+
+New Projects are private. Their creator receives a direct User Project-admin grant atomically with creation. Every Project retains at least one active direct individual User admin; Group grants and implicit deployment-admin access do not satisfy that invariant.
+
+Project roles are fixed as `admin > member > viewer`. Effective role is the highest direct User or inherited Group grant, with no deny/override rules. Deployment administrators have implicit Project-admin authority without synthetic grant rows.
+
+### Project User Access / Project Group Access
+
+Concrete Project grants for a User or Group respectively. They use the fixed Project role vocabulary and are resolved by one shared trusted Go authorization boundary. They are not a generic ACL/policy engine.
 
 ### Issue
 
@@ -53,7 +74,6 @@ Canonical types:
 ```text
 blocks
   source blocks target
-
 depends_on
   source depends on target
 
@@ -132,9 +152,11 @@ Structured request for human input. A blocking Question may place the Run in `WA
 
 `WAITING_FOR_INPUT` is not a Git finalization boundary. The same live execution checkout may remain dirty while waiting.
 
+Human answers use the authenticated durable User ID in the existing HUMAN actor attribution.
+
 ### Decision
 
-Durable attributable human/product outcome.
+Durable attributable human/product outcome. Authenticated human Review decisions use the durable User ID as the existing HUMAN actor identity.
 
 ### Event
 
@@ -181,6 +203,7 @@ Runtime != Runtime Instance
 Workspace != Runtime Instance
 Workspace != Runner worktree
 Review != filesystem snapshot
+Group != Squad
 ```
 
 - Issue survives all attempts.
@@ -189,6 +212,7 @@ Review != filesystem snapshot
 - Runtime is reusable configuration; Runtime Instance is disposable compute.
 - A Run may use replacement Runtime Instances during legacy managed-compute recovery.
 - Historical Run truth comes from immutable provenance plus pinned Git identities rather than current mutable configuration.
+- User identity is deployment-global and durable; disabling or renaming a User does not erase historical actor attribution or memberships.
 
 ## Scheduler invariants
 
@@ -216,20 +240,26 @@ Local repository paths are constrained to deployment-authorized roots. Bootstrap
 
 ## Security invariants
 
-- Project IDs are not authorization; ownership/scope is verified.
+- authenticated human identity is derived from server-validated credentials, never caller-controlled headers.
+- active User status, authentication version and forced-password-change state are checked at authoritative protected boundaries.
+- Project IDs are not authorization; effective access is resolved from authenticated User plus direct/Group grants.
+- inaccessible Projects are omitted from listings and direct/nested Project resources use not-found semantics.
+- Project role changes take effect on subsequent authoritative requests without relying on frontend state.
+- every Project retains an active direct individual User admin; Group/implicit deployment-admin authority does not satisfy that invariant.
 - Agent Runtime code is untrusted.
 - Agent Runtime Instances never receive Docker daemon credentials/socket access.
 - credentials/secrets are resolved in trusted code and injected ephemerally.
 - secret plaintext is excluded from Events, raw logs, Artifacts, provenance and public API responses.
-- caller-controlled headers cannot grant trusted actor identity.
 - remote Git uses the Runner host's configured Git authentication; #72 does not introduce provider credential forwarding.
+
+See `authorization.md` for the complete fixed human authentication and authorization model.
 
 ## Collaboration extensions
 
 Planning, Automations, Agent-created Issues, delegation, Squads and worker topology reuse the same Issue/Run/scheduler/Workspace/Git-branch model rather than creating parallel execution systems.
 
-Delegation is a subtask within the current Issue; Agent-created follow-up work creates a real new Issue. Squads layer reusable leader/member configuration on delegation.
+Delegation is a subtask within the current Issue; Agent-created follow-up work creates a real new Issue. Squads layer reusable leader/member configuration on delegation. Human Groups remain a separate deployment-global access concept.
 
-Users/groups/roles/permissions are later product administration work and are not yet fully specified. Plugin expansion comes later still.
+The fixed local Users/Groups/Project authorization foundation is documented in `authorization.md`. External identity providers, custom permissions and broader administration are later extensions; they must not silently change the fixed roles or shared authorization boundary.
 
 Earlier #15 candidate snapshot/staging assumptions are superseded wherever they conflict with these Git-native domain invariants.
