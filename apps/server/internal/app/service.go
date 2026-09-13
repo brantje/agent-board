@@ -490,6 +490,7 @@ func validateProject(v store.Project) error {
 			if hasPassword || strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https") {
 				return invalid("cloneUrl must not contain credentials")
 			}
+		}
 		if err != nil && cloneURLHasEmbeddedCredentials(cloneURL) {
 			return invalid("cloneUrl must not contain credentials")
 		}
