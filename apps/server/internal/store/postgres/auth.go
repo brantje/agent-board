@@ -332,10 +332,29 @@ func (s *Store) GetAuthSettings(ctx context.Context) (store.AuthSettings, error)
 }
 
 func (s *Store) CreateAuthSession(ctx context.Context, input store.AuthSession) (store.AuthSession, error) {
-	return scanAuthSession(s.pool.QueryRow(ctx, `
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return store.AuthSession{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	value, err := scanAuthSession(tx.QueryRow(ctx, `
 		INSERT INTO auth_sessions (user_id,refresh_token_hash,expires_at)
 		VALUES ($1,$2,$3)
 		RETURNING `+authSessionColumns, input.UserID, input.RefreshTokenHash, input.ExpiresAt))
+	if err != nil {
+		return store.AuthSession{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO auth_session_refresh_tokens (session_id,token_hash)
+		VALUES ($1,$2)
+	`, value.ID, input.RefreshTokenHash); err != nil {
+		return store.AuthSession{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.AuthSession{}, err
+	}
+	return value, nil
 }
 
 func (s *Store) GetAuthSessionByRefreshHash(ctx context.Context, hash []byte) (store.AuthSession, error) {
@@ -343,17 +362,40 @@ func (s *Store) GetAuthSessionByRefreshHash(ctx context.Context, hash []byte) (s
 }
 
 func (s *Store) RotateAuthSession(ctx context.Context, id string, oldHash, newHash []byte, expiresAt, now time.Time) (store.AuthSession, error) {
-	return scanAuthSession(s.pool.QueryRow(ctx, `
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return store.AuthSession{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	value, err := scanAuthSession(tx.QueryRow(ctx, `
 		UPDATE auth_sessions
 		SET refresh_token_hash=$3,expires_at=$4,last_used_at=$5
 		WHERE id=$1 AND refresh_token_hash=$2 AND revoked_at IS NULL AND expires_at>$5
 		RETURNING `+authSessionColumns, id, oldHash, newHash, expiresAt, now))
+	if err != nil {
+		return store.AuthSession{}, err
+	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO auth_session_refresh_tokens (session_id,token_hash)
+		VALUES ($1,$2)
+	`, value.ID, newHash); err != nil {
+		return store.AuthSession{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.AuthSession{}, err
+	}
+	return value, nil
 }
 
 func (s *Store) RevokeAuthSessionByRefreshHash(ctx context.Context, hash []byte, now time.Time) error {
 	tag, err := s.pool.Exec(ctx, `
-		UPDATE auth_sessions SET revoked_at=$2
-		WHERE refresh_token_hash=$1 AND revoked_at IS NULL
+		UPDATE auth_sessions AS session
+		SET revoked_at=$2
+		FROM auth_session_refresh_tokens AS token
+		WHERE token.session_id=session.id
+		  AND token.token_hash=$1
+		  AND session.revoked_at IS NULL
 	`, hash, now)
 	if err != nil {
 		return notFound(err)
