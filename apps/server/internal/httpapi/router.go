@@ -100,7 +100,7 @@ func newRouterWithReviews(service *app.Service, runEvidence *app.RunEvidenceServ
 func newRouterWithProjectAccess(service *app.Service, runEvidence *app.RunEvidenceService, secretWriter app.SecretWriter, secretResolver executioncontext.SecretResolver, secretWriteAuthorizer SecretWriteAuthorizer, questions *app.QuestionService, reviews *app.ReviewService, eventHub *evidence.Hub, projectAccess *app.ProjectAccessService, auth *app.AuthService) http.Handler {
 	router := chi.NewRouter()
 	router.Get("/healthz", handleHealth)
-	if service == nil {
+	if service == nil || (projectAccess != nil && auth == nil) {
 		return router
 	}
 	a := &api{
