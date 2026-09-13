@@ -224,7 +224,8 @@ func (s *ProjectAccessService) AnswerQuestion(ctx context.Context, actor Authent
 	if questions == nil {
 		return store.AnswerQuestionResult{}, errors.New("question service is unavailable")
 	}
-	return questions.Answer(ctx, projectID, questionID, answer, nil)
+	actorID := actor.ID
+	return questions.Answer(ctx, projectID, questionID, answer, &actorID)
 }
 
 func (s *ProjectAccessService) ListReviews(ctx context.Context, actor AuthenticatedUser, reviews *ReviewService, projectID string, filter store.ReviewFilter) ([]store.Review, error) {
@@ -254,7 +255,8 @@ func (s *ProjectAccessService) ApproveReview(ctx context.Context, actor Authenti
 	if reviews == nil {
 		return store.CompleteReviewApprovalResult{}, errors.New("review service is unavailable")
 	}
-	return reviews.Approve(ctx, projectID, reviewID, nil)
+	actorID := actor.ID
+	return reviews.Approve(ctx, projectID, reviewID, &actorID)
 }
 
 func (s *ProjectAccessService) RequestReviewChanges(ctx context.Context, actor AuthenticatedUser, reviews *ReviewService, projectID, reviewID, feedback string) (store.RequestReviewChangesResult, error) {
@@ -264,7 +266,8 @@ func (s *ProjectAccessService) RequestReviewChanges(ctx context.Context, actor A
 	if reviews == nil {
 		return store.RequestReviewChangesResult{}, errors.New("review service is unavailable")
 	}
-	return reviews.RequestChanges(ctx, projectID, reviewID, feedback, nil)
+	actorID := actor.ID
+	return reviews.RequestChanges(ctx, projectID, reviewID, feedback, &actorID)
 }
 
 func (s *ProjectAccessService) ListUserAccess(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.ProjectUserAccessView, error) {
