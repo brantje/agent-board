@@ -32,7 +32,7 @@ func (r *authSentinelReader) Read(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func reviewAuthService(t *testing.T, s *Store) *app.AuthService {
+func authSecurityTestService(t *testing.T, s *Store) *app.AuthService {
 	t.Helper()
 	service, err := app.NewAuthService(s, app.AuthServiceConfig{
 		SigningKey: bytes.Repeat([]byte{31}, 32),
@@ -73,7 +73,7 @@ func TestSchemaRejectsCrossFieldUserLoginNamespaceCollisions(t *testing.T) {
 func TestAuthServiceConcurrentRefreshAllowsExactlyOneRotation(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
-	service := reviewAuthService(t, s)
+	service := authSecurityTestService(t, s)
 	ctx := context.Background()
 
 	if _, err := service.Bootstrap(ctx, app.BootstrapRegistration{
@@ -131,7 +131,7 @@ func TestAuthServiceConcurrentRefreshAllowsExactlyOneRotation(t *testing.T) {
 func TestAuthRawSecretsStayOutOfDurableAndLoggableSinks(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
-	service := reviewAuthService(t, s)
+	service := authSecurityTestService(t, s)
 	ctx := context.Background()
 
 	loginPassword := "SENTINEL-Login-Password-9!"
