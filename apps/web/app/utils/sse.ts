@@ -90,8 +90,9 @@ function authenticatedFetchStream(path: string, authorization: Record<string, st
 
 export function openSSE(path: string, handlers: SSEHandlers): SSESource {
   const authorization = browserAuthorizationHeaders()
-  if (!authorization.Authorization && typeof EventSource !== 'undefined') {
-    return nativeEventSource(path, handlers)
+  if (!authorization.Authorization) {
+    if (typeof EventSource !== 'undefined') return nativeEventSource(path, handlers)
+    return { close: () => {} }
   }
   return authenticatedFetchStream(path, authorization, handlers)
 }
