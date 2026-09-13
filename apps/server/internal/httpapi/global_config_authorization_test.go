@@ -16,6 +16,8 @@ func TestGlobalConfigurationRequiresDeploymentAdmin(t *testing.T) {
 		"/api/model-profiles",
 		"/api/runtimes",
 		"/api/agents",
+		"/api/runners",
+		"/api/secrets",
 	} {
 		t.Run(path, func(t *testing.T) {
 			response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", bearer(projectAdminToken))
