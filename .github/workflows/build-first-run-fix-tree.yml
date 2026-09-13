@@ -1,0 +1,120 @@
+name: Build verified first-run fix tree
+
+on:
+  push:
+    branches:
+      - phase/79-authz-hardening
+
+permissions:
+  contents: write
+
+jobs:
+  build-tree:
+    if: github.event.head_commit.message == 'chore: build verified first-run fix tree'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: agent_board_test
+          POSTGRES_USER: agent_board
+          POSTGRES_PASSWORD: agent_board
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U agent_board -d agent_board_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENT_BOARD_TEST_DATABASE_RESET: "1"
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - name: Configure test database
+        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
+      - run: pnpm install --frozen-lockfile
+      - name: Regression tests fail before implementation
+        shell: bash
+        run: |
+          set -u
+          python .github/scripts/apply_first_run_issue_creator.py tests
+          frontend_status=0
+          pnpm --filter @agent-board/web exec vitest run test/auth.test.ts test/components.test.ts || frontend_status=$?
+          if [ "$frontend_status" -eq 0 ]; then
+            echo "frontend regression tests unexpectedly passed before the fix" >&2
+            exit 1
+          fi
+          backend_status=0
+          (cd apps/server && go test ./internal/app) || backend_status=$?
+          if [ "$backend_status" -eq 0 ]; then
+            echo "backend regression tests unexpectedly passed before the fix" >&2
+            exit 1
+          fi
+      - name: Apply implementation
+        run: python .github/scripts/apply_first_run_issue_creator.py production
+      - name: Format and verify targeted behavior
+        shell: bash
+        run: |
+          set -eu
+          gofmt -w \
+            apps/server/internal/store/types.go \
+            apps/server/internal/app/questions.go \
+            apps/server/internal/app/service.go \
+            apps/server/internal/app/assignment.go \
+            apps/server/internal/app/issue_events.go \
+            apps/server/internal/app/project_access.go \
+            apps/server/internal/app/project_access_test.go \
+            apps/server/internal/app/issue_events_test.go \
+            apps/server/internal/store/postgres/questions.go \
+            apps/server/internal/store/postgres/core.go \
+            apps/server/internal/store/postgres/assignment.go \
+            apps/server/internal/store/postgres/controlplane_integration_test.go \
+            apps/server/internal/httpapi/contracts.go \
+            apps/server/internal/httpapi/mapping.go
+          pnpm --filter @agent-board/web exec vitest run test/auth.test.ts test/components.test.ts
+          pnpm typecheck
+          (cd apps/server && go test ./internal/app ./internal/httpapi ./internal/store/postgres)
+          git diff --check
+      - name: Build final Git tree object
+        shell: bash
+        run: |
+          set -eu
+          base_tree="$(git rev-parse HEAD^{tree})"
+          python - "$base_tree" <<'PY'
+          import json
+          import pathlib
+          import subprocess
+          import sys
+
+          base_tree = sys.argv[1]
+          paths = subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines()
+          tree = []
+          for path in paths:
+              if path.startswith('.github/'):
+                  continue
+              tree.append({
+                  'path': path,
+                  'mode': '100644',
+                  'type': 'blob',
+                  'content': pathlib.Path(path).read_text(),
+              })
+          for path in (
+              '.github/scripts/apply_first_run_issue_creator.py',
+              '.github/workflows/build-first-run-fix-tree.yml',
+          ):
+              tree.append({'path': path, 'mode': '100644', 'type': 'blob', 'sha': None})
+          pathlib.Path('/tmp/final-tree.json').write_text(json.dumps({'base_tree': base_tree, 'tree': tree}))
+          PY
+          tree_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/trees" --input /tmp/final-tree.json --jq .sha)"
+          echo "FINAL_TREE_SHA=$tree_sha"
