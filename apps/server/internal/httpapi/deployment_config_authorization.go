@@ -23,7 +23,14 @@ func isDeploymentGlobalConfigurationPath(path string) bool {
 	if trimmed == "/api/repository-settings" {
 		return true
 	}
-	for _, prefix := range []string{"/api/providers", "/api/model-profiles", "/api/runtimes", "/api/agents"} {
+	for _, prefix := range []string{
+		"/api/providers",
+		"/api/model-profiles",
+		"/api/runtimes",
+		"/api/agents",
+		"/api/runners",
+		"/api/secrets",
+	} {
 		if trimmed == prefix || strings.HasPrefix(trimmed, prefix+"/") {
 			return true
 		}
