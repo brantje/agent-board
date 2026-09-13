@@ -2,6 +2,7 @@ import { onBeforeUnmount, onMounted, ref, shallowRef, toValue, watch, type Maybe
 import type { EventEvidence, Issue, Question, Review, Run, RunEvidence, RunUsageEvidence } from '../types/api'
 import { apiPath, apiQuery, apiRequest, type ApiError } from '../utils/api'
 import { maxSequence, mergeEvents, parseEventMessage, refetchTargets, applyCurrentBranchToRun } from '../utils/events'
+import { openSSE, type SSESource } from '../utils/sse'
 
 export const SSE_RECONNECT_MS = 2000
 export type RunEventConnection = 'connecting' | 'live' | 'reconnecting' | 'disconnected' | 'error'
@@ -17,7 +18,7 @@ export function useRunEvents(projectId: MaybeRefOrGetter<string>, runId: MaybeRe
   const error = shallowRef<ApiError>()
   let generation = 0
   let usageRequest = 0
-  let source: EventSource | undefined
+  let source: SSESource | undefined
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
   let controller: AbortController | undefined
 
@@ -63,35 +64,35 @@ export function useRunEvents(projectId: MaybeRefOrGetter<string>, runId: MaybeRe
   }
 
   function openStream(ids: { projectId: string; runId: string }, current: number) {
-    if (typeof EventSource === 'undefined') return
     closeSource()
     connection.value = connection.value === 'reconnecting' ? 'reconnecting' : 'connecting'
     const afterSequence = maxSequence(events.value)
-    source = new EventSource(apiQuery(`${apiPath('runs', ids.projectId, ids.runId)}/events`, { afterSequence: String(afterSequence) }))
-    source.onopen = () => {
-      if (current === generation) connection.value = 'live'
-    }
-    if (current === generation) connection.value = 'live'
-    source.onmessage = message => {
-      if (current !== generation) return
-      const incoming = parseEventMessage(message.data)
-      if (!incoming) return
-      events.value = mergeEvents(events.value, [incoming])
-      if (evidence.value?.run) {
-        const patched = applyCurrentBranchToRun(evidence.value.run, incoming)
-        if (patched) evidence.value = { ...evidence.value, run: patched }
+    source = openSSE(apiQuery(`${apiPath('runs', ids.projectId, ids.runId)}/events`, { afterSequence: String(afterSequence) }), {
+      onOpen: () => {
+        if (current === generation) connection.value = 'live'
+      },
+      onMessage: data => {
+        if (current !== generation) return
+        const incoming = parseEventMessage(data)
+        if (!incoming) return
+        events.value = mergeEvents(events.value, [incoming])
+        if (evidence.value?.run) {
+          const patched = applyCurrentBranchToRun(evidence.value.run, incoming)
+          if (patched) evidence.value = { ...evidence.value, run: patched }
+        }
+        void refetchFor(incoming.type, ids)
+      },
+      onError: () => {
+        if (current !== generation) return
+        source?.close()
+        source = undefined
+        connection.value = 'reconnecting'
+        reconnectTimer = setTimeout(() => {
+          if (current === generation) openStream(ids, current)
+        }, SSE_RECONNECT_MS)
       }
-      void refetchFor(incoming.type, ids)
-    }
-    source.onerror = () => {
-      if (current !== generation) return
-      source?.close()
-      source = undefined
-      connection.value = 'reconnecting'
-      reconnectTimer = setTimeout(() => {
-        if (current === generation) openStream(ids, current)
-      }, SSE_RECONNECT_MS)
-    }
+    })
+    if (current === generation) connection.value = 'live'
   }
 
   async function refresh() {
