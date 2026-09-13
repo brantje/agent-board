@@ -151,14 +151,30 @@ func verifyRunnableAgent(ctx context.Context, tx pgx.Tx, projectID, agentID stri
 }
 
 func latestActiveRun(ctx context.Context, tx pgx.Tx, projectID, issueID string) (store.Run, error) {
-	return scanRun(tx.QueryRow(ctx, `
+	run, err := scanRun(tx.QueryRow(ctx, `
         SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
         FROM runs
-        WHERE project_id=$1 AND issue_id=$2 AND status = ANY($3::text[])
+        WHERE project_id=$1 AND issue_id=$2
         ORDER BY attempt DESC
         LIMIT 1
         FOR UPDATE
-    `, projectID, issueID, activeRunStatuses))
+    `, projectID, issueID))
+	if err != nil {
+		return store.Run{}, err
+	}
+	if !isActiveRunStatus(run.Status) {
+		return store.Run{}, store.ErrNotFound
+	}
+	return run, nil
+}
+
+func isActiveRunStatus(status string) bool {
+	for _, candidate := range activeRunStatuses {
+		if candidate == status {
+			return true
+		}
+	}
+	return false
 }
 
 func workspaceForAssignment(ctx context.Context, tx pgx.Tx, projectID, issueID, issueKey, repositoryPath, defaultBranch string) (store.Workspace, error) {

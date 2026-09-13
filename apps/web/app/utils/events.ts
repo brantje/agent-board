@@ -461,42 +461,24 @@ function parseToolTodos(input: Record<string, unknown> | undefined, resultPrevie
   return input ? parseTodoItems(input.todos) : undefined
 }
 
-function mergeTodoStatuses(current: TodoActivityItem[], latest: TodoActivityItem[]) {
-  const latestByContent = new Map(latest.map(todo => [todo.content, todo.status]))
-  const shared = current.some(todo => latestByContent.has(todo.content))
-  if (!shared) return current
-  const merged = current.map(todo => ({
-    ...todo,
-    status: latestByContent.get(todo.content) ?? todo.status
-  }))
-  for (const todo of latest) {
-    if (!merged.some(item => item.content === todo.content)) merged.push(todo)
-  }
-  return merged
+export function todoStartedSummary(todos: TodoActivityItem[]) {
+  const total = todos.length
+  if (!total) return 'Started todo 0 of 0'
+  const inProgressIndex = todos.findIndex(item => item.status === 'in_progress')
+  const current = inProgressIndex >= 0
+    ? inProgressIndex + 1
+    : todos.every(item => item.status === 'completed')
+      ? total
+      : 1
+  return `Started todo ${current} of ${total}`
 }
 
-function applyLatestTodoSnapshots(items: RunActivityItem[]) {
-  const indexes = items.flatMap((item, index) => (
-    item.kind === 'tool' && isTodoToolName(item.name) && item.todos?.length ? [index] : []
-  ))
-  const latestIndex = indexes.at(-1)
-  if (latestIndex == null || indexes.length < 2) return items
-  const latestItem = items[latestIndex]
-  if (latestItem?.kind !== 'tool' || !latestItem.todos?.length) return items
-  const latest = latestItem.todos
-  const next = [...items]
-  for (const priorIndex of indexes.slice(0, -1)) {
-    const prior = next[priorIndex]
-    if (prior?.kind !== 'tool' || !prior.todos?.length) continue
-    const todos = mergeTodoStatuses(prior.todos, latest)
-    next[priorIndex] = { ...prior, todos, target: todoProgressSummary(todos) }
+export function latestTodoItems(items: RunActivityItem[]) {
+  for (let index = items.length - 1; index >= 0; index--) {
+    const item = items[index]
+    if (item?.kind === 'tool' && isTodoToolName(item.name) && item.todos?.length) return item.todos
   }
-  return next
-}
-
-export function todoProgressSummary(todos: TodoActivityItem[]) {
-  const completed = todos.filter(item => item.status === 'completed').length
-  return `${completed}/${todos.length}`
+  return undefined
 }
 
 function finalizeToolPresentation(
@@ -513,7 +495,7 @@ function finalizeToolPresentation(
     ? parseToolTodos(mergedInput, mergedPreview) || existing?.todos
     : undefined
   const target = todos?.length
-    ? todoProgressSummary(todos)
+    ? todoStartedSummary(todos)
     : toolTarget(fields, input) || existing?.target || ''
   return {
     label: toolActivityLabel(name),
@@ -753,7 +735,7 @@ export function projectRunActivity(events: EventEvidence[]): RunActivityItem[] {
       unknown: isUnknownEvent(event)
     })
   }
-  return applyLatestTodoSnapshots(reorderThoughtsBeforeTools(items))
+  return reorderThoughtsBeforeTools(items)
 }
 
 export function parseEventMessage(data: string): EventEvidence | undefined {

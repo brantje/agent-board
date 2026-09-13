@@ -87,11 +87,14 @@ describe('live workspace branch helpers', () => {
 })
 
 describe('workspace branch presentation', () => {
-  it('renders branch before priority on issue cards and hides when absent', async () => {
+  it('renders branch below the title on issue cards and hides when absent', async () => {
     const wrapper = mount(IssueCard, { props: { issue }, global })
     expect(wrapper.find('.issue-branch').text()).toContain('agent-board/AB-12')
     const text = wrapper.text()
-    expect(text.indexOf('agent-board/AB-12')).toBeLessThan(text.indexOf('Low'))
+    const titleIndex = text.indexOf('Fix scheduler')
+    const branchIndex = text.indexOf('agent-board/AB-12')
+    expect(titleIndex).toBeGreaterThanOrEqual(0)
+    expect(titleIndex).toBeLessThan(branchIndex)
 
     await wrapper.setProps({ issue: { ...issue, currentBranch: null } })
     expect(wrapper.find('.issue-branch').exists()).toBe(false)

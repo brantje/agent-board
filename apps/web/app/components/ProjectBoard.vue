@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { Agent, Issue, Project } from '../types/api'
+import type { Agent, Issue, Project, Run } from '../types/api'
 import { apiPath } from '../utils/api'
-import { boardColumns } from '../utils/issues'
+import { boardColumns, latestRun } from '../utils/issues'
 import { isBoardActivityEvent, applyCurrentBranchToIssues } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
@@ -11,6 +11,7 @@ const props = withDefaults(defineProps<{ projectId: string; canMutate?: boolean 
 const project = useResource<Project>(() => apiPath('projects', undefined, props.projectId))
 const issues = useResource<Issue[]>(() => apiPath('issues', props.projectId))
 const agents = useResource<Agent[]>(() => apiPath('agents', props.projectId))
+const runs = useResource<Run[]>(() => apiPath('runs', props.projectId))
 const search = ref('')
 const open = ref(false)
 
@@ -18,13 +19,20 @@ const title = computed(() => project.data.value ? `${project.data.value.name} / 
 const columns = computed(() => boardColumns(issues.data.value || [], search.value))
 const pending = computed(() => project.pending.value || issues.pending.value || agents.pending.value)
 const error = computed(() => project.error.value || issues.error.value || agents.error.value)
+const runsError = computed(() => runs.error.value)
 
 function agentName(issue: Issue) {
   return agents.data.value?.find(agent => agent.id === issue.assignedAgentId)?.name
 }
 
+function runStatus(issue: Issue) {
+  const items = runs.data.value
+  if (!Array.isArray(items)) return undefined
+  return latestRun(items, issue.id)?.status
+}
+
 async function refreshAll() {
-  await Promise.all([project.refresh(), issues.refresh(), agents.refresh()])
+  await Promise.all([project.refresh(), issues.refresh(), agents.refresh(), runs.refresh()])
 }
 
 async function created() {
@@ -54,6 +62,14 @@ useProjectEvents(() => props.projectId, async event => {
     </template>
 
     <AsyncState :pending="pending" :error="error" @retry="refreshAll">
+      <UAlert
+        v-if="runsError"
+        title="Run status unavailable"
+        :description="runsError.message"
+        color="warning"
+        class="mb-3"
+        :actions="[{ label: 'Retry', onClick: () => runs.refresh() }]"
+      />
       <div class="flex min-h-[calc(100dvh-10rem)] gap-3 overflow-x-auto pb-3" role="region" aria-label="Issue board" tabindex="0">
         <section
           v-for="column in columns"
@@ -69,7 +85,13 @@ useProjectEvents(() => props.projectId, async event => {
             <UBadge :label="String(column.issues.length)" color="neutral" variant="subtle" />
           </header>
           <div class="space-y-2 p-2">
-            <IssueCard v-for="issue in column.issues" :key="issue.id" :issue="issue" :agent-name="agentName(issue)" />
+            <IssueCard
+              v-for="issue in column.issues"
+              :key="issue.id"
+              :issue="issue"
+              :agent-name="agentName(issue)"
+              :run-status="runStatus(issue)"
+            />
             <p v-if="!column.issues.length" class="px-2 py-4 text-xs text-muted">{{ search ? 'No matching issues' : 'No issues' }}</p>
           </div>
         </section>

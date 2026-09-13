@@ -12,6 +12,6 @@ export function authRedirect(path: string, authenticated: boolean, forcePassword
   }
   if (forcePasswordChange && path !== '/account') return '/account'
   if ((path === '/settings' || path.startsWith('/settings/')) && !admin) return '/account'
-  if (isPublicAuthPath(path)) return '/account'
+  if (isPublicAuthPath(path)) return '/'
   return null
 }

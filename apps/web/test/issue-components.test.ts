@@ -4,6 +4,7 @@ import ProjectBoard from '../app/components/ProjectBoard.vue'
 import IssueDetail from '../app/components/IssueDetail.vue'
 import IssueEditor from '../app/components/IssueEditor.vue'
 import IssueCard from '../app/components/IssueCard.vue'
+import IdentityAvatar from '../app/components/IdentityAvatar.vue'
 import QuestionPanel from '../app/components/QuestionPanel.vue'
 import RunStatus from '../app/components/RunStatus.vue'
 import { event, MockEventSource, question } from './execution-fixtures'
@@ -18,8 +19,9 @@ const issue = {
   status: 'TODO',
   priority: 0,
   assignedAgentId: null,
+  createdBy: null,
   createdAt: '',
-  updatedAt: '',
+  updatedAt: '2026-09-13T14:59:00.000Z',
   currentBranch: null,
   lastEvent: null
 }
@@ -54,6 +56,7 @@ const global = {
   stubs: {
     ...uiStubs,
     IssueCard,
+    IdentityAvatar,
     IssueEditor,
     IssueRelationships: { template: '<section>Relationships</section>' },
     QuestionPanel: { props: ['projectId', 'issueId', 'runId'], template: '<section>Questions</section>' },
@@ -72,15 +75,22 @@ afterEach(() => {
 
 describe('Issue workflow components', () => {
   it('renders the authoritative card hierarchy and safe links for assigned/unassigned Issues', async () => {
+    vi.useFakeTimers()
+    try {
+    vi.setSystemTime(new Date('2026-09-13T15:00:00.000Z'))
     const wrapper = mount(IssueCard, { props: { issue }, global })
     expect(wrapper.get('a').attributes('href')).toBe('/projects/p/issues/AB-12')
     const text = wrapper.text()
     expect(text.indexOf('AB-12')).toBeLessThan(text.indexOf('Fix scheduler'))
-    expect(text.indexOf('Fix scheduler')).toBeLessThan(text.indexOf('Persist leases'))
-    expect(text).toContain('Low')
+    expect(wrapper.find('[aria-label="Low"]').exists()).toBe(true)
+    expect(wrapper.find('[data-icon="i-lucide-signal-low"]').exists()).toBe(true)
+    expect(text).not.toContain('Low')
+    expect(text).toContain('Updated 1m ago')
     expect(text).not.toContain('Unassigned')
     expect(text).not.toContain('TODO')
     expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(false)
+    expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(false)
+    expect(wrapper.find('[data-issue-run-status]').exists()).toBe(false)
 
     await wrapper.setProps({
       issue: {
@@ -88,17 +98,32 @@ describe('Issue workflow components', () => {
         lastEvent: event({ id: 'evt-q', type: 'question.created', sequence: null, payload: { prompt: 'Choose' } })
       }
     })
-    expect(wrapper.text()).toContain('Question Created')
+    expect(wrapper.text()).not.toContain('Question Created')
     expect(wrapper.text()).not.toContain('TODO')
 
-    await wrapper.setProps({ issue: { ...issue, assignedAgentId: 'a', priority: 3, description: '' } })
-    expect(wrapper.text()).toContain('High')
+    await wrapper.setProps({ issue: { ...issue, assignedAgentId: 'a', priority: 3, description: '' }, runStatus: 'QUEUED' })
+    expect(wrapper.find('[aria-label="High"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('Persist leases')
     expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(true)
+    expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(true)
+    expect(wrapper.get('[data-issue-run-status]').text()).toBe('Queued')
 
-    await wrapper.setProps({ agentName: 'Coder' })
+    await wrapper.setProps({ agentName: 'Coder', runStatus: 'RUNNING' })
     expect(wrapper.find('[aria-label="Coder"]').exists()).toBe(true)
     expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Coder')
+    expect(wrapper.get('[data-issue-run-status]').text()).toBe('Running')
+    expect(wrapper.find('.issue-run-spinner [data-icon="i-lucide-bot"]').exists()).toBe(true)
+    expect(wrapper.find('.issue-run-spinner .animate-spin').exists()).toBe(true)
+    expect(wrapper.find('.ring-primary\\/35').exists()).toBe(true)
+
+    await wrapper.setProps({ runStatus: 'FAILED' })
+    expect(wrapper.get('[data-issue-run-status]').attributes('data-color')).toBe('error')
+    expect(wrapper.get('[data-issue-run-status]').text()).toBe('Failed')
+    expect(wrapper.find('.issue-run-spinner').exists()).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('creates only valid Issues, round-trips priority, and cannot submit protected Review/Done transitions', async () => {
@@ -146,6 +171,7 @@ describe('Issue workflow components', () => {
       if (options.method === 'POST') return new Response(JSON.stringify({ ...issue, id: 'created', title: 'Created' }), { status: 201 })
       if (path.endsWith('/agents')) return new Response(JSON.stringify([agent]))
       if (path.endsWith('/issues')) return new Response(JSON.stringify([issue]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
       return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
     })
     vi.stubGlobal('fetch', fetch)
@@ -202,12 +228,12 @@ describe('Issue workflow components', () => {
     const fetch = vi.fn(async (path: string) => {
       if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
       if (path.endsWith('/issues')) return new Response(JSON.stringify([current]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
       return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
     })
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(ProjectBoard, { props: { projectId: 'p' }, global })
     await flushPromises()
-    expect(wrapper.text()).toContain('Issue Created')
     expect(wrapper.text()).not.toContain('Loading')
     expect(wrapper.get('[data-status=TODO]').text()).toContain('Fix scheduler')
 
@@ -220,8 +246,28 @@ describe('Issue workflow components', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('Loading')
     expect(wrapper.get('[data-status=IN_PROGRESS]').text()).toContain('Fix scheduler')
-    expect(wrapper.get('[data-status=IN_PROGRESS]').text()).toContain('Question Created')
+    expect(wrapper.get('[data-status=IN_PROGRESS]').text()).not.toContain('Question Created')
     expect(wrapper.get('[data-status=TODO]').text()).not.toContain('Fix scheduler')
+    wrapper.unmount()
+  })
+
+  it('keeps the board visible when run status fails to load', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path.endsWith('/runs')) {
+        return new Response(JSON.stringify({ error: { code: 'internal_error', message: 'runs unavailable' } }), { status: 500 })
+      }
+      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/issues')) return new Response(JSON.stringify([issue]))
+      return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectBoard, { props: { projectId: 'p' }, global })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Workspace / Board')
+    expect(wrapper.text()).toContain('Fix scheduler')
+    expect(wrapper.text()).toContain('Run status unavailable')
+    expect(wrapper.text()).not.toContain('Unable to load')
     wrapper.unmount()
   })
 
@@ -233,6 +279,7 @@ describe('Issue workflow components', () => {
       }
       if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
       if (path.endsWith('/issues')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
       return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
     })
     vi.stubGlobal('fetch', fetch)

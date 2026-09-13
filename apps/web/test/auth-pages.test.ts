@@ -61,7 +61,7 @@ describe('authentication pages', () => {
     await flushPromises()
 
     expect(login).toHaveBeenCalledWith('admin@example.com', 'test-password-value', true)
-    expect(navigateTo).toHaveBeenCalledWith('/account')
+    expect(navigateTo).toHaveBeenCalledWith('/')
   })
 
   it('submits bootstrap registration through Nuxt UI AuthForm fields', async () => {
@@ -87,7 +87,7 @@ describe('authentication pages', () => {
       email: 'admin@example.com',
       password: 'test-password-value'
     })
-    expect(navigateTo).toHaveBeenCalledWith('/auth/login')
+    expect(navigateTo).toHaveBeenCalledWith('/')
   })
 
   it('clears setup password plaintext after consuming a one-time token', async () => {

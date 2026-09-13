@@ -68,3 +68,43 @@ export function latestRun(runs: Run[], issueId: string) {
     .filter(run => run.issueId === issueId)
     .sort((a, b) => b.attempt - a.attempt)[0]
 }
+
+const terminalRunStatuses = new Set(['COMPLETED', 'CANCELLED'])
+
+export function issueCardRunStatus(assignedAgentId: string | null, runStatus?: string | null) {
+  if (!assignedAgentId || !runStatus || terminalRunStatuses.has(runStatus)) return null
+  return statusLabel(runStatus)
+}
+
+export function isLiveIssueRun(runStatus?: string | null) {
+  return runStatus === 'RUNNING' || runStatus === 'STARTING'
+}
+
+export function isFailedIssueRun(runStatus?: string | null) {
+  return runStatus === 'FAILED'
+}
+
+const updatedFormatter = new Intl.RelativeTimeFormat('en', { numeric: 'always', style: 'narrow' })
+
+export function formatUpdatedLabel(updatedAt: string, now = Date.now()) {
+  const date = new Date(updatedAt)
+  if (Number.isNaN(date.getTime())) return ''
+  const diffMs = date.getTime() - now
+  const minute = 60_000
+  const hour = 60 * minute
+  const day = 24 * hour
+  const abs = Math.abs(diffMs)
+  if (abs < hour) {
+    const minutes = diffMs === 0 ? -1 : Math.round(diffMs / minute)
+    const value = minutes === 0 ? -1 : minutes
+    return `Updated ${updatedFormatter.format(value, 'minute')}`
+  }
+  if (abs < day) {
+    const hours = Math.round(diffMs / hour)
+    const value = hours === 0 ? -1 : hours
+    return `Updated ${updatedFormatter.format(value, 'hour')}`
+  }
+  const days = Math.round(diffMs / day)
+  const value = days === 0 ? -1 : days
+  return `Updated ${updatedFormatter.format(value, 'day')}`
+}

@@ -42,6 +42,31 @@ afterEach(() => {
 })
 
 describe('centralized auth composable', () => {
+  it('logs the bootstrap administrator in after registration', async () => {
+    installState()
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      const method = init?.method ?? 'GET'
+      if (path === '/api/auth/bootstrap/register' && method === 'POST') return json(user, 201)
+      if (path === '/api/auth/login' && method === 'POST') return json(tokens('registered'))
+      throw new Error(`unexpected fetch ${method} ${path}`)
+    }))
+
+    const auth = useAuth()
+    const registered = await auth.register({
+      username: 'admin',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      password: 'test-password-value'
+    })
+
+    expect(registered.id).toBe(user.id)
+    expect(auth.isAuthenticated.value).toBe(true)
+    expect(auth.user.value?.username).toBe('admin')
+    expect(auth.credentials.value?.accessToken).toBe('test-access-registered')
+    expect(auth.persistent.value).toBe(false)
+  })
+
   it('refreshes on a 401 and retries with rotated credentials', async () => {
     installState()
     let protectedCalls = 0

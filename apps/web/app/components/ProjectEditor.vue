@@ -19,7 +19,6 @@ const state = reactive({
   sourceRef: props.project?.sourceRef ?? '',
   repositoryPath: props.project?.repositoryPath ?? '',
   defaultBranch: props.project?.defaultBranch || 'main',
-  workflowSettings: props.project ? JSON.stringify(props.project.workflowSettings ?? {}, null, 2) : '{}',
   allowInternalRunner: props.project?.allowInternalRunner ?? true
 })
 const saving = ref(false)
@@ -41,23 +40,13 @@ function validate() {
     if (!state.repositoryPath.trim()) errors.push({ name: 'repositoryPath', message: 'Local repository path is required.' })
     if (!state.defaultBranch.trim()) errors.push({ name: 'defaultBranch', message: 'Default branch is required.' })
   }
-  try {
-    const parsed = JSON.parse(state.workflowSettings)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      errors.push({ name: 'workflowSettings', message: 'Workflow settings must be a JSON object.' })
-    }
-  } catch {
-    errors.push({ name: 'workflowSettings', message: 'Workflow settings must be valid JSON.' })
-  }
   return errors
 }
 
 function payload() {
-  const workflowSettings = JSON.parse(state.workflowSettings) as Record<string, unknown>
   const body: Record<string, unknown> = {
     name: state.name.trim(),
-    sourceType: state.sourceType,
-    workflowSettings
+    sourceType: state.sourceType
   }
   if (state.sourceType === 'git') {
     body.cloneUrl = state.cloneUrl.trim()
@@ -146,13 +135,6 @@ onMounted(async () => {
         <UInput v-model="state.defaultBranch" class="w-full font-mono" :disabled="saving" />
       </UFormField>
     </template>
-    <UFormField
-      label="Workflow settings"
-      name="workflowSettings"
-      description="Optional workflow policy overrides supported by your Go server."
-    >
-      <UTextarea v-model="state.workflowSettings" :rows="6" class="w-full font-mono" :disabled="saving" />
-    </UFormField>
     <UFormField
       v-if="project"
       label="Allow internal runner"

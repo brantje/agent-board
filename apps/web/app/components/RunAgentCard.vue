@@ -11,7 +11,7 @@ const agent = computed(() => runAgentInfo(props.provenance))
     <h2 class="section-label mb-3">Agent</h2>
     <div v-if="agent" class="space-y-4 text-sm">
       <div class="flex min-w-0 items-center gap-2">
-        <UAvatar v-if="agent.name" :alt="agent.name" size="xs" class="issue-identity" />
+        <IdentityAvatar v-if="agent.name" kind="agent" :name="agent.name" size="xs" />
         <p class="min-w-0 font-medium">{{ agent.name || 'Unnamed agent' }}</p>
       </div>
       <dl class="space-y-2">

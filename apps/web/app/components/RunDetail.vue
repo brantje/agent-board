@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import type { ArtifactEvidence, EventEvidence } from '../types/api'
 import { apiPath, apiText, downloadApiFile } from '../utils/api'
-import { projectRunActivity } from '../utils/events'
+import { latestTodoItems, projectRunActivity } from '../utils/events'
 import { commandLabel, formatElapsed, runStatusLabel } from '../utils/runs'
 import { useRunEvents } from '../composables/useRunEvents'
 
@@ -15,6 +15,7 @@ const artifactError = ref<Error>()
 const run = computed(() => evidence.value?.run)
 const matchingReview = computed(() => evidence.value?.run.issueId && reviews.value.find(item => item.runId === props.runId)?.id)
 const activityItems = computed(() => projectRunActivity(events.value))
+const latestTodos = computed(() => latestTodoItems(activityItems.value))
 const toolCallCount = computed(() => activityItems.value.filter(item => item.kind === 'tool').length)
 
 const commandItems = computed(() => (evidence.value?.commands || []).map(session => ({
@@ -170,6 +171,7 @@ function provenanceText() {
         </section>
         <aside class="space-y-4">
           <RunAgentCard :provenance="evidence?.provenance" />
+          <RunTodoCard v-if="latestTodos?.length" :todos="latestTodos" />
           <RunUsageCard :usage="evidence?.usage" />
           <UCard>
             <h2 class="section-label mb-3">Properties</h2>

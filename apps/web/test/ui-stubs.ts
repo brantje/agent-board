@@ -3,7 +3,7 @@ export const uiStubs = {
   PageFrame: {props:['title','description'],template:'<main><h1>{{title}}</h1><p>{{description}}</p><slot name="actions"/><slot/></main>'},
   AsyncState: {props:['pending','error','empty','emptyTitle','emptyDescription'],emits:['retry'],template:'<div><p v-if="pending">Loading</p><p v-else-if="error">{{error.message}}<button @click="$emit(\'retry\')">Retry</button></p><p v-else-if="empty">{{emptyTitle}} {{emptyDescription}}</p><slot v-else/></div>'},
   UCard: {template:'<section><slot name="header"/><slot/><slot name="footer"/></section>'},
-  UButton: {props:['label','to','disabled','loading','type'],emits:['click'],template:'<button :type="type || \'button\'" :disabled="disabled || loading" @click="$emit(\'click\')">{{label}}<slot/></button>'},
+  UButton: {props:['label','to','disabled','loading','type','square'],emits:['click'],template:'<button :type="type || \'button\'" :disabled="disabled || loading" :data-loading="loading ? \'true\' : undefined" @click="$emit(\'click\')">{{label}}<slot/></button>'},
   UAlert: {props:['title','description'],template:'<div role="alert">{{title}} {{description}}</div>'},
   UBadge: {props:['label','icon','color','variant','size','trailingIcon'],template:'<span :data-color="color" :data-variant="variant" :data-icon="icon">{{label}}<slot/><slot name="trailing"/></span>'},
   UTable: defineComponent({
@@ -21,7 +21,7 @@ export const uiStubs = {
       ])
     }
   }),
-  UAvatar: {props:['alt','text','size'],template:'<span :aria-label="alt">{{text || alt}}</span>'},
+  UAvatar: {props:['alt','text','size','icon'],template:'<span :aria-label="alt" :data-icon="icon">{{text || alt}}</span>'},
   UModal: {props:['open','title'],template:'<div v-if="open" role="dialog"><h2>{{title}}</h2><slot name="body"/></div>'},
   UForm: {props:['state','validate'],emits:['submit'],template:'<form @submit.prevent="$emit(\'submit\')"><slot/></form>'},
   UAuthForm: defineComponent({

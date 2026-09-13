@@ -24,7 +24,7 @@ afterEach(() => {
 })
 
 describe('ProjectEditor', () => {
-  it('creates a local project with uppercase prefix and valid workflow settings', async () => {
+  it('creates a local project with uppercase prefix', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(project), { status: 201 }))
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(ProjectEditor, { global })
@@ -36,7 +36,6 @@ describe('ProjectEditor', () => {
     await wrapper.get('[data-field=issuePrefix] input').setValue('ab')
     await wrapper.get('[data-field=repositoryPath] input').setValue('/repo')
     await wrapper.get('[data-field=defaultBranch] input').setValue('main')
-    await wrapper.get('[data-field=workflowSettings] textarea').setValue('{"reviewRequired":true}')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
@@ -47,8 +46,7 @@ describe('ProjectEditor', () => {
       issuePrefix: 'AB',
       sourceType: 'local',
       repositoryPath: '/repo',
-      defaultBranch: 'main',
-      workflowSettings: { reviewRequired: true }
+      defaultBranch: 'main'
     })
     expect(wrapper.emitted('saved')?.[0]).toEqual([project])
   })
@@ -89,12 +87,11 @@ describe('ProjectEditor', () => {
       issuePrefix: 'REM',
       sourceType: 'git',
       cloneUrl: 'https://example.com/acme/widget.git',
-      sourceRef: 'release/v1',
-      workflowSettings: {}
+      sourceRef: 'release/v1'
     })
   })
 
-  it('rejects invalid prefix and invalid workflow JSON', async () => {
+  it('rejects invalid prefix', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(project)))
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(ProjectEditor, { global })
@@ -103,11 +100,6 @@ describe('ProjectEditor', () => {
     await wrapper.get('[data-field=issuePrefix] input').setValue('1A')
     await wrapper.get('[data-field=repositoryPath] input').setValue('/repo')
     await wrapper.get('[data-field=defaultBranch] input').setValue('main')
-    await wrapper.get('form').trigger('submit')
-    expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false)
-
-    await wrapper.get('[data-field=issuePrefix] input').setValue('AB')
-    await wrapper.get('[data-field=workflowSettings] textarea').setValue('[]')
     await wrapper.get('form').trigger('submit')
     expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false)
   })
@@ -200,7 +192,6 @@ describe('ProjectEditor', () => {
       sourceType: 'local',
       repositoryPath: '/repo',
       defaultBranch: 'main',
-      workflowSettings: {},
       allowInternalRunner: true
     })
     expect(body).not.toHaveProperty('issuePrefix')

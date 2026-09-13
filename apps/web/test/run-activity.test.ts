@@ -1,7 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import ActivityTimeline from '../app/components/ActivityTimeline.vue'
-import { projectRunActivity, eventActivityIcon, eventTitle, toolActivityIcon, toolActivityLabel, toolActivityTarget } from '../app/utils/events'
+import { latestTodoItems, projectRunActivity, todoStartedSummary, eventActivityIcon, eventTitle, toolActivityIcon, toolActivityLabel, toolActivityTarget } from '../app/utils/events'
 import { event } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
@@ -364,6 +364,28 @@ describe('run activity projection', () => {
     expect(items[0]).toMatchObject({ kind: 'event', event: { type: 'file.modified' }, description: 'styles.css' })
   })
 
+  it('formats todoStartedSummary from current todo statuses', () => {
+    expect(todoStartedSummary([
+      { content: 'a', status: 'pending' },
+      { content: 'b', status: 'in_progress' },
+      { content: 'c', status: 'pending' },
+      { content: 'd', status: 'pending' },
+      { content: 'e', status: 'pending' }
+    ])).toBe('Started todo 2 of 5')
+    expect(todoStartedSummary([
+      { content: 'a', status: 'completed' },
+      { content: 'b', status: 'completed' },
+      { content: 'c', status: 'completed' },
+      { content: 'd', status: 'completed' },
+      { content: 'e', status: 'completed' }
+    ])).toBe('Started todo 5 of 5')
+    expect(todoStartedSummary([
+      { content: 'a', status: 'pending' },
+      { content: 'b', status: 'pending' },
+      { content: 'c', status: 'pending' }
+    ])).toBe('Started todo 1 of 3')
+  })
+
   it('projects Todowrite input.todos into structured todos with Todo label and count', () => {
     const todos = [
       { content: 'Create project structure', status: 'in progress', priority: 'high' },
@@ -388,7 +410,7 @@ describe('run activity projection', () => {
     expect(items[0]).toMatchObject({
       kind: 'tool',
       label: 'Todo',
-      target: '1/3',
+      target: 'Started todo 1 of 3',
       status: 'completed',
       todos: [
         { content: 'Create project structure', status: 'in_progress' },
@@ -423,12 +445,12 @@ describe('run activity projection', () => {
     ])
     expect(items[0]).toMatchObject({
       kind: 'tool',
-      target: '1/1',
+      target: 'Started todo 1 of 1',
       todos: [{ content: 'Create project structure', status: 'completed' }]
     })
   })
 
-  it('updates earlier Todowrite rows when a later call changes todo statuses', () => {
+  it('keeps earlier Todowrite rows as start snapshots while latestTodoItems returns the newest list', () => {
     const items = projectRunActivity([
       event({
         id: 'start-1',
@@ -456,20 +478,21 @@ describe('run activity projection', () => {
     expect(items).toHaveLength(2)
     expect(items[0]).toMatchObject({
       kind: 'tool',
-      target: '1/2',
-      todos: [
-        { content: 'Ship feature', status: 'completed' },
-        { content: 'Add tests', status: 'in_progress' }
-      ]
+      target: 'Started todo 1 of 1',
+      todos: [{ content: 'Ship feature', status: 'in_progress' }]
     })
     expect(items[1]).toMatchObject({
       kind: 'tool',
-      target: '1/2',
+      target: 'Started todo 2 of 2',
       todos: [
         { content: 'Ship feature', status: 'completed' },
         { content: 'Add tests', status: 'in_progress' }
       ]
     })
+    expect(latestTodoItems(items)).toEqual([
+      { content: 'Ship feature', status: 'completed' },
+      { content: 'Add tests', status: 'in_progress' }
+    ])
   })
 
   it('parses todos from resultPreview when input is missing', () => {
@@ -488,7 +511,7 @@ describe('run activity projection', () => {
     expect(items[0]).toMatchObject({
       kind: 'tool',
       label: 'Todo',
-      target: '1/1',
+      target: 'Started todo 1 of 1',
       todos: [{ content: 'Ship feature', status: 'completed' }]
     })
   })
@@ -699,7 +722,7 @@ describe('ActivityTimeline run feed', () => {
     expect(question.text()).toContain('waiting for answer')
   })
 
-  it('renders Todowrite as a Cursor-style checklist without JSON result', () => {
+  it('renders Todowrite as a compact Started todo line without the checklist', () => {
     const todos = [
       { content: 'Create project structure', status: 'in progress', priority: 'high' },
       { content: 'Build core habit tracking', status: 'pending', priority: 'high' },
@@ -724,23 +747,19 @@ describe('ActivityTimeline run feed', () => {
       global: { stubs: uiStubs }
     })
     const tool = wrapper.get('[data-tool-kind="todo"]')
-    expect(tool.text()).toContain('Todo')
-    expect(tool.text()).toContain('1/3')
-    expect(tool.text()).toContain('Create project structure')
-    expect(tool.text()).toContain('Build core habit tracking')
-    expect(tool.text()).toContain('Polish UI/UX')
+    expect(tool.text()).toContain('Started todo 1 of 3')
+    expect(tool.text()).not.toContain('Create project structure')
+    expect(tool.text()).not.toContain('Build core habit tracking')
+    expect(tool.text()).not.toContain('Polish UI/UX')
     expect(tool.text()).not.toContain('result:')
     expect(tool.text()).not.toContain('Todowrite')
     expect(tool.text()).not.toContain('priority')
     expect(tool.find('[data-icon="i-lucide-list-todo"]').exists()).toBe(true)
-    expect(tool.find('[data-todo-status="in_progress"] [data-icon="i-lucide-loader-circle"]').exists()).toBe(true)
-    expect(tool.find('[data-todo-status="completed"] .line-through').exists()).toBe(true)
-    expect(tool.find('[data-todo-status="in_progress"] .animate-spin').exists()).toBe(true)
     expect(tool.find('button').exists()).toBe(false)
-    expect(tool.find('.run-activity-todo-list').exists()).toBe(true)
+    expect(tool.find('.run-activity-todo-list').exists()).toBe(false)
   })
 
-  it('renders a failed todo tool reason below the checklist', () => {
+  it('renders a failed todo tool reason below the compact line', () => {
     const items = projectRunActivity([
       event({
         id: 'start',
@@ -762,11 +781,12 @@ describe('ActivityTimeline run feed', () => {
     const tool = wrapper.get('[data-tool-kind="todo"]')
     expect(tool.attributes('data-tool-status')).toBe('failed')
     expect(tool.text()).toContain('failed')
-    expect(tool.text()).toContain('Ship feature')
+    expect(tool.text()).toContain('Started todo 1 of 1')
+    expect(tool.text()).not.toContain('Ship feature')
     expect(tool.text()).toContain('error: todo write failed')
   })
 
-  it('renders two Todowrite rows independently', () => {
+  it('renders two Todowrite rows independently as compact lines', () => {
     const items = projectRunActivity([
       event({
         id: 'start-1',
@@ -789,8 +809,10 @@ describe('ActivityTimeline run feed', () => {
     })
     const tools = wrapper.findAll('[data-tool-kind="todo"]')
     expect(tools).toHaveLength(2)
-    expect(tools[0]?.text()).toContain('First list')
-    expect(tools[1]?.text()).toContain('Second list')
+    expect(tools[0]?.text()).toContain('Started todo 1 of 1')
+    expect(tools[1]?.text()).toContain('Started todo 1 of 1')
+    expect(tools[0]?.text()).not.toContain('First list')
+    expect(tools[1]?.text()).not.toContain('Second list')
   })
 
   it('renders Decision Recorded with the question and answers on one muted line', () => {

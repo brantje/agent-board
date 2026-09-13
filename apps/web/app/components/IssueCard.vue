@@ -1,43 +1,82 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { IdentityKind } from '../utils/identity'
 import type { Issue } from '../types/api'
-import { issuePriority } from '../utils/issues'
-import { eventTitle } from '../utils/events'
+import { formatUpdatedLabel, isFailedIssueRun, isLiveIssueRun, issueCardRunStatus, issuePriority } from '../utils/issues'
 
-const props = defineProps<{ issue: Issue; agentName?: string }>()
+const props = withDefaults(defineProps<{
+  issue: Issue
+  agentName?: string
+  assigneeKind?: IdentityKind
+  runStatus?: string | null
+}>(), {
+  assigneeKind: 'agent'
+})
 
 const priority = computed(() => issuePriority(props.issue.priority))
 const assignedLabel = computed(() => props.agentName || (props.issue.assignedAgentId ? 'Assigned Agent' : ''))
-const lastEventLabel = computed(() => props.issue.lastEvent ? eventTitle(props.issue.lastEvent) : '')
+const runStatusLabel = computed(() => issueCardRunStatus(props.issue.assignedAgentId, props.runStatus))
+const updatedLabel = computed(() => formatUpdatedLabel(props.issue.updatedAt))
+const liveRun = computed(() => isLiveIssueRun(props.runStatus))
+const failedRun = computed(() => isFailedIssueRun(props.runStatus))
 </script>
 
 <template>
   <NuxtLink :to="`/projects/${issue.projectId}/issues/${issue.id}`" class="block focus-visible:outline-2 focus-visible:outline-primary">
-    <UCard>
-      <p class="font-mono text-xs leading-none text-dimmed">{{ issue.id }}</p>
-      <h3 class="mt-1.5 text-sm font-semibold leading-snug text-highlighted break-words line-clamp-2">{{ issue.title }}</h3>
-      <p v-if="issue.description.trim()" class="mt-1 truncate text-xs text-muted">{{ issue.description }}</p>
-        <div class="mt-3 flex items-center justify-between gap-2">
-        <div class="flex min-w-0 items-center gap-2">
-          <UAvatar v-if="assignedLabel" :alt="assignedLabel" :aria-label="assignedLabel" size="2xs" class="issue-identity" />
-          <WorkspaceBranch v-if="issue.currentBranch" :branch="issue.currentBranch" />
-          <UBadge
-            :label="priority.label"
-            :icon="priority.icon"
-            color="warning"
-            :variant="priority.variant"
-            size="sm"
-            class="issue-priority"
+    <UCard :class="{ 'ring-1 ring-primary/35': liveRun }">
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex min-w-0 items-center gap-1.5">
+          <UIcon
+            :name="priority.icon"
+            class="size-3.5 shrink-0 text-warning"
+            :aria-label="priority.label"
           />
+          <p class="font-mono text-xs leading-none text-dimmed">{{ issue.id }}</p>
         </div>
         <UBadge
-          v-if="lastEventLabel"
-          :label="lastEventLabel"
-          color="neutral"
+          v-if="failedRun && runStatusLabel"
+          :label="runStatusLabel"
+          icon="i-lucide-circle-x"
+          color="error"
           variant="subtle"
           size="sm"
-          class="issue-last-event ml-auto"
+          class="issue-run-status shrink-0"
+          data-issue-run-status
         />
+        <div
+          v-else-if="runStatusLabel"
+          class="flex shrink-0 items-center gap-1.5 text-xs text-muted"
+          data-issue-run-status
+        >
+          <span
+            v-if="liveRun"
+            class="issue-run-spinner relative inline-flex size-4 shrink-0 items-center justify-center"
+            :aria-label="runStatusLabel"
+          >
+            <span class="issue-run-spinner-ring absolute inset-0 rounded-full border border-primary/25 border-t-primary animate-spin" aria-hidden="true" />
+            <UAvatar
+              icon="i-lucide-bot"
+              size="3xs"
+              color="neutral"
+              alt=""
+              class="issue-identity relative z-10 !size-3"
+              aria-hidden="true"
+            />
+          </span>
+          <span v-else class="size-1.5 shrink-0 rounded-full bg-muted" aria-hidden="true" />
+          <span>{{ runStatusLabel }}</span>
+        </div>
+      </div>
+
+      <h3 class="mt-1.5 text-sm font-semibold leading-snug text-highlighted break-words line-clamp-2">{{ issue.title }}</h3>
+      <WorkspaceBranch v-if="issue.currentBranch" class="mt-2" :branch="issue.currentBranch" />
+
+      <div class="mt-3 flex items-center justify-between gap-2">
+        <div v-if="assignedLabel" class="flex min-w-0 items-center gap-2">
+          <IdentityAvatar :kind="assigneeKind" :name="assignedLabel" />
+          <span class="truncate text-xs text-highlighted">{{ assignedLabel }}</span>
+        </div>
+        <span v-if="updatedLabel" class="ml-auto shrink-0 text-xs text-muted">{{ updatedLabel }}</span>
       </div>
     </UCard>
   </NuxtLink>
