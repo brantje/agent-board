@@ -91,7 +91,10 @@ describe('workspace branch presentation', () => {
     const wrapper = mount(IssueCard, { props: { issue }, global })
     expect(wrapper.find('.issue-branch').text()).toContain('agent-board/AB-12')
     const text = wrapper.text()
-    expect(text.indexOf('Fix scheduler')).toBeLessThan(text.indexOf('agent-board/AB-12'))
+    const titleIndex = text.indexOf('Fix scheduler')
+    const branchIndex = text.indexOf('agent-board/AB-12')
+    expect(titleIndex).toBeGreaterThanOrEqual(0)
+    expect(titleIndex).toBeLessThan(branchIndex)
 
     await wrapper.setProps({ issue: { ...issue, currentBranch: null } })
     expect(wrapper.find('.issue-branch').exists()).toBe(false)

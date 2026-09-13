@@ -76,6 +76,7 @@ afterEach(() => {
 describe('Issue workflow components', () => {
   it('renders the authoritative card hierarchy and safe links for assigned/unassigned Issues', async () => {
     vi.useFakeTimers()
+    try {
     vi.setSystemTime(new Date('2026-09-13T15:00:00.000Z'))
     const wrapper = mount(IssueCard, { props: { issue }, global })
     expect(wrapper.get('a').attributes('href')).toBe('/projects/p/issues/AB-12')
@@ -120,7 +121,9 @@ describe('Issue workflow components', () => {
     expect(wrapper.get('[data-issue-run-status]').attributes('data-color')).toBe('error')
     expect(wrapper.get('[data-issue-run-status]').text()).toBe('Failed')
     expect(wrapper.find('.issue-run-spinner').exists()).toBe(false)
-    vi.useRealTimers()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('creates only valid Issues, round-trips priority, and cannot submit protected Review/Done transitions', async () => {
@@ -245,6 +248,26 @@ describe('Issue workflow components', () => {
     expect(wrapper.get('[data-status=IN_PROGRESS]').text()).toContain('Fix scheduler')
     expect(wrapper.get('[data-status=IN_PROGRESS]').text()).not.toContain('Question Created')
     expect(wrapper.get('[data-status=TODO]').text()).not.toContain('Fix scheduler')
+    wrapper.unmount()
+  })
+
+  it('keeps the board visible when run status fails to load', async () => {
+    const fetch = vi.fn(async (path: string) => {
+      if (path.endsWith('/runs')) {
+        return new Response(JSON.stringify({ error: { code: 'internal_error', message: 'runs unavailable' } }), { status: 500 })
+      }
+      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/issues')) return new Response(JSON.stringify([issue]))
+      return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectBoard, { props: { projectId: 'p' }, global })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Workspace / Board')
+    expect(wrapper.text()).toContain('Fix scheduler')
+    expect(wrapper.text()).toContain('Run status unavailable')
+    expect(wrapper.text()).not.toContain('Unable to load')
     wrapper.unmount()
   })
 

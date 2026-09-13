@@ -17,8 +17,9 @@ const open = ref(false)
 
 const title = computed(() => project.data.value ? `${project.data.value.name} / Board` : 'Project Board')
 const columns = computed(() => boardColumns(issues.data.value || [], search.value))
-const pending = computed(() => project.pending.value || issues.pending.value || agents.pending.value || runs.pending.value)
-const error = computed(() => project.error.value || issues.error.value || agents.error.value || runs.error.value)
+const pending = computed(() => project.pending.value || issues.pending.value || agents.pending.value)
+const error = computed(() => project.error.value || issues.error.value || agents.error.value)
+const runsError = computed(() => runs.error.value)
 
 function agentName(issue: Issue) {
   return agents.data.value?.find(agent => agent.id === issue.assignedAgentId)?.name
@@ -61,6 +62,14 @@ useProjectEvents(() => props.projectId, async event => {
     </template>
 
     <AsyncState :pending="pending" :error="error" @retry="refreshAll">
+      <UAlert
+        v-if="runsError"
+        title="Run status unavailable"
+        :description="runsError.message"
+        color="warning"
+        class="mb-3"
+        :actions="[{ label: 'Retry', onClick: () => runs.refresh() }]"
+      />
       <div class="flex min-h-[calc(100dvh-10rem)] gap-3 overflow-x-auto pb-3" role="region" aria-label="Issue board" tabindex="0">
         <section
           v-for="column in columns"
