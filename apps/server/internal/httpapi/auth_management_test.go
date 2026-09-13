@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,11 +109,12 @@ func TestAuthPhase2AdminCreatesPendingUserAndSecretIsNoStore(t *testing.T) {
 	if list.Code != http.StatusOK {
 		t.Fatalf("list users status=%d body=%s", list.Code, list.Body.String())
 	}
-	if contains := string(list.Body.Bytes()); contains == "" || json.Valid(list.Body.Bytes()) == false {
-		t.Fatalf("invalid user list response: %q", contains)
+	listBody := list.Body.String()
+	if listBody == "" || !json.Valid([]byte(listBody)) {
+		t.Fatalf("invalid user list response: %q", listBody)
 	}
-	if string(list.Body.Bytes()) == response.Body.String() {
-		t.Fatal("user list must not replay the one-time setup secret response")
+	if strings.Contains(listBody, created.SetupToken) {
+		t.Fatal("user list exposed the one-time setup token")
 	}
 }
 
