@@ -30,8 +30,9 @@ type ProjectDTO struct {
 }
 
 type IssueCreatorDTO struct {
-	Type string `json:"type"`
-	ID   string `json:"id"`
+	Type string  `json:"type"`
+	ID   string  `json:"id"`
+	Name *string `json:"name"`
 }
 
 type IssueDTO struct {
@@ -221,9 +222,9 @@ type CreateProviderRequest struct {
 type UpdateProviderRequest struct {
 	Name          *string          `json:"name"`
 	Kind          *string          `json:"kind"`
-	BaseURL       *string          `json:"baseUrl"`
-	CredentialRef *string          `json:"credentialRef"`
-	Enabled       *bool            `json:"enabled"`
+	BaseURL       *string         `json:"baseUrl"`
+	CredentialRef *string         `json:"credentialRef"`
+	Enabled       *bool           `json:"enabled"`
 	SafeMetadata  *json.RawMessage `json:"safeMetadata"`
 }
 
