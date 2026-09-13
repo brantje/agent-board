@@ -31,7 +31,8 @@ describe('ReviewDetail', () => {
     expect(wrapper.text()).toContain('new.txt')
     expect(wrapper.text()).toContain('git status')
     expect(wrapper.text()).toContain('Candidate is ready.')
-    expect(wrapper.get('a[href="/api/projects/project-a/runs/run-1/artifacts/art-staged"]').exists()).toBe(true)
+    expect(wrapper.find('a[href^="/api/projects/"][href*="/artifacts/"]').exists()).toBe(false)
+    expect(button(wrapper, 'candidate-staged.patch').exists()).toBe(true)
     expect(candidateArtifacts.map(item => item.name).every(name => wrapper.text().includes(name))).toBe(true)
   })
 
