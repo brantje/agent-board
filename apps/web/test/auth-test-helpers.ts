@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { vi } from 'vitest'
 import { AUTH_STORAGE_KEY } from '../app/utils/auth-storage'
 
 export const activeAuthUser = {
