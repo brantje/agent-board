@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { ArtifactEvidence, EventEvidence } from '../types/api'
-import { apiPath, apiText } from '../utils/api'
+import { apiPath, apiText, downloadApiFile } from '../utils/api'
 import { projectRunActivity } from '../utils/events'
 import { commandLabel, formatElapsed, runStatusLabel } from '../utils/runs'
 import { useRunEvents } from '../composables/useRunEvents'
@@ -10,6 +10,7 @@ const props = withDefaults(defineProps<{ projectId: string; runId: string; canMu
 const { evidence, events, reviews, connection, pending, error, refresh } = useRunEvents(() => props.projectId, () => props.runId)
 const logs = ref<Record<string, string>>({})
 const logError = ref<Error>()
+const artifactError = ref<Error>()
 
 const run = computed(() => evidence.value?.run)
 const matchingReview = computed(() => evidence.value?.run.issueId && reviews.value.find(item => item.runId === props.runId)?.id)
@@ -36,7 +37,7 @@ const rawItems = computed(() => (evidence.value?.rawOutput || []).map(chunk => (
   slot: 'raw',
   chunk
 })))
-const artifactHref = (artifact: ArtifactEvidence) => `/api/projects/${props.projectId}/runs/${props.runId}/artifacts/${artifact.id}`
+const artifactPath = (artifact: ArtifactEvidence) => `/api/projects/${props.projectId}/runs/${props.runId}/artifacts/${artifact.id}`
 
 function testLabel(event: EventEvidence) {
   const command = commandLabel(event.payload?.command)
@@ -61,6 +62,15 @@ async function loadChunk(id: string) {
     logs.value = { ...logs.value, [id]: await apiText(`${apiPath('runs', props.projectId, props.runId)}/raw-output/${id}`) }
   } catch (failure) {
     logError.value = failure as Error
+  }
+}
+
+async function downloadArtifact(artifact: ArtifactEvidence) {
+  artifactError.value = undefined
+  try {
+    await downloadApiFile(artifactPath(artifact), artifact.name)
+  } catch (failure) {
+    artifactError.value = failure as Error
   }
 }
 
@@ -123,7 +133,14 @@ function provenanceText() {
                 <UAccordion :items="fileItems">
                   <template #file="{ item }">
                     <p class="py-2 text-sm">{{ fileLabel(item.event) }}</p>
-                    <a v-if="fileArtifact(item.event)" class="text-sm hover:text-primary" :href="artifactHref(fileArtifact(item.event)!)">{{ fileArtifact(item.event)!.name }}</a>
+                    <button
+                      v-if="fileArtifact(item.event)"
+                      type="button"
+                      class="text-sm hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                      @click="downloadArtifact(fileArtifact(item.event)!)"
+                    >
+                      {{ fileArtifact(item.event)!.name }}
+                    </button>
                   </template>
                 </UAccordion>
               </UCard>
@@ -197,9 +214,16 @@ function provenanceText() {
           </UCard>
           <UCard>
             <h2 class="section-label mb-3">Artifacts</h2>
+            <UAlert v-if="artifactError" title="Unable to download artifact" :description="artifactError.message" color="error" class="mb-3" />
             <ul class="space-y-2 text-sm">
               <li v-for="artifact in evidence?.artifacts" :key="artifact.id">
-                <a :href="artifactHref(artifact)" class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{ artifact.name }}</a>
+                <button
+                  type="button"
+                  class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                  @click="downloadArtifact(artifact)"
+                >
+                  {{ artifact.name }}
+                </button>
               </li>
             </ul>
           </UCard>
