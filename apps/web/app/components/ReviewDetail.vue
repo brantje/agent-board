@@ -7,7 +7,7 @@ import { statusLabel } from '../utils/issues'
 import { useResource } from '../composables/useResource'
 import { eventDescription, eventTitle } from '../utils/events'
 
-const props = defineProps<{ projectId: string; reviewId: string }>()
+const props = withDefaults(defineProps<{ projectId: string; reviewId: string; canMutate?: boolean }>(), { canMutate: true })
 const { data, pending, error, refresh } = useResource<ReviewDetailModel>(() => apiPath('reviews', props.projectId, props.reviewId))
 const feedback = ref('')
 const acting = ref(false)
@@ -36,7 +36,7 @@ function testsAreSuccess() {
 }
 
 async function approve() {
-  if (acting.value) return
+  if (!props.canMutate || acting.value) return
   acting.value = true
   actionError.value = undefined
   try {
@@ -50,7 +50,7 @@ async function approve() {
 }
 
 async function requestChanges() {
-  if (acting.value || !feedback.value.trim()) return
+  if (!props.canMutate || acting.value || !feedback.value.trim()) return
   acting.value = true
   actionError.value = undefined
   try {
@@ -122,13 +122,16 @@ function provenanceText() {
           <UCard>
             <h2 class="section-label mb-3">Decision</h2>
             <p class="mb-3 text-sm">{{ statusLabel(review?.status || '') }}</p>
-            <UButton v-if="review?.status === 'PENDING'" label="Approve" :loading="acting" class="mb-4" @click="approve" />
-            <UForm :state="{ feedback }" class="space-y-3" @submit="requestChanges">
-              <UFormField label="Feedback" name="feedback">
-                <UTextarea v-model="feedback" class="w-full" :disabled="acting || review?.status !== 'PENDING'" />
-              </UFormField>
-              <UButton label="Request changes" type="submit" :loading="acting" :disabled="!feedback.trim() || review?.status !== 'PENDING'" />
-            </UForm>
+            <template v-if="canMutate">
+              <UButton v-if="review?.status === 'PENDING'" label="Approve" :loading="acting" class="mb-4" @click="approve" />
+              <UForm :state="{ feedback }" class="space-y-3" @submit="requestChanges">
+                <UFormField label="Feedback" name="feedback">
+                  <UTextarea v-model="feedback" class="w-full" :disabled="acting || review?.status !== 'PENDING'" />
+                </UFormField>
+                <UButton label="Request changes" type="submit" :loading="acting" :disabled="!feedback.trim() || review?.status !== 'PENDING'" />
+              </UForm>
+            </template>
+            <p v-else class="text-sm text-muted">Your Project role is read-only.</p>
             <p v-if="issue" class="mt-3 text-sm">Board status: {{ statusLabel(issue.status) }}</p>
             <p v-if="decidedRun" class="mt-2 text-sm">
               <NuxtLink :to="`/projects/${projectId}/runs/${decidedRun.id}`" class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{ runStatusLabel(decidedRun.status) }}</NuxtLink>
