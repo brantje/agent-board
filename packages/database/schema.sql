@@ -112,6 +112,11 @@ CREATE TABLE auth_sessions (
 CREATE UNIQUE INDEX auth_sessions_refresh_token_uq ON auth_sessions (refresh_token_hash);
 CREATE INDEX auth_sessions_user_idx ON auth_sessions (user_id, created_at DESC);
 
+CREATE TABLE auth_session_refresh_tokens (
+    session_id uuid NOT NULL REFERENCES auth_sessions(id) ON DELETE CASCADE,
+    token_hash bytea PRIMARY KEY CHECK (octet_length(token_hash) = 32)
+);
+
 CREATE TABLE password_tokens (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
