@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestPhase3GroupOpenAPIIsConcreteAndAdminAuthenticated(t *testing.T) {
+func TestGroupOpenAPIIsConcreteAndAdminAuthenticated(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "..", "packages", "api")
 	openAPIData, err := os.ReadFile(filepath.Join(root, "openapi.yaml"))
 	if err != nil {

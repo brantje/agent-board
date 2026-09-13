@@ -85,4 +85,13 @@ type AuthStore interface {
 
 	CreatePasswordToken(context.Context, PasswordToken) (PasswordToken, error)
 	CompletePasswordToken(context.Context, []byte, string, string, time.Time) (User, error)
+	CreatePendingUserWithSetupToken(context.Context, User, PasswordToken) (User, PasswordToken, error)
+	ListUsers(context.Context) ([]User, error)
+	UpdateUserIdentity(context.Context, string, string, string, string) (User, error)
+	SetUserPasswordIfAuthVersion(context.Context, string, int64, string, bool) (User, error)
+	SetUserDisabled(context.Context, string, bool) (User, error)
+	ListUserAuthSessions(context.Context, string, time.Time) ([]AuthSession, error)
+	RevokeAuthSession(context.Context, string, string, time.Time) error
+	RevokeOtherAuthSessions(context.Context, string, string, time.Time) error
+	UpdateAuthSettings(context.Context, AuthSettings) (AuthSettings, error)
 }

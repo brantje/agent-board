@@ -97,11 +97,11 @@ func (m *authMemory) UpdateAuthSettings(_ context.Context, settings store.AuthSe
 	return settings, nil
 }
 
-func phase2Admin() AuthenticatedUser {
+func deploymentAdminActor() AuthenticatedUser {
 	return AuthenticatedUser{ID: "admin", DeploymentRole: store.DeploymentRoleAdmin, Status: store.UserStatusActive}
 }
 
-func TestPhase2DeploymentMemberCannotAdministerUsersOrSettings(t *testing.T) {
+func TestDeploymentMemberCannotAdministerUsersOrSettings(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
 	service := authTestService(t, memory, &now)
@@ -114,11 +114,11 @@ func TestPhase2DeploymentMemberCannotAdministerUsersOrSettings(t *testing.T) {
 	}
 }
 
-func TestPhase2AdminCreatesPendingUserWithOneTimeSetupSecret(t *testing.T) {
+func TestAdminCreatesPendingUserWithOneTimeSetupSecret(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
 	service := authTestService(t, memory, &now)
-	created, err := service.CreatePendingUser(context.Background(), phase2Admin(), PendingUserRegistration{
+	created, err := service.CreatePendingUser(context.Background(), deploymentAdminActor(), PendingUserRegistration{
 		Username: " New.User ", Email: " NEW@example.com ", DisplayName: " New User ",
 	})
 	if err != nil {
@@ -130,13 +130,13 @@ func TestPhase2AdminCreatesPendingUserWithOneTimeSetupSecret(t *testing.T) {
 	if created.Setup.Token == "" || created.Setup.ExpiresAt.Sub(now) != passwordTokenTTL {
 		t.Fatalf("unexpected setup secret: %+v", created.Setup)
 	}
-	listed, err := service.ListUsers(context.Background(), phase2Admin())
+	listed, err := service.ListUsers(context.Background(), deploymentAdminActor())
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("listed=%+v err=%v", listed, err)
 	}
 }
 
-func TestPhase2ProfileNormalizationAndOwnSessionScope(t *testing.T) {
+func TestProfileNormalizationAndOwnSessionScope(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
 	memory.users["u1"] = store.User{ID: "u1", Username: "one", Email: "one@example.com", DisplayName: "One", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive, AuthVersion: 1}
@@ -164,18 +164,18 @@ func TestPhase2ProfileNormalizationAndOwnSessionScope(t *testing.T) {
 	}
 }
 
-func TestPhase2AuthSettingsValidationAndUpdate(t *testing.T) {
+func TestAuthSettingsValidationAndUpdate(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
 	service := authTestService(t, memory, &now)
 	bad := memory.settings
 	bad.AccessTokenLifetime = time.Minute
-	if _, err := service.UpdateAuthSettings(context.Background(), phase2Admin(), bad); err == nil {
+	if _, err := service.UpdateAuthSettings(context.Background(), deploymentAdminActor(), bad); err == nil {
 		t.Fatal("expected access lifetime validation")
 	}
 	good := memory.settings
 	good.PasswordPolicy.RequireNumber = true
-	stored, err := service.UpdateAuthSettings(context.Background(), phase2Admin(), good)
+	stored, err := service.UpdateAuthSettings(context.Background(), deploymentAdminActor(), good)
 	if err != nil {
 		t.Fatal(err)
 	}

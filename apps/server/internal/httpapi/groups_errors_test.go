@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestPhase3GroupHTTPAllRoutesRequireAdmin(t *testing.T) {
+func TestGroupHTTPAllRoutesRequireAdmin(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	handler, _ := newPhase3GroupHTTPHandler(t, &now)
 	groupID := "00000000-0000-0000-0000-000000000001"
@@ -39,7 +39,7 @@ func TestPhase3GroupHTTPAllRoutesRequireAdmin(t *testing.T) {
 	}
 }
 
-func TestPhase3GroupHTTPValidationAndNotFoundContracts(t *testing.T) {
+func TestGroupHTTPValidationAndNotFoundContracts(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	handler, _ := newPhase3GroupHTTPHandler(t, &now)
 	registerAuthHTTPUser(t, handler)

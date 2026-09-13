@@ -19,11 +19,7 @@ func (s *AuthService) setPasswordIfAuthVersion(ctx context.Context, userID strin
 	if err != nil {
 		return AuthenticatedUser{}, err
 	}
-	extended, err := s.phase2Store()
-	if err != nil {
-		return AuthenticatedUser{}, err
-	}
-	user, err := extended.SetUserPasswordIfAuthVersion(ctx, userID, expectedAuthVersion, passwordHash, forcePasswordChange)
+	user, err := s.store.SetUserPasswordIfAuthVersion(ctx, userID, expectedAuthVersion, passwordHash, forcePasswordChange)
 	if errors.Is(err, store.ErrConflict) {
 		return AuthenticatedUser{}, NewError("conflict", "authentication state changed", err)
 	}

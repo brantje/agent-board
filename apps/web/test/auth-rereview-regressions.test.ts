@@ -52,7 +52,7 @@ afterEach(() => {
   sessionStorage.clear()
 })
 
-describe('phase 2 auth rereview regressions', () => {
+describe('authentication management auth rereview regressions', () => {
   it('sends currentPassword and newPassword for ordinary self password changes', async () => {
     installState()
     let passwordBody: unknown

@@ -48,7 +48,7 @@ func (m *authMemory) SetUserDisabled(_ context.Context, id string, disabled bool
 	return user, nil
 }
 
-func (m *phase2LifecycleMemory) SetUserPasswordIfAuthVersion(_ context.Context, id string, expectedAuthVersion int64, passwordHash string, force bool) (store.User, error) {
+func (m *authLifecycleMemory) SetUserPasswordIfAuthVersion(_ context.Context, id string, expectedAuthVersion int64, passwordHash string, force bool) (store.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	user, ok := m.users[id]
@@ -76,6 +76,6 @@ func (m *phase2LifecycleMemory) SetUserPasswordIfAuthVersion(_ context.Context, 
 	return user, nil
 }
 
-func (m *phase2LifecycleMemory) SetUserDisabled(ctx context.Context, id string, disabled bool) (store.User, error) {
+func (m *authLifecycleMemory) SetUserDisabled(ctx context.Context, id string, disabled bool) (store.User, error) {
 	return m.authMemory.SetUserDisabled(ctx, id, disabled)
 }

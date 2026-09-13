@@ -8,7 +8,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func requirePhase3ErrorCode(t *testing.T, err error, code string) {
+func requireGroupErrorCode(t *testing.T, err error, code string) {
 	t.Helper()
 	apiErr, ok := AsError(err)
 	if !ok {
@@ -19,15 +19,15 @@ func requirePhase3ErrorCode(t *testing.T, err error, code string) {
 	}
 }
 
-func TestPhase3GroupApplicationErrorContracts(t *testing.T) {
+func TestGroupApplicationErrorContracts(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(100, 0).UTC()
-	admin := phase2Admin()
+	admin := deploymentAdminActor()
 	member := AuthenticatedUser{ID: "member", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive}
 
 	withoutGroups := authTestService(t, newAuthMemory(), &now)
 	_, err := withoutGroups.ListGroups(ctx, admin)
-	requirePhase3ErrorCode(t, err, "group_management_unavailable")
+	requireGroupErrorCode(t, err, "group_management_unavailable")
 
 	memory := newGroupAuthMemory()
 	service := groupAuthTestService(t, memory, &now)
@@ -62,20 +62,20 @@ func TestPhase3GroupApplicationErrorContracts(t *testing.T) {
 	}
 
 	_, err = service.UpdateGroup(ctx, admin, "missing", "platform")
-	requirePhase3ErrorCode(t, err, "group_not_found")
+	requireGroupErrorCode(t, err, "group_not_found")
 	err = service.DeleteGroup(ctx, admin, "missing")
-	requirePhase3ErrorCode(t, err, "group_not_found")
+	requireGroupErrorCode(t, err, "group_not_found")
 	_, err = service.ListGroupMembers(ctx, admin, "missing")
-	requirePhase3ErrorCode(t, err, "group_not_found")
+	requireGroupErrorCode(t, err, "group_not_found")
 
 	err = service.AddGroupMember(ctx, admin, group.ID, "missing-user")
-	requirePhase3ErrorCode(t, err, "user_not_found")
+	requireGroupErrorCode(t, err, "user_not_found")
 	err = service.AddGroupMember(ctx, admin, "missing", "active")
-	requirePhase3ErrorCode(t, err, "group_not_found")
+	requireGroupErrorCode(t, err, "group_not_found")
 	err = service.RemoveGroupMember(ctx, admin, "missing", "active")
-	requirePhase3ErrorCode(t, err, "group_not_found")
+	requireGroupErrorCode(t, err, "group_not_found")
 	err = service.RemoveGroupMember(ctx, admin, group.ID, "active")
-	requirePhase3ErrorCode(t, err, "group_member_not_found")
+	requireGroupErrorCode(t, err, "group_member_not_found")
 
 	if _, err := service.UpdateGroup(ctx, admin, group.ID, "   "); err == nil {
 		t.Fatal("blank group rename was accepted")

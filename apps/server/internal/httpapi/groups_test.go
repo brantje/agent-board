@@ -13,22 +13,22 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-type phase3GroupHTTPStore struct {
+type groupHTTPStore struct {
 	*authHTTPStore
 	groups  map[string]store.Group
 	members map[string]map[string]struct{}
 	next    int
 }
 
-func newPhase3GroupHTTPStore() *phase3GroupHTTPStore {
-	return &phase3GroupHTTPStore{
+func newGroupHTTPStore() *groupHTTPStore {
+	return &groupHTTPStore{
 		authHTTPStore: newAuthHTTPStore(),
 		groups:        map[string]store.Group{},
 		members:       map[string]map[string]struct{}{},
 	}
 }
 
-func (s *phase3GroupHTTPStore) ListGroups(context.Context) ([]store.Group, error) {
+func (s *groupHTTPStore) ListGroups(context.Context) ([]store.Group, error) {
 	result := make([]store.Group, 0, len(s.groups))
 	for _, group := range s.groups {
 		result = append(result, group)
@@ -37,7 +37,7 @@ func (s *phase3GroupHTTPStore) ListGroups(context.Context) ([]store.Group, error
 	return result, nil
 }
 
-func (s *phase3GroupHTTPStore) CreateGroup(_ context.Context, input store.Group) (store.Group, error) {
+func (s *groupHTTPStore) CreateGroup(_ context.Context, input store.Group) (store.Group, error) {
 	for _, group := range s.groups {
 		if group.Name == input.Name {
 			return store.Group{}, store.ErrConflict
@@ -56,7 +56,7 @@ func leftPad12(value int) string {
 	return result[len(result)-12:]
 }
 
-func (s *phase3GroupHTTPStore) UpdateGroup(_ context.Context, id, name string) (store.Group, error) {
+func (s *groupHTTPStore) UpdateGroup(_ context.Context, id, name string) (store.Group, error) {
 	group, ok := s.groups[id]
 	if !ok {
 		return store.Group{}, store.ErrNotFound
@@ -71,7 +71,7 @@ func (s *phase3GroupHTTPStore) UpdateGroup(_ context.Context, id, name string) (
 	return group, nil
 }
 
-func (s *phase3GroupHTTPStore) DeleteGroup(_ context.Context, id string) error {
+func (s *groupHTTPStore) DeleteGroup(_ context.Context, id string) error {
 	if _, ok := s.groups[id]; !ok {
 		return store.ErrNotFound
 	}
@@ -80,7 +80,7 @@ func (s *phase3GroupHTTPStore) DeleteGroup(_ context.Context, id string) error {
 	return nil
 }
 
-func (s *phase3GroupHTTPStore) ListGroupMembers(_ context.Context, groupID string) ([]store.User, error) {
+func (s *groupHTTPStore) ListGroupMembers(_ context.Context, groupID string) ([]store.User, error) {
 	if _, ok := s.groups[groupID]; !ok {
 		return nil, store.ErrNotFound
 	}
@@ -91,7 +91,7 @@ func (s *phase3GroupHTTPStore) ListGroupMembers(_ context.Context, groupID strin
 	return result, nil
 }
 
-func (s *phase3GroupHTTPStore) AddGroupMember(_ context.Context, groupID, userID string) error {
+func (s *groupHTTPStore) AddGroupMember(_ context.Context, groupID, userID string) error {
 	if _, ok := s.groups[groupID]; !ok {
 		return store.ErrNotFound
 	}
@@ -105,7 +105,7 @@ func (s *phase3GroupHTTPStore) AddGroupMember(_ context.Context, groupID, userID
 	return nil
 }
 
-func (s *phase3GroupHTTPStore) RemoveGroupMember(_ context.Context, groupID, userID string) error {
+func (s *groupHTTPStore) RemoveGroupMember(_ context.Context, groupID, userID string) error {
 	if _, ok := s.groups[groupID]; !ok {
 		return store.ErrNotFound
 	}
@@ -116,9 +116,9 @@ func (s *phase3GroupHTTPStore) RemoveGroupMember(_ context.Context, groupID, use
 	return nil
 }
 
-func newPhase3GroupHTTPHandler(t *testing.T, now *time.Time) (http.Handler, *phase3GroupHTTPStore) {
+func newPhase3GroupHTTPHandler(t *testing.T, now *time.Time) (http.Handler, *groupHTTPStore) {
 	t.Helper()
-	authStore := newPhase3GroupHTTPStore()
+	authStore := newGroupHTTPStore()
 	authService, err := app.NewAuthService(authStore, app.AuthServiceConfig{
 		Now:        func() time.Time { return *now },
 		Random:     &authHTTPRandom{},
@@ -131,7 +131,7 @@ func newPhase3GroupHTTPHandler(t *testing.T, now *time.Time) (http.Handler, *pha
 	return NewRouterWithApplication(services), authStore
 }
 
-func TestPhase3GroupHTTPAdminCRUDAndMembership(t *testing.T) {
+func TestGroupHTTPAdminCRUDAndMembership(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	handler, authStore := newPhase3GroupHTTPHandler(t, &now)
 	registerAuthHTTPUser(t, handler)
@@ -195,7 +195,7 @@ func TestPhase3GroupHTTPAdminCRUDAndMembership(t *testing.T) {
 	}
 }
 
-func TestPhase3GroupHTTPRequiresAuthenticatedDeploymentAdmin(t *testing.T) {
+func TestGroupHTTPRequiresAuthenticatedDeploymentAdmin(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	handler, _ := newPhase3GroupHTTPHandler(t, &now)
 	registerAuthHTTPUser(t, handler)

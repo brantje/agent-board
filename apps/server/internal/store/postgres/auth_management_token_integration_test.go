@@ -9,7 +9,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestAuthPhase2StorePasswordTokenLifecycle(t *testing.T) {
+func TestAuthStorePasswordTokenLifecycle(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
 	ctx := context.Background()

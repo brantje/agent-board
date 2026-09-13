@@ -79,7 +79,7 @@ func (input authSettingsUpdateRequest) complete() bool {
 		input.RequireSymbol != nil
 }
 
-func (a *api) registerAuthPhase2Routes(r chi.Router) {
+func (a *api) registerAuthManagementRoutes(r chi.Router) {
 	r.Get("/auth/users", a.handleListUsers)
 	r.Post("/auth/users", a.handleCreatePendingUser)
 	r.Post("/auth/users/{userID}/setup-token", a.handleAdminSetupToken)
@@ -148,75 +148,131 @@ func (a *api) adminActor(w http.ResponseWriter, r *http.Request) (app.Authentica
 
 func (a *api) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.adminActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	users, err := a.auth.ListUsers(r.Context(), actor)
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	response := make([]authUserResponse, 0, len(users))
-	for _, user := range users { response = append(response, authUserDTO(user)) }
+	for _, user := range users {
+		response = append(response, authUserDTO(user))
+	}
 	writeSensitiveJSON(w, http.StatusOK, response)
 }
 
 func (a *api) handleCreatePendingUser(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.adminActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	var input pendingUserRequest
-	if !decodeJSON(w, r, &input) { return }
+	if !decodeJSON(w, r, &input) {
+		return
+	}
 	result, err := a.auth.CreatePendingUser(r.Context(), actor, app.PendingUserRegistration{Username: input.Username, Email: input.Email, DisplayName: input.DisplayName})
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeSensitiveJSON(w, http.StatusCreated, pendingUserResponse{User: authUserDTO(result.User), SetupToken: result.Setup.Token, SetupTokenExpiresAt: result.Setup.ExpiresAt})
 }
 
-func (a *api) handleAdminSetupToken(w http.ResponseWriter, r *http.Request) { a.handleAdminPasswordToken(w, r, store.PasswordTokenPurposeSetup) }
-func (a *api) handleAdminResetToken(w http.ResponseWriter, r *http.Request) { a.handleAdminPasswordToken(w, r, store.PasswordTokenPurposeReset) }
+func (a *api) handleAdminSetupToken(w http.ResponseWriter, r *http.Request) {
+	a.handleAdminPasswordToken(w, r, store.PasswordTokenPurposeSetup)
+}
+func (a *api) handleAdminResetToken(w http.ResponseWriter, r *http.Request) {
+	a.handleAdminPasswordToken(w, r, store.PasswordTokenPurposeReset)
+}
 func (a *api) handleAdminPasswordToken(w http.ResponseWriter, r *http.Request, purpose string) {
 	actor, ok := a.adminActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	userID, ok := pathUUID(w, r, "userID")
-	if !ok { return }
+	if !ok {
+		return
+	}
 	secret, err := a.auth.AdminCreatePasswordToken(r.Context(), actor, userID, purpose)
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeSensitiveJSON(w, http.StatusCreated, passwordTokenResponse{Token: secret.Token, ExpiresAt: secret.ExpiresAt})
 }
 
 func (a *api) handleAdminSetPassword(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.adminActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	userID, ok := pathUUID(w, r, "userID")
-	if !ok { return }
+	if !ok {
+		return
+	}
 	var input adminPasswordChangeRequest
-	if !decodeJSON(w, r, &input) { return }
+	if !decodeJSON(w, r, &input) {
+		return
+	}
 	user, err := a.auth.AdminSetPassword(r.Context(), actor, userID, input.Password)
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, authUserDTO(user))
 }
 
-func (a *api) handleAdminDisableUser(w http.ResponseWriter, r *http.Request) { a.handleAdminSetDisabled(w, r, true) }
-func (a *api) handleAdminEnableUser(w http.ResponseWriter, r *http.Request) { a.handleAdminSetDisabled(w, r, false) }
+func (a *api) handleAdminDisableUser(w http.ResponseWriter, r *http.Request) {
+	a.handleAdminSetDisabled(w, r, true)
+}
+func (a *api) handleAdminEnableUser(w http.ResponseWriter, r *http.Request) {
+	a.handleAdminSetDisabled(w, r, false)
+}
 func (a *api) handleAdminSetDisabled(w http.ResponseWriter, r *http.Request, disabled bool) {
 	actor, ok := a.adminActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	userID, ok := pathUUID(w, r, "userID")
-	if !ok { return }
+	if !ok {
+		return
+	}
 	user, err := a.auth.AdminSetDisabled(r.Context(), actor, userID, disabled)
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, authUserDTO(user))
 }
 
 func (a *api) handleUpdateOwnProfile(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.authActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	var input profileUpdateRequest
-	if !decodeJSON(w, r, &input) { return }
+	if !decodeJSON(w, r, &input) {
+		return
+	}
 	user, err := a.auth.UpdateOwnProfile(r.Context(), actor, app.UserProfileUpdate{Username: input.Username, Email: input.Email, DisplayName: input.DisplayName})
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, authUserDTO(user))
 }
 
 func (a *api) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.authActorAllowForcedPasswordChange(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	var input selfPasswordChangeRequest
-	if !decodeJSON(w, r, &input) { return }
+	if !decodeJSON(w, r, &input) {
+		return
+	}
 	if input.NewPassword == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "newPassword is required")
 		return
@@ -226,27 +282,44 @@ func (a *api) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user, err := a.auth.ChangeOwnPassword(r.Context(), actor, input.CurrentPassword, input.NewPassword)
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeSensitiveJSON(w, http.StatusOK, authUserDTO(user))
 }
 
 func (a *api) handleListOwnSessions(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.authActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	sessions, err := a.auth.ListOwnSessions(r.Context(), actor)
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	response := make([]authSessionResponse, 0, len(sessions))
-	for _, session := range sessions { response = append(response, authSessionResponse{ID: session.ID, ExpiresAt: session.ExpiresAt, CreatedAt: session.CreatedAt, LastUsedAt: session.LastUsedAt}) }
+	for _, session := range sessions {
+		response = append(response, authSessionResponse{ID: session.ID, ExpiresAt: session.ExpiresAt, CreatedAt: session.CreatedAt, LastUsedAt: session.LastUsedAt})
+	}
 	writeSensitiveJSON(w, http.StatusOK, response)
 }
 
 func (a *api) handleRevokeOwnSession(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.authActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	sessionID, ok := pathUUID(w, r, "sessionID")
-	if !ok { return }
+	if !ok {
+		return
+	}
 	if err := a.auth.RevokeOwnSession(r.Context(), actor, sessionID); err != nil {
-		if errors.Is(err, store.ErrNotFound) { writeError(w, http.StatusNotFound, "session_not_found", "session not found"); return }
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "session_not_found", "session not found")
+			return
+		}
 		writeAppError(w, err)
 		return
 	}
@@ -255,47 +328,66 @@ func (a *api) handleRevokeOwnSession(w http.ResponseWriter, r *http.Request) {
 
 func (a *api) handleLogoutOtherSessions(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.authActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	var input refreshRequest
-	if !decodeJSON(w, r, &input) { return }
-	if err := a.auth.LogoutOtherSessions(r.Context(), actor, input.RefreshToken); err != nil { writeAppError(w, err); return }
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if err := a.auth.LogoutOtherSessions(r.Context(), actor, input.RefreshToken); err != nil {
+		writeAppError(w, err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *api) handleAuthSettings(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.adminActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	settings, err := a.auth.AuthSettings(r.Context(), actor)
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeSensitiveJSON(w, http.StatusOK, authSettingsDTO(settings))
 }
 
 func (a *api) handleUpdateAuthSettings(w http.ResponseWriter, r *http.Request) {
 	actor, ok := a.adminActor(w, r)
-	if !ok { return }
+	if !ok {
+		return
+	}
 	var input authSettingsUpdateRequest
-	if !decodeJSON(w, r, &input) { return }
+	if !decodeJSON(w, r, &input) {
+		return
+	}
 	if !input.complete() {
 		writeError(w, http.StatusBadRequest, "invalid_request", "all authentication settings fields are required")
 		return
 	}
 	settings, err := a.auth.UpdateAuthSettings(r.Context(), actor, store.AuthSettings{
-		AccessTokenLifetime: time.Duration(*input.AccessTokenLifetimeSeconds) * time.Second,
+		AccessTokenLifetime:  time.Duration(*input.AccessTokenLifetimeSeconds) * time.Second,
 		RefreshTokenLifetime: time.Duration(*input.RefreshTokenLifetimeSeconds) * time.Second,
-		PasswordPolicy: store.PasswordPolicy{MinimumLength: *input.MinimumPasswordLength, RequireUppercase: *input.RequireUppercase, RequireLowercase: *input.RequireLowercase, RequireNumber: *input.RequireNumber, RequireSymbol: *input.RequireSymbol},
+		PasswordPolicy:       store.PasswordPolicy{MinimumLength: *input.MinimumPasswordLength, RequireUppercase: *input.RequireUppercase, RequireLowercase: *input.RequireLowercase, RequireNumber: *input.RequireNumber, RequireSymbol: *input.RequireSymbol},
 	})
-	if err != nil { writeAppError(w, err); return }
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	writeJSON(w, http.StatusOK, authSettingsDTO(settings))
 }
 
 func authSettingsDTO(settings store.AuthSettings) authSettingsResponse {
 	return authSettingsResponse{
-		AccessTokenLifetimeSeconds: int64(settings.AccessTokenLifetime / time.Second),
+		AccessTokenLifetimeSeconds:  int64(settings.AccessTokenLifetime / time.Second),
 		RefreshTokenLifetimeSeconds: int64(settings.RefreshTokenLifetime / time.Second),
-		MinimumPasswordLength: settings.PasswordPolicy.MinimumLength,
-		RequireUppercase: settings.PasswordPolicy.RequireUppercase,
-		RequireLowercase: settings.PasswordPolicy.RequireLowercase,
-		RequireNumber: settings.PasswordPolicy.RequireNumber,
-		RequireSymbol: settings.PasswordPolicy.RequireSymbol,
+		MinimumPasswordLength:       settings.PasswordPolicy.MinimumLength,
+		RequireUppercase:            settings.PasswordPolicy.RequireUppercase,
+		RequireLowercase:            settings.PasswordPolicy.RequireLowercase,
+		RequireNumber:               settings.PasswordPolicy.RequireNumber,
+		RequireSymbol:               settings.PasswordPolicy.RequireSymbol,
 	}
 }

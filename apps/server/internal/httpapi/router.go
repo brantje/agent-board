@@ -123,8 +123,8 @@ func newRouterWithProjectAccess(service *app.Service, runEvidence *app.RunEviden
 		}
 		if a.auth != nil {
 			a.registerAuthRoutes(r)
-			a.registerAuthPhase2Routes(r)
-			a.registerAuthPhase3GroupRoutes(r)
+			a.registerAuthManagementRoutes(r)
+			a.registerGroupRoutes(r)
 		}
 		if a.projectAccess != nil {
 			a.registerProjectAccessRoutes(r)

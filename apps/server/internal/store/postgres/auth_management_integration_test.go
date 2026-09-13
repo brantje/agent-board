@@ -9,7 +9,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestAuthPhase2StoreUserSessionAndSettingsManagement(t *testing.T) {
+func TestAuthStoreUserSessionAndSettingsManagement(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
 	ctx := context.Background()
@@ -110,7 +110,7 @@ func TestAuthPhase2StoreUserSessionAndSettingsManagement(t *testing.T) {
 	}
 }
 
-func TestAuthPhase2StoreStatusAndPasswordChangesInvalidateCredentials(t *testing.T) {
+func TestAuthStoreStatusAndPasswordChangesInvalidateCredentials(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
 	ctx := context.Background()

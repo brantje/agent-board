@@ -9,11 +9,11 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-type phase2LifecycleMemory struct {
+type authLifecycleMemory struct {
 	*authMemory
 }
 
-func (m *phase2LifecycleMemory) SetUserPassword(_ context.Context, id, passwordHash string, force bool) (store.User, error) {
+func (m *authLifecycleMemory) SetUserPassword(_ context.Context, id, passwordHash string, force bool) (store.User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	user, ok := m.users[id]
@@ -38,7 +38,7 @@ func (m *phase2LifecycleMemory) SetUserPassword(_ context.Context, id, passwordH
 	return user, nil
 }
 
-func phase2ReviewAuthTestService(t *testing.T, authStore store.AuthStore, now *time.Time) *AuthService {
+func reviewAuthTestService(t *testing.T, authStore store.AuthStore, now *time.Time) *AuthService {
 	t.Helper()
 	service, err := NewAuthService(authStore, AuthServiceConfig{
 		Now:        func() time.Time { return *now },
@@ -51,11 +51,11 @@ func phase2ReviewAuthTestService(t *testing.T, authStore store.AuthStore, now *t
 	return service
 }
 
-func TestPhase2AdminDirectPasswordActivatesPendingAndInvalidatesSetup(t *testing.T) {
+func TestAdminDirectPasswordActivatesPendingAndInvalidatesSetup(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	memory := &phase2LifecycleMemory{authMemory: newAuthMemory()}
-	service := phase2ReviewAuthTestService(t, memory, &now)
+	memory := &authLifecycleMemory{authMemory: newAuthMemory()}
+	service := reviewAuthTestService(t, memory, &now)
 	admin := bootstrapTestUser(t, service)
 
 	pending, err := service.CreatePendingUser(ctx, admin, PendingUserRegistration{
@@ -95,7 +95,7 @@ func TestPhase2AdminDirectPasswordActivatesPendingAndInvalidatesSetup(t *testing
 	}
 }
 
-func TestPhase2PendingDisableReenableReturnsToPendingWithoutPassword(t *testing.T) {
+func TestPendingDisableReenableReturnsToPendingWithoutPassword(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	memory := newAuthMemory()
@@ -124,7 +124,7 @@ func TestPhase2PendingDisableReenableReturnsToPendingWithoutPassword(t *testing.
 	}
 }
 
-func TestPhase2ForcedPasswordChangeBlocksNormalApplicationAccess(t *testing.T) {
+func TestForcedPasswordChangeBlocksNormalApplicationAccess(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	memory := newAuthMemory()
@@ -195,16 +195,16 @@ func TestPhase2ForcedPasswordChangeBlocksNormalApplicationAccess(t *testing.T) {
 	}
 }
 
-func TestPhase2PersistedPasswordPolicyCoversEveryPasswordPath(t *testing.T) {
+func TestPersistedPasswordPolicyCoversEveryPasswordPath(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	memory := newAuthMemory()
 	memory.settings.PasswordPolicy = store.PasswordPolicy{
-		MinimumLength: 14,
+		MinimumLength:    14,
 		RequireUppercase: true,
 		RequireLowercase: true,
-		RequireNumber: true,
-		RequireSymbol: true,
+		RequireNumber:    true,
+		RequireSymbol:    true,
 	}
 	service := authTestService(t, memory, &now)
 

@@ -11,7 +11,7 @@ import (
 )
 
 type blockingPasswordMutationStore struct {
-	*phase2LifecycleMemory
+	*authLifecycleMemory
 	started chan struct{}
 	release chan struct{}
 	once    sync.Once
@@ -19,9 +19,9 @@ type blockingPasswordMutationStore struct {
 
 func newBlockingPasswordMutationStore() *blockingPasswordMutationStore {
 	return &blockingPasswordMutationStore{
-		phase2LifecycleMemory: &phase2LifecycleMemory{authMemory: newAuthMemory()},
-		started:               make(chan struct{}),
-		release:               make(chan struct{}),
+		authLifecycleMemory: &authLifecycleMemory{authMemory: newAuthMemory()},
+		started:             make(chan struct{}),
+		release:             make(chan struct{}),
 	}
 }
 
@@ -32,28 +32,28 @@ func (m *blockingPasswordMutationStore) waitForPasswordCommit() {
 
 func (m *blockingPasswordMutationStore) SetUserPassword(ctx context.Context, id, passwordHash string, force bool) (store.User, error) {
 	m.waitForPasswordCommit()
-	return m.phase2LifecycleMemory.SetUserPassword(ctx, id, passwordHash, force)
+	return m.authLifecycleMemory.SetUserPassword(ctx, id, passwordHash, force)
 }
 
 func (m *blockingPasswordMutationStore) SetUserPasswordIfAuthVersion(ctx context.Context, id string, expectedAuthVersion int64, passwordHash string, force bool) (store.User, error) {
 	m.waitForPasswordCommit()
-	return m.phase2LifecycleMemory.SetUserPasswordIfAuthVersion(ctx, id, expectedAuthVersion, passwordHash, force)
+	return m.authLifecycleMemory.SetUserPasswordIfAuthVersion(ctx, id, expectedAuthVersion, passwordHash, force)
 }
 
 func (m *blockingPasswordMutationStore) SetUserDisabled(ctx context.Context, id string, disabled bool) (store.User, error) {
-	return m.phase2LifecycleMemory.SetUserDisabled(ctx, id, disabled)
+	return m.authLifecycleMemory.SetUserDisabled(ctx, id, disabled)
 }
 
 type casLifecycleMemory struct {
-	*phase2LifecycleMemory
+	*authLifecycleMemory
 }
 
 func (m *casLifecycleMemory) SetUserPasswordIfAuthVersion(ctx context.Context, id string, expectedAuthVersion int64, passwordHash string, force bool) (store.User, error) {
-	return m.phase2LifecycleMemory.SetUserPasswordIfAuthVersion(ctx, id, expectedAuthVersion, passwordHash, force)
+	return m.authLifecycleMemory.SetUserPasswordIfAuthVersion(ctx, id, expectedAuthVersion, passwordHash, force)
 }
 
 func (m *casLifecycleMemory) SetUserDisabled(ctx context.Context, id string, disabled bool) (store.User, error) {
-	return m.phase2LifecycleMemory.SetUserDisabled(ctx, id, disabled)
+	return m.authLifecycleMemory.SetUserDisabled(ctx, id, disabled)
 }
 
 type blockingCASLifecycleMemory struct {
@@ -65,7 +65,7 @@ type blockingCASLifecycleMemory struct {
 
 func newBlockingCASLifecycleMemory() *blockingCASLifecycleMemory {
 	return &blockingCASLifecycleMemory{
-		casLifecycleMemory: &casLifecycleMemory{phase2LifecycleMemory: &phase2LifecycleMemory{authMemory: newAuthMemory()}},
+		casLifecycleMemory: &casLifecycleMemory{authLifecycleMemory: &authLifecycleMemory{authMemory: newAuthMemory()}},
 		started:            make(chan struct{}),
 		release:            make(chan struct{}),
 	}
@@ -77,11 +77,11 @@ func (m *blockingCASLifecycleMemory) SetUserPasswordIfAuthVersion(ctx context.Co
 	return m.casLifecycleMemory.SetUserPasswordIfAuthVersion(ctx, id, expectedAuthVersion, passwordHash, force)
 }
 
-func TestPhase2StaleSelfPasswordChangeCannotOverwriteAdminAssignment(t *testing.T) {
+func TestStaleSelfPasswordChangeCannotOverwriteAdminAssignment(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	memory := newBlockingPasswordMutationStore()
-	service := phase2ReviewAuthTestService(t, memory, &now)
+	service := reviewAuthTestService(t, memory, &now)
 	admin := bootstrapTestUser(t, service)
 
 	result := make(chan error, 1)
@@ -95,7 +95,7 @@ func TestPhase2StaleSelfPasswordChangeCannotOverwriteAdminAssignment(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := memory.phase2LifecycleMemory.SetUserPassword(ctx, admin.ID, recoveryHash, true); err != nil {
+	if _, err := memory.authLifecycleMemory.SetUserPassword(ctx, admin.ID, recoveryHash, true); err != nil {
 		t.Fatal(err)
 	}
 	close(memory.release)
@@ -115,11 +115,11 @@ func TestPhase2StaleSelfPasswordChangeCannotOverwriteAdminAssignment(t *testing.
 	}
 }
 
-func TestPhase2ForcedPasswordChangeUsesCapturedAuthVersion(t *testing.T) {
+func TestForcedPasswordChangeUsesCapturedAuthVersion(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	memory := newBlockingCASLifecycleMemory()
-	service := phase2ReviewAuthTestService(t, memory, &now)
+	service := reviewAuthTestService(t, memory, &now)
 	admin := bootstrapTestUser(t, service)
 
 	if _, err := service.AdminSetPassword(ctx, admin, admin.ID, "temporary-admin-password"); err != nil {
@@ -140,7 +140,7 @@ func TestPhase2ForcedPasswordChangeUsesCapturedAuthVersion(t *testing.T) {
 	}()
 	<-memory.started
 
-	if _, err := service.AdminSetPassword(ctx, phase2Admin(), admin.ID, "admin-recovery-password"); err != nil {
+	if _, err := service.AdminSetPassword(ctx, deploymentAdminActor(), admin.ID, "admin-recovery-password"); err != nil {
 		t.Fatal(err)
 	}
 	close(memory.release)

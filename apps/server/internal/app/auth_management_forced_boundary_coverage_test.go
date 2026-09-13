@@ -8,7 +8,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestPhase2ForcedPasswordActorRejectedAcrossNormalManagementOperations(t *testing.T) {
+func TestForcedPasswordActorRejectedAcrossNormalManagementOperations(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	service := authTestService(t, newAuthMemory(), &now)
 	ctx := context.Background()

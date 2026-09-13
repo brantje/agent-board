@@ -59,14 +59,6 @@ func requireDeploymentAdmin(actor AuthenticatedUser) error {
 	return nil
 }
 
-func (s *AuthService) phase2Store() (store.AuthPhase2Store, error) {
-	extended, ok := s.store.(store.AuthPhase2Store)
-	if !ok {
-		return nil, NewError("auth_management_unavailable", "authentication management is unavailable", store.ErrInvalidArgument)
-	}
-	return extended, nil
-}
-
 func (s *AuthService) AuthenticateNormalAccess(ctx context.Context, accessToken string) (AuthenticatedUser, error) {
 	user, err := s.AuthenticateAccessToken(ctx, accessToken)
 	if err != nil {
@@ -93,11 +85,7 @@ func (s *AuthService) ListUsers(ctx context.Context, actor AuthenticatedUser) ([
 	if err := requireDeploymentAdmin(actor); err != nil {
 		return nil, err
 	}
-	extended, err := s.phase2Store()
-	if err != nil {
-		return nil, err
-	}
-	users, err := extended.ListUsers(ctx)
+	users, err := s.store.ListUsers(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -116,16 +104,12 @@ func (s *AuthService) CreatePendingUser(ctx context.Context, actor Authenticated
 	if err != nil {
 		return PendingUserResult{}, err
 	}
-	extended, err := s.phase2Store()
-	if err != nil {
-		return PendingUserResult{}, err
-	}
 	rawToken, tokenHash, err := s.newOpaqueToken()
 	if err != nil {
 		return PendingUserResult{}, err
 	}
 	expiresAt := s.now().UTC().Add(passwordTokenTTL)
-	user, token, err := extended.CreatePendingUserWithSetupToken(ctx, store.User{
+	user, token, err := s.store.CreatePendingUserWithSetupToken(ctx, store.User{
 		Username:       username,
 		Email:          email,
 		DisplayName:    displayName,
@@ -183,11 +167,7 @@ func (s *AuthService) AdminSetDisabled(ctx context.Context, actor AuthenticatedU
 	if err := requireDeploymentAdmin(actor); err != nil {
 		return AuthenticatedUser{}, err
 	}
-	extended, err := s.phase2Store()
-	if err != nil {
-		return AuthenticatedUser{}, err
-	}
-	user, err := extended.SetUserDisabled(ctx, userID, disabled)
+	user, err := s.store.SetUserDisabled(ctx, userID, disabled)
 	if errors.Is(err, store.ErrConflict) {
 		return AuthenticatedUser{}, NewError("conflict", "at least one active deployment admin is required", err)
 	}
@@ -205,11 +185,7 @@ func (s *AuthService) UpdateOwnProfile(ctx context.Context, actor AuthenticatedU
 	if err != nil {
 		return AuthenticatedUser{}, err
 	}
-	extended, err := s.phase2Store()
-	if err != nil {
-		return AuthenticatedUser{}, err
-	}
-	user, err := extended.UpdateUserIdentity(ctx, actor.ID, username, email, displayName)
+	user, err := s.store.UpdateUserIdentity(ctx, actor.ID, username, email, displayName)
 	if errors.Is(err, store.ErrConflict) {
 		return AuthenticatedUser{}, NewError("conflict", "username or email is already in use", err)
 	}
@@ -256,11 +232,7 @@ func (s *AuthService) ListOwnSessions(ctx context.Context, actor AuthenticatedUs
 	if err := requireNormalAuthenticatedUser(actor); err != nil {
 		return nil, err
 	}
-	extended, err := s.phase2Store()
-	if err != nil {
-		return nil, err
-	}
-	sessions, err := extended.ListUserAuthSessions(ctx, actor.ID, s.now().UTC())
+	sessions, err := s.store.ListUserAuthSessions(ctx, actor.ID, s.now().UTC())
 	if err != nil {
 		return nil, err
 	}
@@ -280,11 +252,7 @@ func (s *AuthService) RevokeOwnSession(ctx context.Context, actor AuthenticatedU
 	if err := requireNormalAuthenticatedUser(actor); err != nil {
 		return err
 	}
-	extended, err := s.phase2Store()
-	if err != nil {
-		return err
-	}
-	return extended.RevokeAuthSession(ctx, actor.ID, sessionID, s.now().UTC())
+	return s.store.RevokeAuthSession(ctx, actor.ID, sessionID, s.now().UTC())
 }
 
 func (s *AuthService) LogoutOtherSessions(ctx context.Context, actor AuthenticatedUser, currentRefreshToken string) error {
@@ -300,11 +268,7 @@ func (s *AuthService) LogoutOtherSessions(ctx context.Context, actor Authenticat
 	if err != nil || current.UserID != actor.ID || current.RevokedAt != nil || !current.ExpiresAt.After(now) {
 		return authFailure()
 	}
-	extended, err := s.phase2Store()
-	if err != nil {
-		return err
-	}
-	return extended.RevokeOtherAuthSessions(ctx, actor.ID, current.ID, now)
+	return s.store.RevokeOtherAuthSessions(ctx, actor.ID, current.ID, now)
 }
 
 func (s *AuthService) AuthSettings(ctx context.Context, actor AuthenticatedUser) (store.AuthSettings, error) {
@@ -328,9 +292,5 @@ func (s *AuthService) UpdateAuthSettings(ctx context.Context, actor Authenticate
 	if err := validateAuthSettings(settings); err != nil {
 		return store.AuthSettings{}, err
 	}
-	extended, err := s.phase2Store()
-	if err != nil {
-		return store.AuthSettings{}, err
-	}
-	return extended.UpdateAuthSettings(ctx, settings)
+	return s.store.UpdateAuthSettings(ctx, settings)
 }

@@ -12,7 +12,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestAuthPhase2StoreCannotDisableLastActiveDeploymentAdmin(t *testing.T) {
+func TestAuthStoreCannotDisableLastActiveDeploymentAdmin(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	admin := authUser("admin", "admin@example.com", store.UserStatusActive)
@@ -35,7 +35,7 @@ func TestAuthPhase2StoreCannotDisableLastActiveDeploymentAdmin(t *testing.T) {
 	}
 }
 
-func TestAuthPhase2StoreConcurrentDisableCannotRemoveLastTwoAdmins(t *testing.T) {
+func TestAuthStoreConcurrentDisableCannotRemoveLastTwoAdmins(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	first := authUser("admin-one", "admin-one@example.com", store.UserStatusActive)

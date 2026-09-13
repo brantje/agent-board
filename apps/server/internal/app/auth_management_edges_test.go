@@ -9,12 +9,12 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestPhase2AdministrationRejectsInvalidUserStates(t *testing.T) {
+func TestAdministrationRejectsInvalidUserStates(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
 	service := authTestService(t, memory, &now)
 	ctx := context.Background()
-	admin := phase2Admin()
+	admin := deploymentAdminActor()
 
 	memory.users["active"] = store.User{
 		ID: "active", Username: "active", Email: "active@example.com", DisplayName: "Active",
@@ -74,7 +74,7 @@ func TestPhase2AdministrationRejectsInvalidUserStates(t *testing.T) {
 	}
 }
 
-func TestPhase2SelfServiceRejectsConflictsAndInvalidSessions(t *testing.T) {
+func TestSelfServiceRejectsConflictsAndInvalidSessions(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
 	memory.users["u1"] = store.User{
@@ -102,18 +102,18 @@ func TestPhase2SelfServiceRejectsConflictsAndInvalidSessions(t *testing.T) {
 	}
 }
 
-func TestPhase2AuthSettingsRejectInvalidPersistedSettings(t *testing.T) {
+func TestAuthSettingsRejectInvalidPersistedSettings(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
 	memory.settings.AccessTokenLifetime = time.Minute
 	service := authTestService(t, memory, &now)
 
-	if _, err := service.AuthSettings(context.Background(), phase2Admin()); err == nil {
+	if _, err := service.AuthSettings(context.Background(), deploymentAdminActor()); err == nil {
 		t.Fatal("expected invalid persisted auth settings to be rejected")
 	}
 }
 
-func TestPhase2AuthenticateDeploymentAdmin(t *testing.T) {
+func TestAuthenticateDeploymentAdmin(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	memory := newAuthMemory()
 	service := authTestService(t, memory, &now)

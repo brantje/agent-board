@@ -176,4 +176,4 @@ func (s *Store) UpdateAuthSettings(ctx context.Context, settings store.AuthSetti
 	}, nil
 }
 
-var _ store.AuthPhase2Store = (*Store)(nil)
+var _ store.AuthStore = (*Store)(nil)

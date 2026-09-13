@@ -8,7 +8,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestPhase2UserLifecycleInvalidatesAuthenticationAndForcesAdminPasswordChange(t *testing.T) {
+func TestUserLifecycleInvalidatesAuthenticationAndForcesAdminPasswordChange(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	memory := newAuthMemory()
@@ -131,7 +131,7 @@ func TestPhase2UserLifecycleInvalidatesAuthenticationAndForcesAdminPasswordChang
 	}
 }
 
-func TestPhase2SharedProfilePasswordSettingsAndSessionPolicy(t *testing.T) {
+func TestSharedProfilePasswordSettingsAndSessionPolicy(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	memory := newAuthMemory()
@@ -166,11 +166,11 @@ func TestPhase2SharedProfilePasswordSettingsAndSessionPolicy(t *testing.T) {
 	settings.AccessTokenLifetime = 2 * time.Hour
 	settings.RefreshTokenLifetime = 7 * 24 * time.Hour
 	settings.PasswordPolicy = store.PasswordPolicy{
-		MinimumLength: 14,
+		MinimumLength:    14,
 		RequireUppercase: true,
 		RequireLowercase: true,
-		RequireNumber: true,
-		RequireSymbol: true,
+		RequireNumber:    true,
+		RequireSymbol:    true,
 	}
 	stored, err := service.UpdateAuthSettings(ctx, updated, settings)
 	if err != nil {

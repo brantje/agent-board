@@ -137,12 +137,12 @@ func (m *groupAuthMemory) RemoveGroupMember(_ context.Context, groupID, userID s
 	return nil
 }
 
-func TestPhase3GroupAdministrationAndMembership(t *testing.T) {
+func TestGroupAdministrationAndMembership(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(100, 0).UTC()
 	memory := newGroupAuthMemory()
 	service := groupAuthTestService(t, memory, &now)
-	admin := phase2Admin()
+	admin := deploymentAdminActor()
 	member := AuthenticatedUser{ID: "member", DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusActive}
 
 	if _, err := service.CreateGroup(ctx, member, "engineering"); err == nil {
@@ -212,7 +212,7 @@ func TestPhase3GroupAdministrationAndMembership(t *testing.T) {
 	}
 }
 
-func TestPhase3GroupAdministrationRequiresNormalDeploymentAdmin(t *testing.T) {
+func TestGroupAdministrationRequiresNormalDeploymentAdmin(t *testing.T) {
 	now := time.Unix(100, 0).UTC()
 	service := groupAuthTestService(t, newGroupAuthMemory(), &now)
 	ctx := context.Background()

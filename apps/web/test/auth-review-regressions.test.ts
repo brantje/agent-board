@@ -62,7 +62,7 @@ afterEach(() => {
   sessionStorage.clear()
 })
 
-describe('phase 2 auth review regressions', () => {
+describe('authentication management auth review regressions', () => {
   it('offers pending-user password assignment and disable actions', async () => {
     vi.stubGlobal('useAuth', () => ({
       users: vi.fn(async () => [pendingUser]),

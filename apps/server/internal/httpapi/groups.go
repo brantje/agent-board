@@ -32,7 +32,7 @@ func groupDTO(group store.Group) groupResponse {
 	}
 }
 
-func (a *api) registerAuthPhase3GroupRoutes(r chi.Router) {
+func (a *api) registerGroupRoutes(r chi.Router) {
 	r.Get("/groups", a.handleListGroups)
 	r.Post("/groups", a.handleCreateGroup)
 	r.Patch("/groups/{groupID}", a.handleUpdateGroup)

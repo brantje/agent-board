@@ -61,11 +61,11 @@ func TestAuthOpenAPIContractsAreIntentional(t *testing.T) {
 		t.Fatal("token responses must document Cache-Control: no-store")
 	}
 	if !strings.Contains(paths, "security: [{BearerAuth: []}]") {
-		t.Fatal("authenticated phase 2 endpoints must require bearer authentication")
+		t.Fatal("authenticated authentication management endpoints must require bearer authentication")
 	}
 	for _, operation := range []string{"updateAuthenticatedUser", "listDeploymentUsers", "changeAuthenticatedUserPassword", "listAuthenticatedUserSessions", "updateAuthenticationSettings"} {
 		if !strings.Contains(paths, "operationId: "+operation) {
-			t.Fatalf("auth OpenAPI missing phase 2 operation %s", operation)
+			t.Fatalf("auth OpenAPI missing authentication management operation %s", operation)
 		}
 	}
 

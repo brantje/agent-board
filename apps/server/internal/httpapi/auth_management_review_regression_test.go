@@ -14,11 +14,11 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-type phase2AuthHTTPStore struct {
+type authManagementAuthHTTPStore struct {
 	*authHTTPStore
 }
 
-func (s *phase2AuthHTTPStore) SetUserPassword(_ context.Context, id, hash string, force bool) (store.User, error) {
+func (s *authManagementAuthHTTPStore) SetUserPassword(_ context.Context, id, hash string, force bool) (store.User, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	user, ok := s.users[id]
@@ -45,7 +45,7 @@ func (s *phase2AuthHTTPStore) SetUserPassword(_ context.Context, id, hash string
 
 func newPhase2AuthHTTPHandler(t *testing.T, now *time.Time) http.Handler {
 	t.Helper()
-	authStore := &phase2AuthHTTPStore{authHTTPStore: newAuthHTTPStore()}
+	authStore := &authManagementAuthHTTPStore{authHTTPStore: newAuthHTTPStore()}
 	authService, err := app.NewAuthService(authStore, app.AuthServiceConfig{
 		Now:        func() time.Time { return *now },
 		Random:     &authHTTPRandom{},
