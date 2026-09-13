@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
@@ -21,6 +22,7 @@ import (
 )
 
 type processTestStore struct {
+	mu              sync.Mutex
 	provenance      json.RawMessage
 	events          []store.Event
 	artifacts       []store.Artifact
@@ -30,6 +32,8 @@ type processTestStore struct {
 }
 
 func (s *processTestStore) PutRunProvenance(_ context.Context, _, _ string, value json.RawMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.provenance) != 0 {
 		return store.ErrConflict
 	}
@@ -38,6 +42,8 @@ func (s *processTestStore) PutRunProvenance(_ context.Context, _, _ string, valu
 }
 
 func (s *processTestStore) GetRunProvenance(context.Context, string, string) (json.RawMessage, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if len(s.provenance) == 0 {
 		return nil, store.ErrNotFound
 	}
@@ -45,6 +51,8 @@ func (s *processTestStore) GetRunProvenance(context.Context, string, string) (js
 }
 
 func (s *processTestStore) ListExecutionSessions(context.Context, string, []string) ([]store.ExecutionSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.listSessionsErr != nil {
 		return nil, s.listSessionsErr
 	}
@@ -52,6 +60,8 @@ func (s *processTestStore) ListExecutionSessions(context.Context, string, []stri
 }
 
 func (s *processTestStore) AppendEvent(_ context.Context, event store.Event) (store.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	sequence := int64(len(s.events) + 1)
 	event.ID = "event-" + strings.TrimSpace(event.Type)
 	event.Sequence = &sequence
@@ -60,16 +70,22 @@ func (s *processTestStore) AppendEvent(_ context.Context, event store.Event) (st
 }
 
 func (s *processTestStore) CreateRawOutputChunk(_ context.Context, chunk store.RawOutputChunk) (store.RawOutputChunk, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	chunk.ID = "chunk"
 	s.chunks = append(s.chunks, chunk)
 	return chunk, nil
 }
 
 func (s *processTestStore) ListRawOutputChunks(context.Context, string, string) ([]store.RawOutputChunk, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return append([]store.RawOutputChunk(nil), s.chunks...), nil
 }
 
 func (s *processTestStore) CreateArtifact(_ context.Context, artifact store.Artifact) (store.Artifact, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	artifact.ID = "artifact-" + artifact.Kind + "-" + strings.ReplaceAll(artifact.Name, "/", "-")
 	s.artifacts = append(s.artifacts, artifact)
 	return artifact, nil
