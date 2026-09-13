@@ -232,30 +232,30 @@ jobs:
         run: |
           curl --fail --silent --show-error http://127.0.0.1:3001/healthz
           curl --fail --silent --show-error http://127.0.0.1:3000/
-      - name: Prepare Phase 5 E2E repository
+      - name: Prepare authorization E2E repository
         run: |
           set -eu
-          rm -rf .phase5-auth-e2e
-          mkdir .phase5-auth-e2e
-          git -C .phase5-auth-e2e init -b main
-          git -C .phase5-auth-e2e config user.email phase5-e2e@example.test
-          git -C .phase5-auth-e2e config user.name 'Phase 5 E2E'
-          printf 'phase 5 auth e2e\n' > .phase5-auth-e2e/README.md
-          git -C .phase5-auth-e2e add README.md
-          git -C .phase5-auth-e2e commit -m 'initial fixture'
-          chmod -R a+rwX .phase5-auth-e2e
-      - name: Run Phase 5 Playwright authorization flow
+          rm -rf .authorization-e2e
+          mkdir .authorization-e2e
+          git -C .authorization-e2e init -b main
+          git -C .authorization-e2e config user.email authorization-e2e@example.test
+          git -C .authorization-e2e config user.name 'Authorization E2E'
+          printf 'authorization e2e\n' > .authorization-e2e/README.md
+          git -C .authorization-e2e add README.md
+          git -C .authorization-e2e commit -m 'initial fixture'
+          chmod -R a+rwX .authorization-e2e
+      - name: Run Playwright authorization flow
         run: |
           set -eu
           e2e_root="$(mktemp -d)"
-          cp apps/web/e2e/phase5-auth.playwright.mjs "$e2e_root/phase5-auth.playwright.mjs"
+          cp apps/web/e2e/authorization.playwright.mjs "$e2e_root/authorization.playwright.mjs"
           cd "$e2e_root"
           npm init -y >/dev/null
           npm install --no-audit --no-fund --save-exact playwright@1.55.0
           npx playwright install --with-deps chromium
           AGENT_BOARD_E2E_WEB_URL=http://127.0.0.1:3000 \
           AGENT_BOARD_E2E_API_URL=http://127.0.0.1:3001 \
-            node phase5-auth.playwright.mjs
+            node authorization.playwright.mjs
       - name: Show service logs on failure
         if: failure()
         run: docker compose logs --no-color
