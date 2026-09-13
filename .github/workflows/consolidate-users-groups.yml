@@ -3,7 +3,7 @@ name: Consolidate Users and Groups
 on:
   push:
     branches:
-      - phase/79-authz-hardening
+      - "phase/79-authz-hardening"
 
 permissions:
   contents: write
@@ -14,134 +14,38 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          ref: phase/79-authz-hardening
+          ref: "phase/79-authz-hardening"
           fetch-depth: 0
+
       - uses: actions/setup-go@v6
         with:
           go-version-file: apps/server/go.mod
           cache-dependency-path: apps/server/go.sum
-      - name: Consolidate phase-based auth and Groups structure
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > /tmp/consolidate.py <<'PY'
-          from pathlib import Path
-          import re
-          import subprocess
 
-          def run(*args): subprocess.run(args, check=True)
-          def mv(src, dst):
-              s, d = Path(src), Path(dst)
-              if not s.exists(): return
-              if d.exists(): raise RuntimeError(f'rename target already exists: {dst}')
-              d.parent.mkdir(parents=True, exist_ok=True)
-              run('git', 'mv', src, dst)
+      - name: Apply consolidation
+        run: python3 .github/consolidate-users-groups.py
 
-          for src, dst in {
-              'apps/server/internal/app/auth_phase2.go': 'apps/server/internal/app/auth_management.go',
-              'apps/server/internal/app/auth_phase2_password.go': 'apps/server/internal/app/password.go',
-              'apps/server/internal/app/auth_phase3_groups.go': 'apps/server/internal/app/groups.go',
-              'apps/server/internal/httpapi/auth_phase2.go': 'apps/server/internal/httpapi/auth_management.go',
-              'apps/server/internal/httpapi/auth_phase3_groups.go': 'apps/server/internal/httpapi/groups.go',
-              'apps/server/internal/store/postgres/auth_phase2.go': 'apps/server/internal/store/postgres/auth_management.go',
-          }.items(): mv(src, dst)
-
-          for path in subprocess.check_output(['git', 'ls-files'], text=True).splitlines():
-              if path == 'apps/server/internal/store/auth_phase2.go': continue
-              new = path.replace('auth_phase2_', 'auth_management_').replace('auth_phase3_groups', 'groups')
-              new = new.replace('phase5_authorization_hardening', 'authorization_hardening').replace('phase5-auth', 'authorization')
-              if new != path: mv(path, new)
-
-          p = Path('apps/server/internal/store/auth.go')
-          text = p.read_text()
-          methods = '''
-\tCreatePendingUserWithSetupToken(context.Context, User, PasswordToken) (User, PasswordToken, error)
-\tListUsers(context.Context) ([]User, error)
-\tUpdateUserIdentity(context.Context, string, string, string, string) (User, error)
-\tSetUserPasswordIfAuthVersion(context.Context, string, int64, string, bool) (User, error)
-\tSetUserDisabled(context.Context, string, bool) (User, error)
-\tListUserAuthSessions(context.Context, string, time.Time) ([]AuthSession, error)
-\tRevokeAuthSession(context.Context, string, string, time.Time) error
-\tRevokeOtherAuthSessions(context.Context, string, string, time.Time) error
-\tUpdateAuthSettings(context.Context, AuthSettings) (AuthSettings, error)
-'''
-          if 'CreatePendingUserWithSetupToken(' not in text:
-              m = re.search(r'(type AuthStore interface \{)(.*?)(\n\})', text, flags=re.S)
-              if not m: raise RuntimeError('AuthStore interface not found')
-              text = text[:m.start()] + m.group(1) + m.group(2).rstrip() + methods.rstrip('\n') + m.group(3) + text[m.end():]
-              p.write_text(text)
-          if Path('apps/server/internal/store/auth_phase2.go').exists(): run('git', 'rm', 'apps/server/internal/store/auth_phase2.go')
-
-          p = Path('apps/server/internal/app/auth_management.go')
-          text = p.read_text()
-          text, n = re.subn(r'\nfunc \(s \*AuthService\) phase2Store\(\) \(store\.AuthPhase2Store, error\) \{.*?\n\}\n', '\n', text, flags=re.S)
-          if n != 1: raise RuntimeError(f'expected one phase2Store helper, removed {n}')
-          for pattern in [
-              r'\n\textended, err := s\.phase2Store\(\)\n\tif err != nil \{\n\t\treturn nil, err\n\t\}\n',
-              r'\n\textended, err := s\.phase2Store\(\)\n\tif err != nil \{\n\t\treturn PendingUserResult\{\}, err\n\t\}\n',
-              r'\n\textended, err := s\.phase2Store\(\)\n\tif err != nil \{\n\t\treturn AuthenticatedUser\{\}, err\n\t\}\n',
-              r'\n\textended, err := s\.phase2Store\(\)\n\tif err != nil \{\n\t\treturn err\n\t\}\n',
-              r'\n\textended, err := s\.phase2Store\(\)\n\tif err != nil \{\n\t\treturn store\.AuthSettings\{\}, err\n\t\}\n',
-          ]: text = re.sub(pattern, '\n', text)
-          text = text.replace('extended.', 's.store.')
-          if 'phase2Store' in text or 'extended.' in text: raise RuntimeError('store adapter remained')
-          p.write_text(text)
-
-          p = Path('apps/server/internal/app/password.go')
-          text = p.read_text()
-          text, n = re.subn(r'\n\textended, err := s\.phase2Store\(\)\n\tif err != nil \{\n\t\treturn AuthenticatedUser\{\}, err\n\t\}\n', '\n', text)
-          if n != 1: raise RuntimeError(f'expected one password adapter block, removed {n}')
-          p.write_text(text.replace('extended.SetUserPasswordIfAuthVersion', 's.store.SetUserPasswordIfAuthVersion'))
-
-          p = Path('apps/server/internal/app/auth_management_coverage_test.go')
-          text = p.read_text()
-          text = re.sub(r'\ntype phase1OnlyAuthStore struct \{\n\tstore\.AuthStore\n\}\n', '\n', text)
-          text, n = re.subn(r'\n\tphase1Service := phase2ReviewAuthTestService\(t, phase1OnlyAuthStore\{AuthStore: memory\}, &now\)\n\tif _, err := phase1Service\.(?:setPasswordIfAuthVersion|AdminSetDisabled)\([^\n]*\); err == nil \{\n\t\tt\.Fatal\("expected phase 2 store requirement failure"\)\n\t\}\n', '\n', text)
-          if n != 2: raise RuntimeError(f'expected two obsolete split assertions, removed {n}')
-          p.write_text(text)
-
-          replacements = {
-              'registerAuthPhase2Routes': 'registerAuthManagementRoutes',
-              'registerAuthPhase3GroupRoutes': 'registerGroupRoutes',
-              'AuthPhase2Store': 'AuthStore',
-              'phase2LifecycleMemory': 'authLifecycleMemory',
-              'phase2MutationErrorStore': 'authMutationErrorStore',
-              'phase2ReviewAuthTestService': 'reviewAuthTestService',
-              'phase2Admin': 'deploymentAdminActor',
-              'phase3GroupHTTPStore': 'groupHTTPStore',
-              'newPhase3GroupHTTPStore': 'newGroupHTTPStore',
-              'requirePhase3ErrorCode': 'requireGroupErrorCode',
-              'TestAuthPhase2Store': 'TestAuthStore',
-              'TestPhase2': 'Test', 'TestPhase3': 'Test', 'TestPhase4': 'Test', 'TestPhase5': 'Test',
-          }
-          suffixes = {'.go', '.ts', '.vue', '.js', '.mjs', '.json', '.yaml', '.yml', '.sql', '.md'}
-          for root in (Path('apps'), Path('packages')):
-              if not root.exists(): continue
-              for f in root.rglob('*'):
-                  if not f.is_file() or f.suffix not in suffixes: continue
-                  old = f.read_text(); new = old
-                  for before, after in replacements.items(): new = new.replace(before, after)
-                  for num, lo, hi in [(1,'auth','Auth'),(2,'authManagement','AuthManagement'),(3,'groups','Groups'),(4,'projectAccess','ProjectAccess'),(5,'authorizationHardening','AuthorizationHardening')]:
-                      new = re.sub(rf'\bphase{num}([A-Z][A-Za-z0-9_]*)', lo + r'\1', new)
-                      new = re.sub(rf'\bPhase{num}([A-Z][A-Za-z0-9_]*)', hi + r'\1', new)
-                  for before, after in [('Phase 1','authentication foundation'),('Phase 2','authentication management'),('Phase 3','Groups'),('Phase 4','Project access'),('Phase 5','authorization hardening'),('phase 1','authentication foundation'),('phase 2','authentication management'),('phase 3','Groups'),('phase 4','Project access'),('phase 5','authorization hardening')]: new = new.replace(before, after)
-                  if new != old: f.write_text(new)
-
-          run('git', 'rm', '.github/workflows/consolidate-users-groups.yml')
-          PY
-          python3 /tmp/consolidate.py
       - name: Format and verify focused server packages
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t go_files < <(git diff --name-only --diff-filter=ACMR -- '*.go')
-          if ((${#go_files[@]})); then gofmt -w "${go_files[@]}"; fi
-          if git ls-files apps packages | grep -Ei '(^|[/_.-])phase[_-]?[1-5]([/_.-]|$)|auth_phase'; then echo 'phase-derived source filenames remain' >&2; exit 1; fi
-          if git grep -nEi '\b(phase[_ -]?[1-5]|phase[1-5]|AuthPhase[1-5])\b' -- apps packages; then echo 'phase-derived source terminology remains' >&2; exit 1; fi
+          if ((${#go_files[@]})); then
+            gofmt -w "${go_files[@]}"
+          fi
+          if git ls-files apps packages | grep -Ei '(^|[/_.-])phase[_-]?[1-5]([/_.-]|$)|auth_phase'; then
+            echo 'phase-derived source filenames remain' >&2
+            exit 1
+          fi
+          if git grep -nEi '\b(phase[_ -]?[1-5]|phase[1-5]|AuthPhase[1-5])\b' -- apps packages; then
+            echo 'phase-derived source terminology remains' >&2
+            exit 1
+          fi
           cd apps/server
           go test ./internal/app ./internal/httpapi ./internal/store/...
           go vet ./internal/app ./internal/httpapi ./internal/store/...
           go build ./...
+
       - name: Commit consolidation
         shell: bash
         run: |
