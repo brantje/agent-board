@@ -63,6 +63,29 @@ Runner machine enrollment and Runner WebSocket transport are machine-authenticat
 
 Caller-controlled user/admin/role headers never grant human identity or authorization.
 
+## Authorization inventory
+
+Every existing human-facing control-plane surface is intentionally classified under the fixed model rather than relying on route shape or frontend visibility alone.
+
+| Surface | Required authority |
+| --- | --- |
+| `/healthz` | unauthenticated health-only |
+| bootstrap status/register, login, refresh, setup/reset completion, logout-by-refresh-token | unauthenticated/auth-only token flows with their own lifecycle checks |
+| current account/profile/password/session operations | authenticated User; forced-password-change access is limited to the account flow needed to replace the password |
+| User administration, Group administration and authentication settings | deployment admin |
+| deployment-global Providers, Model Profiles, legacy Runtimes, Agents, Runners, repository settings and secret writes | deployment admin |
+| `GET /api/projects` | authenticated User; inaccessible Projects omitted |
+| `POST /api/projects` | authenticated active deployment member/admin; creator receives direct Project admin |
+| Project and nested Project reads, including Issues, Runs, Questions, Reviews, execution evidence, raw logs, Artifacts and Project SSE | effective Project viewer or higher |
+| ordinary Project workflow mutations, including Issue work/relationships, assignment, supported Run operations, Question answers and Review decisions | effective Project member or higher |
+| Project settings/configuration mutations and Project access/directories/grants | effective Project admin |
+| Project effective-role read | effective Project viewer or higher |
+| Runner enrollment/WebSocket execution transport | machine-authenticated execution plane, not human deployment authority |
+
+Project-scoped configuration reads remain available at the viewer boundary where the current product exposes them; mutation remains Project-admin-only. Shared deployment-global configuration remains deployment-admin-only outside Project scope.
+
+The inventory is enforced in shared application authorization plus transport middleware. Individual handlers must not invent alternate role vocabularies, trust caller-provided actor/admin headers or bypass the shared effective-role decision.
+
 ## Isolation semantics
 
 Normal Users only receive Projects they can access. For inaccessible Project-scoped resources:
@@ -88,6 +111,8 @@ Historical records are preserved when a User is renamed, disabled or re-enabled.
 Nuxt exposes login/bootstrap/setup/reset/forced-password-change flows, current-account/session management, deployment administration and Project access controls. UI role checks only determine navigation/control presentation; bypassing the browser must still be denied by the Go backend.
 
 Without `Stay logged in`, credentials use browser-session/in-memory persistence. With it, access and refresh credentials use persistent browser storage. Authentication failures clear/recover credentials through the shared auth composable; no cookie-only authentication model is substituted.
+
+Protected SSE, raw-output and Artifact reads use authenticated browser transports. Artifact downloads fetch the protected content with the bearer credential and then create a local browser download; access tokens are never placed in download URLs.
 
 ## Explicitly out of scope
 
