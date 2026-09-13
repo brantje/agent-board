@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-func TestAuthPhase2HTTPAdminLifecycleAndPasswordInvalidation(t *testing.T) {
+func TestAdminLifecycleAndPasswordInvalidationHTTP(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	handler, _, _ := newAuthHTTPHandler(t, &now)
 	registerAuthHTTPUser(t, handler)
@@ -131,7 +131,7 @@ func TestAuthPhase2HTTPAdminLifecycleAndPasswordInvalidation(t *testing.T) {
 	}
 }
 
-func TestAuthPhase2HTTPSelfPasswordSingleSessionRevokeAndSettingsDenial(t *testing.T) {
+func TestSelfPasswordSingleSessionRevokeAndSettingsDenialHTTP(t *testing.T) {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	handler, authStore, _ := newAuthHTTPHandler(t, &now)
 	registerAuthHTTPUser(t, handler)
