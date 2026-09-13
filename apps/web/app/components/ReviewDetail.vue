@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { ArtifactEvidence, ReviewApprovalResponse, ReviewDetail as ReviewDetailModel, ReviewRequestChangesResponse } from '../types/api'
-import { apiPath, apiRequest } from '../utils/api'
+import { apiPath, apiRequest, downloadApiFile } from '../utils/api'
 import { commandLabel, runStatusLabel } from '../utils/runs'
 import { statusLabel } from '../utils/issues'
 import { useResource } from '../composables/useResource'
@@ -12,6 +12,7 @@ const { data, pending, error, refresh } = useResource<ReviewDetailModel>(() => a
 const feedback = ref('')
 const acting = ref(false)
 const actionError = ref<Error>()
+const artifactError = ref<Error>()
 const approval = ref<ReviewApprovalResponse>()
 const changes = ref<ReviewRequestChangesResponse>()
 
@@ -26,9 +27,20 @@ const candidateArtifacts = computed(() => (evidence.value?.artifacts || []).filt
 ))
 const agentMessages = computed(() => (evidence.value?.events || []).filter(event => event.type === 'agent.message'))
 
-function artifactHref(artifact: ArtifactEvidence) {
+function artifactPath(artifact: ArtifactEvidence) {
   const runId = evidence.value?.run.id
-  return runId ? `/api/projects/${props.projectId}/runs/${runId}/artifacts/${artifact.id}` : '#'
+  return runId ? `/api/projects/${props.projectId}/runs/${runId}/artifacts/${artifact.id}` : undefined
+}
+
+async function downloadArtifact(artifact: ArtifactEvidence) {
+  const path = artifactPath(artifact)
+  if (!path) return
+  artifactError.value = undefined
+  try {
+    await downloadApiFile(path, artifact.name)
+  } catch (failure) {
+    artifactError.value = failure as Error
+  }
 }
 
 function testsAreSuccess() {
@@ -91,9 +103,16 @@ function provenanceText() {
 
           <UCard>
             <h2 class="section-label mb-3">Candidate</h2>
+            <UAlert v-if="artifactError" title="Unable to download artifact" :description="artifactError.message" color="error" class="mb-3" />
             <ul class="space-y-2 text-sm">
               <li v-for="artifact in candidateArtifacts" :key="artifact.id">
-                <a :href="artifactHref(artifact)" class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary">{{ artifact.name }}</a>
+                <button
+                  type="button"
+                  class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+                  @click="downloadArtifact(artifact)"
+                >
+                  {{ artifact.name }}
+                </button>
                 <span class="text-muted"> · {{ artifact.kind.replaceAll('_', ' ') }}</span>
               </li>
             </ul>
