@@ -6,6 +6,8 @@ export interface ConfigRecord {
   enabled?: boolean
   state?: string
   healthStatus?: string
+  filteredModelCount?: number | null
+  totalModelCount?: number | null
   [key: string]: unknown
 }
 
