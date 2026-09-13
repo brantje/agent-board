@@ -232,6 +232,18 @@ jobs:
         run: |
           curl --fail --silent --show-error http://127.0.0.1:3001/healthz
           curl --fail --silent --show-error http://127.0.0.1:3000/
+      - name: Prepare Phase 5 E2E repository
+        run: |
+          set -eu
+          rm -rf .phase5-auth-e2e
+          mkdir .phase5-auth-e2e
+          git -C .phase5-auth-e2e init -b main
+          git -C .phase5-auth-e2e config user.email phase5-e2e@example.test
+          git -C .phase5-auth-e2e config user.name 'Phase 5 E2E'
+          printf 'phase 5 auth e2e\n' > .phase5-auth-e2e/README.md
+          git -C .phase5-auth-e2e add README.md
+          git -C .phase5-auth-e2e commit -m 'initial fixture'
+          chmod -R a+rwX .phase5-auth-e2e
       - name: Run Phase 5 Playwright authorization flow
         run: |
           set -eu
