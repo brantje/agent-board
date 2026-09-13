@@ -40,6 +40,7 @@ export interface RepositorySettings {
 export interface IssueCreator {
   type: 'HUMAN' | 'AGENT'
   id: string
+  name: string | null
 }
 
 export interface Issue {
