@@ -27,10 +27,10 @@ func TestPhase5ProtectedSurfacesRequireAuthentication(t *testing.T) {
 func TestPhase5NestedProjectResourcesPreserveNotFoundIsolation(t *testing.T) {
 	fixture, _, token := projectAdminFixture(t)
 	for _, path := range []string{
-		"/api/projects/" + otherID + "/issues/" + issueID,
-		"/api/projects/" + otherID + "/runs/" + runID,
-		"/api/projects/" + otherID + "/questions/" + questionID,
-		"/api/projects/" + otherID + "/reviews/" + reviewID,
+		"/api/projects/" + otherID + "/issues/resource-id",
+		"/api/projects/" + otherID + "/runs/resource-id",
+		"/api/projects/" + otherID + "/questions/resource-id",
+		"/api/projects/" + otherID + "/reviews/resource-id",
 		"/api/projects/" + otherID + "/events",
 	} {
 		t.Run(path, func(t *testing.T) {
