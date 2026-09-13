@@ -23,6 +23,12 @@ const choices = computed(() => agents.data.value
   ?.filter(agent => agent.state === 'ENABLED')
   .map(agent => ({ label: agent.name, value: agent.id })) || [])
 const assignedAgentName = computed(() => agents.data.value?.find(agent => agent.id === issue.value?.assignedAgentId)?.name)
+const creatorLabel = computed(() => {
+  const creator = issue.value?.createdBy
+  if (!creator) return 'Unknown'
+  const kind = creator.type === 'AGENT' ? 'Agent' : 'User'
+  return creator.name?.trim() ? `${creator.name} · ${kind}` : `${kind} unavailable`
+})
 const assignmentDescription = computed(() => {
   if (!assignmentResult.value) return undefined
   const result = assignmentResult.value
@@ -132,6 +138,10 @@ async function saved(savedIssue: Issue) {
               <div>
                 <dt class="text-muted">Assigned Agent</dt>
                 <dd>{{ assignedAgentName || (issue.assignedAgentId ? 'Assigned Agent unavailable' : 'Unassigned') }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">Created by</dt>
+                <dd>{{ creatorLabel }}</dd>
               </div>
               <div>
                 <dt class="text-muted">Latest Run</dt>
