@@ -25,6 +25,7 @@ describe('application foundation', () => {
   it('renders only canonical navigation, adding project routes in project context', async () => {
     const route = reactive({ params: {} as Record<string,string> })
     vi.stubGlobal('useRoute', () => route)
+    vi.stubGlobal('useState', () => ({ value: { deploymentRole: 'admin' } }))
     const wrapper = mount(Shell, { global })
     expect(wrapper.findAll('nav').length).toBe(2)
     expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
@@ -46,10 +47,11 @@ describe('application foundation', () => {
     expect(wrapper.find('[aria-label="Back to projects"]').exists()).toBe(false)
     expect(wrapper.find('[aria-label="Primary navigation"]').exists()).toBe(true)
     expect(navigation().global.map(item => item.label)).toEqual(['Projects','Runs','Inbox','Account'])
-    expect(navigation().settings.map(item => item.label)).toEqual(['Settings'])
+    expect(navigation(undefined, { deploymentAdmin: true }).settings.map(item => item.label)).toEqual(['Settings'])
   })
   it('pins Settings above the sidebar footer divider', () => {
     vi.stubGlobal('useRoute', () => ({ params: {} }))
+    vi.stubGlobal('useState', () => ({ value: { deploymentRole: 'admin' } }))
     const sidebar = {
       template: '<aside><div data-testid="sidebar-body"><slot name="default" :collapsed="false" /></div><div data-testid="sidebar-footer"><slot name="footer" :collapsed="false" /></div></aside>'
     }
