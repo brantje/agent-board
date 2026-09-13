@@ -34,7 +34,7 @@ func issueDTO(v store.Issue) IssueDTO {
 		CurrentBranch:   v.CurrentBranch,
 	}
 	if v.CreatedByType != nil && v.CreatedByID != nil {
-		dto.CreatedBy = &IssueCreatorDTO{Type: *v.CreatedByType, ID: *v.CreatedByID}
+		dto.CreatedBy = &IssueCreatorDTO{Type: *v.CreatedByType, ID: *v.CreatedByID, Name: v.CreatedByName}
 	}
 	if v.LastEvent != nil {
 		event := eventEvidenceDTO(*v.LastEvent)
