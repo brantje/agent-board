@@ -263,9 +263,6 @@ func (s *Service) CreateIssue(ctx context.Context, input store.Issue) (store.Iss
 	if err := validateIssue(input); err != nil {
 		return store.Issue{}, err
 	}
-	if input.CreatedByType == nil || input.CreatedByID == nil {
-		return store.Issue{}, invalid("issue creator is required")
-	}
 	value, err := s.store.CreateIssue(ctx, input)
 	if err != nil {
 		return store.Issue{}, translateStoreError(err, "issue")
