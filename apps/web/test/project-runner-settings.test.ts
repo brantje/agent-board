@@ -1,5 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import ProjectRunnerSettings from '../app/components/ProjectRunnerSettings.vue'
 import RunnerManager from '../app/components/RunnerManager.vue'
 import { uiStubs } from './ui-stubs'
 
@@ -23,6 +24,40 @@ const global = {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('project runner settings', () => {
+  it('loads project context for the dedicated runner settings page', async () => {
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path === '/api/projects/project-1') {
+        return new Response(JSON.stringify({ id: 'project-1', allowInternalRunner: false }))
+      }
+      if (path === '/api/projects/project-1/access/effective-role') {
+        return new Response(JSON.stringify({ role: 'admin' }))
+      }
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(ProjectRunnerSettings, {
+      props: { projectId: 'project-1' },
+      global: {
+        stubs: {
+          ...global.stubs,
+          RunnerManager: {
+            props: ['projectId', 'canAdmin', 'allowInternalRunner'],
+            template: '<div data-runner-manager :data-project="projectId" :data-admin="String(canAdmin)" :data-internal="String(allowInternalRunner)" />'
+          }
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('h1').text()).toBe('Runners')
+    const manager = wrapper.get('[data-runner-manager]')
+    expect(manager.attributes('data-project')).toBe('project-1')
+    expect(manager.attributes('data-admin')).toBe('true')
+    expect(manager.attributes('data-internal')).toBe('false')
+  })
+
   it('separates dedicated, shared and internal fallback and uses project-scoped mutations', async () => {
     const settings = {
       runnerIds: [] as string[],
