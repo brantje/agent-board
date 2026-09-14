@@ -10,7 +10,15 @@ const runner = (id: string, projectId: string | null, name: string) => ({
   activeSessions: 0, reservedSessions: 0, maxActiveSessions: 5, createdAt: '', updatedAt: ''
 })
 
-const global = { stubs: { ...uiStubs } }
+const global = {
+  stubs: {
+    ...uiStubs,
+    UAlert: {
+      props: ['title', 'description'],
+      template: '<div role="alert">{{ title }} {{ description }}<slot name="actions" /></div>'
+    }
+  }
+}
 
 afterEach(() => vi.unstubAllGlobals())
 
