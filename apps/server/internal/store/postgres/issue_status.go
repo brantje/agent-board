@@ -32,52 +32,31 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 		return store.IssueMutationResult{}, err
 	}
 	if previous.Status == input.Status {
-		current, err := getIssue(ctx, tx, input.ProjectID, input.IssueID)
-		if err != nil {
-			return store.IssueMutationResult{}, err
-		}
 		if err := tx.Commit(ctx); err != nil {
 			return store.IssueMutationResult{}, err
 		}
-		return store.IssueMutationResult{Issue: current}, nil
+		return store.IssueMutationResult{Issue: previous}, nil
 	}
 
-	updated, err := scanIssueJoined(tx.QueryRow(ctx, `
-		UPDATE issues AS i SET status=$3, updated_at=now()
-		FROM projects AS p
-		WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
-		RETURNING `+issueSelectColumns+`
-	`, input.ProjectID, input.IssueID, input.Status))
-	if err != nil {
-		return store.IssueMutationResult{}, err
-	}
-	_, runEvent, err := enqueueIssueMutation(ctx, tx, updated, previous.Status, false, repositoryPath, defaultBranch)
-	if err != nil {
-		return store.IssueMutationResult{}, err
-	}
-	updated.PreviousStatus = previous.Status
-	issueEvent, err := store.NewIssueUpdatedEventWithActor(updated, previous.Status, input.Actor)
-	if err != nil {
-		return store.IssueMutationResult{}, err
-	}
-	issueEvent.RunID = input.RunID
-	issueEvent.AgentID = input.AgentID
-	issueEvent.WorkspaceID = input.WorkspaceID
-	issueEvent, err = appendEventTx(ctx, tx, issueEvent)
+	updated := previous
+	updated.Status = input.Status
+	result, err := applyIssueMutationTx(ctx, tx, issueMutationTxInput{
+		Issue:          updated,
+		Previous:       previous,
+		RepositoryPath: repositoryPath,
+		DefaultBranch:  defaultBranch,
+		Actor:          input.Actor,
+		RunID:          input.RunID,
+		AgentID:        input.AgentID,
+		WorkspaceID:    input.WorkspaceID,
+	})
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.IssueMutationResult{}, err
 	}
-
-	events := make([]store.Event, 0, 2)
-	if runEvent.ID != "" {
-		events = append(events, runEvent)
-	}
-	events = append(events, issueEvent)
-	updated.LastEvent = &issueEvent
-	return store.IssueMutationResult{Issue: updated, Events: events}, nil
+	return result, nil
 }
 
 func lockIssueStatusRunFence(ctx context.Context, tx pgx.Tx, input store.IssueStatusMutation) error {
