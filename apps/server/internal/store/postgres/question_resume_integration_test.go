@@ -54,8 +54,8 @@ func TestBlockingQuestionAnswerDurablyResumesSameRunAndWorkspace(t *testing.T) {
 		t.Fatalf("waiting run=%+v", waiting)
 	}
 	issue, err := s.GetIssue(ctx, f.project.ID, f.issue.ID)
-	if err != nil || issue.Status != "BLOCKED" {
-		t.Fatalf("blocked issue=%+v err=%v", issue, err)
+	if err != nil || issue.Status != "IN_PROGRESS" {
+		t.Fatalf("waiting issue=%+v err=%v", issue, err)
 	}
 	assertSchedulerOwnershipCounts(t, s, start.Job.ID, 0, 0)
 
