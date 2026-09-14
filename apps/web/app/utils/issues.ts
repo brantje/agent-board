@@ -56,13 +56,6 @@ export function boardColumns(issues: Issue[], search = '') {
   }))
 }
 
-export function editableStatuses(status?: string): string[] {
-  if (!status) return ['BACKLOG', 'TODO']
-  if (status === 'REVIEW') return ['REVIEW']
-  if (status === 'DONE') return ['DONE', 'TODO']
-  return ['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED']
-}
-
 export function latestRun(runs: Run[], issueId: string) {
   return runs
     .filter(run => run.issueId === issueId)
