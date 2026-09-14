@@ -54,6 +54,7 @@ function payload() {
     body.repositoryPath = state.repositoryPath.trim()
     body.defaultBranch = state.defaultBranch.trim()
   }
+  if (props.project) body.allowInternalRunner = props.project.allowInternalRunner
   if (!props.project) body.issuePrefix = state.issuePrefix.trim().toUpperCase()
   return body
 }
