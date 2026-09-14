@@ -289,23 +289,35 @@ function scopeLabel(runner: Runner) {
       <UCard>
         <template #header>
           <div>
-            <h2 class="text-base font-semibold">Shared runners</h2>
-            <p class="text-sm text-muted">Deployment-global capacity. No selection allows any eligible shared runner; selecting runners restricts shared capacity to those hosts.</p>
+            <h2 class="text-base font-semibold">Deployment runners</h2>
+            <p class="text-sm text-muted">Deployment-global capacity available to this Project. The internal runner is controlled by the fallback setting below; shared external runners can be restricted to selected hosts.</p>
           </div>
         </template>
         <UAlert v-if="policyError" color="error" title="Unable to save shared runner policy" :description="policyError.message" class="mb-4" />
-        <div v-if="sharedRunners.length" class="space-y-3">
-          <UCheckbox
-            v-for="runner in sharedRunners"
-            :key="runner.id"
-            :model-value="selectedSharedRunnerIds.includes(runner.id)"
-            :label="runner.name ?? 'Pending registration'"
-            :description="runner.id"
-            :disabled="!canManage || policySaving"
-            @update:model-value="value => toggleSharedRunner(runner.id, Boolean(value))"
-          />
+        <div data-testid="internal-runner-capacity" class="mb-5 flex flex-wrap items-center gap-3 rounded-md border border-default p-3">
+          <div class="min-w-0 flex-1">
+            <h3 class="font-medium text-highlighted">Internal runner</h3>
+            <p class="text-sm text-muted">Server-managed global runner used as fallback capacity.</p>
+          </div>
+          <UBadge color="neutral" variant="subtle" label="Internal" />
+          <UBadge :color="internalFallback ? 'success' : 'neutral'" variant="subtle" :label="internalFallback ? 'Fallback enabled' : 'Fallback disabled'" />
         </div>
-        <p v-else class="text-sm text-muted">No shared external runners are available.</p>
+        <div class="border-t border-default pt-4">
+          <h3 class="mb-1 font-medium text-highlighted">Shared external runners</h3>
+          <p class="mb-3 text-sm text-muted">No selection allows any eligible shared external runner; selecting runners restricts shared capacity to those hosts.</p>
+          <div v-if="sharedRunners.length" class="space-y-3">
+            <UCheckbox
+              v-for="runner in sharedRunners"
+              :key="runner.id"
+              :model-value="selectedSharedRunnerIds.includes(runner.id)"
+              :label="runner.name ?? 'Pending registration'"
+              :description="runner.id"
+              :disabled="!canManage || policySaving"
+              @update:model-value="value => toggleSharedRunner(runner.id, Boolean(value))"
+            />
+          </div>
+          <p v-else class="text-sm text-muted">No shared external runners are available.</p>
+        </div>
         <div v-if="canManage" class="mt-4 flex justify-end">
           <UButton label="Save shared runner policy" :loading="policySaving" @click="saveSharedPolicy" />
         </div>
