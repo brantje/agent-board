@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
@@ -44,11 +45,14 @@ type issueStatusToolPart struct {
 	State     struct {
 		Status string          `json:"status"`
 		Input  json.RawMessage `json:"input,omitempty"`
+		Time   struct {
+			End int64 `json:"end"`
+		} `json:"time"`
 	} `json:"state"`
 }
 
 type issueStatusRecoveryUpdater interface {
-	SetRecoveredStatus(context.Context, string) error
+	SetRecoveredStatus(context.Context, string, time.Time) error
 }
 
 type issueStatusToolTracker struct {
@@ -86,7 +90,7 @@ func (t *issueStatusToolTracker) Reconcile(ctx context.Context, native *client.C
 		return err
 	}
 	for _, part := range parts {
-		if err := t.applyPart(ctx, part, sessionID, updater, false); err != nil {
+		if err := t.applyPart(ctx, part, sessionID, updater, true); err != nil {
 			return err
 		}
 	}
@@ -179,11 +183,14 @@ func (t *issueStatusToolTracker) applyPart(ctx context.Context, part issueStatus
 	}
 	var err error
 	if recovery {
+		if part.State.Time.End <= 0 {
+			return fmt.Errorf("opencode engine: recovered Issue status tool completion is missing completion time")
+		}
 		recoveryUpdater, ok := updater.(issueStatusRecoveryUpdater)
 		if !ok {
 			return fmt.Errorf("opencode engine: recovered Issue status capability is unavailable")
 		}
-		err = recoveryUpdater.SetRecoveredStatus(ctx, status)
+		err = recoveryUpdater.SetRecoveredStatus(ctx, status, time.UnixMilli(part.State.Time.End).UTC())
 	} else {
 		err = updater.SetStatus(ctx, status)
 	}

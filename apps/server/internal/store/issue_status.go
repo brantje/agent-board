@@ -3,7 +3,11 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"time"
 )
+
+var ErrIssueStatusRecoverySuperseded = errors.New("store: issue status recovery superseded")
 
 // ValidIssueStatus reports whether status is part of the v0.1 Issue board contract.
 func ValidIssueStatus(status string) bool {
@@ -24,6 +28,7 @@ type IssueStatusMutation struct {
 	AgentID     *string
 	WorkspaceID *string
 	Recovery    bool
+	RecoveryAt  *time.Time
 }
 
 // IssueStatusMutationStore is the canonical status-only Issue mutation boundary.

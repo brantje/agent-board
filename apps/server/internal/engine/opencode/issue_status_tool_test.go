@@ -8,15 +8,19 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 )
 
 type recordingIssueStatusUpdater struct {
-	statuses  []string
-	recovered []string
-	err       error
+	statuses      []string
+	recovered     []string
+	recoveredAt   []time.Time
+	err           error
+	recoveryErr   error
+	skipRecovered bool
 }
 
 func (u *recordingIssueStatusUpdater) SetStatus(_ context.Context, status string) error {
@@ -24,8 +28,15 @@ func (u *recordingIssueStatusUpdater) SetStatus(_ context.Context, status string
 	return u.err
 }
 
-func (u *recordingIssueStatusUpdater) SetRecoveredStatus(ctx context.Context, status string) error {
+func (u *recordingIssueStatusUpdater) SetRecoveredStatus(ctx context.Context, status string, completedAt time.Time) error {
 	u.recovered = append(u.recovered, status)
+	u.recoveredAt = append(u.recoveredAt, completedAt)
+	if u.recoveryErr != nil {
+		return u.recoveryErr
+	}
+	if u.skipRecovered {
+		return nil
+	}
 	return u.SetStatus(ctx, status)
 }
 
@@ -92,8 +103,11 @@ func TestIssueStatusToolReconcileRecoversMissedCompletionOnce(t *testing.T) {
 	if len(updater.statuses) != 1 || updater.statuses[0] != "BLOCKED" {
 		t.Fatalf("statuses=%v", updater.statuses)
 	}
-	if len(updater.recovered) != 0 {
-		t.Fatalf("in-process reconciliation unexpectedly used attach recovery path: %v", updater.recovered)
+	if len(updater.recovered) != 1 || updater.recovered[0] != "BLOCKED" {
+		t.Fatalf("recovered statuses=%v want [BLOCKED]", updater.recovered)
+	}
+	if len(updater.recoveredAt) != 1 || updater.recoveredAt[0].UnixMilli() != issueStatusToolCompletedAtMillis {
+		t.Fatalf("recovery checkpoints=%v", updater.recoveredAt)
 	}
 }
 
@@ -112,8 +126,8 @@ func TestIssueStatusToolReconcileIgnoresOtherSession(t *testing.T) {
 	if err := newIssueStatusToolTracker().Reconcile(context.Background(), native, "ses_1", updater); err != nil {
 		t.Fatalf("Reconcile() error=%v", err)
 	}
-	if len(updater.statuses) != 0 {
-		t.Fatalf("other session mutated statuses=%v", updater.statuses)
+	if len(updater.statuses) != 0 || len(updater.recovered) != 0 {
+		t.Fatalf("other session mutated statuses=%v recovered=%v", updater.statuses, updater.recovered)
 	}
 }
 
@@ -144,6 +158,71 @@ func TestIssueStatusToolReconcileAttachRestoresLatestDurableIntentOnce(t *testin
 	}
 	if len(updater.recovered) != 1 || updater.recovered[0] != "REVIEW" {
 		t.Fatalf("recovered statuses=%v want [REVIEW]", updater.recovered)
+	}
+}
+
+func TestIssueStatusToolReconcileAttachMarksSupersededPartSeen(t *testing.T) {
+	native := issueStatusHistoryClient(t, "ses_1", []any{
+		map[string]any{
+			"info": map[string]any{"sessionID": "ses_1"},
+			"parts": []any{issueStatusToolPartPayload("ses_1", " part_stale ", "REVIEW")},
+		},
+	})
+	tracker := newIssueStatusToolTracker()
+	updater := &recordingIssueStatusUpdater{skipRecovered: true}
+
+	if err := tracker.ReconcileAttach(context.Background(), native, "ses_1", updater); err != nil {
+		t.Fatalf("ReconcileAttach() stale recovery error=%v", err)
+	}
+	if err := tracker.ReconcileAttach(context.Background(), native, "ses_1", updater); err != nil {
+		t.Fatalf("duplicate ReconcileAttach() stale recovery error=%v", err)
+	}
+	if err := tracker.Reconcile(context.Background(), native, "ses_1", updater); err != nil {
+		t.Fatalf("Reconcile() after stale attach error=%v", err)
+	}
+	if len(updater.recovered) != 1 || updater.recovered[0] != "REVIEW" {
+		t.Fatalf("stale recovery attempts=%v want [REVIEW]", updater.recovered)
+	}
+	if len(updater.statuses) != 0 {
+		t.Fatalf("stale recovery unexpectedly applied status=%v", updater.statuses)
+	}
+}
+
+func TestIssueStatusToolRecoveryFailureIsNotMarkedSeen(t *testing.T) {
+	native := issueStatusHistoryClient(t, "ses_1", []any{
+		map[string]any{
+			"info": map[string]any{"sessionID": "ses_1"},
+			"parts": []any{issueStatusToolPartPayload("ses_1", "part_conflict", "DONE")},
+		},
+	})
+	tracker := newIssueStatusToolTracker()
+	updater := &recordingIssueStatusUpdater{recoveryErr: errors.New("capability conflict")}
+
+	for attempt := 0; attempt < 2; attempt++ {
+		err := tracker.Reconcile(context.Background(), native, "ses_1", updater)
+		if err == nil || !strings.Contains(err.Error(), "capability conflict") {
+			t.Fatalf("attempt %d error=%v", attempt+1, err)
+		}
+	}
+	if len(updater.recovered) != 2 {
+		t.Fatalf("failed recovery attempts=%v want two retries", updater.recovered)
+	}
+}
+
+func TestIssueStatusToolRecoveryRequiresCompletionTime(t *testing.T) {
+	part := issueStatusToolPartPayload("ses_1", "part_no_time", "REVIEW")
+	state := part["state"].(map[string]any)
+	delete(state, "time")
+	native := issueStatusHistoryClient(t, "ses_1", []any{
+		map[string]any{"info": map[string]any{"sessionID": "ses_1"}, "parts": []any{part}},
+	})
+	updater := &recordingIssueStatusUpdater{}
+	err := newIssueStatusToolTracker().Reconcile(context.Background(), native, "ses_1", updater)
+	if err == nil || !strings.Contains(err.Error(), "completion time") {
+		t.Fatalf("missing completion time error=%v", err)
+	}
+	if len(updater.recovered) != 0 {
+		t.Fatalf("malformed recovery reached updater=%v", updater.recovered)
 	}
 }
 
@@ -206,6 +285,8 @@ func issueStatusToolEvent(t *testing.T, sessionID, partID, status string) client
 	return client.Event{Type: "message.part.updated", Properties: properties}
 }
 
+const issueStatusToolCompletedAtMillis int64 = 1_710_000_001_000
+
 func issueStatusToolPartPayload(sessionID, partID, status string) map[string]any {
 	input := map[string]any{}
 	if status != "" {
@@ -219,6 +300,10 @@ func issueStatusToolPartPayload(sessionID, partID, status string) map[string]any
 		"state": map[string]any{
 			"status": "completed",
 			"input":  input,
+			"time": map[string]any{
+				"start": issueStatusToolCompletedAtMillis - 1000,
+				"end":   issueStatusToolCompletedAtMillis,
+			},
 		},
 	}
 }

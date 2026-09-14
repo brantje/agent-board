@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -20,6 +19,9 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 		return store.IssueMutationResult{}, store.ErrInvalidArgument
 	}
 	if input.Recovery && input.RunID == nil {
+		return store.IssueMutationResult{}, store.ErrInvalidArgument
+	}
+	if input.Recovery != (input.RecoveryAt != nil) || (input.RecoveryAt != nil && input.RecoveryAt.IsZero()) {
 		return store.IssueMutationResult{}, store.ErrInvalidArgument
 	}
 
@@ -95,28 +97,38 @@ func validateIssueStatusRecoveryFence(ctx context.Context, tx pgx.Tx, input stor
 	if input.RunID == nil || run.StartedAt == nil {
 		return store.ErrConflict
 	}
-	var eventRunID string
-	var actorType string
-	var eventCreatedAt time.Time
-	err := tx.QueryRow(ctx, `
-		SELECT COALESCE(run_id::text, ''), COALESCE(actor->>'type', ''), created_at
-		FROM events
-		WHERE project_id=$1 AND issue_id=$2
-		  AND type IN ('issue.updated', 'issue.status_changed')
-		ORDER BY created_at DESC, id DESC
-		LIMIT 1
-	`, input.ProjectID, input.IssueID).Scan(&eventRunID, &actorType, &eventCreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil
+	if input.RecoveryAt == nil || input.RecoveryAt.IsZero() {
+		return store.ErrInvalidArgument
 	}
-	if err != nil {
+
+	checkpoint := input.RecoveryAt.UTC()
+	startedAt := run.StartedAt.UTC()
+	var databaseNow time.Time
+	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&databaseNow); err != nil {
 		return err
 	}
-	if !eventCreatedAt.After(*run.StartedAt) {
-		return nil
+	// OpenCode records tool completion on the execution host. If that clock is
+	// obviously outside this Run's server-owned interval, fall back to the Run
+	// start as a conservative checkpoint rather than risk overwriting a known
+	// newer Issue mutation.
+	if checkpoint.Before(startedAt) || checkpoint.After(databaseNow) {
+		checkpoint = startedAt
 	}
-	if eventRunID == *input.RunID && actorType == store.ActorTypeAgent {
-		return nil
+
+	var superseded bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM events
+			WHERE project_id=$1 AND issue_id=$2
+			  AND type IN ('issue.updated', 'issue.status_changed')
+			  AND created_at >= $3
+		)
+	`, input.ProjectID, input.IssueID, checkpoint).Scan(&superseded); err != nil {
+		return err
 	}
-	return store.ErrConflict
+	if superseded {
+		return store.ErrIssueStatusRecoverySuperseded
+	}
+	return nil
 }

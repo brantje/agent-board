@@ -178,51 +178,65 @@ func TestEngineReconcilesMissedQuestionAfterEventStreamDisconnect(t *testing.T) 
 	}
 }
 
-func TestEngineRecoversMissedIssueStatusCompletionAfterEventStreamDisconnectOnce(t *testing.T) {
-	harness := newReconnectHarness()
-	harness.statusMessages = []any{
-		map[string]any{
-			"info": map[string]any{"sessionID": "ses_native", "role": "assistant"},
-			"parts": []any{issueStatusToolPartPayload("ses_native", "part_status_missed", "REVIEW")},
-		},
-	}
-	server := httptest.NewServer(harness.handler(t))
-	defer server.Close()
-	parsed, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestEngineReconcilesMissedIssueStatusAfterEventStreamDisconnect(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		skipRecovered bool
+		wantStatuses  int
+	}{
+		{name: "valid historical replay", wantStatuses: 1},
+		{name: "superseded historical replay", skipRecovered: true, wantStatuses: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			harness := newReconnectHarness()
+			harness.statusMessages = []any{
+				map[string]any{
+					"info": map[string]any{"sessionID": "ses_native", "role": "assistant"},
+					"parts": []any{issueStatusToolPartPayload("ses_native", "part_status_missed", "REVIEW")},
+				},
+			}
+			server := httptest.NewServer(harness.handler(t))
+			defer server.Close()
+			parsed, err := url.Parse(server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	process := newFakeOpenCodeProcess(parsed.Host)
-	launcher := &fakeOpenCodeLauncher{process: process}
-	questions := &fakeInteractiveQuestions{}
-	statuses := &recordingIssueStatusUpdater{}
-	adapter := newWithAddress(parsed.Host)
+			process := newFakeOpenCodeProcess(parsed.Host)
+			launcher := &fakeOpenCodeLauncher{process: process}
+			questions := &fakeInteractiveQuestions{}
+			statuses := &recordingIssueStatusUpdater{skipRecovered: tc.skipRecovered}
+			adapter := newWithAddress(parsed.Host)
 
-	executeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	_, err = adapter.Execute(executeCtx, engine.Request{
-		Context: executioncontext.SafeContext{
-			Issue:    executioncontext.IssueContext{Title: "Recover missed Board status"},
-			Agent:    executioncontext.AgentContext{Engine: Name},
-			Model:    executioncontext.ModelContext{Model: "claude-sonnet"},
-			Provider: executioncontext.ProviderContext{Kind: "anthropic"},
-		},
-		Launcher:             launcher,
-		InteractiveQuestions: questions,
-		IssueStatus:          statuses,
-	})
-	if err != nil {
-		t.Fatalf("Execute() error=%v", err)
-	}
+			executeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_, err = adapter.Execute(executeCtx, engine.Request{
+				Context: executioncontext.SafeContext{
+					Issue:    executioncontext.IssueContext{Title: "Recover missed Board status"},
+					Agent:    executioncontext.AgentContext{Engine: Name},
+					Model:    executioncontext.ModelContext{Model: "claude-sonnet"},
+					Provider: executioncontext.ProviderContext{Kind: "anthropic"},
+				},
+				Launcher:             launcher,
+				InteractiveQuestions: questions,
+				IssueStatus:          statuses,
+			})
+			if err != nil {
+				t.Fatalf("Execute() error=%v", err)
+			}
 
-	harness.mu.Lock()
-	subscriptions := harness.subscriptions
-	harness.mu.Unlock()
-	if subscriptions < 2 {
-		t.Fatalf("event subscriptions=%d want reconnect", subscriptions)
-	}
-	if len(statuses.statuses) != 1 || statuses.statuses[0] != "REVIEW" {
-		t.Fatalf("status updates=%v want [REVIEW]", statuses.statuses)
+			harness.mu.Lock()
+			subscriptions := harness.subscriptions
+			harness.mu.Unlock()
+			if subscriptions < 2 {
+				t.Fatalf("event subscriptions=%d want reconnect", subscriptions)
+			}
+			if len(statuses.recovered) != 1 || statuses.recovered[0] != "REVIEW" {
+				t.Fatalf("recovered status updates=%v want [REVIEW]", statuses.recovered)
+			}
+			if len(statuses.statuses) != tc.wantStatuses {
+				t.Fatalf("applied status updates=%v want count %d", statuses.statuses, tc.wantStatuses)
+			}
+		})
 	}
 }
