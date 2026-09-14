@@ -106,7 +106,7 @@ func TestInteractiveQuestionBatchCommitsTogetherAndEntersWaitingOnce(t *testing.
 	if entered != 1 {
 		t.Fatalf("entered waiting markers=%d want 1", entered)
 	}
-	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "BLOCKED")
+	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "IN_PROGRESS")
 }
 
 func TestExpiredInteractiveBatchWaitsForEveryAnswerBeforeRecovery(t *testing.T) {
@@ -142,11 +142,12 @@ func TestExpiredInteractiveBatchWaitsForEveryAnswerBeforeRecovery(t *testing.T) 
 			if result.Run.Status != "WAITING_FOR_INPUT" || result.Job != nil {
 				t.Fatalf("first answer stranded the remaining Question: run=%s job=%+v", result.Run.Status, result.Job)
 			}
-			assertIssueStatus(t, s, f.project.ID, f.issue.ID, "BLOCKED")
+			assertIssueStatus(t, s, f.project.ID, f.issue.ID, "TODO")
 		} else if result.Run.Status != "QUEUED" || result.Job == nil || result.Job.Kind != "RESUME" {
 			t.Fatalf("final answer did not queue recovery: %+v", result)
 		}
 	}
+	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "TODO")
 	var resumes int
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_jobs WHERE run_id=$1 AND kind='RESUME'`, f.run.ID).Scan(&resumes); err != nil {
 		t.Fatal(err)
