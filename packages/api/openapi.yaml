@@ -91,7 +91,13 @@ paths:
   /api/projects/{projectID}/access/directory/groups:
     $ref: ./paths/project-access.yaml#/directoryGroups
   /api/projects/{projectID}/runners:
-    $ref: ./paths/project-runners.yaml
+    $ref: ./paths/project-runners.yaml#/collection
+  /api/projects/{projectID}/runners/{resourceID}:
+    $ref: ./paths/project-runners.yaml#/resource
+  /api/projects/{projectID}/runners/{resourceID}/rotate-token:
+    $ref: ./paths/project-runners.yaml#/rotate
+  /api/projects/{projectID}/runners/{resourceID}/revoke:
+    $ref: ./paths/project-runners.yaml#/revoke
   /api/secrets:
     $ref: ./paths/secrets.yaml#/path1
   /api/providers:
