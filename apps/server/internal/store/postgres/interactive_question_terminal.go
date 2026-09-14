@@ -49,7 +49,7 @@ func cleanupTerminalInteractiveQuestions(ctx context.Context, tx pgx.Tx, run sto
 		return err
 	}
 	for _, questionID := range questionIDs {
-		if _, err := appendInteractiveQuestionEvent(ctx, tx, run, nil, "question.cancelled", map[string]any{
+		if _, err := appendInteractiveQuestionEvent(ctx, tx, run, "", "question.cancelled", map[string]any{
 			"questionId": questionID,
 			"reason":     "run_terminal",
 		}); err != nil {
