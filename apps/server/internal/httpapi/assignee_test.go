@@ -11,9 +11,9 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func (f *fakeControlPlaneStore) SetIssueAssignee(_ context.Context, pid, id string, target *store.Assignee, _ json.RawMessage) (store.Issue, store.Event, error) {
+func (f *fakeControlPlaneStore) SetIssueAssignee(_ context.Context, pid, id string, target *store.Assignee, _ json.RawMessage) (store.IssueMutationResult, error) {
 	if pid != projectID || id != issueID {
-		return store.Issue{}, store.Event{}, store.ErrNotFound
+		return store.IssueMutationResult{}, store.ErrNotFound
 	}
 	issue := issueFixture("TODO")
 	if target != nil {
@@ -21,7 +21,7 @@ func (f *fakeControlPlaneStore) SetIssueAssignee(_ context.Context, pid, id stri
 		issue.AssigneeID = &target.ID
 		issue.AssigneeName = stringPtr("Owner")
 	}
-	return issue, store.Event{}, nil
+	return store.IssueMutationResult{Issue: issue}, nil
 }
 func (f *fakeControlPlaneStore) ListIssueAssignees(_ context.Context, pid string) ([]store.Assignee, error) {
 	if pid != projectID {
@@ -45,7 +45,7 @@ func TestGenericAssignmentHTTPContract(t *testing.T) {
 		{`{"assignedTo":{"type":"USER","id":"` + otherID + `","name":"forged"}}`, 400},
 	} {
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest("POST", "/api/projects/"+projectID+"/issues/"+issueKey+"/assignment", strings.NewReader(tc.body))
+		req := httptest.NewRequestWithContext(t.Context(), "POST", "/api/projects/"+projectID+"/issues/"+issueKey+"/assignment", strings.NewReader(tc.body))
 		router.ServeHTTP(rec, req)
 		if rec.Code != tc.code {
 			t.Fatalf("%s status=%d body=%s", tc.body, rec.Code, rec.Body.String())
@@ -57,7 +57,7 @@ func TestGenericAssignmentHTTPContract(t *testing.T) {
 		}
 	}
 	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, httptest.NewRequest("GET", "/api/projects/"+projectID+"/assignees", nil))
+	router.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), "GET", "/api/projects/"+projectID+"/assignees", nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), `"type":"USER"`) || !strings.Contains(rec.Body.String(), `"type":"AGENT"`) {
 		t.Fatalf("directory: %d %s", rec.Code, rec.Body.String())
 	}
@@ -82,7 +82,7 @@ func TestGenericAssignmentHTTPProjectAuthorization(t *testing.T) {
 		{outsideToken, "GET", "/assignees", "", 404},
 		{"", "GET", "/assignees", "", 401},
 	} {
-		req := httptest.NewRequest(tc.method, "/api/projects/"+projectID+tc.path, strings.NewReader(tc.body))
+		req := httptest.NewRequestWithContext(t.Context(), tc.method, "/api/projects/"+projectID+tc.path, strings.NewReader(tc.body))
 		if tc.token != "" {
 			req.Header.Set("Authorization", "Bearer "+tc.token)
 		}
