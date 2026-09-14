@@ -286,6 +286,15 @@ func (s *Service) CreateIssue(ctx context.Context, input store.Issue) (store.Iss
 	if err := validateIssue(input); err != nil {
 		return store.Issue{}, err
 	}
+	if mutationStore, ok := s.store.(store.IssueMutationStore); ok {
+		result, err := mutationStore.CreateIssueMutation(ctx, input)
+		if err != nil {
+			return store.Issue{}, translateStoreError(err, "issue")
+		}
+		publisher, _ := s.events.(persistedEventPublisher)
+		publishPersistedEvents(ctx, publisher, result.Events)
+		return result.Issue, nil
+	}
 	value, err := s.store.CreateIssue(ctx, input)
 	if err != nil {
 		return store.Issue{}, translateStoreError(err, "issue")
@@ -306,6 +315,15 @@ func (s *Service) UpdateIssue(ctx context.Context, input store.Issue) (store.Iss
 	}
 	if err := validateIssue(input); err != nil {
 		return store.Issue{}, err
+	}
+	if mutationStore, ok := s.store.(store.IssueMutationStore); ok {
+		result, err := mutationStore.UpdateIssueMutation(ctx, input)
+		if err != nil {
+			return store.Issue{}, translateStoreError(err, "issue")
+		}
+		publisher, _ := s.events.(persistedEventPublisher)
+		publishPersistedEvents(ctx, publisher, result.Events)
+		return result.Issue, nil
 	}
 	current, err := s.GetIssue(ctx, input.ProjectID, input.ID)
 	if err != nil {
