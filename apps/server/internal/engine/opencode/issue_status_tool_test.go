@@ -22,18 +22,17 @@ func (u *recordingIssueStatusUpdater) SetStatus(_ context.Context, status string
 }
 
 func TestIssueStatusServeCommandInstallsToolOutsideWorkspace(t *testing.T) {
-	env := map[string]string{"XDG_CONFIG_HOME": "/tmp/run-config"}
-	command := issueStatusServeCommand("127.0.0.1", "4100", env)
-	if len(command) < 6 || command[0] != "sh" || command[1] != "-c" {
+	command := issueStatusServeCommand("127.0.0.1", "4100", nil)
+	if len(command) != 7 || command[0] != "sh" || command[1] != "-c" {
 		t.Fatalf("command=%q", command)
 	}
-	if command[len(command)-2] != "127.0.0.1" || command[len(command)-1] != "4100" {
+	if command[4] != "127.0.0.1" || command[5] != "4100" {
 		t.Fatalf("command host/port=%q", command)
 	}
 	if !strings.Contains(command[2], "XDG_CONFIG_HOME") || strings.Contains(command[2], "/workspace/.opencode") {
 		t.Fatalf("tool installation script=%q", command[2])
 	}
-	toolSource := env[issueStatusToolSourceEnv]
+	toolSource := command[6]
 	if !strings.Contains(toolSource, "@opencode-ai/plugin") || !strings.Contains(toolSource, "Board status") {
 		t.Fatalf("tool source=%q", toolSource)
 	}
