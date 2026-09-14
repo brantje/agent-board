@@ -10,13 +10,18 @@ import (
 )
 
 type capturingIssueRecorder struct {
-	events []store.Event
+	events    []store.Event
+	published []store.Event
 }
 
 func (c *capturingIssueRecorder) Record(_ context.Context, event store.Event) (store.Event, error) {
 	event.ID = "evt-" + event.Type
 	c.events = append(c.events, event)
 	return event, nil
+}
+
+func (c *capturingIssueRecorder) PublishPersisted(_ context.Context, event store.Event) {
+	c.published = append(c.published, event)
 }
 
 func TestIssueMutationsRecordPersistBeforePublishEvents(t *testing.T) {
@@ -64,14 +69,6 @@ func TestIssueMutationsRecordPersistBeforePublishEvents(t *testing.T) {
 		t.Fatalf("status lastEvent=%+v", changed.LastEvent)
 	}
 
-	assigned, _, err := svc.AssignIssue(context.Background(), pid, coverageIssue().ID, coverageAgent().ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if assigned.LastEvent == nil || assigned.LastEvent.Type != "issue.assigned" {
-		t.Fatalf("assign lastEvent=%+v", assigned.LastEvent)
-	}
-
 	types := make([]string, 0, len(recorder.events))
 	for _, event := range recorder.events {
 		types = append(types, event.Type)
@@ -82,42 +79,15 @@ func TestIssueMutationsRecordPersistBeforePublishEvents(t *testing.T) {
 			t.Fatalf("payload=%s", event.Payload)
 		}
 	}
-	if strings.Join(types, ",") != "issue.created,issue.updated,issue.status_changed,issue.assigned" {
+	if strings.Join(types, ",") != "issue.created,issue.updated,issue.status_changed" {
 		t.Fatalf("types=%v", types)
 	}
-}
-
-func TestAssignIssueSkipsEventWhenAgentAlreadyOwnsIssue(t *testing.T) {
-	pid := coverageProjectID()
-	agentID := coverageAgent().ID
-	issue := coverageIssue()
-	issue.AssigneeID = &agentID
-	existing := store.Event{ID: "evt-assigned", Type: "issue.assigned", ProjectID: pid, IssueID: &issue.ID}
-	issue.LastEvent = &existing
-	base := &stickyIssueStore{
-		fakeStore: fakeStore{project: store.Project{ID: pid, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}, agent: coverageAgent()},
-		issue:     issue,
-	}
-	svc := New(base)
-	recorder := &capturingIssueRecorder{}
-	svc.SetEventRecorder(recorder)
-
-	assigned, _, err := svc.AssignIssue(context.Background(), pid, issue.ID, agentID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if assigned.AssigneeID == nil || *assigned.AssigneeID != agentID {
-		t.Fatalf("assigned=%+v", assigned)
-	}
-	if assigned.LastEvent == nil || assigned.LastEvent.ID != existing.ID {
-		t.Fatalf("idempotent assign lastEvent=%+v", assigned.LastEvent)
-	}
-	if len(recorder.events) != 0 {
-		t.Fatalf("idempotent assign recorded %v", recorder.events)
+	if len(recorder.published) != 0 {
+		t.Fatalf("unexpected persisted publications=%v", recorder.published)
 	}
 }
 
-func TestUpdateIssueUsesLockedPreviousStatusForEventType(t *testing.T) {
+func TestUpdateIssueUsesLockedPreviousStatusAndPublishesAutoEnqueue(t *testing.T) {
 	pid := coverageProjectID()
 	base := &lockedStatusStore{
 		fakeStore: fakeStore{project: store.Project{ID: pid, Name: "Project", IssuePrefix: "AB", RepositoryPath: "/repo", DefaultBranch: "main", WorkflowSettings: store.EmptyObject}},
@@ -142,23 +112,9 @@ func TestUpdateIssueUsesLockedPreviousStatusForEventType(t *testing.T) {
 	if payload["previousStatus"] != "BLOCKED" {
 		t.Fatalf("payload=%s", got.LastEvent.Payload)
 	}
-}
-
-type stickyIssueStore struct {
-	fakeStore
-	issue store.Issue
-}
-
-func (s *stickyIssueStore) GetIssue(context.Context, string, string) (store.Issue, error) {
-	return s.issue, nil
-}
-
-func (s *stickyIssueStore) AssignIssue(_ context.Context, _, _, agentID string) (store.Issue, store.Run, error) {
-	s.issue.AssigneeID = &agentID
-	s.issue.Status = "IN_PROGRESS"
-	locked := s.issue
-	locked.LastEvent = nil
-	return locked, coverageRun(), nil
+	if len(recorder.published) != 1 || recorder.published[0].ID != "run-event" || recorder.published[0].Type != "run.created" {
+		t.Fatalf("published=%v", recorder.published)
+	}
 }
 
 type lockedStatusStore struct {
@@ -167,12 +123,14 @@ type lockedStatusStore struct {
 
 func (s *lockedStatusStore) GetIssue(context.Context, string, string) (store.Issue, error) {
 	issue := coverageIssue()
-	issue.Status = "TODO"
+	issue.Status = "BACKLOG"
 	return issue, nil
 }
 
 func (s *lockedStatusStore) UpdateIssue(_ context.Context, input store.Issue) (store.Issue, error) {
 	input.PreviousStatus = "BLOCKED"
+	runEvent := store.Event{ID: "run-event", Type: "run.created", ProjectID: input.ProjectID, IssueID: &input.ID}
+	input.LastEvent = &runEvent
 	return input, nil
 }
 
