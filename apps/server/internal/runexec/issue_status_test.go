@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -41,7 +40,7 @@ func TestIssueStatusUpdaterBindsMutationToActiveRun(t *testing.T) {
 	if statusStore.mutation.RunID == nil || *statusStore.mutation.RunID != "run-1" || statusStore.mutation.AgentID == nil || *statusStore.mutation.AgentID != agentID || statusStore.mutation.WorkspaceID == nil || *statusStore.mutation.WorkspaceID != "workspace-1" {
 		t.Fatalf("mutation provenance=%+v", statusStore.mutation)
 	}
-	if statusStore.mutation.Recovery || statusStore.mutation.RecoveryAt != nil {
+	if statusStore.mutation.Recovery {
 		t.Fatalf("ordinary mutation unexpectedly marked as recovery: %+v", statusStore.mutation)
 	}
 	var actor map[string]string
@@ -52,11 +51,10 @@ func TestIssueStatusUpdaterBindsMutationToActiveRun(t *testing.T) {
 		t.Fatalf("actor=%v", actor)
 	}
 
-	completedAt := time.Date(2026, 9, 14, 12, 0, 0, 0, time.UTC)
-	if err := updater.SetRecoveredStatus(context.Background(), "DONE", completedAt); err != nil {
+	if err := updater.SetRecoveredStatus(context.Background(), "DONE"); err != nil {
 		t.Fatalf("SetRecoveredStatus() error=%v", err)
 	}
-	if !statusStore.mutation.Recovery || statusStore.mutation.Status != "DONE" || statusStore.mutation.RecoveryAt == nil || !statusStore.mutation.RecoveryAt.Equal(completedAt) {
+	if !statusStore.mutation.Recovery || statusStore.mutation.Status != "DONE" {
 		t.Fatalf("recovered mutation=%+v", statusStore.mutation)
 	}
 }
@@ -70,20 +68,19 @@ func TestIssueStatusUpdaterRecoverySuppressesOnlySupersededIntent(t *testing.T) 
 		Agent:     executioncontext.AgentContext{ID: "agent-1"},
 		Workspace: executioncontext.WorkspaceContext{ID: "workspace-1"},
 	}}
-	completedAt := time.Now().UTC()
 
 	statusStore.err = store.ErrIssueStatusRecoverySuperseded
-	if err := updater.SetRecoveredStatus(context.Background(), "REVIEW", completedAt); err != nil {
+	if err := updater.SetRecoveredStatus(context.Background(), "REVIEW"); err != nil {
 		t.Fatalf("superseded recovery should be skipped, got %v", err)
 	}
 
 	statusStore.err = store.ErrConflict
-	if err := updater.SetRecoveredStatus(context.Background(), "REVIEW", completedAt); !errors.Is(err, store.ErrConflict) {
+	if err := updater.SetRecoveredStatus(context.Background(), "REVIEW"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("capability conflict error=%v want conflict", err)
 	}
 
 	statusStore.err = store.ErrInvalidArgument
-	if err := updater.SetRecoveredStatus(context.Background(), "REVIEW", completedAt); !errors.Is(err, store.ErrInvalidArgument) {
+	if err := updater.SetRecoveredStatus(context.Background(), "REVIEW"); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("validation error=%v want invalid argument", err)
 	}
 }
@@ -105,7 +102,7 @@ func TestIssueStatusUpdaterRejectsInvalidStatusAndPropagatesStoreFence(t *testin
 	if err := updater.SetStatus(context.Background(), "DONE"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("store fence error=%v want conflict", err)
 	}
-	if err := updater.SetRecoveredStatus(context.Background(), "REVIEW", time.Now().UTC()); !errors.Is(err, store.ErrConflict) {
+	if err := updater.SetRecoveredStatus(context.Background(), "REVIEW"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("recovery fence error=%v want conflict", err)
 	}
 }

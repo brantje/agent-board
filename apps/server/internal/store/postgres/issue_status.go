@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -19,9 +18,6 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 		return store.IssueMutationResult{}, store.ErrInvalidArgument
 	}
 	if input.Recovery && input.RunID == nil {
-		return store.IssueMutationResult{}, store.ErrInvalidArgument
-	}
-	if input.Recovery != (input.RecoveryAt != nil) || (input.RecoveryAt != nil && input.RecoveryAt.IsZero()) {
 		return store.IssueMutationResult{}, store.ErrInvalidArgument
 	}
 
@@ -97,24 +93,11 @@ func validateIssueStatusRecoveryFence(ctx context.Context, tx pgx.Tx, input stor
 	if input.RunID == nil || run.StartedAt == nil {
 		return store.ErrConflict
 	}
-	if input.RecoveryAt == nil || input.RecoveryAt.IsZero() {
-		return store.ErrInvalidArgument
-	}
 
-	checkpoint := input.RecoveryAt.UTC()
-	startedAt := run.StartedAt.UTC()
-	var databaseNow time.Time
-	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&databaseNow); err != nil {
-		return err
-	}
-	// OpenCode records tool completion on the execution host. If that clock is
-	// obviously outside this Run's server-owned interval, fall back to the Run
-	// start as a conservative checkpoint rather than risk overwriting a known
-	// newer Issue mutation.
-	if checkpoint.Before(startedAt) || checkpoint.After(databaseNow) {
-		checkpoint = startedAt
-	}
-
+	// OpenCode durable history does not share a trusted clock or sequence with
+	// Agent Board's Event stream, especially on external runners. Be conservative:
+	// once any explicit Issue mutation has happened during this Run, do not replay
+	// an older historical tool intent whose exact relative order cannot be proven.
 	var superseded bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
@@ -124,7 +107,7 @@ func validateIssueStatusRecoveryFence(ctx context.Context, tx pgx.Tx, input stor
 			  AND type IN ('issue.updated', 'issue.status_changed')
 			  AND created_at >= $3
 		)
-	`, input.ProjectID, input.IssueID, checkpoint).Scan(&superseded); err != nil {
+	`, input.ProjectID, input.IssueID, *run.StartedAt).Scan(&superseded); err != nil {
 		return err
 	}
 	if superseded {

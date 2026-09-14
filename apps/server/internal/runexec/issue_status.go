@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
@@ -23,14 +22,11 @@ type issueStatusUpdater struct {
 }
 
 func (u *issueStatusUpdater) SetStatus(ctx context.Context, status string) error {
-	return u.setStatus(ctx, status, nil)
+	return u.setStatus(ctx, status, false)
 }
 
-func (u *issueStatusUpdater) SetRecoveredStatus(ctx context.Context, status string, completedAt time.Time) error {
-	if completedAt.IsZero() {
-		return fmt.Errorf("run execution: recovered Issue status completion time is required")
-	}
-	if err := u.setStatus(ctx, status, &completedAt); err != nil {
+func (u *issueStatusUpdater) SetRecoveredStatus(ctx context.Context, status string) error {
+	if err := u.setStatus(ctx, status, true); err != nil {
 		if errors.Is(err, store.ErrIssueStatusRecoverySuperseded) {
 			return nil
 		}
@@ -39,7 +35,7 @@ func (u *issueStatusUpdater) SetRecoveredStatus(ctx context.Context, status stri
 	return nil
 }
 
-func (u *issueStatusUpdater) setStatus(ctx context.Context, status string, recoveryAt *time.Time) error {
+func (u *issueStatusUpdater) setStatus(ctx context.Context, status string, recovery bool) error {
 	if u == nil || u.store == nil {
 		return fmt.Errorf("run execution: Issue status capability is unavailable")
 	}
@@ -60,8 +56,7 @@ func (u *issueStatusUpdater) setStatus(ctx context.Context, status string, recov
 		RunID:       &runID,
 		AgentID:     &agentID,
 		WorkspaceID: &workspaceID,
-		Recovery:    recoveryAt != nil,
-		RecoveryAt:  recoveryAt,
+		Recovery:    recovery,
 	})
 	if err != nil {
 		return err

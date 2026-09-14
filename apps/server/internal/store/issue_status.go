@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"time"
 )
 
 var ErrIssueStatusRecoverySuperseded = errors.New("store: issue status recovery superseded")
@@ -28,7 +27,6 @@ type IssueStatusMutation struct {
 	AgentID     *string
 	WorkspaceID *string
 	Recovery    bool
-	RecoveryAt  *time.Time
 }
 
 // IssueStatusMutationStore is the canonical status-only Issue mutation boundary.

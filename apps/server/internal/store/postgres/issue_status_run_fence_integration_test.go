@@ -1,11 +1,9 @@
 package postgres
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -18,7 +16,6 @@ func TestAgentIssueStatusMutationRequiresMatchingRunningRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recoveryAt := issueStatusDatabaseClock(t, s, ctx)
 	mutation := store.IssueStatusMutation{
 		ProjectID:   f.project.ID,
 		IssueID:     f.issue.ID,
@@ -28,7 +25,6 @@ func TestAgentIssueStatusMutationRequiresMatchingRunningRun(t *testing.T) {
 		AgentID:     &f.agent.ID,
 		WorkspaceID: &f.workspace.ID,
 		Recovery:    true,
-		RecoveryAt:  &recoveryAt,
 	}
 
 	if _, err := s.SetIssueStatus(ctx, mutation); !errors.Is(err, store.ErrConflict) {
@@ -82,7 +78,7 @@ func TestAgentIssueStatusMutationRequiresMatchingRunningRun(t *testing.T) {
 	assertIssueStatusEventCount(t, s, f, 0)
 }
 
-func TestRecoveredAgentIssueStatusMutationUsesToolCompletionCheckpoint(t *testing.T) {
+func TestRecoveredAgentIssueStatusMutationConservativelyFencesRunIssueMutations(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
 	f := seedRunFixture(t, s, "status-recovery-fence")
@@ -111,7 +107,6 @@ func TestRecoveredAgentIssueStatusMutationUsesToolCompletionCheckpoint(t *testin
 		t.Fatalf("start fixture Run: %v", err)
 	}
 
-	validIntentAt := issueStatusDatabaseClock(t, s, ctx)
 	mutation := store.IssueStatusMutation{
 		ProjectID:   f.project.ID,
 		IssueID:     f.issue.ID,
@@ -121,63 +116,81 @@ func TestRecoveredAgentIssueStatusMutationUsesToolCompletionCheckpoint(t *testin
 		AgentID:     &f.agent.ID,
 		WorkspaceID: &f.workspace.ID,
 		Recovery:    true,
-		RecoveryAt:  &validIntentAt,
 	}
 	if _, err := s.SetIssueStatus(ctx, mutation); err != nil {
-		t.Fatalf("valid historical recovery: %v", err)
+		t.Fatalf("valid historical recovery after pre-run mutation: %v", err)
 	}
 	assertFixtureIssueStatus(t, s, f, "IN_PROGRESS")
 	assertIssueStatusEventCount(t, s, f, 2)
 
-	olderAgentIntentAt := issueStatusDatabaseClock(t, s, ctx)
+	mutation.Status = "DONE"
+	if _, err := s.SetIssueStatus(ctx, mutation); !errors.Is(err, store.ErrIssueStatusRecoverySuperseded) {
+		t.Fatalf("repeat recovery after same-run Agent mutation error=%v want superseded", err)
+	}
+	assertFixtureIssueStatus(t, s, f, "IN_PROGRESS")
+	assertIssueStatusEventCount(t, s, f, 2)
+
 	liveMutation := mutation
 	liveMutation.Recovery = false
-	liveMutation.RecoveryAt = nil
 	liveMutation.Status = "REVIEW"
 	if _, err := s.SetIssueStatus(ctx, liveMutation); err != nil {
-		t.Fatalf("later same-run Agent mutation: %v", err)
-	}
-	mutation.Status = "DONE"
-	mutation.RecoveryAt = &olderAgentIntentAt
-	if _, err := s.SetIssueStatus(ctx, mutation); !errors.Is(err, store.ErrIssueStatusRecoverySuperseded) {
-		t.Fatalf("older Agent recovery error=%v want superseded", err)
+		t.Fatalf("later live Agent mutation: %v", err)
 	}
 	assertFixtureIssueStatus(t, s, f, "REVIEW")
 	assertIssueStatusEventCount(t, s, f, 3)
 
-	staleHumanIntentAt := issueStatusDatabaseClock(t, s, ctx)
+	mutation.Status = "DONE"
+	if _, err := s.SetIssueStatus(ctx, mutation); !errors.Is(err, store.ErrIssueStatusRecoverySuperseded) {
+		t.Fatalf("older recovery after live Agent mutation error=%v want superseded", err)
+	}
+	assertFixtureIssueStatus(t, s, f, "REVIEW")
+	assertIssueStatusEventCount(t, s, f, 3)
+}
+
+func TestRecoveredAgentIssueStatusMutationDoesNotOverwriteHumanMutationDuringRun(t *testing.T) {
+	s := New(testPool(t))
+	ctx := t.Context()
+	f := seedRunFixture(t, s, "status-recovery-human-fence")
+	agentActor, err := json.Marshal(map[string]string{"type": store.ActorTypeAgent, "id": f.agent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	humanActor, err := json.Marshal(map[string]string{"type": store.ActorTypeHuman, "id": "human-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `
+		UPDATE runs
+		SET status='RUNNING', started_at=clock_timestamp(), updated_at=clock_timestamp()
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, f.run.ID); err != nil {
+		t.Fatalf("start fixture Run: %v", err)
+	}
 	if _, err := s.SetIssueStatus(ctx, store.IssueStatusMutation{
 		ProjectID: f.project.ID,
 		IssueID:   f.issue.ID,
 		Status:    "BLOCKED",
 		Actor:     humanActor,
 	}); err != nil {
-		t.Fatalf("later human mutation: %v", err)
+		t.Fatalf("human mutation during Run: %v", err)
 	}
-	assertIssueStatusEventCount(t, s, f, 4)
-	mutation.Status = "REVIEW"
-	mutation.RecoveryAt = &staleHumanIntentAt
-	if _, err := s.SetIssueStatus(ctx, mutation); !errors.Is(err, store.ErrIssueStatusRecoverySuperseded) {
+	beforeEvents := 1
+	assertFixtureIssueStatus(t, s, f, "BLOCKED")
+	assertIssueStatusEventCount(t, s, f, beforeEvents)
+
+	_, err = s.SetIssueStatus(ctx, store.IssueStatusMutation{
+		ProjectID:   f.project.ID,
+		IssueID:     f.issue.ID,
+		Status:      "REVIEW",
+		Actor:       agentActor,
+		RunID:       &f.run.ID,
+		AgentID:     &f.agent.ID,
+		WorkspaceID: &f.workspace.ID,
+		Recovery:    true,
+	})
+	if !errors.Is(err, store.ErrIssueStatusRecoverySuperseded) {
 		t.Fatalf("stale human recovery error=%v want superseded", err)
 	}
 	assertFixtureIssueStatus(t, s, f, "BLOCKED")
-	assertIssueStatusEventCount(t, s, f, 4)
-
-	newerIntentAt := issueStatusDatabaseClock(t, s, ctx)
-	mutation.Status = "DONE"
-	mutation.RecoveryAt = &newerIntentAt
-	if _, err := s.SetIssueStatus(ctx, mutation); err != nil {
-		t.Fatalf("historical recovery after older human mutation: %v", err)
-	}
-	assertFixtureIssueStatus(t, s, f, "DONE")
-	assertIssueStatusEventCount(t, s, f, 5)
-}
-
-func issueStatusDatabaseClock(t *testing.T, s *Store, ctx context.Context) time.Time {
-	t.Helper()
-	var value time.Time
-	if err := s.pool.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&value); err != nil {
-		t.Fatalf("read database clock: %v", err)
-	}
-	return value.UTC()
+	assertIssueStatusEventCount(t, s, f, beforeEvents)
 }
