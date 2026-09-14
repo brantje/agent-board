@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -63,6 +64,14 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 }
 
 func (s *Store) UpdateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
+	return s.updateIssueMutation(ctx, input, store.EmptyObject)
+}
+
+func (s *Store) UpdateIssueMutationWithActor(ctx context.Context, input store.Issue, actor json.RawMessage) (store.IssueMutationResult, error) {
+	return s.updateIssueMutation(ctx, input, actor)
+}
+
+func (s *Store) updateIssueMutation(ctx context.Context, input store.Issue, actor json.RawMessage) (store.IssueMutationResult, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return store.IssueMutationResult{}, err
@@ -89,7 +98,7 @@ func (s *Store) UpdateIssueMutation(ctx context.Context, input store.Issue) (sto
 		return store.IssueMutationResult{}, err
 	}
 	updated.PreviousStatus = previousStatus
-	issueEvent, err := store.NewIssueUpdatedEvent(updated, previousStatus)
+	issueEvent, err := store.NewIssueUpdatedEventWithActor(updated, previousStatus, actor)
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
