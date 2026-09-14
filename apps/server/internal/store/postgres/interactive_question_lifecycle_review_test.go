@@ -69,16 +69,15 @@ func TestInteractiveQuestionAnswerRequeuesAfterLiveClaimExpires(t *testing.T) {
 	}
 }
 
-func TestTerminalLiveWaitingRunCleansInteractiveQuestionState(t *testing.T) {
+func TestTerminalLiveWaitingRunCleansInteractiveQuestionStateWithoutChangingIssueStatus(t *testing.T) {
 	tests := []struct {
 		name           string
 		runStatus      string
 		answerFirst    bool
 		questionStatus string
-		issueStatus    string
 	}{
-		{name: "failed with open Question", runStatus: "FAILED", questionStatus: "CANCELLED", issueStatus: "TODO"},
-		{name: "cancelled after answer", runStatus: "CANCELLED", answerFirst: true, questionStatus: "ANSWERED", issueStatus: "IN_PROGRESS"},
+		{name: "failed with open Question", runStatus: "FAILED", questionStatus: "CANCELLED"},
+		{name: "cancelled after answer", runStatus: "CANCELLED", answerFirst: true, questionStatus: "ANSWERED"},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -107,6 +106,19 @@ func TestTerminalLiveWaitingRunCleansInteractiveQuestionState(t *testing.T) {
 			if err != nil {
 				t.Fatalf("open interactive Question: %v", err)
 			}
+			if opened.Run.Status != "WAITING_FOR_INPUT" {
+				t.Fatalf("run status=%s want WAITING_FOR_INPUT", opened.Run.Status)
+			}
+
+			blocked, err := s.GetIssue(ctx, f.project.ID, f.issue.ID)
+			if err != nil {
+				t.Fatalf("read Issue before explicit block: %v", err)
+			}
+			blocked.Status = "BLOCKED"
+			if _, err := s.UpdateIssue(ctx, blocked); err != nil {
+				t.Fatalf("explicitly block Issue: %v", err)
+			}
+
 			if testCase.answerFirst {
 				answer := "answer persisted before native completion"
 				answered, err := s.AnswerQuestion(ctx, store.AnswerQuestionCommand{
@@ -151,8 +163,22 @@ func TestTerminalLiveWaitingRunCleansInteractiveQuestionState(t *testing.T) {
 			if bindingState != store.InteractiveQuestionCancelled {
 				t.Fatalf("binding state=%s want %s", bindingState, store.InteractiveQuestionCancelled)
 			}
-			assertIssueStatus(t, s, f.project.ID, f.issue.ID, testCase.issueStatus)
+			assertIssueStatus(t, s, f.project.ID, f.issue.ID, "BLOCKED")
 			assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 0, 0)
+
+			if testCase.questionStatus == "CANCELLED" {
+				var eventCount int
+				if err := s.pool.QueryRow(ctx, `
+					SELECT count(*)
+					FROM events
+					WHERE project_id=$1 AND run_id=$2 AND type='question.cancelled' AND payload->>'questionId'=$3
+				`, f.project.ID, f.run.ID, opened.Question.ID).Scan(&eventCount); err != nil {
+					t.Fatalf("count question.cancelled events: %v", err)
+				}
+				if eventCount != 1 {
+					t.Fatalf("question.cancelled events=%d want 1", eventCount)
+				}
+			}
 		})
 	}
 }
