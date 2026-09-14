@@ -11,6 +11,12 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 	if !store.ValidIssueStatus(input.Status) {
 		return store.IssueMutationResult{}, store.ErrInvalidArgument
 	}
+	if input.RunID == nil && (input.AgentID != nil || input.WorkspaceID != nil) {
+		return store.IssueMutationResult{}, store.ErrInvalidArgument
+	}
+	if input.RunID != nil && (input.AgentID == nil || input.WorkspaceID == nil) {
+		return store.IssueMutationResult{}, store.ErrInvalidArgument
+	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
@@ -18,6 +24,9 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockIssueStatusRunFence(ctx, tx, input); err != nil {
+		return store.IssueMutationResult{}, err
+	}
 	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.IssueID)
 	if err != nil {
 		return store.IssueMutationResult{}, err
@@ -69,4 +78,25 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 	events = append(events, issueEvent)
 	updated.LastEvent = &issueEvent
 	return store.IssueMutationResult{Issue: updated, Events: events}, nil
+}
+
+func lockIssueStatusRunFence(ctx context.Context, tx pgx.Tx, input store.IssueStatusMutation) error {
+	if input.RunID == nil {
+		return nil
+	}
+	run, err := scanRun(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		       status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+		FROM runs
+		WHERE project_id=$1 AND id=$2
+		FOR UPDATE
+	`, input.ProjectID, *input.RunID))
+	if err != nil {
+		return notFound(err)
+	}
+	if run.Status != "RUNNING" || run.IssueID != input.IssueID || run.WorkspaceID != *input.WorkspaceID ||
+		run.AgentID == nil || *run.AgentID != *input.AgentID {
+		return store.ErrConflict
+	}
+	return nil
 }
