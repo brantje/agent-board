@@ -147,22 +147,26 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
 	if err != nil {
 		return store.Issue{}, store.Event{}, err
 	}
-	if _, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch); err != nil {
-		return store.Issue{}, store.Event{}, err
-	}
 	payload, err := json.Marshal(map[string]any{"assignedTo": assignee})
 	if err != nil {
 		return store.Issue{}, store.Event{}, err
 	}
-	event, err := appendEventTx(ctx, tx, store.Event{Type: "issue.assigned", ProjectID: projectID, IssueID: &issueID, Actor: actor, Payload: payload})
+	assignmentEvent, err := appendEventTx(ctx, tx, store.Event{Type: "issue.assigned", ProjectID: projectID, IssueID: &issueID, Actor: actor, Payload: payload})
+	if err != nil {
+		return store.Issue{}, store.Event{}, err
+	}
+	_, runEvent, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch)
 	if err != nil {
 		return store.Issue{}, store.Event{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return store.Issue{}, store.Event{}, err
 	}
-	issue.LastEvent = &event
-	return issue, event, nil
+	issue.LastEvent = &assignmentEvent
+	if runEvent.ID != "" {
+		issue.LastEvent = &runEvent
+	}
+	return issue, assignmentEvent, nil
 }
 
 func lockAssigneeEligibility(ctx context.Context, tx pgx.Tx) error {
