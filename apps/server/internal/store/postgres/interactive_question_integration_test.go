@@ -37,7 +37,7 @@ func TestInteractiveQuestionKeepsClaimAndResumesInFlightRun(t *testing.T) {
 	if !opened.Created || !opened.EnteredWaiting || opened.Run.Status != "WAITING_FOR_INPUT" || opened.Binding.State != store.InteractiveQuestionOpen {
 		t.Fatalf("opened=%+v", opened)
 	}
-	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "BLOCKED")
+	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "IN_PROGRESS")
 	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 3)
 
 	replayed, err := s.OpenInteractiveQuestion(ctx, store.OpenInteractiveQuestionCommand{
@@ -65,7 +65,7 @@ func TestInteractiveQuestionKeepsClaimAndResumesInFlightRun(t *testing.T) {
 	if answered.Question.Status != "ANSWERED" || answered.Job != nil || answered.Run.Status != "WAITING_FOR_INPUT" {
 		t.Fatalf("answered=%+v", answered)
 	}
-	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "BLOCKED")
+	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "IN_PROGRESS")
 	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 3)
 
 	resolved, err := s.ResolveInteractiveQuestion(ctx, f.project.ID, opened.Question.ID)
@@ -144,6 +144,7 @@ func TestInteractiveQuestionsResumeOnlyAfterAllNativeQuestionsResolve(t *testing
 	if !secondResolved.Resumed || secondResolved.Run.Status != "RUNNING" {
 		t.Fatalf("second resolve=%+v", secondResolved)
 	}
+	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "IN_PROGRESS")
 	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 1, 3)
 }
 
@@ -181,5 +182,6 @@ func TestInteractiveWaitingClaimCanFailWithoutRecoveryReplay(t *testing.T) {
 	if failed.Status != "FAILED" {
 		t.Fatalf("failed run=%+v", failed)
 	}
+	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "TODO")
 	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 0, 0)
 }
