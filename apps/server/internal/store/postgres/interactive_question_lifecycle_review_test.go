@@ -75,9 +75,10 @@ func TestTerminalLiveWaitingRunCleansInteractiveQuestionState(t *testing.T) {
 		runStatus      string
 		answerFirst    bool
 		questionStatus string
+		issueStatus    string
 	}{
-		{name: "failed with open Question", runStatus: "FAILED", questionStatus: "CANCELLED"},
-		{name: "cancelled after answer", runStatus: "CANCELLED", answerFirst: true, questionStatus: "ANSWERED"},
+		{name: "failed with open Question", runStatus: "FAILED", questionStatus: "CANCELLED", issueStatus: "TODO"},
+		{name: "cancelled after answer", runStatus: "CANCELLED", answerFirst: true, questionStatus: "ANSWERED", issueStatus: "IN_PROGRESS"},
 	}
 	for _, testCase := range tests {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -150,7 +151,7 @@ func TestTerminalLiveWaitingRunCleansInteractiveQuestionState(t *testing.T) {
 			if bindingState != store.InteractiveQuestionCancelled {
 				t.Fatalf("binding state=%s want %s", bindingState, store.InteractiveQuestionCancelled)
 			}
-			assertIssueStatus(t, s, f.project.ID, f.issue.ID, "IN_PROGRESS")
+			assertIssueStatus(t, s, f.project.ID, f.issue.ID, testCase.issueStatus)
 			assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 0, 0)
 		})
 	}
