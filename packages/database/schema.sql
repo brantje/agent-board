@@ -139,6 +139,7 @@ CREATE UNIQUE INDEX password_tokens_active_user_purpose_uq
 
 CREATE TABLE runners (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid REFERENCES projects(id) ON DELETE RESTRICT,
     name text CHECK (name IS NULL OR btrim(name) <> ''),
     token_hash bytea CHECK (token_hash IS NULL OR octet_length(token_hash) = 32),
     registration_token_hash bytea CHECK (registration_token_hash IS NULL OR octet_length(registration_token_hash) = 32),
@@ -151,6 +152,7 @@ CREATE TABLE runners (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CHECK (deleted_at IS NULL OR revoked_at IS NOT NULL),
+    CHECK (NOT internal OR project_id IS NULL),
     CHECK (NOT internal OR (registered_at IS NOT NULL AND registration_token_hash IS NULL AND revoked_at IS NULL AND deleted_at IS NULL)),
     CHECK (
         (registered_at IS NULL AND NOT internal AND name IS NULL AND token_hash IS NULL) OR
@@ -161,6 +163,7 @@ CREATE TABLE runners (
 CREATE UNIQUE INDEX runners_active_name_uq ON runners (lower(name)) WHERE deleted_at IS NULL AND registered_at IS NOT NULL;
 CREATE UNIQUE INDEX runners_registration_token_uq ON runners (registration_token_hash) WHERE registration_token_hash IS NOT NULL;
 CREATE UNIQUE INDEX runners_internal_uq ON runners (internal) WHERE internal;
+CREATE INDEX runners_project_idx ON runners (project_id, created_at, id) WHERE project_id IS NOT NULL;
 
 CREATE TABLE project_runners (
     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -743,6 +746,25 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER execution_sessions_workspace_check
     BEFORE INSERT OR UPDATE OF project_id, run_id, runtime_instance_id ON execution_sessions
     FOR EACH ROW EXECUTE FUNCTION enforce_execution_session_workspace();
+
+CREATE FUNCTION enforce_execution_session_runner_scope() RETURNS trigger AS $$
+DECLARE
+    runner_project_id uuid;
+BEGIN
+    IF NEW.runner_id IS NULL THEN
+        RETURN NEW;
+    END IF;
+    SELECT project_id INTO runner_project_id FROM runners WHERE id = NEW.runner_id;
+    IF runner_project_id IS NOT NULL AND runner_project_id IS DISTINCT FROM NEW.project_id THEN
+        RAISE EXCEPTION 'execution session cannot use runner owned by another project' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER execution_sessions_runner_scope_check
+    BEFORE INSERT OR UPDATE OF project_id, runner_id ON execution_sessions
+    FOR EACH ROW EXECUTE FUNCTION enforce_execution_session_runner_scope();
 
 CREATE FUNCTION reject_immutable_row_mutation() RETURNS trigger AS $$
 BEGIN
