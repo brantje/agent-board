@@ -72,12 +72,13 @@ describe('durable Issue board projection', () => {
     expect(statusLabel('IN_PROGRESS')).toBe('In Progress')
   })
 
-  it('projects assigned Issue card run status and live execution state', () => {
-    expect(issueCardRunStatus(null, 'QUEUED')).toBeNull()
-    expect(issueCardRunStatus('a', 'QUEUED')).toBe('Queued')
-    expect(issueCardRunStatus('a', 'RUNNING')).toBe('Running')
-    expect(issueCardRunStatus('a', 'FAILED')).toBe('Failed')
-    expect(issueCardRunStatus('a', 'COMPLETED')).toBeNull()
+  it('projects Issue card run status independently of current ownership', () => {
+    expect(issueCardRunStatus('QUEUED')).toBe('Queued')
+    expect(issueCardRunStatus('RUNNING')).toBe('Running')
+    expect(issueCardRunStatus('FAILED')).toBe('Failed')
+    expect(issueCardRunStatus('COMPLETED')).toBeNull()
+    expect(issueCardRunStatus('CANCELLED')).toBeNull()
+    expect(issueCardRunStatus()).toBeNull()
     expect(isFailedIssueRun('FAILED')).toBe(true)
     expect(isLiveIssueRun('RUNNING')).toBe(true)
     expect(isLiveIssueRun('STARTING')).toBe(true)
