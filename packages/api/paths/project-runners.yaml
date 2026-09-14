@@ -35,6 +35,8 @@ collection:
   - $ref: ../components/api-components.yaml#/parameters/ProjectID
   get:
     operationId: getProjectRunners
+    security:
+      - BearerAuth: []
     responses:
       '200':
         $ref: '#/projectRunnersResponse'
@@ -42,6 +44,8 @@ collection:
         $ref: ../components/api-components.yaml#/responses/Error
   put:
     operationId: setProjectRunners
+    security:
+      - BearerAuth: []
     requestBody:
       $ref: '#/projectRunnersRequest'
     responses:
@@ -51,6 +55,8 @@ collection:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
     operationId: createProjectRunner
+    security:
+      - BearerAuth: []
     responses:
       '201':
         $ref: ./runners.yaml#/creationResponse
@@ -62,6 +68,8 @@ resource:
   - $ref: ../components/api-components.yaml#/parameters/ResourceID
   patch:
     operationId: updateProjectRunner
+    security:
+      - BearerAuth: []
     requestBody:
       $ref: ./runners.yaml#/nameInput
     responses:
@@ -71,6 +79,8 @@ resource:
         $ref: ../components/api-components.yaml#/responses/Error
   delete:
     operationId: deleteProjectRunner
+    security:
+      - BearerAuth: []
     responses:
       '204':
         description: Permanently soft-deleted and revoked. Historical provenance is retained.
@@ -82,6 +92,8 @@ rotate:
   - $ref: ../components/api-components.yaml#/parameters/ResourceID
   post:
     operationId: rotateProjectRunnerToken
+    security:
+      - BearerAuth: []
     responses:
       '200':
         $ref: ./runners.yaml#/credentialResponse
@@ -93,6 +105,8 @@ revoke:
   - $ref: ../components/api-components.yaml#/parameters/ResourceID
   post:
     operationId: revokeProjectRunner
+    security:
+      - BearerAuth: []
     responses:
       '200':
         $ref: ./runners.yaml#/runnerResponse
