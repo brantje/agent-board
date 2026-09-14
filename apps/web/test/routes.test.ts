@@ -53,6 +53,10 @@ it('binds configuration routes to the correct scope and resource',()=>{
             template: '<div :data-kind="kind" :data-project="projectId" :data-resource="resourceId" />'
           },
           RunnerManager: { template: '<div data-runner-manager />' },
+          ProjectRunnerSettings: {
+            props: ['projectId'],
+            template: '<div data-project-runner-settings :data-project="projectId" />'
+          },
           ProjectSettings: {
             props: ['projectId'],
             template: '<div data-project-settings :data-project="projectId" />'
@@ -69,7 +73,13 @@ it('binds configuration routes to the correct scope and resource',()=>{
     }
     if(path.endsWith('/settings/runners.vue')) {
       expect(wrapper.find('[data-settings-shell]').exists()).toBe(true)
-      expect(wrapper.get('[data-runner-manager]').exists()).toBe(true)
+      if(path.includes('[projectID]')) {
+        expect(wrapper.get('[data-project-runner-settings]').attributes('data-project')).toBe('project-a')
+        expect(wrapper.find('[data-runner-manager]').exists()).toBe(false)
+      } else {
+        expect(wrapper.get('[data-runner-manager]').exists()).toBe(true)
+        expect(wrapper.find('[data-project-runner-settings]').exists()).toBe(false)
+      }
       expect(wrapper.find('[data-kind]').exists()).toBe(false)
       continue
     }
@@ -84,6 +94,7 @@ it('binds configuration routes to the correct scope and resource',()=>{
     expect(manager.attributes('data-kind')).toBeTruthy()
   }
   expect(Object.keys(pages).some(path => path.endsWith('/projects/[projectID]/settings/providers.vue'))).toBe(true)
+  expect(Object.keys(pages).some(path => path.endsWith('/projects/[projectID]/settings/runners.vue'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/settings/agents.vue') && !path.includes('[projectID]'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/settings/runners.vue') && !path.includes('[projectID]'))).toBe(true)
   expect(Object.keys(pages).some(path => path.endsWith('/settings/users.vue') && !path.includes('[projectID]'))).toBe(true)
