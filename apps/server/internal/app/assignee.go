@@ -19,18 +19,13 @@ func (s *Service) SetIssueAssignee(ctx context.Context, projectID, issueID strin
 	if assignmentStore == nil {
 		return store.Issue{}, NewError("assignment_unavailable", "assignment store unavailable", store.ErrInvalidArgument)
 	}
-	issue, event, err := assignmentStore.SetIssueAssignee(ctx, projectID, issueID, target, actor)
+	result, err := assignmentStore.SetIssueAssignee(ctx, projectID, issueID, target, actor)
 	if err != nil {
 		return store.Issue{}, translateStoreError(err, "assignee")
 	}
-	if event.ID != "" {
-		if publisher, ok := s.events.(interface {
-			PublishPersisted(context.Context, store.Event)
-		}); ok {
-			publisher.PublishPersisted(ctx, event)
-		}
-	}
-	return issue, nil
+	publisher, _ := s.events.(persistedEventPublisher)
+	publishPersistedEvents(ctx, publisher, result.Events)
+	return result.Issue, nil
 }
 
 func (s *Service) ListIssueAssignees(ctx context.Context, projectID string) ([]store.Assignee, error) {
