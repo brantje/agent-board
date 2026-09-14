@@ -37,6 +37,7 @@ export interface ProjectRunnerSettings {
   runnerIds: string[]
   projectRunners: Runner[]
   sharedRunners: Runner[]
+  internalRunner: Runner | null
 }
 
 export interface RepositorySettings {
