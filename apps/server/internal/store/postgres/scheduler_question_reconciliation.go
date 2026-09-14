@@ -82,18 +82,6 @@ func resolveExpiredBlockingQuestion(ctx context.Context, tx pgx.Tx, job store.Sc
 		return false, err
 	}
 	command, err := tx.Exec(ctx, `
-		UPDATE issues
-		SET status=CASE WHEN status='DONE' THEN status ELSE 'BLOCKED' END,
-		    updated_at=CASE WHEN status='DONE' THEN updated_at ELSE now() END
-		WHERE project_id=$1 AND id=$2
-	`, run.ProjectID, run.IssueID)
-	if err != nil {
-		return false, err
-	}
-	if command.RowsAffected() != 1 {
-		return false, store.ErrConflict
-	}
-	command, err = tx.Exec(ctx, `
 		UPDATE scheduler_jobs
 		SET state='DONE', wait_reason=NULL, updated_at=now()
 		WHERE project_id=$1 AND id=$2 AND run_id=$3 AND state='CLAIMED'
