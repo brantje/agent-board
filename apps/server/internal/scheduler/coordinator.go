@@ -364,11 +364,15 @@ func (c *Coordinator) resolveReconciliation(ctx context.Context, input store.Sch
 }
 
 func (c *Coordinator) publishPersistedEvents(ctx context.Context, events []store.Event) {
-	if c.config.PersistedEvents == nil {
+	publisher := c.config.PersistedEvents
+	if publisher == nil {
+		publisher, _ = c.processor.(PersistedEventPublisher)
+	}
+	if publisher == nil {
 		return
 	}
 	for _, event := range events {
-		c.config.PersistedEvents.PublishPersisted(ctx, event)
+		publisher.PublishPersisted(ctx, event)
 	}
 }
 
