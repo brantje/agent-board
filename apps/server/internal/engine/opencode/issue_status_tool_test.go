@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -62,6 +64,71 @@ func TestIssueStatusToolCompletionUsesRunScopedCapabilityOnce(t *testing.T) {
 	}
 }
 
+func TestIssueStatusToolReconcileRecoversMissedCompletionOnce(t *testing.T) {
+	native := issueStatusHistoryClient(t, "ses_1", []any{
+		map[string]any{
+			"info": map[string]any{"sessionID": "ses_1"},
+			"parts": []any{issueStatusToolPartPayload("ses_1", "part_recovered", "BLOCKED")},
+		},
+	})
+	tracker := newIssueStatusToolTracker()
+	updater := &recordingIssueStatusUpdater{}
+
+	if err := tracker.Reconcile(context.Background(), native, "ses_1", updater); err != nil {
+		t.Fatalf("Reconcile() error=%v", err)
+	}
+	if err := tracker.Reconcile(context.Background(), native, "ses_1", updater); err != nil {
+		t.Fatalf("duplicate Reconcile() error=%v", err)
+	}
+	if len(updater.statuses) != 1 || updater.statuses[0] != "BLOCKED" {
+		t.Fatalf("statuses=%v", updater.statuses)
+	}
+}
+
+func TestIssueStatusToolReconcileIgnoresOtherSession(t *testing.T) {
+	native := issueStatusHistoryClient(t, "ses_1", []any{
+		map[string]any{
+			"info": map[string]any{"sessionID": "ses_other"},
+			"parts": []any{issueStatusToolPartPayload("ses_other", "part_other", "DONE")},
+		},
+		map[string]any{
+			"info": map[string]any{"sessionID": "ses_1"},
+			"parts": []any{issueStatusToolPartPayload("ses_other", "part_mismatched", "REVIEW")},
+		},
+	})
+	updater := &recordingIssueStatusUpdater{}
+	if err := newIssueStatusToolTracker().Reconcile(context.Background(), native, "ses_1", updater); err != nil {
+		t.Fatalf("Reconcile() error=%v", err)
+	}
+	if len(updater.statuses) != 0 {
+		t.Fatalf("other session mutated statuses=%v", updater.statuses)
+	}
+}
+
+func TestIssueStatusToolReconcileAttachRestoresLatestDurableIntentOnce(t *testing.T) {
+	native := issueStatusHistoryClient(t, "ses_1", []any{
+		map[string]any{
+			"info": map[string]any{"sessionID": "ses_1"},
+			"parts": []any{
+				issueStatusToolPartPayload("ses_1", "part_started", "IN_PROGRESS"),
+				issueStatusToolPartPayload("ses_1", "part_review", "REVIEW"),
+			},
+		},
+	})
+	tracker := newIssueStatusToolTracker()
+	updater := &recordingIssueStatusUpdater{}
+
+	if err := tracker.ReconcileAttach(context.Background(), native, "ses_1", updater); err != nil {
+		t.Fatalf("ReconcileAttach() error=%v", err)
+	}
+	if err := tracker.ReconcileAttach(context.Background(), native, "ses_1", updater); err != nil {
+		t.Fatalf("duplicate ReconcileAttach() error=%v", err)
+	}
+	if len(updater.statuses) != 1 || updater.statuses[0] != "REVIEW" {
+		t.Fatalf("statuses=%v want [REVIEW]", updater.statuses)
+	}
+}
+
 func TestIssueStatusToolCompletionValidatesAndPropagatesFailure(t *testing.T) {
 	tracker := newIssueStatusToolTracker()
 	missingStatus := issueStatusToolEvent(t, "ses_1", "part_1", "")
@@ -94,13 +161,39 @@ func TestInitialTaskPromptExplainsExplicitBoardStatusSemantics(t *testing.T) {
 	}
 }
 
+func issueStatusHistoryClient(t *testing.T, sessionID string, messages []any) *client.Client {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /session/"+sessionID+"/message", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, messages)
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	native, err := client.New(server.Client(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return native
+}
+
 func issueStatusToolEvent(t *testing.T, sessionID, partID, status string) client.Event {
 	t.Helper()
+	properties, err := json.Marshal(map[string]any{
+		"sessionID": sessionID,
+		"part":      issueStatusToolPartPayload(sessionID, partID, status),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client.Event{Type: "message.part.updated", Properties: properties}
+}
+
+func issueStatusToolPartPayload(sessionID, partID, status string) map[string]any {
 	input := map[string]any{}
 	if status != "" {
 		input["status"] = status
 	}
-	part := map[string]any{
+	return map[string]any{
 		"id":        partID,
 		"sessionID": sessionID,
 		"type":      "tool",
@@ -110,9 +203,4 @@ func issueStatusToolEvent(t *testing.T, sessionID, partID, status string) client
 			"input":  input,
 		},
 	}
-	properties, err := json.Marshal(map[string]any{"sessionID": sessionID, "part": part})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return client.Event{Type: "message.part.updated", Properties: properties}
 }
