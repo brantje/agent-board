@@ -11,30 +11,50 @@ import (
 
 type assigneeCommandStore struct {
 	*projectWorkflowAuthorizationStore
-	actor json.RawMessage
-	calls int
-	fail  error
+	actor   json.RawMessage
+	targets []*store.Assignee
+	calls   int
+	fail    error
 }
 
-func (s *assigneeCommandStore) SetIssueAssignee(_ context.Context, _, _ string, target *store.Assignee, actor json.RawMessage) (store.Issue, store.Event, error) {
+func (s *assigneeCommandStore) SetIssueAssignee(_ context.Context, _, _ string, target *store.Assignee, actor json.RawMessage) (store.IssueMutationResult, error) {
 	s.calls++
 	s.actor = actor
-	return store.Issue{}, store.Event{ID: "event"}, s.fail
+	if target == nil {
+		s.targets = append(s.targets, nil)
+	} else {
+		copyTarget := *target
+		s.targets = append(s.targets, &copyTarget)
+	}
+	if s.fail != nil {
+		return store.IssueMutationResult{}, s.fail
+	}
+	events := []store.Event{{ID: "assignment", Type: "issue.assigned"}}
+	if target != nil && target.Type == "AGENT" {
+		events = append(events, store.Event{ID: "run", Type: "run.created"})
+	}
+	return store.IssueMutationResult{Issue: store.Issue{ID: "issue"}, Events: events}, nil
 }
 func (s *assigneeCommandStore) ListIssueAssignees(context.Context, string) ([]store.Assignee, error) {
 	s.calls++
 	return []store.Assignee{}, s.fail
 }
 
-type assigneePublisher struct{ published int }
+type assigneePublisher struct{ published []store.Event }
 
 func (*assigneePublisher) Record(context.Context, store.Event) (store.Event, error) {
 	panic("already persisted")
 }
-func (p *assigneePublisher) PublishPersisted(context.Context, store.Event) { p.published++ }
+func (p *assigneePublisher) PublishPersisted(_ context.Context, event store.Event) {
+	p.published = append(p.published, event)
+}
 
 func TestAssigneeSharedAuthorizationActorAndPublication(t *testing.T) {
-	const pid = "00000000-0000-4000-8000-000000000001"
+	const (
+		pid     = "00000000-0000-4000-8000-000000000001"
+		agentID = "00000000-0000-4000-8000-000000000002"
+		userID  = "00000000-0000-4000-8000-000000000003"
+	)
 	fake := &assigneeCommandStore{projectWorkflowAuthorizationStore: &projectWorkflowAuthorizationStore{project: store.Project{ID: pid}, roles: map[string]string{"member": "member", "viewer": "viewer"}}}
 	svc := New(fake)
 	pub := &assigneePublisher{}
@@ -51,13 +71,31 @@ func TestAssigneeSharedAuthorizationActorAndPublication(t *testing.T) {
 	if fake.calls != 0 {
 		t.Fatal("unauthorized mutation reached store")
 	}
+
 	actor := activeProjectActor("member", "member")
-	if _, err = access.SetIssueAssignee(t.Context(), actor, pid, "issue", nil); err != nil {
-		t.Fatal(err)
+	operations := []*store.Assignee{
+		{Type: "AGENT", ID: agentID},
+		{Type: "USER", ID: userID},
+		nil,
 	}
-	if string(fake.actor) != `{"id":"member","type":"HUMAN"}` || pub.published != 1 {
-		t.Fatalf("actor=%s published=%d", fake.actor, pub.published)
+	for _, target := range operations {
+		if _, err = access.SetIssueAssignee(t.Context(), actor, pid, "issue", target); err != nil {
+			t.Fatal(err)
+		}
+		if string(fake.actor) != `{"id":"member","type":"HUMAN"}` {
+			t.Fatalf("actor=%s", fake.actor)
+		}
 	}
+	if len(fake.targets) != 3 || fake.targets[0] == nil || fake.targets[0].Type != "AGENT" || fake.targets[1] == nil || fake.targets[1].Type != "USER" || fake.targets[2] != nil {
+		t.Fatalf("generic targets=%#v", fake.targets)
+	}
+	if len(pub.published) != 4 {
+		t.Fatalf("published=%#v", pub.published)
+	}
+	if pub.published[0].Type != "issue.assigned" || pub.published[1].Type != "run.created" || pub.published[2].Type != "issue.assigned" || pub.published[3].Type != "issue.assigned" {
+		t.Fatalf("published types=%#v", pub.published)
+	}
+
 	if _, err = access.ListIssueAssignees(t.Context(), activeProjectActor("viewer", "member"), pid); err != nil {
 		t.Fatal(err)
 	}
@@ -70,10 +108,11 @@ func TestAssigneeSharedAuthorizationActorAndPublication(t *testing.T) {
 		}
 	}
 	fake.fail = store.ErrNotFound
+	before := len(pub.published)
 	if _, err = svc.SetIssueAssignee(t.Context(), pid, "issue", &store.Assignee{Type: "USER", ID: pid}, nil); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("mutation error=%v", err)
 	}
-	if pub.published != 1 {
+	if len(pub.published) != before {
 		t.Fatal("published failed mutation")
 	}
 	if _, err = svc.ListIssueAssignees(t.Context(), pid); !errors.Is(err, store.ErrNotFound) {
