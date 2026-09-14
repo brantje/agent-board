@@ -108,6 +108,14 @@ func (s *RedactingStore) CreateArtifact(ctx context.Context, input store.Artifac
 	return s.ControlPlaneStore.CreateArtifact(ctx, input)
 }
 
+func (s *RedactingStore) SetIssueStatus(ctx context.Context, input store.IssueStatusMutation) (store.IssueMutationResult, error) {
+	base, ok := s.ControlPlaneStore.(store.IssueStatusMutationStore)
+	if !ok {
+		return store.IssueMutationResult{}, fmt.Errorf("redacting store base does not support Issue status mutations")
+	}
+	return base.SetIssueStatus(ctx, input)
+}
+
 func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusIfStatus(ctx context.Context, projectID, instanceID, status, expectedStatus string) (store.RuntimeInstance, error) {
 	base, ok := s.ControlPlaneStore.(runtimeRunnerStatusStore)
 	if !ok {
@@ -188,4 +196,5 @@ func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner
 	return base.GetRunner(ctx, id)
 }
 
+var _ store.IssueStatusMutationStore = (*RedactingStore)(nil)
 var _ store.WorkspaceRevisionStore = (*RedactingStore)(nil)
