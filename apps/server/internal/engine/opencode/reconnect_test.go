@@ -16,12 +16,13 @@ import (
 )
 
 type reconnectHarness struct {
-	mu            sync.Mutex
-	subscriptions int
-	promptCalls   int
-	replied       bool
-	replyAnswers  [][]string
-	question      map[string]any
+	mu             sync.Mutex
+	subscriptions  int
+	promptCalls    int
+	replied        bool
+	replyAnswers   [][]string
+	question       map[string]any
+	statusMessages []any
 }
 
 func newReconnectHarness() *reconnectHarness {
@@ -67,8 +68,8 @@ func (h *reconnectHarness) handler(t *testing.T) http.Handler {
 		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"properties\":{}}\n\n")
 		flusher.Flush()
 		if subscription == 1 {
-			// Simulate a transport loss before question.v2.asked reaches Agent Board.
-			// The authoritative pending-Question endpoint must recover it.
+			// Simulate a transport loss before durable native state reaches Agent Board.
+			// Queryable native state must recover both Questions and completed tools.
 			return
 		}
 		<-r.Context().Done()
@@ -99,6 +100,12 @@ func (h *reconnectHarness) handler(t *testing.T) http.Handler {
 			return
 		}
 		writeNativeJSON(t, w, map[string]any{"data": []any{h.question}})
+	})
+	mux.HandleFunc("GET /session/ses_native/message", func(w http.ResponseWriter, _ *http.Request) {
+		h.mu.Lock()
+		messages := append([]any(nil), h.statusMessages...)
+		h.mu.Unlock()
+		writeNativeJSON(t, w, messages)
 	})
 	mux.HandleFunc("POST /api/session/ses_native/question/que_missed/reply", func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
@@ -141,7 +148,7 @@ func TestEngineReconcilesMissedQuestionAfterEventStreamDisconnect(t *testing.T) 
 	_, err = adapter.Execute(executeCtx, engine.Request{
 		Context: executioncontext.SafeContext{
 			Issue:    executioncontext.IssueContext{Title: "Recover the missed Question"},
-			Agent: executioncontext.AgentContext{Engine: Name},
+			Agent:    executioncontext.AgentContext{Engine: Name},
 			Model:    executioncontext.ModelContext{Model: "claude-sonnet"},
 			Provider: executioncontext.ProviderContext{Kind: "anthropic"},
 		},
@@ -168,5 +175,54 @@ func TestEngineReconcilesMissedQuestionAfterEventStreamDisconnect(t *testing.T) 
 	}
 	if questions.correlations[0] != "ses_native/que_missed/0" {
 		t.Fatalf("correlations=%v", questions.correlations)
+	}
+}
+
+func TestEngineRecoversMissedIssueStatusCompletionAfterEventStreamDisconnectOnce(t *testing.T) {
+	harness := newReconnectHarness()
+	harness.statusMessages = []any{
+		map[string]any{
+			"info": map[string]any{"sessionID": "ses_native", "role": "assistant"},
+			"parts": []any{issueStatusToolPartPayload("ses_native", "part_status_missed", "REVIEW")},
+		},
+	}
+	server := httptest.NewServer(harness.handler(t))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	process := newFakeOpenCodeProcess(parsed.Host)
+	launcher := &fakeOpenCodeLauncher{process: process}
+	questions := &fakeInteractiveQuestions{}
+	statuses := &recordingIssueStatusUpdater{}
+	adapter := newWithAddress(parsed.Host)
+
+	executeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err = adapter.Execute(executeCtx, engine.Request{
+		Context: executioncontext.SafeContext{
+			Issue:    executioncontext.IssueContext{Title: "Recover missed Board status"},
+			Agent:    executioncontext.AgentContext{Engine: Name},
+			Model:    executioncontext.ModelContext{Model: "claude-sonnet"},
+			Provider: executioncontext.ProviderContext{Kind: "anthropic"},
+		},
+		Launcher:             launcher,
+		InteractiveQuestions: questions,
+		IssueStatus:          statuses,
+	})
+	if err != nil {
+		t.Fatalf("Execute() error=%v", err)
+	}
+
+	harness.mu.Lock()
+	subscriptions := harness.subscriptions
+	harness.mu.Unlock()
+	if subscriptions < 2 {
+		t.Fatalf("event subscriptions=%d want reconnect", subscriptions)
+	}
+	if len(statuses.statuses) != 1 || statuses.statuses[0] != "REVIEW" {
+		t.Fatalf("status updates=%v want [REVIEW]", statuses.statuses)
 	}
 }
