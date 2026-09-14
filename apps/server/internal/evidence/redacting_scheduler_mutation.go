@@ -20,6 +20,10 @@ func (s *RedactingStore) TransitionAdmittedJobMutation(ctx context.Context, inpu
 }
 
 func (s *RedactingStore) ResolveReconciliationMutation(ctx context.Context, input store.SchedulerReconciliation) (store.SchedulerMutationResult, error) {
+	if input.FailureReason != nil {
+		value := s.registry.RedactString(input.RunID, *input.FailureReason)
+		input.FailureReason = &value
+	}
 	base, ok := s.ControlPlaneStore.(store.SchedulerMutationStore)
 	if !ok {
 		run, err := s.ControlPlaneStore.ResolveReconciliation(ctx, input)
