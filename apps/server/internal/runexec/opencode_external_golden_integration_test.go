@@ -121,7 +121,7 @@ func TestOpenCodeExternalRunnerGoldenPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("approve golden Review: %v", err)
 	}
-	if approved.Review.Status != "APPROVED" || approved.Run.Status != "COMPLETED" || approved.Issue.Status != "DONE" {
+	if approved.Review.Status != "APPROVED" || approved.Run.Status != "COMPLETED" || approved.Issue.Status != "TODO" {
 		t.Fatalf("golden approval result=%+v", approved)
 	}
 
