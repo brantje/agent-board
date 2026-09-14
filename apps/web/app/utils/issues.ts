@@ -56,10 +56,14 @@ export function boardColumns(issues: Issue[], search = '') {
   }))
 }
 
-export function latestRun(runs: Run[], issueId: string) {
+export function issueRuns(runs: Run[], issueId: string) {
   return runs
     .filter(run => run.issueId === issueId)
-    .sort((a, b) => b.attempt - a.attempt)[0]
+    .sort((a, b) => b.attempt - a.attempt)
+}
+
+export function latestRun(runs: Run[], issueId: string) {
+  return issueRuns(runs, issueId)[0]
 }
 
 const terminalRunStatuses = new Set(['COMPLETED', 'CANCELLED'])
@@ -99,5 +103,5 @@ export function formatUpdatedLabel(updatedAt: string, now = Date.now()) {
   }
   const days = Math.round(diffMs / day)
   const value = days === 0 ? -1 : days
-  return `Updated ${updatedFormatter.format(value, 'day')}`
+  return `Updated ${updatedFormatter.format(value, 'day')`
 }
