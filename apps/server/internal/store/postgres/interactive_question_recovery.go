@@ -69,13 +69,6 @@ func queueBlockingQuestionResume(ctx context.Context, tx pgx.Tx, question store.
 	if err != nil {
 		return store.Run{}, store.SchedulerJob{}, err
 	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE issues
-		SET status='IN_PROGRESS', updated_at=now()
-		WHERE project_id=$1 AND id=$2 AND status='BLOCKED'
-	`, question.ProjectID, question.IssueID); err != nil {
-		return store.Run{}, store.SchedulerJob{}, err
-	}
 	job, err := scanSchedulerJob(tx.QueryRow(ctx, `
 		INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key, available_at)
 		VALUES ($1, $2, 'RESUME', 'QUEUED', $3, now())
