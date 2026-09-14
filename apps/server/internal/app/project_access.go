@@ -178,13 +178,6 @@ func (s *ProjectAccessService) UpdateIssue(ctx context.Context, actor Authentica
 	return s.controlPlane.UpdateIssue(ctx, input)
 }
 
-func (s *ProjectAccessService) AssignIssue(ctx context.Context, actor AuthenticatedUser, projectID, issueID, agentID string) (store.Issue, store.Run, error) {
-	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-	return s.controlPlane.AssignIssue(ctx, projectID, issueID, agentID)
-}
-
 func (s *ProjectAccessService) ListRuns(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.Run, error) {
 	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
 		return nil, err
