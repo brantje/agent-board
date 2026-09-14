@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Runner } from '../app/types/api'
-import { runnerEngines, runnerSessionSummary } from '../app/utils/runners'
+import { runnerEngines, runnerFeatures, runnerSessionSummary } from '../app/utils/runners'
 
 const baseRunner: Runner = {
   id: 'runner-1',
@@ -22,7 +22,7 @@ const baseRunner: Runner = {
 }
 
 describe('runner presentation helpers', () => {
-  it('reads supported engines from runner capabilities', () => {
+  it('reads supported engines and features from runner capabilities', () => {
     expect(runnerEngines({
       ...baseRunner,
       capabilities: { engines: ['opencode', 'scripted'] }
@@ -32,6 +32,12 @@ describe('runner presentation helpers', () => {
       capabilities: { engines: ['opencode', 1, '', 'scripted'] }
     })).toEqual(['opencode', 'scripted'])
     expect(runnerEngines({ ...baseRunner, capabilities: {} })).toEqual([])
+
+    expect(runnerFeatures({
+      ...baseRunner,
+      capabilities: { features: ['stdin', 'health', 1, ''] }
+    })).toEqual(['stdin', 'health'])
+    expect(runnerFeatures({ ...baseRunner, capabilities: {} })).toEqual([])
   })
 
   it('summarizes in-use sessions when connected and reserved sessions when offline', () => {
