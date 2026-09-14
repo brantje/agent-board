@@ -58,15 +58,20 @@ func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue
 }
 
 func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue, error) {
+	result, err := s.UpdateIssueMutation(ctx, input)
+	return result.Issue, err
+}
+
+func (s *Store) UpdateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.ID)
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	previousStatus := previous.Status
 
@@ -77,30 +82,31 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 		RETURNING `+issueSelectColumns+`
 	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.Priority))
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	_, runEvent, err := enqueueIssueMutation(ctx, tx, updated, previousStatus, false, repositoryPath, defaultBranch)
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	updated.PreviousStatus = previousStatus
 	issueEvent, err := store.NewIssueUpdatedEvent(updated, previousStatus)
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	issueEvent, err = appendEventTx(ctx, tx, issueEvent)
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
+	events := make([]store.Event, 0, 2)
 	if runEvent.ID != "" {
-		updated.PersistedEvents = append(updated.PersistedEvents, runEvent)
+		events = append(events, runEvent)
 	}
-	updated.PersistedEvents = append(updated.PersistedEvents, issueEvent)
+	events = append(events, issueEvent)
 	updated.LastEvent = &issueEvent
-	return updated, nil
+	return store.IssueMutationResult{Issue: updated, Events: events}, nil
 }
 
 func (s *Store) ListRuns(ctx context.Context, projectID string) ([]store.Run, error) {
