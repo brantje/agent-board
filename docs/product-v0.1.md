@@ -184,9 +184,9 @@ Issue priority uses one numeric v0.1 vocabulary: `0`, `1`, `2`, `3`, `4`. `0` is
 
 Issue ownership is one User, Agent or nobody. The assignment API changes ownership without changing Board status or cancelling Runs. Enabled Project-visible Agents remain assignable while their execution configuration is temporarily unavailable.
 
-Implementation is staged under #99: #100 provides ownership persistence/API/Events; #101 supplies automatic enqueue policy and #102 readiness recovery/explicit execution. The legacy internal execution entry point remains until that enqueue-policy change; the public ownership command does not invoke it.
+The shared automatic enqueue policy (#101) applies to creation with an Agent assignee, assignment and status mutations. Agent assignment enqueues in every status except Backlog, without changing status. For an already assigned Issue, only leaving Backlog for Todo, In Progress, Blocked or Review auto-enqueues. Backlog -> Done and all other status changes do not auto-start. Repeated unchanged ownership is a no-op. Different Agents may have active Runs on one Issue; the same Issue/Agent pair is deduplicated transactionally.
 
-Done Issues cannot start Runs. Reopen returns Done -> Todo without auto-starting.
+Assigning an Agent to a Done Issue can enqueue; reopening Done -> Todo alone does not. Existing Runs continue through ownership/status changes. Readiness recovery and explicit execution remain separate work (#102).
 
 ## Project workflow settings
 

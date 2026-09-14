@@ -67,10 +67,15 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "issue " + suffix, Status: "TODO", AssigneeType: stringPtrPG("AGENT"), AssigneeID: &agent.ID})
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "issue " + suffix, Status: "TODO"})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
+	// Seed ownership directly: this fixture builds its own Run and Workspace.
+	if _, err := s.pool.Exec(ctx, `UPDATE issues SET assignee_type='AGENT',assignee_id=$2 WHERE id=$1`, issue.ID, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	issue.AssigneeType, issue.AssigneeID = stringPtrPG("AGENT"), &agent.ID
 	workspace, err := s.CreateWorkspace(ctx, store.Workspace{ProjectID: project.ID, IssueID: issue.ID, Path: "/workspace/" + suffix, WorkingBranch: "issue/" + suffix})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)

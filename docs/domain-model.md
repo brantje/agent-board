@@ -55,7 +55,7 @@ Core Issue fields include title, description, durable Board status, priority and
 
 The public `assignedTo` value is `{type, id, name}` or null. Eligible Users are active effective Project members/admins, including inherited Group grants and implicit deployment-admin access. Eligible Agents are enabled and visible in the Project; execution readiness is separate. Changing eligibility later does not automatically change existing ownership.
 
-The shared ownership command supports assignment, reassignment and unassignment. It preserves Board status and existing Runs, atomically records an `issue.assigned` Event, and emits no mutation Event when ownership is unchanged. The Project assignee directory uses the same eligibility resolution. Automatic execution policy is tracked separately in #101/#102.
+The shared ownership command supports assignment, reassignment and unassignment. It preserves Board status and existing Runs, atomically records an `issue.assigned` Event, and emits no mutation Event when ownership is unchanged. The Project assignee directory uses the same eligibility resolution. Automatic execution follows the shared mutation policy in `scheduler.md`; readiness recovery remains separate work (#102).
 
 Each Issue has a public key `<project.issue_prefix>-<number>` allocated atomically per Project. The prefix is configured when the Project is created, is globally unique and immutable. The key is the public Issue identifier in URLs and APIs; the internal persistence identity remains a UUID.
 

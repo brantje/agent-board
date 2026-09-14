@@ -122,7 +122,20 @@ Issue #8 deliberately did not activate the coordinator with a placeholder proces
 
 ## Assignment changes
 
-Changing an active Issue assignee cancels the current Run according to product rules and schedules a new attempt through the same scheduler. The Issue Workspace is reused.
+Issue ownership and Board status mutations never cancel Runs. Stopping execution requires an explicit Run command.
+
+The shared `store.ShouldAutoEnqueueIssue` policy is applied inside the Issue mutation transaction:
+
+- assigning/reassigning an Agent (including initial ownership on creation) enqueues in every status except `BACKLOG`;
+- an already Agent-assigned Issue leaving `BACKLOG` enqueues for `TODO`, `IN_PROGRESS`, `BLOCKED` or `REVIEW`, but not `DONE`;
+- all other status changes, User assignment and unassignment do not enqueue;
+- unchanged ownership is an idempotent no-op, including after a prior Run has finished.
+
+Assignment preserves Board status. A valid but currently unrunnable Agent remains assigned successfully, without a pending-execution flag. Readiness reconciliation is separate work (#102).
+
+The Issue row lock serializes automatic enqueue, pair-scoped active-Run suppression and Issue-wide attempt numbering. Different Agents can have active Runs on one Issue; automatic enqueue never creates a second active Run for the same Issue/Agent. All attempts reuse the authoritative Issue Workspace and existing scheduler jobs. Workspace execution ownership still serializes access to its checkout.
+
+New automatic Runs atomically persist `run.created` with Run, Agent and Workspace identity. Duplicate suppression and readiness skips create no Run Events. Issue mutation Events remain owned by the canonical Issue commands.
 
 ## Delegation / Automation compatibility
 

@@ -14,6 +14,7 @@ import (
 
 type Service struct {
 	store               store.ControlPlaneStore
+	assignmentStore     store.IssueAssignmentStore
 	projectRepositories repository.ProjectRepositoryProvisioner
 	events              issueEventRecorder
 	Runners             *RunnerService
@@ -26,6 +27,7 @@ type issueEventRecorder interface {
 
 func New(controlPlaneStore store.ControlPlaneStore) *Service {
 	s := &Service{store: controlPlaneStore}
+	s.assignmentStore, _ = controlPlaneStore.(store.IssueAssignmentStore)
 	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
 		s.Runners = NewRunnerService(runners)
 	}

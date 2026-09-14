@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"log/slog"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -26,61 +28,82 @@ func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID str
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if err := lockAssigneeEligibility(ctx, tx); err != nil {
+		return store.Issue{}, store.Run{}, err
+	}
 	issue, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, projectID, issueID)
 	if err != nil {
 		return store.Issue{}, store.Run{}, err
 	}
-	if issue.Status == "DONE" {
-		return store.Issue{}, store.Run{}, store.ErrConflict
+	assignee, err := resolveAssignee(ctx, tx, projectID, &store.Assignee{Type: "AGENT", ID: agentID})
+	if err != nil {
+		return store.Issue{}, store.Run{}, err
+	}
+	agentID = assignee.ID
+	changed := issue.AssigneeType == nil || *issue.AssigneeType != "AGENT" || issue.AssigneeID == nil || *issue.AssigneeID != agentID
+	if changed {
+		issue, err = scanIssueJoined(tx.QueryRow(ctx, `
+        UPDATE issues AS i SET assignee_type='AGENT', assignee_id=$3, updated_at=now()
+        FROM projects AS p WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
+        RETURNING `+issueSelectColumns, projectID, issueID, agentID))
+		if err != nil {
+			return store.Issue{}, store.Run{}, err
+		}
+	}
+	run, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, changed, repositoryPath, defaultBranch)
+	if err != nil {
+		return store.Issue{}, store.Run{}, err
+	}
+	if !changed {
+		run, err = activeRunForAgent(ctx, tx, projectID, issueID, agentID)
+		if errors.Is(err, store.ErrNotFound) {
+			err = nil
+		}
+		if err != nil {
+			return store.Issue{}, store.Run{}, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.Issue{}, store.Run{}, err
+	}
+	return issue, run, nil
+}
+
+// The caller holds the Issue row lock through commit: policy, readiness,
+// pair-scoped duplicate suppression, attempt allocation and enqueue are atomic.
+func enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store.Issue, previousStatus string, assignment bool, repositoryPath, defaultBranch string) (store.Run, error) {
+	kind := ""
+	if issue.AssigneeType != nil {
+		kind = *issue.AssigneeType
+	}
+	if !store.ShouldAutoEnqueueIssue(previousStatus, issue.Status, kind, assignment) || issue.AssigneeID == nil {
+		return store.Run{}, nil
+	}
+	projectID, issueID, agentID := issue.ProjectID, issue.ID, *issue.AssigneeID
+	active, err := activeRunForAgent(ctx, tx, projectID, issueID, agentID)
+	if err == nil {
+		slog.DebugContext(ctx, "Issue auto enqueue suppressed: active Run", "issue_id", issueID, "agent_id", agentID, "run_id", active.ID)
+		return active, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return store.Run{}, err
 	}
 	if err := verifyRunnableAgent(ctx, tx, projectID, agentID); err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-
-	active, err := latestActiveRun(ctx, tx, projectID, issueID)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return store.Issue{}, store.Run{}, err
-	}
-	if err == nil {
-		if active.AgentID != nil && *active.AgentID == agentID {
-			// Assignment retries are idempotent. Preserve the current Issue board
-			// state because it can legitimately diverge from Run state (for
-			// example BLOCKED/WAITING_FOR_INPUT or REVIEW/READY_FOR_REVIEW).
-			if err := tx.Commit(ctx); err != nil {
-				return store.Issue{}, store.Run{}, err
-			}
-			return issue, active, nil
+		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			slog.DebugContext(ctx, "Issue auto enqueue skipped: Agent unavailable", "issue_id", issueID, "agent_id", agentID)
+			return store.Run{}, nil
 		}
-		if active.Status != "QUEUED" {
-			return store.Issue{}, store.Run{}, store.ErrConflict
-		}
-		if _, err := tx.Exec(ctx, `UPDATE runs SET status='CANCELLED', completed_at=now(), updated_at=now() WHERE project_id=$1 AND id=$2`, projectID, active.ID); err != nil {
-			return store.Issue{}, store.Run{}, err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE scheduler_jobs SET state='CANCELLED', updated_at=now() WHERE project_id=$1 AND run_id=$2 AND state='QUEUED'`, projectID, active.ID); err != nil {
-			return store.Issue{}, store.Run{}, err
-		}
+		return store.Run{}, err
 	}
 
 	workspace, err := workspaceForAssignment(ctx, tx, projectID, issueID, issue.Key, repositoryPath, defaultBranch)
 	if err != nil {
-		return store.Issue{}, store.Run{}, err
+		return store.Run{}, err
 	}
 
 	var attempt int
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(attempt), 0) + 1 FROM runs WHERE issue_id=$1`, issueID).Scan(&attempt); err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-
-	issue, err = scanIssueJoined(tx.QueryRow(ctx, `
-        UPDATE issues AS i
-        SET assignee_type='AGENT', assignee_id=$3, status='IN_PROGRESS', updated_at=now()
-        FROM projects AS p
-        WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
-        RETURNING `+issueSelectColumns+`
-    `, projectID, issueID, agentID))
-	if err != nil {
-		return store.Issue{}, store.Run{}, err
+		return store.Run{}, err
 	}
 
 	run, err := scanRun(tx.QueryRow(ctx, `
@@ -89,20 +112,21 @@ func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID str
         RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
     `, projectID, issueID, workspace.ID, agentID, attempt))
 	if err != nil {
-		return store.Issue{}, store.Run{}, err
+		return store.Run{}, err
 	}
 
 	if _, err := tx.Exec(ctx, `
         INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key)
         VALUES ($1, $2, 'START', 'QUEUED', $3)
     `, projectID, run.ID, "run:"+run.ID+":start"); err != nil {
-		return store.Issue{}, store.Run{}, err
+		return store.Run{}, err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return store.Issue{}, store.Run{}, err
+	payload, _ := json.Marshal(map[string]any{"status": run.Status, "attempt": run.Attempt})
+	if _, err := appendEventTx(ctx, tx, store.Event{Type: "run.created", ProjectID: projectID, IssueID: &issueID, RunID: &run.ID, AgentID: &agentID, WorkspaceID: &workspace.ID, Actor: store.EmptyObject, Payload: payload}); err != nil {
+		return store.Run{}, err
 	}
-	return issue, run, nil
+	return run, nil
 }
 
 func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID string) (store.Issue, string, string, error) {
@@ -150,31 +174,18 @@ func verifyRunnableAgent(ctx context.Context, tx pgx.Tx, projectID, agentID stri
 	return nil
 }
 
-func latestActiveRun(ctx context.Context, tx pgx.Tx, projectID, issueID string) (store.Run, error) {
+func activeRunForAgent(ctx context.Context, tx pgx.Tx, projectID, issueID, agentID string) (store.Run, error) {
 	run, err := scanRun(tx.QueryRow(ctx, `
         SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
         FROM runs
-        WHERE project_id=$1 AND issue_id=$2
+        WHERE project_id=$1 AND issue_id=$2 AND agent_id=$3 AND status = ANY($4::text[])
         ORDER BY attempt DESC
         LIMIT 1
-        FOR UPDATE
-    `, projectID, issueID))
+    `, projectID, issueID, agentID, activeRunStatuses))
 	if err != nil {
 		return store.Run{}, err
 	}
-	if !isActiveRunStatus(run.Status) {
-		return store.Run{}, store.ErrNotFound
-	}
 	return run, nil
-}
-
-func isActiveRunStatus(status string) bool {
-	for _, candidate := range activeRunStatuses {
-		if candidate == status {
-			return true
-		}
-	}
-	return false
 }
 
 func workspaceForAssignment(ctx context.Context, tx pgx.Tx, projectID, issueID, issueKey, repositoryPath, defaultBranch string) (store.Workspace, error) {

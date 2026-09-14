@@ -15,8 +15,8 @@ func (s *Service) SetIssueAssignee(ctx context.Context, projectID, issueID strin
 			return store.Issue{}, NewError("invalid_argument", "assignee must have a valid type and UUID", store.ErrInvalidArgument)
 		}
 	}
-	assignmentStore, ok := s.store.(store.IssueAssignmentStore)
-	if !ok {
+	assignmentStore := s.assignmentStore
+	if assignmentStore == nil {
 		return store.Issue{}, NewError("assignment_unavailable", "assignment store unavailable", store.ErrInvalidArgument)
 	}
 	issue, event, err := assignmentStore.SetIssueAssignee(ctx, projectID, issueID, target, actor)
@@ -34,8 +34,8 @@ func (s *Service) SetIssueAssignee(ctx context.Context, projectID, issueID strin
 }
 
 func (s *Service) ListIssueAssignees(ctx context.Context, projectID string) ([]store.Assignee, error) {
-	assignmentStore, ok := s.store.(store.IssueAssignmentStore)
-	if !ok {
+	assignmentStore := s.assignmentStore
+	if assignmentStore == nil {
 		return nil, NewError("assignment_unavailable", "assignment store unavailable", store.ErrInvalidArgument)
 	}
 	result, err := assignmentStore.ListIssueAssignees(ctx, projectID)

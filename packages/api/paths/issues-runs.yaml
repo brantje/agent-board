@@ -10,6 +10,7 @@ path1:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
     operationId: createIssue
+    description: Initial Agent ownership automatically queues a Run when runnable and outside BACKLOG.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/IssueCreate
     responses:
@@ -30,6 +31,7 @@ path2:
         $ref: ../components/api-components.yaml#/responses/Error
   patch:
     operationId: updateIssue
+    description: Updates Issue state without cancelling Runs. An already Agent-assigned Issue leaving BACKLOG for TODO, IN_PROGRESS, BLOCKED or REVIEW automatically queues a Run when runnable. Other status changes do not enqueue.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/IssueUpdate
     responses:
@@ -43,7 +45,7 @@ path3:
   - $ref: ../components/api-components.yaml#/parameters/IssueID
   post:
     operationId: assignIssue
-    description: Changes current ownership and atomically records its Event. Does not change Board status or Runs.
+    description: Changes ownership and atomically records its Event while preserving Board status and existing Runs. Changed Agent ownership outside BACKLOG queues a Run when runnable, suppressing duplicate active Runs for the same Issue and Agent. User ownership, unassignment and unchanged ownership never enqueue.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/Assignment
     responses:

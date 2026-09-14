@@ -118,7 +118,7 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
 	if err = lockAssigneeEligibility(ctx, tx); err != nil {
 		return store.Issue{}, store.Event{}, err
 	}
-	issue, _, _, err := lockAssignmentIssue(ctx, tx, projectID, issueID)
+	issue, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, projectID, issueID)
 	if err != nil {
 		return store.Issue{}, store.Event{}, err
 	}
@@ -145,6 +145,9 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
         WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
         RETURNING `+issueSelectColumns, projectID, issueID, kind, id))
 	if err != nil {
+		return store.Issue{}, store.Event{}, err
+	}
+	if _, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch); err != nil {
 		return store.Issue{}, store.Event{}, err
 	}
 	payload, err := json.Marshal(map[string]any{"assignedTo": assignee})

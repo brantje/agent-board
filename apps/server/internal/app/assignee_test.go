@@ -87,3 +87,23 @@ func TestAssigneeSharedAuthorizationActorAndPublication(t *testing.T) {
 		t.Fatal("missing directory accepted")
 	}
 }
+
+func TestProductionServicesPreserveAssignmentCapability(t *testing.T) {
+	fake := &assigneeCommandStore{projectWorkflowAuthorizationStore: &projectWorkflowAuthorizationStore{}}
+	services, err := NewServicesWithRuntimes(fake, workspaceMaterializerFunc(func(_ context.Context, _ store.Project, _ store.Issue, w store.Workspace) (store.Workspace, error) {
+		return w, nil
+	}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = services.Close() })
+	if _, err = services.ControlPlane.SetIssueAssignee(t.Context(), "project", "issue", nil, store.EmptyObject); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = services.ControlPlane.ListIssueAssignees(t.Context(), "project"); err != nil {
+		t.Fatal(err)
+	}
+	if fake.calls != 2 {
+		t.Fatalf("calls=%d", fake.calls)
+	}
+}

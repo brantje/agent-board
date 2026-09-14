@@ -216,19 +216,15 @@ func (s *doneIssueStore) GetIssue(context.Context, string, string) (store.Issue,
 	return i, nil
 }
 
-func TestAssignmentPreflightErrorsAndAppErrorString(t *testing.T) {
+func TestAssignmentDefersExecutionReadinessAndAppErrorString(t *testing.T) {
 	pid := coverageProjectID()
 	base := &fakeStore{project: store.Project{ID: pid}, agent: coverageAgent()}
-	for _, tc := range []struct {
-		svc  *Service
-		code string
-	}{{New(&doneIssueStore{fakeStore: base}), "issue_done"}, {New(&disabledModelStore{fakeStore: base}), "execution_configuration_invalid"}} {
-		_, _, err := tc.svc.AssignIssue(context.Background(), pid, "issue", "agent")
-		ae, ok := AsError(err)
-		if !ok || ae.Code != tc.code {
-			t.Fatalf("assignment error=%v", err)
+	for _, svc := range []*Service{New(&doneIssueStore{fakeStore: base}), New(&disabledModelStore{fakeStore: base})} {
+		if _, _, err := svc.AssignIssue(context.Background(), pid, "issue", "agent"); err != nil {
+			t.Fatal(err)
 		}
 	}
+
 	err := NewError("code", "message", store.ErrConflict)
 	if err.Error() != "message" || !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("error=%v", err)
@@ -259,15 +255,14 @@ func (s *disabledProviderStore) GetProvider(context.Context, *string, string) (s
 	return p, nil
 }
 
-func TestAssignmentRejectsUnavailableConfiguration(t *testing.T) {
+func TestAssignmentReadinessIsOwnedByTransactionalStore(t *testing.T) {
 	pid := coverageProjectID()
 	makeBase := func() *fakeStore { return &fakeStore{project: store.Project{ID: pid}, agent: coverageAgent()} }
 	cases := []*Service{New(&disabledAgentStore{fakeStore: makeBase()}), New(&disabledModelStore{fakeStore: makeBase()}), New(&disabledProviderStore{fakeStore: makeBase()})}
 	for _, svc := range cases {
 		_, _, err := svc.AssignIssue(context.Background(), pid, "issue", "agent")
-		ae, ok := AsError(err)
-		if !ok || (ae.Code != "agent_unavailable" && ae.Code != "execution_configuration_invalid") {
-			t.Fatalf("assignment error=%v", err)
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 }

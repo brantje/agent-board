@@ -28,7 +28,7 @@ func TestAssignIssueTreatsReadyForReviewRunAsActive(t *testing.T) {
 	}
 }
 
-func TestAssignIssueStartsNewAttemptAfterFailedFollowUpLeavesOlderReadyForReview(t *testing.T) {
+func TestAssignIssueSuppressesDuplicateWithOlderReadyForReview(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
 	project, issue, agent, firstRun := assignedReadyForReviewRun(t, s, "failed-follow-up")
@@ -45,8 +45,8 @@ func TestAssignIssueStartsNewAttemptAfterFailedFollowUpLeavesOlderReadyForReview
 	if err != nil {
 		t.Fatalf("reassign after failed follow-up: %v", err)
 	}
-	if nextRun.Attempt != 3 || nextRun.Status != "QUEUED" || nextRun.ID == firstRun.ID {
-		t.Fatalf("reassign run=%+v, want new QUEUED attempt 3", nextRun)
+	if nextRun.ID != firstRun.ID {
+		t.Fatalf("reassign run=%+v, want existing active review Run", nextRun)
 	}
 
 	var jobCount int

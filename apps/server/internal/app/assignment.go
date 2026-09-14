@@ -6,40 +6,16 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-// AssignIssue is the legacy internal execution entry point. Public ownership
-// mutations use SetIssueAssignee; enqueue policy is replaced separately by #101.
+// AssignIssue is the compatibility Agent assignment entry point. The store uses
+// the same transactional enqueue policy as public ownership mutations.
 func (s *Service) AssignIssue(ctx context.Context, projectID, issueID, agentID string) (store.Issue, store.Run, error) {
 	issue, err := s.GetIssue(ctx, projectID, issueID)
 	if err != nil {
 		return store.Issue{}, store.Run{}, err
 	}
-	if issue.Status == "DONE" {
-		return store.Issue{}, store.Run{}, NewError("issue_done", "done issue cannot start a run", store.ErrConflict)
-	}
-
-	scope := &projectID
-	agent, err := s.GetAgent(ctx, scope, agentID)
+	agent, err := s.GetAgent(ctx, &projectID, agentID)
 	if err != nil {
 		return store.Issue{}, store.Run{}, err
-	}
-	if agent.State != "ENABLED" {
-		return store.Issue{}, store.Run{}, NewError("agent_unavailable", "agent is not runnable", store.ErrConflict)
-	}
-
-	model, err := s.GetModelProfile(ctx, scope, agent.ModelProfileID)
-	if err != nil {
-		return store.Issue{}, store.Run{}, executionConfigError(err)
-	}
-	if !model.Enabled {
-		return store.Issue{}, store.Run{}, executionConfigError(nil)
-	}
-
-	provider, err := s.GetProvider(ctx, scope, model.ProviderID)
-	if err != nil {
-		return store.Issue{}, store.Run{}, executionConfigError(err)
-	}
-	if !provider.Enabled || provider.HealthStatus == "UNHEALTHY" {
-		return store.Issue{}, store.Run{}, executionConfigError(nil)
 	}
 
 	assigned, run, err := s.store.AssignIssue(ctx, projectID, issueID, agentID)
@@ -55,8 +31,4 @@ func (s *Service) AssignIssue(ctx context.Context, projectID, issueID, agentID s
 		return store.Issue{}, store.Run{}, err
 	}
 	return attachIssueEvent(assigned, event), run, nil
-}
-
-func executionConfigError(err error) error {
-	return NewError("execution_configuration_invalid", "agent execution configuration is not runnable", err)
 }

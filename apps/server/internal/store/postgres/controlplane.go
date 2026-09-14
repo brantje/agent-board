@@ -64,38 +64,11 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var issueID, previousStatus string
-	if err := tx.QueryRow(ctx, `
-		SELECT id::text, status
-		FROM issues
-		WHERE project_id=$1 AND id=$2
-		FOR UPDATE
-	`, input.ProjectID, input.ID).Scan(&issueID, &previousStatus); err != nil {
-		return store.Issue{}, notFound(err)
+	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.ID)
+	if err != nil {
+		return store.Issue{}, err
 	}
-
-	if input.Status == "DONE" {
-		var active bool
-		if err := tx.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1
-				FROM runs
-				WHERE project_id=$1 AND issue_id=$2
-				  AND status = ANY($3::text[])
-			) OR EXISTS (
-				SELECT 1
-				FROM scheduler_jobs AS job
-				JOIN runs AS run ON run.id=job.run_id AND run.project_id=job.project_id
-				WHERE run.project_id=$1 AND run.issue_id=$2
-				  AND job.state IN ('QUEUED','CLAIMED')
-			)
-		`, input.ProjectID, input.ID, activeRunStatuses).Scan(&active); err != nil {
-			return store.Issue{}, err
-		}
-		if active {
-			return store.Issue{}, store.ErrConflict
-		}
-	}
+	previousStatus := previous.Status
 
 	updated, err := scanIssueJoined(tx.QueryRow(ctx, `
 		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, updated_at=now()
@@ -104,6 +77,9 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 		RETURNING `+issueSelectColumns+`
 	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.Priority))
 	if err != nil {
+		return store.Issue{}, err
+	}
+	if _, err := enqueueIssueMutation(ctx, tx, updated, previousStatus, false, repositoryPath, defaultBranch); err != nil {
 		return store.Issue{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {

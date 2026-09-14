@@ -138,7 +138,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if assigned.Status != "IN_PROGRESS" || assigned.AssigneeID == nil || *assigned.AssigneeID != agent.ID {
+	if assigned.Status != issue.Status || assigned.AssigneeID == nil || *assigned.AssigneeID != agent.ID {
 		t.Fatalf("unexpected assigned issue: %+v", assigned)
 	}
 	if run.Status != "QUEUED" || run.Attempt != 1 || run.WorkspaceID == "" {
@@ -164,6 +164,9 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	}
 	if sameIssue.ID != assigned.ID || sameRun.ID != run.ID {
 		t.Fatalf("same assignment created duplicate run: %s vs %s", sameRun.ID, run.ID)
+	}
+	if !sameIssue.UpdatedAt.Equal(assigned.UpdatedAt) {
+		t.Fatal("unchanged assignment changed updated_at")
 	}
 	var runCount, jobCount int
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE issue_id=$1`, issue.ID).Scan(&runCount); err != nil {
@@ -191,7 +194,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if old.Status != "CANCELLED" {
+	if old.Status != "QUEUED" {
 		t.Fatalf("old status=%s", old.Status)
 	}
 
@@ -202,7 +205,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.AssignIssue(ctx, p1.ID, done.ID, otherAgent.ID); !errors.Is(err, store.ErrConflict) {
+	if _, _, err = s.AssignIssue(ctx, p1.ID, done.ID, otherAgent.ID); err != nil {
 		t.Fatalf("done assignment err=%v", err)
 	}
 	disabled, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Disabled", Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "DISABLED"})
@@ -213,7 +216,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.AssignIssue(ctx, p1.ID, blocked.ID, disabled.ID); !errors.Is(err, store.ErrConflict) {
+	if _, _, err = s.AssignIssue(ctx, p1.ID, blocked.ID, disabled.ID); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("disabled assignment err=%v", err)
 	}
 }
