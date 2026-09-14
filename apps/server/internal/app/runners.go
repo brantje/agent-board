@@ -247,7 +247,7 @@ func (s *RunnerService) projectOwnedRunner(ctx context.Context, projectID, id st
 		return store.Runner{}, err
 	}
 	if value.ProjectID == nil || !strings.EqualFold(*value.ProjectID, projectID) {
-		return store.Runner{}, notFound("runner")
+		return store.Runner{}, translateStoreError(store.ErrNotFound, "runner")
 	}
 	return value, nil
 }
