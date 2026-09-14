@@ -8,32 +8,32 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func (s *Store) transitionAdmittedJob(ctx context.Context, input store.SchedulerTransition) (store.Run, error) {
+func (s *Store) transitionAdmittedJob(ctx context.Context, input store.SchedulerTransition) (store.SchedulerMutationResult, error) {
 	if strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.JobID) == "" ||
 		strings.TrimSpace(input.RunID) == "" || strings.TrimSpace(input.LeaseToken) == "" {
-		return store.Run{}, store.ErrInvalidArgument
+		return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	current, err := lockFencedRun(ctx, tx, input.ProjectID, input.JobID, input.RunID, input.LeaseToken)
 	if err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
 	if !validSchedulerRunTransition(current.Status, input.RunStatus) {
-		return store.Run{}, store.ErrConflict
+		return store.SchedulerMutationResult{}, store.ErrConflict
 	}
 
 	release, jobState, terminal, err := schedulerTransitionEffects(input.RunStatus)
 	if err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
 	if input.RunStatus == "FAILED" && (input.FailureReason == nil || strings.TrimSpace(*input.FailureReason) == "") {
-		return store.Run{}, store.ErrInvalidArgument
+		return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 	}
 
 	run, err := scanRun(tx.QueryRow(ctx, `
@@ -47,47 +47,52 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
 	`, input.ProjectID, input.RunID, input.RunStatus, input.FailureReason, terminal))
 	if err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
 
 	if terminal && current.Status == "WAITING_FOR_INPUT" {
 		if err := cleanupTerminalInteractiveQuestions(ctx, tx, run); err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
 	}
 
 	if input.RunStatus == "READY_FOR_REVIEW" {
 		if err := createPendingReview(ctx, tx, run); err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
 	}
 
+	events := make([]store.Event, 0, 1)
 	if input.RunStatus == "FAILED" {
-		if err := rollbackFailedRunIssueStatus(ctx, tx, run); err != nil {
-			return store.Run{}, err
+		event, err := rollbackFailedRunIssueStatus(ctx, tx, run)
+		if err != nil {
+			return store.SchedulerMutationResult{}, err
+		}
+		if event.ID != "" {
+			events = append(events, event)
 		}
 	}
 
 	if release {
 		if _, err := tx.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, input.ProjectID, input.JobID); err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE scheduler_jobs
 			SET state=$4, wait_reason=NULL, updated_at=now()
 			WHERE id=$2 AND project_id=$1 AND run_id=$3 AND state='CLAIMED'
 		`, input.ProjectID, input.JobID, input.RunID, jobState); err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM scheduler_leases WHERE job_id=$1 AND lease_token=$2`, input.JobID, input.LeaseToken); err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
-	return run, nil
+	return store.SchedulerMutationResult{Run: run, Events: events}, nil
 }
 
 func createPendingReview(ctx context.Context, tx pgx.Tx, run store.Run) error {
