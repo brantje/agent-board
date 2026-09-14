@@ -13,7 +13,7 @@ type ControlPlaneStore interface {
 	ListProjects(context.Context) ([]Project, error)
 	UpdateProject(context.Context, Project) (Project, error)
 	ListIssues(context.Context, string) ([]Issue, error)
-	UpdateIssue(context.Context, Issue) (IssueMutationResult, error)
+	UpdateIssue(context.Context, Issue) (Issue, error)
 	ListIssueRelationships(context.Context, string, string) ([]IssueRelationship, error)
 	CreateIssueRelationship(context.Context, IssueRelationship) (IssueRelationship, error)
 	DeleteIssueRelationship(context.Context, string, string, string) error
