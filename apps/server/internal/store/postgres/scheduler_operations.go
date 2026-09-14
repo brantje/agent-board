@@ -79,6 +79,11 @@ func (s *Store) ReleaseCapacity(ctx context.Context, projectID, jobID string) er
 }
 
 func (s *Store) TransitionAdmittedJob(ctx context.Context, input store.SchedulerTransition) (store.Run, error) {
+	result, err := s.TransitionAdmittedJobMutation(ctx, input)
+	return result.Run, err
+}
+
+func (s *Store) TransitionAdmittedJobMutation(ctx context.Context, input store.SchedulerTransition) (store.SchedulerMutationResult, error) {
 	return s.transitionAdmittedJob(ctx, input)
 }
 
@@ -87,6 +92,11 @@ func (s *Store) ClaimExpiredJobForReconciliation(ctx context.Context, ownerID st
 }
 
 func (s *Store) ResolveReconciliation(ctx context.Context, input store.SchedulerReconciliation) (store.Run, error) {
+	result, err := s.ResolveReconciliationMutation(ctx, input)
+	return result.Run, err
+}
+
+func (s *Store) ResolveReconciliationMutation(ctx context.Context, input store.SchedulerReconciliation) (store.SchedulerMutationResult, error) {
 	return s.resolveReconciliation(ctx, input)
 }
 
