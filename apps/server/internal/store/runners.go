@@ -6,9 +6,12 @@ import (
 	"time"
 )
 
-// Runner is deployment-global execution capacity. Connectivity is never stored.
+// Runner is execution capacity. ProjectID is nil for deployment-global/shared
+// capacity and set for a Runner dedicated to exactly one Project. Connectivity
+// is never stored.
 type Runner struct {
 	ID                    string
+	ProjectID             *string
 	Name                  string
 	TokenHash             []byte `json:"-"`
 	RegistrationTokenHash []byte `json:"-"`
