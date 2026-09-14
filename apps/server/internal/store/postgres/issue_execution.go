@@ -65,7 +65,7 @@ func (s *Store) RunnableIssueExecutionScopes(ctx context.Context, filter store.I
           AND ($2='' OR a.id::text=$2)
           AND ($3='' OR m.id::text=$3)
           AND ($4='' OR m.provider_id::text=$4)
-        ORDER BY i.project_id, a.id
+        ORDER BY 1, 2
     `, filter.ProjectID, filter.AgentID, filter.ModelProfileID, filter.ProviderID)
 	if err != nil {
 		return nil, err
