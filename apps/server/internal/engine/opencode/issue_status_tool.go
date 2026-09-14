@@ -81,21 +81,16 @@ func (t *issueStatusToolTracker) Handle(ctx context.Context, event client.Event,
 }
 
 func (t *issueStatusToolTracker) Reconcile(ctx context.Context, native *client.Client, sessionID string, updater engine.IssueStatusUpdater) error {
-	parts, err := durableIssueStatusToolParts(ctx, native, sessionID)
-	if err != nil {
-		return err
-	}
-	for _, part := range parts {
-		if err := t.applyPart(ctx, part, sessionID, updater, true); err != nil {
-			return err
-		}
-	}
-	return nil
+	return t.reconcileDurable(ctx, native, sessionID, updater)
 }
 
 // ReconcileAttach restores the final durable Board intent from a recovered
 // native session without replaying an already-applied historical status sequence.
 func (t *issueStatusToolTracker) ReconcileAttach(ctx context.Context, native *client.Client, sessionID string, updater engine.IssueStatusUpdater) error {
+	return t.reconcileDurable(ctx, native, sessionID, updater)
+}
+
+func (t *issueStatusToolTracker) reconcileDurable(ctx context.Context, native *client.Client, sessionID string, updater engine.IssueStatusUpdater) error {
 	parts, err := durableIssueStatusToolParts(ctx, native, sessionID)
 	if err != nil {
 		return err
@@ -103,6 +98,9 @@ func (t *issueStatusToolTracker) ReconcileAttach(ctx context.Context, native *cl
 	if len(parts) == 0 {
 		return nil
 	}
+	// Board status is a current value, not an event stream to reconstruct. Older
+	// durable tool intents are superseded by the final durable intent from this
+	// session, whether or not Agent Board observed them live.
 	for _, part := range parts[:len(parts)-1] {
 		if partID := strings.TrimSpace(part.ID); partID != "" {
 			t.seen[partID] = struct{}{}
