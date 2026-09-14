@@ -118,6 +118,11 @@ func (s *Store) GetProject(ctx context.Context, projectID string) (store.Project
 }
 
 func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue, error) {
+	result, err := s.CreateIssueMutation(ctx, input)
+	return result.Issue, err
+}
+
+func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
 	status := input.Status
 	if status == "" {
 		status = "BACKLOG"
@@ -125,26 +130,26 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	if (input.AssigneeType == nil) != (input.AssigneeID == nil) {
-		return store.Issue{}, store.ErrInvalidArgument
+		return store.IssueMutationResult{}, store.ErrInvalidArgument
 	}
 	var assignee *store.Assignee
 	if input.AssigneeType != nil {
 		if err := lockAssigneeEligibility(ctx, tx); err != nil {
-			return store.Issue{}, err
+			return store.IssueMutationResult{}, err
 		}
 		assignee, err = resolveAssignee(ctx, tx, input.ProjectID, input.AssignedTo())
 		if err != nil {
-			return store.Issue{}, err
+			return store.IssueMutationResult{}, err
 		}
 	}
 	creatorName, err := issueCreatorName(ctx, tx, input.ProjectID, input.CreatedByType, input.CreatedByID)
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 
 	var prefix string
@@ -155,7 +160,7 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 		WHERE id = $1
 		RETURNING issue_prefix, next_issue_number - 1
 	`, input.ProjectID).Scan(&prefix, &number); err != nil {
-		return store.Issue{}, notFound(err)
+		return store.IssueMutationResult{}, notFound(err)
 	}
 
 	issue, err := scanIssueWithPriority(tx.QueryRow(ctx, `
@@ -164,7 +169,7 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 		RETURNING id::text, project_id::text, title, description, status, priority, assignee_type, assignee_id::text, NULL::text, number, created_by_type, created_by_id::text, created_at, updated_at
 	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, input.AssigneeType, input.AssigneeID, input.CreatedByType, input.CreatedByID))
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	issue.Key = store.FormatIssueKey(prefix, issue.Number)
 	issue.CreatedByName = creatorName
@@ -176,29 +181,30 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 	if assignee != nil && assignee.Type == "AGENT" {
 		_, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, issue.ProjectID, issue.ID)
 		if err != nil {
-			return store.Issue{}, err
+			return store.IssueMutationResult{}, err
 		}
 		if _, runEvent, err = enqueueIssueMutation(ctx, tx, issue, "", true, repositoryPath, defaultBranch); err != nil {
-			return store.Issue{}, err
+			return store.IssueMutationResult{}, err
 		}
 	}
 	issueEvent, err := store.NewIssueCreatedEvent(issue)
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	issueEvent, err = appendEventTx(ctx, tx, issueEvent)
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
+	events := make([]store.Event, 0, 2)
 	if runEvent.ID != "" {
-		issue.PersistedEvents = append(issue.PersistedEvents, runEvent)
+		events = append(events, runEvent)
 	}
-	issue.PersistedEvents = append(issue.PersistedEvents, issueEvent)
+	events = append(events, issueEvent)
 	issue.LastEvent = &issueEvent
-	return issue, nil
+	return store.IssueMutationResult{Issue: issue, Events: events}, nil
 }
 
 func issueCreatorName(ctx context.Context, tx pgx.Tx, projectID string, creatorType, creatorID *string) (*string, error) {
