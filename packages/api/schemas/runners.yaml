@@ -1,9 +1,10 @@
 Runner:
   type: object
   additionalProperties: false
-  required: [id, name, internal, managed, deletable, connected, registeredAt, revokedAt, lastSeenAt, capabilities, createdAt, updatedAt]
+  required: [id, projectId, name, internal, managed, deletable, connected, registeredAt, revokedAt, lastSeenAt, capabilities, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
+    projectId: {type: [string, 'null'], format: uuid}
     name: {type: [string, 'null']}
     internal: {type: boolean}
     managed: {type: boolean}
