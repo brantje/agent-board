@@ -54,7 +54,10 @@ const global = {
   components: { RunStatus }
 }
 const button = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').find(value => value.text() === label)!
+const hasButton = (wrapper: ReturnType<typeof mount>, label: string) => wrapper.findAll('button').some(value => value.text() === label)
 const formForField = (wrapper: ReturnType<typeof mount>, name: string) => wrapper.findAll('form').find(form => form.find(`[data-field=${name}]`).exists())!
+const statusOptions = (wrapper: ReturnType<typeof mount>) => wrapper.get('[data-field=status]').findAll('option').map(option => option.text())
+const allStatusOptions = ['Select…', 'Backlog', 'Todo', 'In Progress', 'Blocked', 'Review', 'Done']
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -126,11 +129,12 @@ describe('Issue workflow components', () => {
     expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(false)
   })
 
-  it('creates only valid Issues, round-trips priority, and cannot submit protected Review/Done transitions', async () => {
+  it('creates valid Issues and allows every persisted Board status without a client transition graph', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(issue)))
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(IssueEditor, { props: { projectId: 'p' }, global })
 
+    expect(statusOptions(wrapper)).toEqual(allStatusOptions)
     await wrapper.get('form').trigger('submit')
     expect(fetch).not.toHaveBeenCalled()
     await wrapper.get('input').setValue('New task')
@@ -149,15 +153,20 @@ describe('Issue workflow components', () => {
     expect(wrapper.emitted('cancel')).toHaveLength(1)
 
     const done = mount(IssueEditor, { props: { projectId: 'p', issue: { ...issue, status: 'DONE' } }, global })
-    expect(done.get('[data-field=status]').findAll('option').map(option => option.text())).toEqual(['Select…', 'Done', 'Todo'])
-    await done.get('[data-field=status] select').setValue('TODO')
+    expect(statusOptions(done)).toEqual(allStatusOptions)
+    expect(done.text()).not.toContain('Reopen into Todo')
+    await done.get('[data-field=status] select').setValue('IN_PROGRESS')
     await done.get('form').trigger('submit')
     await flushPromises()
-    expect(fetch.mock.calls.at(-1)?.[1]).toMatchObject({ method: 'PATCH' })
+    expect(fetch.mock.calls.at(-1)?.[1]).toMatchObject({
+      method: 'PATCH',
+      body: JSON.stringify({ title: issue.title, description: issue.description, status: 'IN_PROGRESS', priority: 0 })
+    })
 
     const review = mount(IssueEditor, { props: { projectId: 'p', issue: { ...issue, status: 'REVIEW' } }, global })
-    expect(review.get('[data-field=status]').findAll('option').map(option => option.text())).toEqual(['Select…', 'Review'])
-    expect(review.text()).toContain('Review decision')
+    expect(statusOptions(review)).toEqual(allStatusOptions)
+    expect(review.text()).not.toContain('Review decision')
+    await review.get('[data-field=status] select').setValue('DONE')
 
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: { code: 'conflict', message: 'raw detail' } }), { status: 409 })))
     await review.get('form').trigger('submit')
@@ -166,7 +175,7 @@ describe('Issue workflow components', () => {
     expect(review.text()).not.toContain('raw detail')
   })
 
-  it('renders all Board columns, filters Issues, and refreshes Project/Issue/Run state after creation', async () => {
+  it('renders all Board columns, works without Agents, filters Issues, and refreshes state after creation', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit) => {
       if (options.method === 'POST') return new Response(JSON.stringify({ ...issue, id: 'created', title: 'Created' }), { status: 201 })
       if (path.endsWith('/issues')) return new Response(JSON.stringify([issue]))
@@ -207,6 +216,7 @@ describe('Issue workflow components', () => {
     expect(wrapper.text()).toContain('No matching issues')
 
     await button(wrapper, 'New issue').trigger('click')
+    expect(statusOptions(wrapper)).toEqual(allStatusOptions)
     await button(wrapper, 'Cancel').trigger('click')
     expect(wrapper.find('[role=dialog]').exists()).toBe(false)
 
@@ -219,7 +229,7 @@ describe('Issue workflow components', () => {
     wrapper.unmount()
   })
 
-  it('updates column membership and last-event badge from Project SSE without a loading skeleton', async () => {
+  it('refreshes persisted Board state on Run and Issue events without projecting Run lifecycle into status', async () => {
     vi.stubGlobal('EventSource', MockEventSource)
     let current = {
       ...issue,
@@ -236,16 +246,20 @@ describe('Issue workflow components', () => {
     expect(wrapper.text()).not.toContain('Loading')
     expect(wrapper.get('[data-status=TODO]').text()).toContain('Fix scheduler')
 
+    MockEventSource.instances[0]?.emit(event({ id: 'evt-run', type: 'run.created', sequence: null, issueId: issue.id, runId: run.id }))
+    await flushPromises()
+    expect(wrapper.get('[data-status=TODO]').text()).toContain('Fix scheduler')
+    expect(wrapper.get('[data-status=IN_PROGRESS]').text()).not.toContain('Fix scheduler')
+
     current = {
       ...issue,
       status: 'IN_PROGRESS',
-      lastEvent: event({ id: 'evt-2', type: 'question.created', sequence: null })
+      lastEvent: event({ id: 'evt-2', type: 'issue.status_changed', sequence: null })
     }
     MockEventSource.instances[0]?.emit(current.lastEvent)
     await flushPromises()
     expect(wrapper.text()).not.toContain('Loading')
     expect(wrapper.get('[data-status=IN_PROGRESS]').text()).toContain('Fix scheduler')
-    expect(wrapper.get('[data-status=IN_PROGRESS]').text()).not.toContain('Question Created')
     expect(wrapper.get('[data-status=TODO]').text()).not.toContain('Fix scheduler')
     wrapper.unmount()
   })
@@ -293,27 +307,23 @@ describe('Issue workflow components', () => {
     wrapper.unmount()
   })
 
-  it('uses the generic assignee directory for User, Agent, and unassign mutations', async () => {
+  it('uses the generic assignee directory and preserves automatic Run creation from backend policy', async () => {
     let assignedTo: { type: 'USER' | 'AGENT'; id: string; name: string } | null = null
-    let runCreated = false
-    let fail = false
+    let runHistory: typeof run[] = []
     const directory = [
       { type: 'USER' as const, id: 'u', name: 'Alex' },
       { type: 'AGENT' as const, id: 'a', name: 'Coder' }
     ]
     const fetch = vi.fn(async (path: string, options: RequestInit) => {
-      if (options.method === 'POST') {
-        if (fail) {
-          return new Response(JSON.stringify({ error: { code: 'execution_configuration_invalid', message: 'unsafe backend detail' } }), { status: 422 })
-        }
+      if (path.endsWith('/assignment') && options.method === 'POST') {
         const body = JSON.parse(options.body as string) as { assignedTo: { type: 'USER' | 'AGENT'; id: string } | null }
         const selected = body.assignedTo && directory.find(value => value.type === body.assignedTo?.type && value.id === body.assignedTo.id)
         assignedTo = selected ? { ...body.assignedTo!, name: selected.name } : null
-        if (body.assignedTo?.type === 'AGENT') runCreated = true
+        if (body.assignedTo?.type === 'AGENT' && !runHistory.length) runHistory = [run]
         return new Response(JSON.stringify({ issue: { ...issue, assignedTo } }), { status: 200 })
       }
       if (path.endsWith('/assignees')) return new Response(JSON.stringify(directory))
-      if (path.endsWith('/runs')) return new Response(JSON.stringify(runCreated ? [run] : []))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify(runHistory))
       return new Response(JSON.stringify({ ...issue, assignedTo }))
     })
     vi.stubGlobal('fetch', fetch)
@@ -330,41 +340,37 @@ describe('Issue workflow components', () => {
     ])
     expect(fetch.mock.calls.some(([path]) => String(path).endsWith('/agents'))).toBe(false)
     await formForField(wrapper, 'assignee').trigger('submit')
-    expect(fetch.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0)
+    expect(fetch.mock.calls.filter(([path, options]) => String(path).endsWith('/assignment') && options.method === 'POST')).toHaveLength(0)
 
     await wrapper.get('[data-field=assignee] select').setValue('AGENT:a')
-    fail = true
-    await formForField(wrapper, 'assignee').trigger('submit')
-    await flushPromises()
-    expect(wrapper.text()).toContain('selected execution configuration is not runnable')
-    expect(wrapper.text()).not.toContain('unsafe backend detail')
-
-    fail = false
     await formForField(wrapper, 'assignee').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Assignment accepted')
     expect(wrapper.text()).toContain('Board status: Todo')
     expect(wrapper.text()).toContain('Ownership updated.')
-    let assignmentCall = fetch.mock.calls.filter(([, options]) => options.method === 'POST').at(-1)!
+    let assignmentCall = fetch.mock.calls.filter(([path, options]) => String(path).endsWith('/assignment') && options.method === 'POST').at(-1)!
     expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: { type: 'AGENT', id: 'a' } })
-    expect(wrapper.text()).toContain('Attempt 1 · Queued')
+    expect(wrapper.text()).toContain('Attempt 1')
+    expect(wrapper.text()).toContain('Queued')
     expect(wrapper.text()).toContain('Queue reason: capacity')
+    expect(hasButton(wrapper, 'Run again')).toBe(true)
 
     await wrapper.get('[data-field=assignee] select').setValue('USER:u')
     await formForField(wrapper, 'assignee').trigger('submit')
     await flushPromises()
-    assignmentCall = fetch.mock.calls.filter(([, options]) => options.method === 'POST').at(-1)!
+    assignmentCall = fetch.mock.calls.filter(([path, options]) => String(path).endsWith('/assignment') && options.method === 'POST').at(-1)!
     expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: { type: 'USER', id: 'u' } })
     expect(wrapper.text()).toContain('Alex')
-    expect(wrapper.text()).toContain('Attempt 1 · Queued')
+    expect(wrapper.text()).toContain('Attempt 1')
+    expect(hasButton(wrapper, 'Run again')).toBe(false)
 
     await wrapper.get('[data-field=assignee] select').setValue('__UNASSIGNED__')
     await formForField(wrapper, 'assignee').trigger('submit')
     await flushPromises()
-    assignmentCall = fetch.mock.calls.filter(([, options]) => options.method === 'POST').at(-1)!
+    assignmentCall = fetch.mock.calls.filter(([path, options]) => String(path).endsWith('/assignment') && options.method === 'POST').at(-1)!
     expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: null })
     expect(wrapper.text()).toContain('Unassigned')
-    expect(wrapper.text()).toContain('Attempt 1 · Queued')
+    expect(wrapper.text()).toContain('Attempt 1')
 
     await button(wrapper, 'Edit issue').trigger('click')
     await button(wrapper, 'Cancel').trigger('click')
@@ -375,15 +381,147 @@ describe('Issue workflow components', () => {
     wrapper.unmount()
   })
 
-  it('allows Agent assignment while DONE and leaves Board status unchanged', async () => {
-    const doneIssue = { ...issue, status: 'DONE' }
+  it('keeps Agent ownership visible when explicit execution configuration is invalid', async () => {
+    let current = { ...issue, assignedTo: null as null | { type: 'AGENT'; id: string; name: string } }
     const fetch = vi.fn(async (path: string, options: RequestInit) => {
-      if (options.method === 'POST') {
-        return new Response(JSON.stringify({ issue: { ...doneIssue, assignedTo: { type: 'AGENT', id: 'a', name: 'Coder' } } }))
+      if (path.endsWith('/assignment') && options.method === 'POST') {
+        current = { ...issue, assignedTo: { type: 'AGENT', id: 'a', name: 'Coder' } }
+        return new Response(JSON.stringify({ issue: current }))
+      }
+      if (path.endsWith(`/issues/${issue.id}/runs`) && options.method === 'POST') {
+        return new Response(JSON.stringify({ error: { code: 'execution_configuration_invalid', message: 'unsafe backend detail' } }), { status: 422 })
       }
       if (path.endsWith('/assignees')) return new Response(JSON.stringify([{ type: 'AGENT', id: 'a', name: 'Coder' }]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
-      return new Response(JSON.stringify(doneIssue))
+      return new Response(JSON.stringify(current))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
+    await flushPromises()
+
+    await wrapper.get('[data-field=assignee] select').setValue('AGENT:a')
+    await formForField(wrapper, 'assignee').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Coder')
+    expect(wrapper.text()).toContain('No Runs yet')
+    expect(hasButton(wrapper, 'Start Run')).toBe(true)
+
+    await button(wrapper, 'Start Run').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to start Run')
+    expect(wrapper.text()).toContain('selected execution configuration is not runnable')
+    expect(wrapper.text()).not.toContain('unsafe backend detail')
+    expect(wrapper.text()).toContain('Coder')
+    expect(wrapper.text()).toContain('Board status')
+    expect(wrapper.text()).toContain('Todo')
+    wrapper.unmount()
+  })
+
+  it('shows Start Run only for mutable non-Backlog Issues currently assigned to an Agent', async () => {
+    const cases = [
+      ['BACKLOG', { type: 'AGENT', id: 'a', name: 'Coder' }, false],
+      ['TODO', { type: 'AGENT', id: 'a', name: 'Coder' }, true],
+      ['IN_PROGRESS', { type: 'AGENT', id: 'a', name: 'Coder' }, true],
+      ['BLOCKED', { type: 'AGENT', id: 'a', name: 'Coder' }, true],
+      ['REVIEW', { type: 'AGENT', id: 'a', name: 'Coder' }, true],
+      ['DONE', { type: 'AGENT', id: 'a', name: 'Coder' }, true],
+      ['TODO', { type: 'USER', id: 'u', name: 'Alex' }, false],
+      ['TODO', null, false]
+    ] as const
+
+    for (const [status, assignedTo, expected] of cases) {
+      const current = { ...issue, status, assignedTo }
+      vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+        if (path.endsWith('/assignees')) return new Response(JSON.stringify([]))
+        if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+        return new Response(JSON.stringify(current))
+      }))
+      const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
+      await flushPromises()
+      expect(hasButton(wrapper, 'Start Run')).toBe(expected)
+      wrapper.unmount()
+    }
+
+    const readonly = { ...issue, assignedTo: { type: 'AGENT' as const, id: 'a', name: 'Coder' } }
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/assignees')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+      return new Response(JSON.stringify(readonly))
+    }))
+    const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id, canMutate: false }, global })
+    await flushPromises()
+    expect(hasButton(wrapper, 'Start Run')).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('starts a Run without choosing execution resources and renders queued scheduler waiting as success', async () => {
+    let runHistory: typeof run[] = []
+    const current = { ...issue, assignedTo: { type: 'AGENT' as const, id: 'a', name: 'Coder' } }
+    const fetch = vi.fn(async (path: string, options: RequestInit) => {
+      if (path.endsWith(`/issues/${issue.id}/runs`) && options.method === 'POST') {
+        runHistory = [run]
+        return new Response(JSON.stringify(run))
+      }
+      if (path.endsWith('/assignees')) return new Response(JSON.stringify([{ type: 'AGENT', id: 'a', name: 'Coder' }]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify(runHistory))
+      return new Response(JSON.stringify(current))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
+    await flushPromises()
+
+    expect(hasButton(wrapper, 'Start Run')).toBe(true)
+    await button(wrapper, 'Start Run').trigger('click')
+    await flushPromises()
+
+    const startCall = fetch.mock.calls.find(([path, options]) => String(path).endsWith(`/issues/${issue.id}/runs`) && options.method === 'POST')!
+    expect(startCall[1].body).toBeUndefined()
+    expect(wrapper.text()).toContain('Run accepted')
+    expect(wrapper.text()).toContain('Queued')
+    expect(wrapper.text()).toContain('Queue reason: capacity')
+    expect(wrapper.text()).toContain('Board status')
+    expect(wrapper.text()).toContain('Todo')
+    expect(hasButton(wrapper, 'Run again')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('renders concurrent Runs for different Agents while current ownership stays independent', async () => {
+    const current = { ...issue, assignedTo: { type: 'AGENT' as const, id: 'b', name: 'Agent B' } }
+    const runA = { ...run, id: 'run-a', agentId: 'a', attempt: 1, status: 'RUNNING', queueReason: null }
+    const runB = { ...run, id: 'run-b', agentId: 'b', attempt: 2, status: 'STARTING', queueReason: null }
+    const fetch = vi.fn(async (path: string) => {
+      if (path.endsWith('/assignees')) return new Response(JSON.stringify([
+        { type: 'AGENT', id: 'a', name: 'Agent A' },
+        { type: 'AGENT', id: 'b', name: 'Agent B' }
+      ]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify([runA, runB]))
+      return new Response(JSON.stringify(current))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('Agent B')
+    expect(text).toContain('Attempt 2')
+    expect(text).toContain('Attempt 1')
+    expect(text.indexOf('Attempt 2')).toBeLessThan(text.indexOf('Attempt 1'))
+    expect(wrapper.findAll('button').filter(value => value.text() === 'Open Run')).toHaveLength(2)
+    expect(hasButton(wrapper, 'Run again')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('allows Agent assignment while DONE and leaves Board status unchanged', async () => {
+    const doneIssue = { ...issue, status: 'DONE' }
+    let current = doneIssue
+    const fetch = vi.fn(async (path: string, options: RequestInit) => {
+      if (path.endsWith('/assignment') && options.method === 'POST') {
+        current = { ...doneIssue, assignedTo: { type: 'AGENT', id: 'a', name: 'Coder' } } as typeof current
+        return new Response(JSON.stringify({ issue: current }))
+      }
+      if (path.endsWith('/assignees')) return new Response(JSON.stringify([{ type: 'AGENT', id: 'a', name: 'Coder' }]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+      return new Response(JSON.stringify(current))
     })
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
@@ -396,10 +534,11 @@ describe('Issue workflow components', () => {
     await formForField(wrapper, 'assignee').trigger('submit')
     await flushPromises()
 
-    const assignmentCall = fetch.mock.calls.find(([, options]) => options.method === 'POST')!
+    const assignmentCall = fetch.mock.calls.find(([path, options]) => String(path).endsWith('/assignment') && options.method === 'POST')!
     expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: { type: 'AGENT', id: 'a' } })
     expect(wrapper.text()).toContain('Board status: Done')
     expect(wrapper.text()).toContain('Done')
+    expect(hasButton(wrapper, 'Start Run')).toBe(true)
     wrapper.unmount()
   })
 
