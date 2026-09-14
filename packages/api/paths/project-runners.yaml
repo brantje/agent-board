@@ -1,11 +1,11 @@
 projectRunnersResponse:
-  description: Dedicated Project runners plus the shared external-runner allowlist and available shared capacity.
+  description: Dedicated Project runners plus deployment-global internal and shared runner capacity.
   content:
     application/json:
       schema:
         type: object
         additionalProperties: false
-        required: [runnerIds, projectRunners, sharedRunners]
+        required: [runnerIds, projectRunners, sharedRunners, internalRunner]
         properties:
           runnerIds:
             type: array
@@ -18,6 +18,10 @@ projectRunnersResponse:
             type: array
             items:
               $ref: ../schemas/runners.yaml#/Runner
+          internalRunner:
+            oneOf:
+              - $ref: ../schemas/runners.yaml#/Runner
+              - type: 'null'
 projectRunnersRequest:
   required: true
   content:
