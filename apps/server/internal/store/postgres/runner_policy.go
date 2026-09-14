@@ -43,7 +43,7 @@ func (s *Store) SetProjectRunnerIDs(ctx context.Context, projectID string, ids [
 			return store.ErrInvalidArgument
 		}
 		seen[id] = true
-		tag, err := tx.Exec(ctx, `INSERT INTO project_runners(project_id,runner_id) SELECT $1,id FROM runners WHERE id=$2 AND NOT internal AND deleted_at IS NULL AND revoked_at IS NULL`, projectID, id)
+		tag, err := tx.Exec(ctx, `INSERT INTO project_runners(project_id,runner_id) SELECT $1,id FROM runners WHERE id=$2 AND project_id IS NULL AND NOT internal AND deleted_at IS NULL AND revoked_at IS NULL`, projectID, id)
 		if err != nil {
 			return notFound(err)
 		}
