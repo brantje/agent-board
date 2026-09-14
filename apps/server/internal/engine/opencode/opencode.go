@@ -467,6 +467,8 @@ func pickNativeSession(ctx context.Context, native *client.Client, sessions []cl
 	return client.Session{}, nil
 }
 
+const issueStatusPromptGuidance = "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When the work is ready for human review or handoff, use REVIEW. When the Issue is fully complete, use DONE. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required."
+
 func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	var sections []string
 	if role := strings.TrimSpace(safe.Agent.RoleInstructions); role != "" {
@@ -480,7 +482,7 @@ func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	if safe.ReviewFeedback != nil && strings.TrimSpace(safe.ReviewFeedback.Feedback) != "" {
 		sections = append(sections, "Review feedback:\n"+strings.TrimSpace(safe.ReviewFeedback.Feedback))
 	}
-	sections = append(sections, "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When the work is ready for human review or handoff, use REVIEW. When the Issue is fully complete, use DONE. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required.")
+	sections = append(sections, issueStatusPromptGuidance)
 	sections = append(sections, "Work directly in the current project directory and implement the requested issue. Treat /workspace as the logical workspace root: use project-relative paths for workspace files rather than absolute /workspace paths. If human input is required, use OpenCode's native Question capability rather than guessing.")
 	return strings.Join(sections, "\n\n")
 }

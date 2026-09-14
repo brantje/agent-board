@@ -12,8 +12,6 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 )
 
-const issueStatusActivityHiddenSubstring = "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When the work is ready for human review or handoff, use REVIEW. When the Issue is fully complete, use DONE. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required."
-
 type completedTextPart struct {
 	ID   string
 	Text string
@@ -185,7 +183,7 @@ func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) err
 	if !visible {
 		return nil
 	}
-	part.Text = strings.ReplaceAll(part.Text, issueStatusActivityHiddenSubstring, "")
+	part.Text = strings.ReplaceAll(part.Text, issueStatusPromptGuidance, "")
 	if strings.TrimSpace(part.Text) == "" {
 		return nil
 	}

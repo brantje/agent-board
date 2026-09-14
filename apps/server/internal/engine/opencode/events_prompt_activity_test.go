@@ -14,7 +14,7 @@ func TestHandleTextPartHidesOnlyIssueStatusPromptSubstring(t *testing.T) {
 	part := mustJSON(t, map[string]any{
 		"id":        "msg_prompt",
 		"sessionID": "ses_1",
-		"text":      prefix + issueStatusActivityHiddenSubstring + suffix,
+		"text":      prefix + issueStatusPromptGuidance + suffix,
 		"time":      map[string]any{"end": 1},
 	})
 
@@ -28,7 +28,7 @@ func TestHandleTextPartHidesOnlyIssueStatusPromptSubstring(t *testing.T) {
 	if message != prefix+suffix {
 		t.Fatalf("message=%q want=%q", message, prefix+suffix)
 	}
-	if strings.Contains(message, issueStatusActivityHiddenSubstring) {
+	if strings.Contains(message, issueStatusPromptGuidance) {
 		t.Fatalf("status guidance leaked into activity: %q", message)
 	}
 }
@@ -39,7 +39,7 @@ func TestHandleTextPartDropsIssueStatusPromptOnlyActivity(t *testing.T) {
 	part := mustJSON(t, map[string]any{
 		"id":        "msg_prompt_only",
 		"sessionID": "ses_1",
-		"text":      issueStatusActivityHiddenSubstring,
+		"text":      issueStatusPromptGuidance,
 		"time":      map[string]any{"end": 1},
 	})
 
