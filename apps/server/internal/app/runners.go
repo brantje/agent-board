@@ -45,7 +45,7 @@ func (s *RunnerService) ProjectRunnerSettings(ctx context.Context, id string) (P
 			settings.SharedRunners = append(settings.SharedRunners, value)
 			continue
 		}
-		if *value.ProjectID == id {
+		if strings.EqualFold(*value.ProjectID, id) {
 			settings.ProjectRunners = append(settings.ProjectRunners, value)
 		}
 	}
@@ -246,7 +246,7 @@ func (s *RunnerService) projectOwnedRunner(ctx context.Context, projectID, id st
 	if err != nil {
 		return store.Runner{}, err
 	}
-	if value.ProjectID == nil || *value.ProjectID != projectID {
+	if value.ProjectID == nil || !strings.EqualFold(*value.ProjectID, projectID) {
 		return store.Runner{}, notFound("runner")
 	}
 	return value, nil
