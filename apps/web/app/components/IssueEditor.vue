@@ -6,7 +6,7 @@ import { issueStatuses, statusLabel } from '../utils/issues'
 
 const props = defineProps<{ projectId: string; issue?: Issue; initialStatus?: string }>()
 const emit = defineEmits<{ saved: [issue: Issue]; cancel: [] }>()
-const statusItems = issueStatuses.map(status => ({ label: statusLabel(status), value: status }))
+const statusItems: { label: string; value: string }[] = issueStatuses.map(status => ({ label: statusLabel(status), value: status }))
 const priorityItems = [0, 1, 2, 3, 4].map(value => ({ label: value === 0 ? 'Priority 0 (default)' : `Priority ${value}`, value }))
 const initialStatus = props.issue?.status || props.initialStatus || 'BACKLOG'
 const state = reactive({
