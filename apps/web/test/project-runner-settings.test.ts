@@ -61,8 +61,6 @@ describe('project runner settings', () => {
     expect(fetch).toHaveBeenCalledWith('/api/projects/project-1/runners', expect.objectContaining({ method: 'PUT' }))
 
     await wrapper.get('input[role="switch"]').setValue(true)
-    const saveFallback = wrapper.findAll('button').find(button => button.text() === 'Save fallback')
-    await saveFallback!.trigger('click')
     await flushPromises()
     expect(fetch).toHaveBeenCalledWith('/api/projects/project-1', expect.objectContaining({ method: 'PATCH' }))
 
