@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { Agent, AssignmentResponse, Issue, Run } from '../types/api'
+import type { Assignee, AssignmentResponse, Issue, Run } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { latestRun, statusLabel } from '../utils/issues'
 import { isBoardActivityEvent, applyCurrentBranchToIssue } from '../utils/events'
@@ -10,7 +10,7 @@ import IssueRelationships from './IssueRelationships.vue'
 
 const props = withDefaults(defineProps<{ projectId: string; issueId: string; canMutate?: boolean }>(), { canMutate: true })
 const { data: issue, pending, error, refresh } = useResource<Issue>(() => apiPath('issues', props.projectId, props.issueId))
-const agents = useResource<Agent[]>(() => apiPath('agents', props.projectId))
+const assignees = useResource<Assignee[]>(() => apiPath('assignees', props.projectId))
 const runs = useResource<Run[]>(() => apiPath('runs', props.projectId))
 const selected = ref('')
 const assigning = ref(false)
@@ -18,10 +18,15 @@ const assignmentError = ref<Error>()
 const assignmentResult = ref<AssignmentResponse>()
 const editing = ref(false)
 
+const unassignedChoice = '__UNASSIGNED__'
 const latest = computed(() => latestRun(runs.data.value || [], props.issueId))
-const choices = computed(() => agents.data.value
-  ?.filter(agent => agent.state === 'ENABLED')
-  .map(agent => ({ label: agent.name, value: agent.id })) || [])
+const choices = computed(() => [
+  { label: 'Unassigned', value: unassignedChoice },
+  ...(assignees.data.value || []).map(assignee => ({
+    label: `${assignee.name} · ${assignee.type === 'USER' ? 'User' : 'Agent'}`,
+    value: `${assignee.type}:${assignee.id}`
+  }))
+])
 const assignedName = computed(() => issue.value?.assignedTo?.name)
 const creatorLabel = computed(() => {
   const creator = issue.value?.createdBy
@@ -38,7 +43,7 @@ const assignmentDescription = computed(() => {
 const questionsPanel = ref<{ refresh?: () => Promise<unknown> }>()
 
 async function reload() {
-  await Promise.all([refresh(), agents.refresh(), runs.refresh(), questionsPanel.value?.refresh?.()])
+  await Promise.all([refresh(), assignees.refresh(), runs.refresh(), questionsPanel.value?.refresh?.()])
 }
 
 useProjectEvents(() => props.projectId, async event => {
@@ -54,14 +59,24 @@ useProjectEvents(() => props.projectId, async event => {
 })
 
 async function assign() {
-  if (!props.canMutate || !selected.value || assigning.value || issue.value?.status === 'DONE') return
+  if (!props.canMutate || !selected.value || assigning.value) return
+
+  const selectedAssignee = selected.value === unassignedChoice
+    ? null
+    : assignees.data.value?.find(assignee => `${assignee.type}:${assignee.id}` === selected.value)
+  if (selected.value !== unassignedChoice && !selectedAssignee) return
+
   assigning.value = true
   assignmentError.value = undefined
   assignmentResult.value = undefined
   try {
     const result = await apiRequest<AssignmentResponse>(`${apiPath('issues', props.projectId, props.issueId)}/assignment`, {
       method: 'POST',
-      body: { assignedTo: { type: 'AGENT', id: selected.value } }
+      body: {
+        assignedTo: selectedAssignee
+          ? { type: selectedAssignee.type, id: selectedAssignee.id }
+          : null
+      }
     })
     assignmentResult.value = result
     issue.value = result.issue
@@ -135,7 +150,7 @@ async function saved(savedIssue: Issue) {
                 <dd>Priority {{ issue.priority }}</dd>
               </div>
               <div>
-                <dt class="text-muted">Assigned Agent</dt>
+                <dt class="text-muted">Assignee</dt>
                 <dd class="flex items-center gap-2">
                   <template v-if="assignedName">
                     <IdentityAvatar :kind="issue.assignedTo?.type === 'USER' ? 'user' : 'agent'" :name="assignedName" size="xs" />
@@ -175,18 +190,15 @@ async function saved(savedIssue: Issue) {
 
           <UCard v-if="canMutate">
             <h2 class="section-label mb-3">Assignment</h2>
-            <AsyncState :pending="agents.pending.value" :error="agents.error.value" @retry="agents.refresh">
+            <AsyncState :pending="assignees.pending.value" :error="assignees.error.value" @retry="assignees.refresh">
               <UForm :state="{ selected }" class="space-y-3" @submit="assign">
-                <UAlert v-if="assignmentError" title="Unable to assign" :description="assignmentError.message" color="error" />
+                <UAlert v-if="assignmentError" title="Unable to update assignee" :description="assignmentError.message" color="error" />
                 <UAlert v-if="assignmentResult" title="Assignment accepted" :description="assignmentDescription" color="success" />
-                <UAlert v-if="!choices.length && issue.status !== 'DONE'" title="No enabled Agents" description="Create or enable an Agent in this Project before assigning work." color="neutral" />
-                <UFormField label="Enabled Agent" name="agent" description="Assign ownership to an enabled Agent in this Project.">
-                  <USelect v-model="selected" :items="choices" :disabled="assigning || issue.status === 'DONE' || !choices.length" class="w-full" />
+                <UFormField label="Assignee" name="assignee" description="Choose an eligible User or Agent, or leave the Issue unassigned.">
+                  <USelect v-model="selected" :items="choices" :disabled="assigning" class="w-full" />
                 </UFormField>
-                <p v-if="issue.status === 'DONE'" class="text-sm text-muted">Reopen this Issue before assigning work.</p>
-                <p v-else-if="issue.assignedTo?.id" class="text-sm text-muted">Assignment changes Issue ownership.</p>
-                <p v-else class="text-sm text-muted">Assignment updates the current Issue owner.</p>
-                <UButton label="Assign Agent" type="submit" :loading="assigning" :disabled="!selected || issue.status === 'DONE'" />
+                <p class="text-sm text-muted">Assignment changes ownership only; it does not change the board status.</p>
+                <UButton label="Update assignee" type="submit" :loading="assigning" :disabled="!selected" />
               </UForm>
             </AsyncState>
           </UCard>
