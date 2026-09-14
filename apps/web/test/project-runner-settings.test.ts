@@ -80,6 +80,77 @@ describe('project runner settings', () => {
     expect(wrapper.get('[data-testid="runner-registration-token"]').text()).toBe('project-registration')
   })
 
+  it('manages a project-owned runner through project-scoped lifecycle routes', async () => {
+    const settings = {
+      runnerIds: [] as string[],
+      projectRunners: [runner('owned-1', 'project-1', 'owned-host')],
+      sharedRunners: [] as ReturnType<typeof runner>[]
+    }
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      const method = init?.method ?? 'GET'
+      if (path === '/api/projects/project-1/runners' && method === 'GET') {
+        return new Response(JSON.stringify(settings))
+      }
+      if (path === '/api/projects/project-1/runners/owned-1' && method === 'PATCH') {
+        const body = JSON.parse(String(init?.body)) as { name: string, maxActiveSessions: number }
+        settings.projectRunners[0] = { ...settings.projectRunners[0], ...body }
+        return new Response(JSON.stringify(settings.projectRunners[0]))
+      }
+      if (path === '/api/projects/project-1/runners/owned-1/rotate-token' && method === 'POST') {
+        return new Response(JSON.stringify({ runner: settings.projectRunners[0], runnerToken: 'rotated-project-token' }))
+      }
+      if (path === '/api/projects/project-1/runners/owned-1/revoke' && method === 'POST') {
+        return new Response(JSON.stringify({ ...settings.projectRunners[0], connected: false, revokedAt: '2026-09-14T01:00:00Z' }))
+      }
+      if (path === '/api/projects/project-1/runners/owned-1' && method === 'DELETE') {
+        settings.projectRunners = []
+        return new Response(null, { status: 204 })
+      }
+      return new Response('{}', { status: 404 })
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(RunnerManager, {
+      props: { projectId: 'project-1', canAdmin: true, allowInternalRunner: false },
+      global
+    })
+    await flushPromises()
+
+    const edit = wrapper.findAll('button').find(button => button.text() === 'Edit')
+    await edit!.trigger('click')
+    const dialog = wrapper.get('[role="dialog"]')
+    await dialog.get('input[type="text"]').setValue('renamed-owned-host')
+    await dialog.get('form').trigger('submit')
+    await flushPromises()
+
+    const editCall = fetch.mock.calls.find(([input, init]) => String(input) === '/api/projects/project-1/runners/owned-1' && init?.method === 'PATCH')
+    expect(editCall?.[0]).toBe('/api/projects/project-1/runners/owned-1')
+    expect(JSON.parse(String(editCall?.[1]?.body))).toEqual({ name: 'renamed-owned-host', maxActiveSessions: 5 })
+
+    const rotate = wrapper.findAll('button').find(button => button.text() === 'Rotate token')
+    await rotate!.trigger('click')
+    await flushPromises()
+    const rotateCall = fetch.mock.calls.find(([input, init]) => String(input) === '/api/projects/project-1/runners/owned-1/rotate-token' && init?.method === 'POST')
+    expect(rotateCall?.[0]).toBe('/api/projects/project-1/runners/owned-1/rotate-token')
+    expect(rotateCall?.[1]?.body).toBeUndefined()
+    expect(wrapper.get('[data-testid="runner-token"]').text()).toBe('rotated-project-token')
+
+    const revoke = wrapper.findAll('button').find(button => button.text() === 'Revoke')
+    await revoke!.trigger('click')
+    await flushPromises()
+    const revokeCall = fetch.mock.calls.find(([input, init]) => String(input) === '/api/projects/project-1/runners/owned-1/revoke' && init?.method === 'POST')
+    expect(revokeCall?.[0]).toBe('/api/projects/project-1/runners/owned-1/revoke')
+    expect(revokeCall?.[1]?.body).toBeUndefined()
+
+    const remove = wrapper.findAll('button').find(button => button.text() === 'Delete')
+    await remove!.trigger('click')
+    await flushPromises()
+    const deleteCall = fetch.mock.calls.find(([input, init]) => String(input) === '/api/projects/project-1/runners/owned-1' && init?.method === 'DELETE')
+    expect(deleteCall?.[0]).toBe('/api/projects/project-1/runners/owned-1')
+    expect(deleteCall?.[1]?.body).toBeUndefined()
+  })
+
   it('keeps project runner controls read-only without project admin permission', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       runnerIds: [], projectRunners: [runner('owned-1', 'project-1', 'owned-host')], sharedRunners: []
