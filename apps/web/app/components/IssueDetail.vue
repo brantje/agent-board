@@ -17,6 +17,7 @@ const assigning = ref(false)
 const assignmentError = ref<Error>()
 const assignmentResult = ref<AssignmentResponse>()
 const assignmentRunBaseline = ref<Set<string> | null>()
+const checkingAssignmentRuns = ref(false)
 const startingRun = ref(false)
 const startRunError = ref<Error>()
 const startRunResult = ref<Run>()
@@ -41,7 +42,7 @@ const canStartRun = computed(() => Boolean(
 const runActionLabel = computed(() => issueRunHistory.value.length ? 'Run again' : 'Start Run')
 const assignmentRunState = computed(() => {
   if (assignmentResult.value?.issue.assignedTo?.type !== 'AGENT') return undefined
-  if (runs.pending.value) return 'checking'
+  if (checkingAssignmentRuns.value || runs.pending.value) return 'checking'
   if (runs.error.value || runs.data.value === undefined) return 'unknown'
   if (!issueRunHistory.value.length) return 'not-created'
   const baseline = assignmentRunBaseline.value
@@ -109,6 +110,7 @@ async function assign() {
   assignmentError.value = undefined
   assignmentResult.value = undefined
   assignmentRunBaseline.value = undefined
+  checkingAssignmentRuns.value = false
 
   let result: AssignmentResponse
   try {
@@ -132,7 +134,12 @@ async function assign() {
   try {
     if (result.issue.assignedTo?.type === 'AGENT') {
       assignmentRunBaseline.value = runBaseline
-      await runs.refresh()
+      checkingAssignmentRuns.value = true
+      try {
+        await runs.refresh()
+      } finally {
+        checkingAssignmentRuns.value = false
+      }
     }
   } finally {
     assigning.value = false
