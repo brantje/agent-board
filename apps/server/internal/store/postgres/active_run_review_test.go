@@ -6,29 +6,40 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestAssignIssueTreatsReadyForReviewRunAsActive(t *testing.T) {
+func TestSetIssueAssigneeTreatsReadyForReviewRunAsActive(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
 	project, issue, agent, firstRun := assignedReadyForReviewRun(t, s, "ready-review")
 
-	_, repeatedRun, err := s.AssignIssue(ctx, project.ID, issue.ID, agent.ID)
+	if _, err := s.SetIssueAssignee(ctx, project.ID, issue.ID, nil, store.EmptyObject); err != nil {
+		t.Fatalf("unassign issue: %v", err)
+	}
+	result, err := s.SetIssueAssignee(ctx, project.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: agent.ID}, store.EmptyObject)
 	if err != nil {
 		t.Fatalf("repeat assignment: %v", err)
 	}
-	if repeatedRun.ID != firstRun.ID {
-		t.Fatalf("repeat assignment created run %s, want existing %s", repeatedRun.ID, firstRun.ID)
+	for _, event := range result.Events {
+		if event.Type == "run.created" {
+			t.Fatalf("repeat assignment created run event: %+v", event)
+		}
 	}
 
-	var runCount int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE project_id=$1 AND issue_id=$2`, project.ID, issue.ID).Scan(&runCount); err != nil {
-		t.Fatalf("count runs: %v", err)
+	runs, err := s.ListRuns(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
 	}
-	if runCount != 1 {
-		t.Fatalf("run count=%d, want 1", runCount)
+	var issueRuns []store.Run
+	for _, run := range runs {
+		if run.IssueID == issue.ID {
+			issueRuns = append(issueRuns, run)
+		}
+	}
+	if len(issueRuns) != 1 || issueRuns[0].ID != firstRun.ID {
+		t.Fatalf("runs=%+v, want only existing %s", issueRuns, firstRun.ID)
 	}
 }
 
-func TestAssignIssueSuppressesDuplicateWithOlderReadyForReview(t *testing.T) {
+func TestSetIssueAssigneeSuppressesDuplicateWithOlderReadyForReview(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
 	project, issue, agent, firstRun := assignedReadyForReviewRun(t, s, "failed-follow-up")
@@ -41,16 +52,21 @@ func TestAssignIssueSuppressesDuplicateWithOlderReadyForReview(t *testing.T) {
 		t.Fatalf("insert failed follow-up run: %v", err)
 	}
 
-	_, nextRun, err := s.AssignIssue(ctx, project.ID, issue.ID, agent.ID)
+	if _, err := s.SetIssueAssignee(ctx, project.ID, issue.ID, nil, store.EmptyObject); err != nil {
+		t.Fatalf("unassign issue: %v", err)
+	}
+	result, err := s.SetIssueAssignee(ctx, project.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: agent.ID}, store.EmptyObject)
 	if err != nil {
 		t.Fatalf("reassign after failed follow-up: %v", err)
 	}
-	if nextRun.ID != firstRun.ID {
-		t.Fatalf("reassign run=%+v, want existing active review Run", nextRun)
+	for _, event := range result.Events {
+		if event.Type == "run.created" {
+			t.Fatalf("reassignment created duplicate run event: %+v", event)
+		}
 	}
 
 	var jobCount int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_jobs WHERE run_id=$1 AND kind='START' AND state='QUEUED'`, nextRun.ID).Scan(&jobCount); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_jobs WHERE run_id=$1 AND kind='START' AND state='QUEUED'`, firstRun.ID).Scan(&jobCount); err != nil {
 		t.Fatalf("count start jobs: %v", err)
 	}
 	if jobCount != 1 {
@@ -62,7 +78,7 @@ func TestAssignIssueSuppressesDuplicateWithOlderReadyForReview(t *testing.T) {
 		t.Fatalf("get previous review run: %v", err)
 	}
 	if previous.Status != "READY_FOR_REVIEW" {
-		t.Fatalf("superseded review run status=%s, want READY_FOR_REVIEW", previous.Status)
+		t.Fatalf("review run status=%s, want READY_FOR_REVIEW", previous.Status)
 	}
 }
 
@@ -105,12 +121,26 @@ func assignedReadyForReviewRun(t *testing.T, s *Store, name string) (store.Proje
 		t.Fatalf("create issue: %v", err)
 	}
 
-	_, firstRun, err := s.AssignIssue(ctx, project.ID, issue.ID, agent.ID)
-	if err != nil {
+	if _, err := s.SetIssueAssignee(ctx, project.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: agent.ID}, store.EmptyObject); err != nil {
 		t.Fatalf("assign issue: %v", err)
+	}
+	runs, err := s.ListRuns(ctx, project.ID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var firstRun store.Run
+	for _, run := range runs {
+		if run.IssueID == issue.ID {
+			firstRun = run
+			break
+		}
+	}
+	if firstRun.ID == "" {
+		t.Fatal("automatic assignment did not create a Run")
 	}
 	if _, err := s.pool.Exec(ctx, `UPDATE runs SET status='READY_FOR_REVIEW', updated_at=now() WHERE id=$1`, firstRun.ID); err != nil {
 		t.Fatalf("mark run ready for review: %v", err)
 	}
+	firstRun.Status = "READY_FOR_REVIEW"
 	return project, issue, agent, firstRun
 }
