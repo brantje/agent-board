@@ -82,40 +82,20 @@ func (s *Store) updateIssueMutation(ctx context.Context, input store.Issue, acto
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
-	previousStatus := previous.Status
-
-	updated, err := scanIssueJoined(tx.QueryRow(ctx, `
-		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, updated_at=now()
-		FROM projects AS p
-		WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
-		RETURNING `+issueSelectColumns+`
-	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.Priority))
-	if err != nil {
-		return store.IssueMutationResult{}, err
-	}
-	_, runEvent, err := enqueueIssueMutation(ctx, tx, updated, previousStatus, false, repositoryPath, defaultBranch)
-	if err != nil {
-		return store.IssueMutationResult{}, err
-	}
-	updated.PreviousStatus = previousStatus
-	issueEvent, err := store.NewIssueUpdatedEventWithActor(updated, previousStatus, actor)
-	if err != nil {
-		return store.IssueMutationResult{}, err
-	}
-	issueEvent, err = appendEventTx(ctx, tx, issueEvent)
+	result, err := applyIssueMutationTx(ctx, tx, issueMutationTxInput{
+		Issue:          input,
+		Previous:       previous,
+		RepositoryPath: repositoryPath,
+		DefaultBranch:  defaultBranch,
+		Actor:          actor,
+	})
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.IssueMutationResult{}, err
 	}
-	events := make([]store.Event, 0, 2)
-	if runEvent.ID != "" {
-		events = append(events, runEvent)
-	}
-	events = append(events, issueEvent)
-	updated.LastEvent = &issueEvent
-	return store.IssueMutationResult{Issue: updated, Events: events}, nil
+	return result, nil
 }
 
 func (s *Store) ListRuns(ctx context.Context, projectID string) ([]store.Run, error) {
