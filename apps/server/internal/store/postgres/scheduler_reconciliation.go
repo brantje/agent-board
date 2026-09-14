@@ -236,6 +236,11 @@ func (s *Store) resolveReconciliationTerminal(ctx context.Context, tx pgx.Tx, in
 	if err != nil {
 		return store.Run{}, err
 	}
+	if runStatus == "FAILED" {
+		if err := rollbackFailedRunIssueStatus(ctx, tx, run); err != nil {
+			return store.Run{}, err
+		}
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE scheduler_jobs
 		SET state=$4, wait_reason=NULL, updated_at=now()

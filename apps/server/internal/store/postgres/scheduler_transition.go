@@ -56,36 +56,15 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 		}
 	}
 
-	if input.RunStatus == "WAITING_FOR_INPUT" {
-		command, err := tx.Exec(ctx, `
-			UPDATE issues
-			SET status=CASE WHEN status='DONE' THEN status ELSE 'BLOCKED' END,
-			    updated_at=CASE WHEN status='DONE' THEN updated_at ELSE now() END
-			WHERE project_id=$1 AND id=$2
-		`, run.ProjectID, run.IssueID)
-		if err != nil {
-			return store.Run{}, err
-		}
-		if command.RowsAffected() != 1 {
-			return store.Run{}, store.ErrConflict
-		}
-	}
-
 	if input.RunStatus == "READY_FOR_REVIEW" {
 		if err := createPendingReview(ctx, tx, run); err != nil {
 			return store.Run{}, err
 		}
-		command, err := tx.Exec(ctx, `
-			UPDATE issues
-			SET status=CASE WHEN status='DONE' THEN status ELSE 'REVIEW' END,
-			    updated_at=CASE WHEN status='DONE' THEN updated_at ELSE now() END
-			WHERE project_id=$1 AND id=$2
-		`, run.ProjectID, run.IssueID)
-		if err != nil {
+	}
+
+	if input.RunStatus == "FAILED" {
+		if err := rollbackFailedRunIssueStatus(ctx, tx, run); err != nil {
 			return store.Run{}, err
-		}
-		if command.RowsAffected() != 1 {
-			return store.Run{}, store.ErrConflict
 		}
 	}
 
