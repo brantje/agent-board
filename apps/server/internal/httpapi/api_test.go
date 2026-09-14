@@ -220,11 +220,6 @@ func (f *fakeControlPlaneStore) GetRun(_ context.Context, pid, id string) (store
 	}
 	return store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 1, Status: "QUEUED"}, nil
 }
-func (f *fakeControlPlaneStore) AssignIssue(context.Context, string, string, string) (store.Issue, store.Run, error) {
-	issue := issueFixture("IN_PROGRESS")
-	issue.AssigneeID = stringPtr(agentID)
-	return issue, store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 1, Status: "QUEUED"}, nil
-}
 func stringPtr(v string) *string { return &v }
 
 func TestControlPlaneRoutes(t *testing.T) {
