@@ -25,7 +25,7 @@ type Project struct {
 	IssuePrefix         string
 	SourceType          string
 	CloneURL            *string
-	SourceRef            *string
+	SourceRef           *string
 	RepositoryPath      string
 	DefaultBranch       string
 	WorkflowSettings    json.RawMessage
@@ -34,26 +34,25 @@ type Project struct {
 }
 
 type Issue struct {
-	ID              string
-	ProjectID       string
-	Number          int
-	Key             string
-	Title           string
-	Description     string
-	Status          string
-	Priority        int
-	AssigneeType    *string
-	AssigneeID      *string
-	AssigneeName    *string
-	CreatedByType   *string
-	CreatedByID     *string
-	CreatedByName   *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	LastEvent       *Event
-	PersistedEvents []Event
-	PreviousStatus  string
-	CurrentBranch   *string
+	ID             string
+	ProjectID      string
+	Number         int
+	Key            string
+	Title          string
+	Description    string
+	Status         string
+	Priority       int
+	AssigneeType   *string
+	AssigneeID     *string
+	AssigneeName   *string
+	CreatedByType  *string
+	CreatedByID    *string
+	CreatedByName  *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	LastEvent      *Event
+	PreviousStatus string
+	CurrentBranch  *string
 }
 
 type IssueRelationship struct {
@@ -70,7 +69,7 @@ type Provider struct {
 	ProjectID          *string
 	Name               string
 	Kind               string
-	BaseURL             *string
+	BaseURL            *string
 	CredentialRef      *string
 	Enabled            bool
 	HealthStatus       string
