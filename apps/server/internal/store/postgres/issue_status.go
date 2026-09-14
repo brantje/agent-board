@@ -90,14 +90,14 @@ func lockIssueStatusRunFence(ctx context.Context, tx pgx.Tx, input store.IssueSt
 }
 
 func validateIssueStatusRecoveryFence(ctx context.Context, tx pgx.Tx, input store.IssueStatusMutation, run store.Run) error {
-	if input.RunID == nil || run.StartedAt == nil {
+	if input.RunID == nil || input.AgentID == nil || input.WorkspaceID == nil || run.StartedAt == nil {
 		return store.ErrConflict
 	}
 
 	// OpenCode durable history does not share a trusted clock or sequence with
-	// Agent Board's Event stream, especially on external runners. Be conservative:
-	// once any explicit Issue mutation has happened during this Run, do not replay
-	// an older historical tool intent whose exact relative order cannot be proven.
+	// Agent Board's Event stream, especially on external runners. Treat canonical
+	// status Events proven to come from this exact Run capability as earlier
+	// same-Run progress, but conservatively fence any other explicit Issue mutation.
 	var superseded bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
@@ -106,8 +106,16 @@ func validateIssueStatusRecoveryFence(ctx context.Context, tx pgx.Tx, input stor
 			WHERE project_id=$1 AND issue_id=$2
 			  AND type IN ('issue.updated', 'issue.status_changed')
 			  AND created_at >= $3
+			  AND NOT (
+				type='issue.status_changed'
+				AND run_id IS NOT NULL AND run_id=$4
+				AND agent_id IS NOT NULL AND agent_id=$5
+				AND workspace_id IS NOT NULL AND workspace_id=$6
+				AND COALESCE(actor->>'type','')=$7
+				AND COALESCE(actor->>'id','')=$5::text
+			  )
 		)
-	`, input.ProjectID, input.IssueID, *run.StartedAt).Scan(&superseded); err != nil {
+	`, input.ProjectID, input.IssueID, *run.StartedAt, *input.RunID, *input.AgentID, *input.WorkspaceID, store.ActorTypeAgent).Scan(&superseded); err != nil {
 		return err
 	}
 	if superseded {
