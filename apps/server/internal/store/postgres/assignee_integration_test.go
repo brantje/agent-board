@@ -2,34 +2,46 @@ package postgres
 
 import (
 	"encoding/json"
-	"github.com/brantje/agent-board/apps/server/internal/store"
 	"strings"
 	"testing"
+
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
+
+func eventOfType(events []store.Event, eventType string) *store.Event {
+	for i := range events {
+		if events[i].Type == eventType {
+			return &events[i]
+		}
+	}
+	return nil
+}
 
 func TestGenericAssigneeOwnershipAndEvents(t *testing.T) {
 	s := New(testPool(t))
 	f := seedRunFixture(t, s, "assignee")
 	ctx := t.Context()
-	if _, _, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject); err != nil {
+	if _, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}
 	target := &store.Assignee{Type: "AGENT", ID: f.agent.ID}
-	issue, event, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, json.RawMessage(`{"type":"HUMAN","id":"actor"}`))
+	result, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, json.RawMessage(`{"type":"HUMAN","id":"actor"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if issue.AssigneeID == nil || *issue.AssigneeID != f.agent.ID || event.Type != "issue.assigned" {
-		t.Fatalf("issue=%+v event=%+v", issue, event)
+	event := eventOfType(result.Events, "issue.assigned")
+	if result.Issue.AssigneeID == nil || *result.Issue.AssigneeID != f.agent.ID || event == nil {
+		t.Fatalf("issue=%+v events=%+v", result.Issue, result.Events)
 	}
 	target.ID = strings.ToUpper(target.ID)
-	_, event, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject)
-	if err != nil || event.ID != "" {
-		t.Fatalf("no-op event=%+v err=%v", event, err)
+	result, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject)
+	if err != nil || len(result.Events) != 0 {
+		t.Fatalf("no-op events=%+v err=%v", result.Events, err)
 	}
-	issue, event, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject)
-	if err != nil || issue.AssigneeID != nil || string(event.Payload) != `{"assignedTo": null}` {
-		t.Fatalf("unassign issue=%+v event=%+v err=%v", issue, event, err)
+	result, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject)
+	event = eventOfType(result.Events, "issue.assigned")
+	if err != nil || result.Issue.AssigneeID != nil || event == nil || string(event.Payload) != `{"assignedTo": null}` {
+		t.Fatalf("unassign issue=%+v events=%+v err=%v", result.Issue, result.Events, err)
 	}
 }
 
@@ -81,10 +93,10 @@ func TestAssigneeEligibilityAndDirectory(t *testing.T) {
 	for name, u := range users {
 		target := &store.Assignee{Type: "USER", ID: u.ID, Name: "untrusted name"}
 		eligible := name == "admin" || name == "member" || name == "group" || name == "deployment"
-		issue, event, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject)
+		result, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject)
 		if eligible {
-			if err != nil || issue.AssignedTo().Name != u.DisplayName || event.ID == "" {
-				t.Fatalf("%s issue=%+v err=%v", name, issue, err)
+			if err != nil || result.Issue.AssignedTo().Name != u.DisplayName || eventOfType(result.Events, "issue.assigned") == nil {
+				t.Fatalf("%s issue=%+v events=%+v err=%v", name, result.Issue, result.Events, err)
 			}
 		} else {
 			if err == nil {
@@ -101,13 +113,13 @@ func TestAssigneeEligibilityAndDirectory(t *testing.T) {
 		if _, err = s.pool.Exec(ctx, `UPDATE issues SET status=$2 WHERE id=$1`, f.issue.ID, status); err != nil {
 			t.Fatal(err)
 		}
-		current, _, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject)
-		if err != nil || current.Status != status {
-			t.Fatalf("clear in %s: %+v %v", status, current, err)
+		result, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject)
+		if err != nil || result.Issue.Status != status {
+			t.Fatalf("clear in %s: %+v %v", status, result.Issue, err)
 		}
-		current, _, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, &store.Assignee{Type: "USER", ID: users["member"].ID}, store.EmptyObject)
-		if err != nil || current.Status != status {
-			t.Fatalf("assign in %s: %+v %v", status, current, err)
+		result, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, &store.Assignee{Type: "USER", ID: users["member"].ID}, store.EmptyObject)
+		if err != nil || result.Issue.Status != status {
+			t.Fatalf("assign in %s: %+v %v", status, result.Issue, err)
 		}
 	}
 	// Unavailable model/provider must not exclude an otherwise enabled Agent.
@@ -129,9 +141,9 @@ func TestAssigneeEligibilityAndDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	after, _, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject)
-	if err != nil || after.Status != before.Status {
-		t.Fatalf("unready assignment=%+v err=%v", after, err)
+	result, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject)
+	if err != nil || result.Issue.Status != before.Status {
+		t.Fatalf("unready assignment=%+v err=%v", result.Issue, err)
 	}
 	runs, err := s.ListRuns(ctx, f.project.ID)
 	if err != nil || len(runs) != 1 || runs[0].Status != f.run.Status {
@@ -140,19 +152,19 @@ func TestAssigneeEligibilityAndDirectory(t *testing.T) {
 	if _, err = s.pool.Exec(ctx, `UPDATE agents SET state='DISABLED' WHERE id=$1`, f.agent.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject); err == nil {
+	if _, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject); err == nil {
 		t.Fatal("disabled agent assigned")
 	}
 	for _, target := range []*store.Assignee{{Type: "OTHER", ID: f.agent.ID}, {Type: "USER", ID: f.agent.ID}, {Type: "AGENT", ID: users["member"].ID}} {
-		if _, _, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject); err == nil {
+		if _, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject); err == nil {
 			t.Fatalf("invalid reference accepted: %+v", target)
 		}
 	}
 	other := seedRunFixture(t, s, "foreign")
-	if _, _, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, &store.Assignee{Type: "AGENT", ID: other.agent.ID}, store.EmptyObject); err == nil {
+	if _, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, &store.Assignee{Type: "AGENT", ID: other.agent.ID}, store.EmptyObject); err == nil {
 		t.Fatal("foreign agent assigned")
 	}
-	if _, _, err = s.SetIssueAssignee(ctx, other.project.ID, f.issue.ID, nil, store.EmptyObject); err == nil {
+	if _, err = s.SetIssueAssignee(ctx, other.project.ID, f.issue.ID, nil, store.EmptyObject); err == nil {
 		t.Fatal("foreign issue assigned")
 	}
 	for _, pair := range []struct{ kind, id any }{{nil, f.agent.ID}, {"AGENT", nil}, {"OTHER", f.agent.ID}, {"USER", f.agent.ID}, {"AGENT", users["member"].ID}, {"AGENT", other.agent.ID}} {
@@ -166,7 +178,7 @@ func TestAssigneeAtomicEventAndConcurrentIdempotency(t *testing.T) {
 	s := New(testPool(t))
 	f := seedRunFixture(t, s, "atomic")
 	ctx := t.Context()
-	if _, _, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject); err != nil {
+	if _, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}
 	target := &store.Assignee{Type: "AGENT", ID: f.agent.ID}
@@ -174,7 +186,7 @@ func TestAssigneeAtomicEventAndConcurrentIdempotency(t *testing.T) {
 	results := make(chan error, callers)
 	for range callers {
 		go func() {
-			_, _, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, json.RawMessage(`{"type":"HUMAN","id":"actor"}`))
+			_, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, json.RawMessage(`{"type":"HUMAN","id":"actor"}`))
 			results <- err
 		}()
 	}
@@ -187,15 +199,15 @@ func TestAssigneeAtomicEventAndConcurrentIdempotency(t *testing.T) {
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE issue_id=$1 AND payload->'assignedTo'->>'id'=$2`, f.issue.ID, f.agent.ID).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
-	issue, event, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject)
-	if err != nil || event.ID != "" || issue.LastEvent == nil {
-		t.Fatalf("no-op=%+v event=%+v err=%v", issue, event, err)
+	result, err := s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, target, store.EmptyObject)
+	if err != nil || len(result.Events) != 0 || result.Issue.LastEvent == nil {
+		t.Fatalf("no-op=%+v events=%+v err=%v", result.Issue, result.Events, err)
 	}
 	var payload struct {
 		AssignedTo store.Assignee `json:"assignedTo"`
 	}
-	if err = json.Unmarshal(issue.LastEvent.Payload, &payload); err != nil || payload.AssignedTo.Name != f.agent.Name || string(issue.LastEvent.Actor) != `{"id": "actor", "type": "HUMAN"}` {
-		t.Fatalf("persisted event=%+v err=%v", issue.LastEvent, err)
+	if err = json.Unmarshal(result.Issue.LastEvent.Payload, &payload); err != nil || payload.AssignedTo.Name != f.agent.Name || string(result.Issue.LastEvent.Actor) != `{"id": "actor", "type": "HUMAN"}` {
+		t.Fatalf("persisted event=%+v err=%v", result.Issue.LastEvent, err)
 	}
 	listed, err := s.ListIssues(ctx, f.project.ID)
 	if err != nil || len(listed) != 1 || listed[0].AssignedTo().Name != f.agent.Name {
@@ -204,11 +216,11 @@ func TestAssigneeAtomicEventAndConcurrentIdempotency(t *testing.T) {
 	if _, err = s.pool.Exec(ctx, `CREATE FUNCTION reject_assignment_event() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'event failure'; END $$; CREATE TRIGGER reject_assignment_event BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_assignment_event()`); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject); err == nil {
+	if _, err = s.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, nil, store.EmptyObject); err == nil {
 		t.Fatal("event failure accepted")
 	}
 	current, err := s.GetIssue(ctx, f.project.ID, f.issue.ID)
-	if err != nil || current.AssignedTo() == nil || current.AssignedTo().ID != f.agent.ID || !current.UpdatedAt.Equal(issue.UpdatedAt) {
+	if err != nil || current.AssignedTo() == nil || current.AssignedTo().ID != f.agent.ID || !current.UpdatedAt.Equal(result.Issue.UpdatedAt) {
 		t.Fatalf("mutation escaped rollback: %+v %v", current, err)
 	}
 }
