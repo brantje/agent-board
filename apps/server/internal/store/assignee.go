@@ -28,6 +28,13 @@ type IssueMutationResult struct {
 	Events []Event
 }
 
+// IssueMutationStore exposes the transaction-aware Issue mutation result when
+// the durable store can persist the causal Issue Event with the state change.
+type IssueMutationStore interface {
+	CreateIssueMutation(context.Context, Issue) (IssueMutationResult, error)
+	UpdateIssueMutation(context.Context, Issue) (IssueMutationResult, error)
+}
+
 type IssueAssignmentStore interface {
 	SetIssueAssignee(context.Context, string, string, *Assignee, json.RawMessage) (IssueMutationResult, error)
 	ListIssueAssignees(context.Context, string) ([]Assignee, error)
