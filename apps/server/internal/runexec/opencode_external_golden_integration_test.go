@@ -117,12 +117,16 @@ func TestOpenCodeExternalRunnerGoldenPath(t *testing.T) {
 	if reviews == nil {
 		t.Fatal("Review service is unavailable")
 	}
+	issueBeforeApproval, err := fixture.services.ControlPlane.GetIssue(fixture.ctx, project.ID, run.IssueID)
+	if err != nil {
+		t.Fatalf("get Issue before approval: %v", err)
+	}
 	approved, err := reviews.Approve(fixture.ctx, project.ID, review.ID, nil)
 	if err != nil {
 		t.Fatalf("approve golden Review: %v", err)
 	}
-	if approved.Review.Status != "APPROVED" || approved.Run.Status != "COMPLETED" || approved.Issue.Status != "TODO" {
-		t.Fatalf("golden approval result=%+v", approved)
+	if approved.Review.Status != "APPROVED" || approved.Run.Status != "COMPLETED" || approved.Issue.Status != issueBeforeApproval.Status {
+		t.Fatalf("golden approval result=%+v want Issue status preserved as %q", approved, issueBeforeApproval.Status)
 	}
 
 	assertOpenCodeGoldenSession(t, fixture.ctx, fixture, project.ID, run.ID, external.Runner.ID)
