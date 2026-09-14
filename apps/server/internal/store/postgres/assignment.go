@@ -21,89 +21,42 @@ var activeRunStatuses = []string{
 	"READY_FOR_REVIEW",
 }
 
-func (s *Store) AssignIssue(ctx context.Context, projectID, issueID, agentID string) (store.Issue, store.Run, error) {
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
-	if err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if err := lockAssigneeEligibility(ctx, tx); err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-	issue, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, projectID, issueID)
-	if err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-	assignee, err := resolveAssignee(ctx, tx, projectID, &store.Assignee{Type: "AGENT", ID: agentID})
-	if err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-	agentID = assignee.ID
-	changed := issue.AssigneeType == nil || *issue.AssigneeType != "AGENT" || issue.AssigneeID == nil || *issue.AssigneeID != agentID
-	if changed {
-		issue, err = scanIssueJoined(tx.QueryRow(ctx, `
-        UPDATE issues AS i SET assignee_type='AGENT', assignee_id=$3, updated_at=now()
-        FROM projects AS p WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
-        RETURNING `+issueSelectColumns, projectID, issueID, agentID))
-		if err != nil {
-			return store.Issue{}, store.Run{}, err
-		}
-	}
-	run, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, changed, repositoryPath, defaultBranch)
-	if err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-	if !changed {
-		run, err = activeRunForAgent(ctx, tx, projectID, issueID, agentID)
-		if errors.Is(err, store.ErrNotFound) {
-			err = nil
-		}
-		if err != nil {
-			return store.Issue{}, store.Run{}, err
-		}
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-	return issue, run, nil
-}
-
 // The caller holds the Issue row lock through commit: policy, readiness,
 // pair-scoped duplicate suppression, attempt allocation and enqueue are atomic.
-func enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store.Issue, previousStatus string, assignment bool, repositoryPath, defaultBranch string) (store.Run, error) {
+// A non-zero Event is returned only when this call persisted a new run.created.
+func enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store.Issue, previousStatus string, assignment bool, repositoryPath, defaultBranch string) (store.Run, store.Event, error) {
 	kind := ""
 	if issue.AssigneeType != nil {
 		kind = *issue.AssigneeType
 	}
 	if !store.ShouldAutoEnqueueIssue(previousStatus, issue.Status, kind, assignment) || issue.AssigneeID == nil {
-		return store.Run{}, nil
+		return store.Run{}, store.Event{}, nil
 	}
 	projectID, issueID, agentID := issue.ProjectID, issue.ID, *issue.AssigneeID
 	active, err := activeRunForAgent(ctx, tx, projectID, issueID, agentID)
 	if err == nil {
 		slog.DebugContext(ctx, "Issue auto enqueue suppressed: active Run", "issue_id", issueID, "agent_id", agentID, "run_id", active.ID)
-		return active, nil
+		return active, store.Event{}, nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
-		return store.Run{}, err
+		return store.Run{}, store.Event{}, err
 	}
 	if err := verifyRunnableAgent(ctx, tx, projectID, agentID); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			slog.DebugContext(ctx, "Issue auto enqueue skipped: Agent unavailable", "issue_id", issueID, "agent_id", agentID)
-			return store.Run{}, nil
+			return store.Run{}, store.Event{}, nil
 		}
-		return store.Run{}, err
+		return store.Run{}, store.Event{}, err
 	}
 
 	workspace, err := workspaceForAssignment(ctx, tx, projectID, issueID, issue.Key, repositoryPath, defaultBranch)
 	if err != nil {
-		return store.Run{}, err
+		return store.Run{}, store.Event{}, err
 	}
 
 	var attempt int
 	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(attempt), 0) + 1 FROM runs WHERE issue_id=$1`, issueID).Scan(&attempt); err != nil {
-		return store.Run{}, err
+		return store.Run{}, store.Event{}, err
 	}
 
 	run, err := scanRun(tx.QueryRow(ctx, `
@@ -112,21 +65,22 @@ func enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store.Issue, pre
         RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
     `, projectID, issueID, workspace.ID, agentID, attempt))
 	if err != nil {
-		return store.Run{}, err
+		return store.Run{}, store.Event{}, err
 	}
 
 	if _, err := tx.Exec(ctx, `
         INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key)
         VALUES ($1, $2, 'START', 'QUEUED', $3)
     `, projectID, run.ID, "run:"+run.ID+":start"); err != nil {
-		return store.Run{}, err
+		return store.Run{}, store.Event{}, err
 	}
 
 	payload, _ := json.Marshal(map[string]any{"status": run.Status, "attempt": run.Attempt})
-	if _, err := appendEventTx(ctx, tx, store.Event{Type: "run.created", ProjectID: projectID, IssueID: &issueID, RunID: &run.ID, AgentID: &agentID, WorkspaceID: &workspace.ID, Actor: store.EmptyObject, Payload: payload}); err != nil {
-		return store.Run{}, err
+	event, err := appendEventTx(ctx, tx, store.Event{Type: "run.created", ProjectID: projectID, IssueID: &issueID, RunID: &run.ID, AgentID: &agentID, WorkspaceID: &workspace.ID, Actor: store.EmptyObject, Payload: payload})
+	if err != nil {
+		return store.Run{}, store.Event{}, err
 	}
-	return run, nil
+	return run, event, nil
 }
 
 func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID string) (store.Issue, string, string, error) {
