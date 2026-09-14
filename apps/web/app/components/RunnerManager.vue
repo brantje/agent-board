@@ -3,7 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import type { Project, ProjectRunnerSettings, Runner } from '../types/api'
 import { apiRequest } from '../utils/api'
 import { useResource } from '../composables/useResource'
-import { runnerEngines, runnerSessionSummary } from '../utils/runners'
+import { runnerEngines, runnerFeatures, runnerSessionSummary } from '../utils/runners'
 
 const props = defineProps<{
   projectId?: string
@@ -25,6 +25,7 @@ const projectSettings = computed<ProjectRunnerSettings | undefined>(() => {
 })
 const managedRunners = computed(() => Array.isArray(data.value) ? data.value : projectSettings.value?.projectRunners ?? [])
 const sharedRunners = computed(() => projectSettings.value?.sharedRunners ?? [])
+const internalRunner = computed(() => projectSettings.value?.internalRunner ?? undefined)
 const registrationToken = ref('')
 const runnerToken = ref('')
 const creating = ref(false)
@@ -278,6 +279,10 @@ function scopeLabel(runner: Runner) {
               <UBadge v-for="engine in runnerEngines(runner)" :key="engine" color="primary" variant="subtle" :label="engine" />
               <span v-if="!runnerEngines(runner).length" class="text-xs text-muted">No engines reported yet</span>
             </div>
+            <div v-if="runner.registeredAt && runnerFeatures(runner).length" class="mt-2 flex flex-wrap items-center gap-2" data-testid="runner-features">
+              <span class="text-xs text-muted">Features:</span>
+              <UBadge v-for="feature in runnerFeatures(runner)" :key="feature" color="neutral" variant="subtle" :label="feature" />
+            </div>
             <p v-if="runner.registeredAt" class="mt-2 text-sm text-muted" data-testid="runner-session-summary">{{ runnerSessionSummary(runner) }}</p>
             <p class="mt-1 text-xs text-muted">Last seen: {{ runner.lastSeenAt ?? 'Never' }}</p>
           </UCard>
@@ -294,14 +299,26 @@ function scopeLabel(runner: Runner) {
           </div>
         </template>
         <UAlert v-if="policyError" color="error" title="Unable to save shared runner policy" :description="policyError.message" class="mb-4" />
-        <div data-testid="internal-runner-capacity" class="mb-5 flex flex-wrap items-center gap-3 rounded-md border border-default p-3">
-          <div class="min-w-0 flex-1">
-            <h3 class="font-medium text-highlighted">Internal runner</h3>
-            <p class="text-sm text-muted">Server-managed global runner used as fallback capacity.</p>
+        <div v-if="internalRunner" data-testid="internal-runner-capacity" class="mb-5 rounded-md border border-default p-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="min-w-0 flex-1">
+              <h3 class="font-medium text-highlighted">{{ internalRunner.name ?? 'Internal runner' }}</h3>
+              <p class="text-xs text-muted font-mono break-all">{{ internalRunner.id }}</p>
+            </div>
+            <UBadge color="neutral" variant="subtle" label="Internal" />
+            <UBadge :color="internalFallback ? 'success' : 'neutral'" variant="subtle" :label="internalFallback ? 'Fallback enabled' : 'Fallback disabled'" />
           </div>
-          <UBadge color="neutral" variant="subtle" label="Internal" />
-          <UBadge :color="internalFallback ? 'success' : 'neutral'" variant="subtle" :label="internalFallback ? 'Fallback enabled' : 'Fallback disabled'" />
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <UBadge v-for="engine in runnerEngines(internalRunner)" :key="engine" color="primary" variant="subtle" :label="engine" />
+            <span v-if="!runnerEngines(internalRunner).length" class="text-xs text-muted">No engines reported yet</span>
+          </div>
+          <div v-if="runnerFeatures(internalRunner).length" class="mt-2 flex flex-wrap items-center gap-2" data-testid="internal-runner-features">
+            <span class="text-xs text-muted">Features:</span>
+            <UBadge v-for="feature in runnerFeatures(internalRunner)" :key="feature" color="neutral" variant="subtle" :label="feature" />
+          </div>
+          <p class="mt-2 text-sm text-muted" data-testid="internal-runner-session-summary">{{ runnerSessionSummary(internalRunner) }}</p>
         </div>
+        <p v-else class="mb-5 text-sm text-muted">Internal runner capacity is unavailable.</p>
         <div class="border-t border-default pt-4">
           <h3 class="mb-1 font-medium text-highlighted">Shared external runners</h3>
           <p class="mb-3 text-sm text-muted">No selection allows any eligible shared external runner; selecting runners restricts shared capacity to those hosts.</p>
