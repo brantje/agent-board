@@ -182,8 +182,9 @@ func TestProjectAccessMemberRunsExistingWorkflowMutations(t *testing.T) {
 		t.Fatalf("member CreateIssue() issue=%+v calls=%d err=%v", created, fake.createIssueCalls, err)
 	}
 
-	assigned, err := access.SetIssueAssignee(t.Context(), member, projectID, "issue-existing", &store.Assignee{Type: "AGENT", ID: "agent-1", Name: "Agent"})
-	if err != nil || assigned.AssigneeID == nil || *assigned.AssigneeID != "agent-1" || fake.assignmentCalls != 1 {
+	const agentID = "00000000-0000-4000-8000-000000000001"
+	assigned, err := access.SetIssueAssignee(t.Context(), member, projectID, "issue-existing", &store.Assignee{Type: "AGENT", ID: agentID, Name: "Agent"})
+	if err != nil || assigned.AssigneeID == nil || *assigned.AssigneeID != agentID || fake.assignmentCalls != 1 {
 		t.Fatalf("member SetIssueAssignee() issue=%+v calls=%d err=%v", assigned, fake.assignmentCalls, err)
 	}
 
