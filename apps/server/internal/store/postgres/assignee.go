@@ -107,32 +107,35 @@ func (s *Store) ListIssueAssignees(ctx context.Context, projectID string) ([]sto
 	return result, nil
 }
 
-func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string, target *store.Assignee, actor json.RawMessage) (store.Issue, store.Event, error) {
+func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string, target *store.Assignee, actor json.RawMessage) (store.IssueMutationResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return store.Issue{}, store.Event{}, err
+		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	// Serialize eligibility checks with changes to Users, grants, memberships and
 	// Agent scope/state, using the existing administration lock order.
 	if err = lockAssigneeEligibility(ctx, tx); err != nil {
-		return store.Issue{}, store.Event{}, err
+		return store.IssueMutationResult{}, err
 	}
 	issue, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, projectID, issueID)
 	if err != nil {
-		return store.Issue{}, store.Event{}, err
+		return store.IssueMutationResult{}, err
 	}
 	assignee, err := resolveAssignee(ctx, tx, projectID, target)
 	if err != nil {
-		return store.Issue{}, store.Event{}, err
+		return store.IssueMutationResult{}, err
 	}
 	current := issue.AssignedTo()
 	if (current == nil && assignee == nil) || (current != nil && assignee != nil && current.Type == assignee.Type && current.ID == assignee.ID) {
 		issue, err = getIssue(ctx, tx, projectID, issueID)
 		if err != nil {
-			return store.Issue{}, store.Event{}, err
+			return store.IssueMutationResult{}, err
 		}
-		return issue, store.Event{}, tx.Commit(ctx)
+		if err = tx.Commit(ctx); err != nil {
+			return store.IssueMutationResult{}, err
+		}
+		return store.IssueMutationResult{Issue: issue}, nil
 	}
 	var kind, id *string
 	if assignee != nil {
@@ -145,27 +148,30 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
         WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
         RETURNING `+issueSelectColumns, projectID, issueID, kind, id))
 	if err != nil {
-		return store.Issue{}, store.Event{}, err
+		return store.IssueMutationResult{}, err
 	}
 	payload, err := json.Marshal(map[string]any{"assignedTo": assignee})
 	if err != nil {
-		return store.Issue{}, store.Event{}, err
+		return store.IssueMutationResult{}, err
 	}
 	assignmentEvent, err := appendEventTx(ctx, tx, store.Event{Type: "issue.assigned", ProjectID: projectID, IssueID: &issueID, Actor: actor, Payload: payload})
 	if err != nil {
-		return store.Issue{}, store.Event{}, err
+		return store.IssueMutationResult{}, err
 	}
-	if _, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch); err != nil {
-		return store.Issue{}, store.Event{}, err
-	}
-	issue, err = getIssue(ctx, tx, projectID, issueID)
+	_, runEvent, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch)
 	if err != nil {
-		return store.Issue{}, store.Event{}, err
+		return store.IssueMutationResult{}, err
+	}
+	events := []store.Event{assignmentEvent}
+	issue.LastEvent = &assignmentEvent
+	if runEvent.ID != "" {
+		events = append(events, runEvent)
+		issue.LastEvent = &runEvent
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return store.Issue{}, store.Event{}, err
+		return store.IssueMutationResult{}, err
 	}
-	return issue, assignmentEvent, nil
+	return store.IssueMutationResult{Issue: issue, Events: events}, nil
 }
 
 func lockAssigneeEligibility(ctx context.Context, tx pgx.Tx) error {
