@@ -25,17 +25,6 @@ const issue = {
   currentBranch: null,
   lastEvent: null
 }
-const agent = {
-  id: 'a',
-  projectId: 'p',
-  name: 'Coder',
-  roleInstructions: '',
-  engine: 'opencode',
-  modelProfileId: 'm',
-  engineSettings: {},
-  concurrencyLimit: 1,
-  state: 'ENABLED'
-}
 const run = {
   id: 'r',
   projectId: 'p',
@@ -77,50 +66,52 @@ describe('Issue workflow components', () => {
   it('renders the authoritative card hierarchy and safe links for assigned/unassigned Issues', async () => {
     vi.useFakeTimers()
     try {
-    vi.setSystemTime(new Date('2026-09-13T15:00:00.000Z'))
-    const wrapper = mount(IssueCard, { props: { issue }, global })
-    expect(wrapper.get('a').attributes('href')).toBe('/projects/p/issues/AB-12')
-    const text = wrapper.text()
-    expect(text.indexOf('AB-12')).toBeLessThan(text.indexOf('Fix scheduler'))
-    expect(wrapper.find('[aria-label="Low"]').exists()).toBe(true)
-    expect(wrapper.find('[data-icon="i-lucide-signal-low"]').exists()).toBe(true)
-    expect(text).not.toContain('Low')
-    expect(text).toContain('Updated 1m ago')
-    expect(text).not.toContain('Unassigned')
-    expect(text).not.toContain('TODO')
-    expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(false)
-    expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(false)
-    expect(wrapper.find('[data-issue-run-status]').exists()).toBe(false)
+      vi.setSystemTime(new Date('2026-09-13T15:00:00.000Z'))
+      const wrapper = mount(IssueCard, { props: { issue }, global })
+      expect(wrapper.get('a').attributes('href')).toBe('/projects/p/issues/AB-12')
+      const text = wrapper.text()
+      expect(text.indexOf('AB-12')).toBeLessThan(text.indexOf('Fix scheduler'))
+      expect(wrapper.find('[aria-label="Low"]').exists()).toBe(true)
+      expect(wrapper.find('[data-icon="i-lucide-signal-low"]').exists()).toBe(true)
+      expect(text).not.toContain('Low')
+      expect(text).toContain('Updated 1m ago')
+      expect(text).not.toContain('Unassigned')
+      expect(text).not.toContain('TODO')
+      expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(false)
+      expect(wrapper.find('[data-issue-run-status]').exists()).toBe(false)
 
-    await wrapper.setProps({
-      issue: {
-        ...issue,
-        lastEvent: event({ id: 'evt-q', type: 'question.created', sequence: null, payload: { prompt: 'Choose' } })
-      }
-    })
-    expect(wrapper.text()).not.toContain('Question Created')
-    expect(wrapper.text()).not.toContain('TODO')
+      await wrapper.setProps({
+        issue: {
+          ...issue,
+          lastEvent: event({ id: 'evt-q', type: 'question.created', sequence: null, payload: { prompt: 'Choose' } })
+        }
+      })
+      expect(wrapper.text()).not.toContain('Question Created')
+      expect(wrapper.text()).not.toContain('TODO')
 
-    await wrapper.setProps({ issue: { ...issue, assignedTo: { type: 'AGENT', id: 'a', name: 'Agent' }, priority: 3, description: '' }, runStatus: 'QUEUED' })
-    expect(wrapper.find('[aria-label="High"]').exists()).toBe(true)
-    expect(wrapper.text()).not.toContain('Persist leases')
-    expect(wrapper.find('[aria-label="Agent"]').exists()).toBe(true)
-    expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(true)
-    expect(wrapper.get('[data-issue-run-status]').text()).toBe('Queued')
+      await wrapper.setProps({ issue: { ...issue, assignedTo: null }, runStatus: 'RUNNING' })
+      expect(wrapper.get('[data-issue-run-status]').text()).toBe('Running')
+      expect(wrapper.find('.issue-run-spinner .animate-spin').exists()).toBe(true)
 
-    await wrapper.setProps({ issue: { ...issue, assignedTo: { type: 'AGENT', id: 'a', name: 'Coder' } }, runStatus: 'RUNNING' })
-    expect(wrapper.find('[aria-label="Coder"]').exists()).toBe(true)
-    expect(wrapper.find('[aria-label="Assigned Agent"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Coder')
-    expect(wrapper.get('[data-issue-run-status]').text()).toBe('Running')
-    expect(wrapper.find('.issue-run-spinner [data-icon="i-lucide-bot"]').exists()).toBe(true)
-    expect(wrapper.find('.issue-run-spinner .animate-spin').exists()).toBe(true)
-    expect(wrapper.find('.ring-primary\\/35').exists()).toBe(true)
+      await wrapper.setProps({ issue: { ...issue, assignedTo: { type: 'AGENT', id: 'a', name: 'Agent' }, priority: 3, description: '' }, runStatus: 'QUEUED' })
+      expect(wrapper.find('[aria-label="High"]').exists()).toBe(true)
+      expect(wrapper.text()).not.toContain('Persist leases')
+      expect(wrapper.find('[aria-label="Agent"]').exists()).toBe(true)
+      expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(true)
+      expect(wrapper.get('[data-issue-run-status]').text()).toBe('Queued')
 
-    await wrapper.setProps({ runStatus: 'FAILED' })
-    expect(wrapper.get('[data-issue-run-status]').attributes('data-color')).toBe('error')
-    expect(wrapper.get('[data-issue-run-status]').text()).toBe('Failed')
-    expect(wrapper.find('.issue-run-spinner').exists()).toBe(false)
+      await wrapper.setProps({ issue: { ...issue, assignedTo: { type: 'AGENT', id: 'a', name: 'Coder' } }, runStatus: 'RUNNING' })
+      expect(wrapper.find('[aria-label="Coder"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('Coder')
+      expect(wrapper.get('[data-issue-run-status]').text()).toBe('Running')
+      expect(wrapper.find('.issue-run-spinner [data-icon="i-lucide-bot"]').exists()).toBe(true)
+      expect(wrapper.find('.issue-run-spinner .animate-spin').exists()).toBe(true)
+      expect(wrapper.find('.ring-primary\\/35').exists()).toBe(true)
+
+      await wrapper.setProps({ runStatus: 'FAILED' })
+      expect(wrapper.get('[data-issue-run-status]').attributes('data-color')).toBe('error')
+      expect(wrapper.get('[data-issue-run-status]').text()).toBe('Failed')
+      expect(wrapper.find('.issue-run-spinner').exists()).toBe(false)
     } finally {
       vi.useRealTimers()
     }
@@ -175,10 +166,9 @@ describe('Issue workflow components', () => {
     expect(review.text()).not.toContain('raw detail')
   })
 
-  it('renders all Board columns, filters Issues, and reconciles Project/Agent/Issue state after creation', async () => {
+  it('renders all Board columns, filters Issues, and refreshes Project/Issue/Run state after creation', async () => {
     const fetch = vi.fn(async (path: string, options: RequestInit) => {
       if (options.method === 'POST') return new Response(JSON.stringify({ ...issue, id: 'created', title: 'Created' }), { status: 201 })
-      if (path.endsWith('/agents')) return new Response(JSON.stringify([agent]))
       if (path.endsWith('/issues')) return new Response(JSON.stringify([issue]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
       return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
@@ -211,6 +201,7 @@ describe('Issue workflow components', () => {
     expect(wrapper.text()).toContain('Backlog')
     expect(wrapper.text()).toContain('Blocked')
     expect(wrapper.text()).toContain('Fix scheduler')
+    expect(fetch.mock.calls.some(([path]) => String(path).endsWith('/agents'))).toBe(false)
     await wrapper.get('input').setValue('absent')
     expect(wrapper.text()).not.toContain('Fix scheduler')
     expect(wrapper.text()).toContain('No matching issues')
@@ -235,7 +226,6 @@ describe('Issue workflow components', () => {
       lastEvent: event({ id: 'evt-1', type: 'issue.created', sequence: null })
     }
     const fetch = vi.fn(async (path: string) => {
-      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
       if (path.endsWith('/issues')) return new Response(JSON.stringify([current]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
       return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
@@ -265,7 +255,6 @@ describe('Issue workflow components', () => {
       if (path.endsWith('/runs')) {
         return new Response(JSON.stringify({ error: { code: 'internal_error', message: 'runs unavailable' } }), { status: 500 })
       }
-      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
       if (path.endsWith('/issues')) return new Response(JSON.stringify([issue]))
       return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
     })
@@ -280,13 +269,12 @@ describe('Issue workflow components', () => {
     wrapper.unmount()
   })
 
-  it('treats Project/Issue/Agent reads as one scoped Board state and offers retry on failure', async () => {
+  it('treats Project/Issue reads as scoped Board state and offers retry on failure', async () => {
     let failProject = true
     const fetch = vi.fn(async (path: string) => {
       if (path === '/api/projects/p' && failProject) {
         return new Response(JSON.stringify({ error: { code: 'project_not_found', message: 'private path' } }), { status: 404 })
       }
-      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
       if (path.endsWith('/issues')) return new Response(JSON.stringify([]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
       return new Response(JSON.stringify({ id: 'p', name: 'Workspace' }))
@@ -305,23 +293,26 @@ describe('Issue workflow components', () => {
     wrapper.unmount()
   })
 
-  it('reconciles the assignment response immediately, then refetches durable Issue and Run state', async () => {
-    let status = 'TODO'
-    let assigned = false
+  it('uses the generic assignee directory for User, Agent, and unassign mutations', async () => {
+    let assignedTo: { type: 'USER' | 'AGENT'; id: string; name: string } | null = null
     let fail = false
+    const directory = [
+      { type: 'USER' as const, id: 'u', name: 'Alex' },
+      { type: 'AGENT' as const, id: 'a', name: 'Coder' }
+    ]
     const fetch = vi.fn(async (path: string, options: RequestInit) => {
       if (options.method === 'POST') {
         if (fail) {
           return new Response(JSON.stringify({ error: { code: 'execution_configuration_invalid', message: 'unsafe backend detail' } }), { status: 422 })
         }
-        assigned = true
-        return new Response(JSON.stringify({ issue: { ...issue, status, assignedTo: { type: 'AGENT', id: 'a', name: 'Agent' } } }), { status: 200 })
+        const body = JSON.parse(options.body as string) as { assignedTo: { type: 'USER' | 'AGENT'; id: string } | null }
+        const selected = body.assignedTo && directory.find(value => value.type === body.assignedTo?.type && value.id === body.assignedTo.id)
+        assignedTo = selected ? { ...body.assignedTo!, name: selected.name } : null
+        return new Response(JSON.stringify({ issue: { ...issue, assignedTo } }), { status: 200 })
       }
-      if (path.endsWith('/agents')) {
-        return new Response(JSON.stringify([agent, { ...agent, id: 'draft', name: 'Draft', state: 'DRAFT' }, { ...agent, id: 'disabled', name: 'Disabled', state: 'DISABLED' }]))
-      }
-      if (path.endsWith('/runs')) return new Response(JSON.stringify(assigned ? [run] : []))
-      return new Response(JSON.stringify({ ...issue, status, assignedTo: assigned ? { type: 'AGENT', id: 'a', name: 'Agent' } : null }))
+      if (path.endsWith('/assignees')) return new Response(JSON.stringify(directory))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify(assignedTo?.type === 'AGENT' ? [run] : []))
+      return new Response(JSON.stringify({ ...issue, assignedTo }))
     })
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
@@ -329,32 +320,47 @@ describe('Issue workflow components', () => {
 
     expect(wrapper.text()).toContain('Priority 0')
     expect(wrapper.text()).toContain('No Runs yet')
-    expect(wrapper.text()).toContain('Execution attempts will appear here.')
-    expect(wrapper.text()).not.toContain('New work will appear here when it is created.')
-    expect(wrapper.text()).toContain('Questions')
-    expect(wrapper.find('option[value=draft]').exists()).toBe(false)
-    expect(wrapper.find('option[value=disabled]').exists()).toBe(false)
-    await formForField(wrapper, 'agent').trigger('submit')
+    expect(wrapper.get('[data-field=assignee]').findAll('option').map(option => option.text())).toEqual([
+      'Select…',
+      'Unassigned',
+      'Alex · User',
+      'Coder · Agent'
+    ])
+    expect(fetch.mock.calls.some(([path]) => String(path).endsWith('/agents'))).toBe(false)
+    await formForField(wrapper, 'assignee').trigger('submit')
     expect(fetch.mock.calls.filter(([, options]) => options.method === 'POST')).toHaveLength(0)
 
-    await wrapper.get('[data-field=agent] select').setValue('a')
+    await wrapper.get('[data-field=assignee] select').setValue('AGENT:a')
     fail = true
-    await formForField(wrapper, 'agent').trigger('submit')
+    await formForField(wrapper, 'assignee').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('selected execution configuration is not runnable')
     expect(wrapper.text()).not.toContain('unsafe backend detail')
 
     fail = false
-    await formForField(wrapper, 'agent').trigger('submit')
+    await formForField(wrapper, 'assignee').trigger('submit')
     await flushPromises()
     expect(wrapper.text()).toContain('Assignment accepted')
     expect(wrapper.text()).toContain('Board status: Todo')
     expect(wrapper.text()).toContain('Ownership updated.')
-    const assignmentCall = fetch.mock.calls.find(([, options]) => options.method === 'POST')!
+    let assignmentCall = fetch.mock.calls.filter(([, options]) => options.method === 'POST').at(-1)!
     expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: { type: 'AGENT', id: 'a' } })
     expect(wrapper.text()).toContain('Attempt 1 · Queued')
     expect(wrapper.text()).toContain('Queue reason: capacity')
-    expect(fetch.mock.calls.filter(([, options]) => options.method === 'GET').length).toBeGreaterThanOrEqual(6)
+
+    await wrapper.get('[data-field=assignee] select').setValue('USER:u')
+    await formForField(wrapper, 'assignee').trigger('submit')
+    await flushPromises()
+    assignmentCall = fetch.mock.calls.filter(([, options]) => options.method === 'POST').at(-1)!
+    expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: { type: 'USER', id: 'u' } })
+    expect(wrapper.text()).toContain('Alex')
+
+    await wrapper.get('[data-field=assignee] select').setValue('__UNASSIGNED__')
+    await formForField(wrapper, 'assignee').trigger('submit')
+    await flushPromises()
+    assignmentCall = fetch.mock.calls.filter(([, options]) => options.method === 'POST').at(-1)!
+    expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: null })
+    expect(wrapper.text()).toContain('Unassigned')
 
     await button(wrapper, 'Edit issue').trigger('click')
     await button(wrapper, 'Cancel').trigger('click')
@@ -365,25 +371,32 @@ describe('Issue workflow components', () => {
     wrapper.unmount()
   })
 
-  it('handles empty Agent state and prevents DONE Issues from starting Runs', async () => {
-    let done = false
-    const fetch = vi.fn(async (path: string) => {
-      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
+  it('allows Agent assignment while DONE and leaves Board status unchanged', async () => {
+    const doneIssue = { ...issue, status: 'DONE' }
+    const fetch = vi.fn(async (path: string, options: RequestInit) => {
+      if (options.method === 'POST') {
+        return new Response(JSON.stringify({ issue: { ...doneIssue, assignedTo: { type: 'AGENT', id: 'a', name: 'Coder' } } }))
+      }
+      if (path.endsWith('/assignees')) return new Response(JSON.stringify([{ type: 'AGENT', id: 'a', name: 'Coder' }]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
-      return new Response(JSON.stringify({ ...issue, status: done ? 'DONE' : 'TODO' }))
+      return new Response(JSON.stringify(doneIssue))
     })
     vi.stubGlobal('fetch', fetch)
     const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
     await flushPromises()
-    expect(wrapper.text()).toContain('No enabled Agents')
-    wrapper.unmount()
 
-    done = true
-    const doneWrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
+    expect(button(wrapper, 'Update assignee').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).not.toContain('Reopen this Issue')
+    await wrapper.get('[data-field=assignee] select').setValue('AGENT:a')
+    expect(button(wrapper, 'Update assignee').attributes('disabled')).toBeUndefined()
+    await formForField(wrapper, 'assignee').trigger('submit')
     await flushPromises()
-    expect(button(doneWrapper, 'Assign Agent').attributes('disabled')).toBeDefined()
-    expect(doneWrapper.text()).toContain('Reopen this Issue')
-    doneWrapper.unmount()
+
+    const assignmentCall = fetch.mock.calls.find(([, options]) => options.method === 'POST')!
+    expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: { type: 'AGENT', id: 'a' } })
+    expect(wrapper.text()).toContain('Board status: Done')
+    expect(wrapper.text()).toContain('Done')
+    wrapper.unmount()
   })
 
   it('refreshes Issue detail and open questions from Project SSE without a loading skeleton', async () => {
@@ -391,7 +404,7 @@ describe('Issue workflow components', () => {
     let current = { ...issue, title: 'Fix scheduler' }
     let questions = [] as ReturnType<typeof question>[]
     const fetch = vi.fn(async (path: string) => {
-      if (path.endsWith('/agents')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/assignees')) return new Response(JSON.stringify([]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
       if (path.includes('/questions')) return new Response(JSON.stringify(questions))
       return new Response(JSON.stringify(current))
