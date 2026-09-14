@@ -83,13 +83,23 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 	if err != nil {
 		return store.Issue{}, err
 	}
+	updated.PreviousStatus = previousStatus
+	issueEvent, err := store.NewIssueUpdatedEvent(updated, previousStatus)
+	if err != nil {
+		return store.Issue{}, err
+	}
+	issueEvent, err = appendEventTx(ctx, tx, issueEvent)
+	if err != nil {
+		return store.Issue{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.Issue{}, err
 	}
-	updated.PreviousStatus = previousStatus
 	if runEvent.ID != "" {
-		updated.LastEvent = &runEvent
+		updated.PersistedEvents = append(updated.PersistedEvents, runEvent)
 	}
+	updated.PersistedEvents = append(updated.PersistedEvents, issueEvent)
+	updated.LastEvent = &issueEvent
 	return updated, nil
 }
 
