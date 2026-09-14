@@ -6,6 +6,7 @@ import { useProjectPermissions } from '../composables/useProjectPermissions'
 import { useResource } from '../composables/useResource'
 import ProjectAccessSettings from './ProjectAccessSettings.vue'
 import ProjectEditor from './ProjectEditor.vue'
+import RunnerManager from './RunnerManager.vue'
 
 const props = defineProps<{ projectId: string }>()
 const { data, pending, error, refresh } = useResource<Project>(() => apiPath('projects', undefined, props.projectId))
@@ -88,6 +89,12 @@ function retry() {
             </div>
           </dl>
         </UCard>
+        <RunnerManager
+          :project-id="projectId"
+          :can-admin="canAdmin"
+          :allow-internal-runner="data.allowInternalRunner"
+          @project-updated="savedProject"
+        />
         <ProjectAccessSettings :project-id="projectId" :effective-role="role" />
       </template>
     </AsyncState>
