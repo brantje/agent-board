@@ -144,6 +144,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	defer cancelEventReads()
 
 	state := newRunState(session.ID, request.InteractiveQuestions, activitySink(request.Launcher))
+	statusTools := newIssueStatusToolTracker()
 	state.seedModelUsage(settings.ProviderID, request.Context.Model.Model, nil)
 	if limit, err := native.ModelContextLimit(ctx, settings.ProviderID, request.Context.Model.Model); err == nil {
 		state.contextLimitTokens = cloneInt64(limit)
@@ -286,6 +287,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				}
 				continue
 			}
+			if err := statusTools.Handle(ctx, eventRead.event, session.ID, request.IssueStatus); err != nil {
+				return engine.Result{}, err
+			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
 				return engine.Result{}, err
 			}
@@ -385,7 +389,7 @@ func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher,
 		}
 	}
 	process, err := launcher.Start(ctx, engine.ProcessRequest{
-		Command:               []string{"opencode", "serve", "--hostname", host, "--port", port},
+		Command:               issueStatusServeCommand(host, port, env),
 		CWD:                   "/workspace",
 		Env:                   env,
 		ProviderCredentialEnv: providerCredentialEnv,
@@ -462,6 +466,7 @@ func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	if safe.ReviewFeedback != nil && strings.TrimSpace(safe.ReviewFeedback.Feedback) != "" {
 		sections = append(sections, "Review feedback:\n"+strings.TrimSpace(safe.ReviewFeedback.Feedback))
 	}
+	sections = append(sections, "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When the work is ready for human review or handoff, use REVIEW. When the Issue is fully complete, use DONE. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required.")
 	sections = append(sections, "Work directly in the current project directory and implement the requested issue. Treat /workspace as the logical workspace root: use project-relative paths for workspace files rather than absolute /workspace paths. If human input is required, use OpenCode's native Question capability rather than guessing.")
 	return strings.Join(sections, "\n\n")
 }
