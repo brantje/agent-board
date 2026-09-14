@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -94,7 +95,7 @@ func TestProjectRunnerRotationDoesNotMutateWhenResponseEnrichmentFails(t *testin
 	if response.Code != http.StatusInternalServerError {
 		t.Fatalf("rotate=%d %s", response.Code, response.Body.String())
 	}
-	if base.value.TokenHash[0] != 7 {
+	if !bytes.Equal(base.value.TokenHash, tokenHash) {
 		t.Fatal("runner credential rotated before response enrichment succeeded")
 	}
 }
