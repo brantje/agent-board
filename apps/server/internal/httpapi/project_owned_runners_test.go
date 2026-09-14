@@ -2,8 +2,8 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
