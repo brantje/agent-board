@@ -10,7 +10,7 @@ path1:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
     operationId: createIssue
-    description: Initial Agent ownership automatically queues a Run when runnable and outside BACKLOG.
+    description: Initial Agent ownership automatically queues a Run outside BACKLOG when execution configuration is valid. Scheduler availability is evaluated after Run creation.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/IssueCreate
     responses:
@@ -31,7 +31,7 @@ path2:
         $ref: ../components/api-components.yaml#/responses/Error
   patch:
     operationId: updateIssue
-    description: Updates Issue state without cancelling Runs. An already Agent-assigned Issue leaving BACKLOG for TODO, IN_PROGRESS, BLOCKED or REVIEW automatically queues a Run when runnable. Other status changes do not enqueue.
+    description: Updates Issue state without cancelling Runs. An already Agent-assigned Issue leaving BACKLOG for TODO, IN_PROGRESS, BLOCKED or REVIEW automatically queues a Run when execution configuration is valid. Other status changes do not enqueue. Scheduler availability is evaluated after Run creation.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/IssueUpdate
     responses:
@@ -45,7 +45,7 @@ path3:
   - $ref: ../components/api-components.yaml#/parameters/IssueID
   post:
     operationId: assignIssue
-    description: Changes ownership and atomically records its Event while preserving Board status and existing Runs. Changed Agent ownership outside BACKLOG queues a Run when runnable, suppressing duplicate active Runs for the same Issue and Agent. User ownership, unassignment and unchanged ownership never enqueue.
+    description: Changes ownership and atomically records its Event while preserving Board status and existing Runs. Changed Agent ownership outside BACKLOG queues a Run when execution configuration is valid, suppressing duplicate active Runs for the same Issue and Agent. Invalid execution configuration does not invalidate ownership. User ownership, unassignment and unchanged ownership never enqueue. Scheduler availability is evaluated after Run creation.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/Assignment
     responses:
@@ -113,7 +113,7 @@ assignees:
   - $ref: ../components/api-components.yaml#/parameters/ProjectID
   get:
     operationId: listIssueAssignees
-    description: Active effective Project members/admins and enabled visible Agents, independent of execution readiness.
+    description: Active effective Project members/admins and enabled visible Agents, independent of execution configuration and scheduler availability.
     responses:
       '200':
         description: Eligible Issue owners
