@@ -11,6 +11,9 @@ import (
 
 func coverageProjectID() string { return "project" }
 func coverageScope() *string    { v := coverageProjectID(); return &v }
+func coverageAssignee() store.Assignee {
+	return store.Assignee{Type: "AGENT", ID: "00000000-0000-4000-8000-000000000001", Name: "Agent"}
+}
 func coverageProvider() store.Provider {
 	return store.Provider{ID: "provider", Name: "Provider", Kind: "test", Enabled: true, HealthStatus: "UNKNOWN", SafeMetadata: store.EmptyObject}
 }
@@ -98,16 +101,24 @@ func (f *fakeStore) GetIssue(context.Context, string, string) (store.Issue, erro
 	return coverageIssue(), nil
 }
 func (f *fakeStore) UpdateIssue(_ context.Context, v store.Issue) (store.Issue, error) { return v, nil }
+func (f *fakeStore) SetIssueAssignee(_ context.Context, _, _ string, target *store.Assignee, _ json.RawMessage) (store.IssueMutationResult, error) {
+	i := coverageIssue()
+	if target == nil {
+		i.AssigneeType, i.AssigneeID, i.AssigneeName = nil, nil, nil
+	} else {
+		kind, id, name := target.Type, target.ID, target.Name
+		i.AssigneeType, i.AssigneeID, i.AssigneeName = &kind, &id, &name
+	}
+	return store.IssueMutationResult{Issue: i}, nil
+}
+func (f *fakeStore) ListIssueAssignees(context.Context, string) ([]store.Assignee, error) {
+	return []store.Assignee{coverageAssignee()}, nil
+}
 func (f *fakeStore) ListRuns(context.Context, string) ([]store.Run, error) {
 	return []store.Run{coverageRun()}, nil
 }
 func (f *fakeStore) GetRun(context.Context, string, string) (store.Run, error) {
 	return coverageRun(), nil
-}
-func (f *fakeStore) AssignIssue(context.Context, string, string, string) (store.Issue, store.Run, error) {
-	i := coverageIssue()
-	i.Status = "IN_PROGRESS"
-	return i, coverageRun(), nil
 }
 func (f *fakeStore) ListProjectEventsAfter(context.Context, string, string, int) ([]store.Event, error) {
 	return nil, nil
@@ -125,13 +136,14 @@ func TestControlPlaneServiceHappyPaths(t *testing.T) {
 	runtime := coverageRuntime()
 	agent := f.agent
 	issue := coverageIssue()
+	assignee := coverageAssignee()
 	calls := []func() error{
 		func() error { _, e := svc.ListProjects(ctx); return e }, func() error { _, e := svc.CreateProject(ctx, p); return e }, func() error { _, e := svc.GetProject(ctx, p.ID); return e }, func() error { _, e := svc.UpdateProject(ctx, p); return e },
 		func() error { _, e := svc.ListProviders(ctx, nil); return e }, func() error { _, e := svc.CreateProvider(ctx, provider); return e }, func() error { _, e := svc.GetProvider(ctx, nil, provider.ID); return e }, func() error { _, e := svc.UpdateProvider(ctx, nil, provider); return e }, func() error { _, e := svc.ListProviders(ctx, scope); return e }, func() error { _, e := svc.GetProvider(ctx, scope, provider.ID); return e }, func() error { _, e := svc.UpdateProvider(ctx, scope, provider); return e },
 		func() error { _, e := svc.ListModelProfiles(ctx, nil); return e }, func() error { _, e := svc.ListModelProfiles(ctx, scope); return e }, func() error { _, e := svc.GetModelProfile(ctx, scope, model.ID); return e }, func() error { _, e := svc.CreateModelProfile(ctx, model); return e }, func() error { _, e := svc.UpdateModelProfile(ctx, scope, model); return e },
 		func() error { _, e := svc.ListRuntimes(ctx, scope); return e }, func() error { _, e := svc.GetRuntime(ctx, scope, runtime.ID); return e }, func() error { _, e := svc.CreateRuntime(ctx, runtime); return e }, func() error { _, e := svc.UpdateRuntime(ctx, scope, runtime); return e },
 		func() error { _, e := svc.ListAgents(ctx, scope); return e }, func() error { _, e := svc.GetAgent(ctx, scope, agent.ID); return e }, func() error { _, e := svc.CreateAgent(ctx, agent); return e }, func() error { _, e := svc.UpdateAgent(ctx, scope, agent); return e },
-		func() error { _, e := svc.ListIssues(ctx, pid); return e }, func() error { _, e := svc.GetIssue(ctx, pid, issue.ID); return e }, func() error { _, e := svc.CreateIssue(ctx, issue); return e }, func() error { _, e := svc.UpdateIssue(ctx, issue); return e }, func() error { _, e := svc.ListRuns(ctx, pid); return e }, func() error { _, e := svc.GetRun(ctx, pid, "run"); return e }, func() error { _, _, e := svc.AssignIssue(ctx, pid, issue.ID, agent.ID); return e }, func() error { _, e := svc.ListProjectEventsAfter(ctx, pid, ""); return e },
+		func() error { _, e := svc.ListIssues(ctx, pid); return e }, func() error { _, e := svc.GetIssue(ctx, pid, issue.ID); return e }, func() error { _, e := svc.CreateIssue(ctx, issue); return e }, func() error { _, e := svc.UpdateIssue(ctx, issue); return e }, func() error { _, e := svc.ListRuns(ctx, pid); return e }, func() error { _, e := svc.GetRun(ctx, pid, "run"); return e }, func() error { _, e := svc.SetIssueAssignee(ctx, pid, issue.ID, &assignee, store.EmptyObject); return e }, func() error { _, e := svc.ListIssueAssignees(ctx, pid); return e }, func() error { _, e := svc.ListProjectEventsAfter(ctx, pid, ""); return e },
 	}
 	for n, call := range calls {
 		if err := call(); err != nil {
@@ -219,8 +231,9 @@ func (s *doneIssueStore) GetIssue(context.Context, string, string) (store.Issue,
 func TestAssignmentDefersExecutionReadinessAndAppErrorString(t *testing.T) {
 	pid := coverageProjectID()
 	base := &fakeStore{project: store.Project{ID: pid}, agent: coverageAgent()}
+	target := coverageAssignee()
 	for _, svc := range []*Service{New(&doneIssueStore{fakeStore: base}), New(&disabledModelStore{fakeStore: base})} {
-		if _, _, err := svc.AssignIssue(context.Background(), pid, "issue", "agent"); err != nil {
+		if _, err := svc.SetIssueAssignee(context.Background(), pid, "issue", &target, store.EmptyObject); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -259,9 +272,9 @@ func TestAssignmentReadinessIsOwnedByTransactionalStore(t *testing.T) {
 	pid := coverageProjectID()
 	makeBase := func() *fakeStore { return &fakeStore{project: store.Project{ID: pid}, agent: coverageAgent()} }
 	cases := []*Service{New(&disabledAgentStore{fakeStore: makeBase()}), New(&disabledModelStore{fakeStore: makeBase()}), New(&disabledProviderStore{fakeStore: makeBase()})}
+	target := coverageAssignee()
 	for _, svc := range cases {
-		_, _, err := svc.AssignIssue(context.Background(), pid, "issue", "agent")
-		if err != nil {
+		if _, err := svc.SetIssueAssignee(context.Background(), pid, "issue", &target, store.EmptyObject); err != nil {
 			t.Fatal(err)
 		}
 	}
