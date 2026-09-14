@@ -1,9 +1,12 @@
 package store
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 func NewIssueCreatedEvent(issue Issue) (Event, error) {
-	actor := append(json.RawMessage(nil), EmptyObject...)
+	actor := EmptyObject
 	if issue.CreatedByType != nil && issue.CreatedByID != nil {
 		encoded, err := json.Marshal(map[string]string{"type": *issue.CreatedByType, "id": *issue.CreatedByID})
 		if err != nil {
@@ -15,11 +18,15 @@ func NewIssueCreatedEvent(issue Issue) (Event, error) {
 }
 
 func NewIssueUpdatedEvent(issue Issue, previousStatus string) (Event, error) {
+	return NewIssueUpdatedEventWithActor(issue, previousStatus, EmptyObject)
+}
+
+func NewIssueUpdatedEventWithActor(issue Issue, previousStatus string, actor json.RawMessage) (Event, error) {
 	eventType := "issue.updated"
 	if previousStatus != issue.Status {
 		eventType = "issue.status_changed"
 	}
-	return newIssueMutationEvent(eventType, issue, EmptyObject, previousStatus)
+	return newIssueMutationEvent(eventType, issue, actor, previousStatus)
 }
 
 func newIssueMutationEvent(eventType string, issue Issue, actor json.RawMessage, previousStatus string) (Event, error) {
@@ -35,12 +42,15 @@ func newIssueMutationEvent(eventType string, issue Issue, actor json.RawMessage,
 	if err != nil {
 		return Event{}, err
 	}
-	issueID := issue.ID
+	if len(actor) == 0 {
+		actor = EmptyObject
+	}
+	issueID := strings.TrimSpace(issue.ID)
 	return Event{
 		Type:      eventType,
 		ProjectID: issue.ProjectID,
 		IssueID:   &issueID,
-		Actor:     append(json.RawMessage(nil), actor...),
+		Actor:     actor,
 		Payload:   encoded,
 	}, nil
 }
