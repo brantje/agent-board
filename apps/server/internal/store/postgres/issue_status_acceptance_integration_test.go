@@ -47,6 +47,9 @@ func TestAgentIssueStatusMutationPersistsCanonicalEventAttribution(t *testing.T)
 	s := New(testPool(t))
 	ctx := t.Context()
 	f := seedRunFixture(t, s, "status-agent-event")
+	if _, err := s.pool.Exec(ctx, `UPDATE runs SET status='RUNNING' WHERE project_id=$1 AND id=$2`, f.project.ID, f.run.ID); err != nil {
+		t.Fatalf("set fixture Run status: %v", err)
+	}
 	actor, err := json.Marshal(map[string]string{"type": store.ActorTypeAgent, "id": f.agent.ID})
 	if err != nil {
 		t.Fatal(err)
