@@ -58,7 +58,7 @@ describe('project runner settings', () => {
     expect(manager.attributes('data-internal')).toBe('false')
   })
 
-  it('separates dedicated, shared and internal fallback and uses project-scoped mutations', async () => {
+  it('separates dedicated, deployment and internal fallback capacity and uses project-scoped mutations', async () => {
     const settings = {
       runnerIds: [] as string[],
       projectRunners: [runner('owned-1', 'project-1', 'owned-host')],
@@ -91,9 +91,13 @@ describe('project runner settings', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('Project runners')
-    expect(wrapper.text()).toContain('Shared runners')
+    expect(wrapper.text()).toContain('Deployment runners')
+    expect(wrapper.text()).toContain('Shared external runners')
     expect(wrapper.text()).toContain('Internal runner fallback')
     expect(wrapper.text()).toContain('owned-host')
+    const internal = wrapper.get('[data-testid="internal-runner-capacity"]')
+    expect(internal.text()).toContain('Internal runner')
+    expect(internal.text()).toContain('Fallback disabled')
 
     await wrapper.find('input[type="checkbox"]').setValue(true)
     const savePolicy = wrapper.findAll('button').find(button => button.text() === 'Save shared runner policy')
@@ -105,6 +109,7 @@ describe('project runner settings', () => {
 
     await wrapper.get('input[role="switch"]').setValue(true)
     await flushPromises()
+    expect(internal.text()).toContain('Fallback enabled')
     const patch = fetch.mock.calls.find(([, init]) => init?.method === 'PATCH')
     expect(patch?.[0]).toBe('/api/projects/project-1')
     expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ allowInternalRunner: true })
@@ -197,6 +202,7 @@ describe('project runner settings', () => {
     await flushPromises()
     expect(wrapper.findAll('button').some(button => button.text() === 'Create runner')).toBe(false)
     expect(wrapper.findAll('button').some(button => button.text() === 'Edit')).toBe(false)
+    expect(wrapper.get('[data-testid="internal-runner-capacity"]').text()).toContain('Fallback enabled')
     expect(wrapper.get('input[role="switch"]').attributes('disabled')).toBeDefined()
   })
 })
