@@ -23,7 +23,12 @@ func (i Issue) AssignedTo() *Assignee {
 	return &Assignee{Type: *i.AssigneeType, ID: *i.AssigneeID, Name: name}
 }
 
+type IssueMutationResult struct {
+	Issue  Issue
+	Events []Event
+}
+
 type IssueAssignmentStore interface {
-	SetIssueAssignee(context.Context, string, string, *Assignee, json.RawMessage) (Issue, Event, error)
+	SetIssueAssignee(context.Context, string, string, *Assignee, json.RawMessage) (IssueMutationResult, error)
 	ListIssueAssignees(context.Context, string) ([]Assignee, error)
 }
