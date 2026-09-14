@@ -22,6 +22,24 @@ func (s *reservationFailureRunnerStore) CountRunnerReservations(context.Context,
 	return nil, errors.New("reservation lookup failed")
 }
 
+type projectCapacityRunnerStore struct {
+	*runnerAPIStore
+	values       []store.Runner
+	reservations map[string]int
+}
+
+func (s *projectCapacityRunnerStore) ListRunners(context.Context) ([]store.Runner, error) {
+	return append([]store.Runner(nil), s.values...), nil
+}
+
+func (s *projectCapacityRunnerStore) CountRunnerReservations(_ context.Context, ids []string) (map[string]int, error) {
+	counts := map[string]int{}
+	for _, id := range ids {
+		counts[id] = s.reservations[id]
+	}
+	return counts, nil
+}
+
 func TestProjectOwnedRunnerAPIScopeAndRegistration(t *testing.T) {
 	sharedStore := &runnerAPIStore{}
 	sharedRouter := NewRouter(app.New(sharedStore))
@@ -78,6 +96,40 @@ func TestProjectOwnedRunnerAPIScopeAndRegistration(t *testing.T) {
 	foreignUpdate := runnerAPIRequest(ownedRouter, http.MethodPatch, "/api/projects/"+otherID+"/runners/"+response.Runner.ID, `{"name":"wrong-project"}`)
 	if foreignUpdate.Code != http.StatusNotFound {
 		t.Fatalf("foreign update=%d %s", foreignUpdate.Code, foreignUpdate.Body.String())
+	}
+}
+
+func TestProjectRunnerSettingsExposeInternalRunnerCapacity(t *testing.T) {
+	now := time.Now().UTC()
+	internalID := "33333333-3333-4333-8333-333333333333"
+	memory := &projectCapacityRunnerStore{
+		runnerAPIStore: &runnerAPIStore{},
+		values: []store.Runner{{
+			ID: internalID, Name: "Internal runner", Internal: true, RegisteredAt: &now,
+			Capabilities: json.RawMessage(`{"engines":["opencode"],"features":["stdin","health"],"max_active_sessions":3}`),
+		}},
+		reservations: map[string]int{internalID: 1},
+	}
+	router := NewRouter(app.New(memory))
+
+	response := runnerAPIRequest(router, http.MethodGet, "/api/projects/"+projectID+"/runners", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("project settings=%d %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		InternalRunner *RunnerDTO `json:"internalRunner"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.InternalRunner == nil || !body.InternalRunner.Internal || body.InternalRunner.ID != internalID {
+		t.Fatalf("internal runner=%#v", body.InternalRunner)
+	}
+	if body.InternalRunner.MaxActiveSessions != 3 || body.InternalRunner.ReservedSessions != 1 {
+		t.Fatalf("internal capacity=%#v", body.InternalRunner)
+	}
+	if !strings.Contains(string(body.InternalRunner.Capabilities), `"features":["stdin","health"]`) {
+		t.Fatalf("internal capabilities=%s", body.InternalRunner.Capabilities)
 	}
 }
 
