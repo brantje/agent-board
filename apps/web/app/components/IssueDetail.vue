@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import type { Assignee, AssignmentResponse, Issue, Run } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
-import { latestRun, statusLabel } from '../utils/issues'
+import { issueRuns, statusLabel } from '../utils/issues'
 import { isBoardActivityEvent, applyCurrentBranchToIssue } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
@@ -16,10 +16,14 @@ const selected = ref('')
 const assigning = ref(false)
 const assignmentError = ref<Error>()
 const assignmentResult = ref<AssignmentResponse>()
+const startingRun = ref(false)
+const startRunError = ref<Error>()
+const startRunResult = ref<Run>()
 const editing = ref(false)
 
 const unassignedChoice = '__UNASSIGNED__'
-const latest = computed(() => latestRun(runs.data.value || [], props.issueId))
+const issueRunHistory = computed(() => issueRuns(runs.data.value || [], props.issueId))
+const latest = computed(() => issueRunHistory.value[0])
 const choices = computed(() => [
   { label: 'Unassigned', value: unassignedChoice },
   ...(assignees.data.value || []).map(assignee => ({
@@ -28,6 +32,12 @@ const choices = computed(() => [
   }))
 ])
 const assignedName = computed(() => issue.value?.assignedTo?.name)
+const canStartRun = computed(() => Boolean(
+  props.canMutate
+  && issue.value?.assignedTo?.type === 'AGENT'
+  && issue.value.status !== 'BACKLOG'
+))
+const runActionLabel = computed(() => issueRunHistory.value.length ? 'Run again' : 'Start Run')
 const creatorLabel = computed(() => {
   const creator = issue.value?.createdBy
   if (!creator) return 'Unknown'
@@ -38,6 +48,12 @@ const assignmentDescription = computed(() => {
   if (!assignmentResult.value) return undefined
   const result = assignmentResult.value
   return `Board status: ${statusLabel(result.issue.status)}. Ownership updated.`
+})
+const startRunDescription = computed(() => {
+  const result = startRunResult.value
+  if (!result) return undefined
+  const queue = result.queueReason ? ` Queue reason: ${result.queueReason}.` : ''
+  return `Attempt ${result.attempt} · ${statusLabel(result.status)}.${queue}`
 })
 
 const questionsPanel = ref<{ refresh?: () => Promise<unknown> }>()
@@ -89,6 +105,25 @@ async function assign() {
   }
 }
 
+async function startRun() {
+  if (!canStartRun.value || startingRun.value) return
+
+  startingRun.value = true
+  startRunError.value = undefined
+  startRunResult.value = undefined
+  try {
+    const result = await apiRequest<Run>(`${apiPath('issues', props.projectId, props.issueId)}/runs`, {
+      method: 'POST'
+    })
+    startRunResult.value = result
+    await runs.refresh()
+  } catch (failure) {
+    startRunError.value = failure as Error
+  } finally {
+    startingRun.value = false
+  }
+}
+
 async function saved(savedIssue: Issue) {
   issue.value = savedIssue
   editing.value = false
@@ -114,17 +149,37 @@ async function saved(savedIssue: Issue) {
           <IssueRelationships :project-id="projectId" :issue-id="issueId" :can-mutate="canMutate" />
 
           <UCard>
-            <h2 class="section-label mb-3">Latest Run</h2>
-            <AsyncState :pending="runs.pending.value" :error="runs.error.value" :empty="!latest" empty-title="No Runs yet" empty-description="Execution attempts will appear here." @retry="runs.refresh">
-              <template v-if="latest">
-                <div class="flex flex-wrap items-center gap-3">
-                  <RunStatus :status="latest.status" :label="statusLabel(latest.status)" />
-                  <span>Attempt {{ latest.attempt }}</span>
-                  <UButton label="Open Run" :to="`/projects/${projectId}/runs/${latest.id}`" variant="outline" />
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <h2 class="section-label">Runs</h2>
+              <UButton
+                v-if="canStartRun"
+                :label="runActionLabel"
+                icon="i-lucide-play"
+                :loading="startingRun"
+                @click="startRun"
+              />
+            </div>
+            <UAlert v-if="startRunError" title="Unable to start Run" :description="startRunError.message" color="error" class="mb-3" />
+            <UAlert v-if="startRunResult" title="Run accepted" :description="startRunDescription" color="success" class="mb-3" />
+            <AsyncState
+              :pending="runs.pending.value"
+              :error="runs.error.value"
+              :empty="!issueRunHistory.length"
+              empty-title="No Runs yet"
+              empty-description="Execution attempts will appear here."
+              @retry="runs.refresh"
+            >
+              <div v-if="issueRunHistory.length" class="space-y-3">
+                <div v-for="run in issueRunHistory" :key="run.id" class="rounded-md border border-default p-3">
+                  <div class="flex flex-wrap items-center gap-3">
+                    <RunStatus :status="run.status" :label="statusLabel(run.status)" />
+                    <span>Attempt {{ run.attempt }}</span>
+                    <UButton label="Open Run" :to="`/projects/${projectId}/runs/${run.id}`" variant="outline" />
+                  </div>
+                  <p v-if="run.queueReason" class="mt-3 text-sm">Queue reason: {{ run.queueReason }}</p>
+                  <p v-if="run.failureReason" class="mt-3 text-sm text-error">Execution failure: {{ run.failureReason }}</p>
                 </div>
-                <p v-if="latest.queueReason" class="mt-3 text-sm">Queue reason: {{ latest.queueReason }}</p>
-                <p v-if="latest.failureReason" class="mt-3 text-sm text-error">Execution failure: {{ latest.failureReason }}</p>
-              </template>
+              </div>
             </AsyncState>
           </UCard>
 
@@ -197,7 +252,7 @@ async function saved(savedIssue: Issue) {
                 <UFormField label="Assignee" name="assignee" description="Choose an eligible User or Agent, or leave the Issue unassigned.">
                   <USelect v-model="selected" :items="choices" :disabled="assigning" class="w-full" />
                 </UFormField>
-                <p class="text-sm text-muted">Assignment changes ownership only; it does not change the board status.</p>
+                <p class="text-sm text-muted">Assignment changes ownership only; it does not change the board status. Agent assignment may enqueue execution according to backend policy.</p>
                 <UButton label="Update assignee" type="submit" :loading="assigning" :disabled="!selected" />
               </UForm>
             </AsyncState>
