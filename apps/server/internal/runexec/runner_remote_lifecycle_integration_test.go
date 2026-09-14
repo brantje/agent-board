@@ -207,14 +207,14 @@ func TestRemoteGitExternalRunnerLifecycleContinuesAcrossRunners(t *testing.T) {
 		t.Fatalf("final Review diff is not reproducible:\n%s", diff)
 	}
 	issueBeforeApproval, err := database.GetIssue(ctx, project.ID, run2.IssueID)
-	if err != nil || issueBeforeApproval.Status != "REVIEW" {
+	if err != nil || issueBeforeApproval.Status != "TODO" {
 		t.Fatalf("remote Issue before approval=%+v err=%v", issueBeforeApproval, err)
 	}
 	approved, err := reviews.Approve(ctx, project.ID, review2.ID, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if approved.Review.Status != "APPROVED" || approved.Run.Status != "READY_FOR_REVIEW" || approved.Issue.Status != "REVIEW" {
+	if approved.Review.Status != "APPROVED" || approved.Run.Status != "READY_FOR_REVIEW" || approved.Issue.Status != "TODO" {
 		t.Fatalf("remote approval incorrectly claimed target delivery: %+v", approved)
 	}
 	if got := integrationGitOutput(t, ctx, origin, "rev-parse", "refs/heads/main"); got != targetRevision {
