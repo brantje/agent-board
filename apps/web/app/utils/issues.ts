@@ -103,5 +103,5 @@ export function formatUpdatedLabel(updatedAt: string, now = Date.now()) {
   }
   const days = Math.round(diffMs / day)
   const value = days === 0 ? -1 : days
-  return `Updated ${updatedFormatter.format(value, 'day')`
+  return `Updated ${updatedFormatter.format(value, 'day')}`
 }
