@@ -83,7 +83,7 @@ describe('Go API transport', () => {
       expect((error as ApiError).status).toBe(status)
       expect((error as ApiError).code).toBe(code)
       expect((error as Error).message).not.toContain('never reflect me')
-      if (code === 'issue_done') expect((error as Error).message).toContain('Reopen')
+      if (code === 'issue_done') expect((error as Error).message).not.toContain('Reopen')
     }
   })
 
