@@ -183,21 +183,11 @@ func (s *ProjectAccessService) UpdateIssue(ctx context.Context, actor Authentica
 	if current.Status == input.Status && sameIssueEditableMetadata(current, input) {
 		return current, nil
 	}
-	if current.Status != input.Status {
-		encodedActor, err := json.Marshal(map[string]string{"type": store.ActorTypeHuman, "id": actor.ID})
-		if err != nil {
-			return store.Issue{}, err
-		}
-		updated, err := s.controlPlane.SetIssueStatus(ctx, input.ProjectID, input.ID, input.Status, encodedActor)
-		if err != nil {
-			return store.Issue{}, err
-		}
-		if sameIssueEditableMetadata(current, input) {
-			return updated, nil
-		}
-		input.Status = updated.Status
+	encodedActor, err := json.Marshal(map[string]string{"type": store.ActorTypeHuman, "id": actor.ID})
+	if err != nil {
+		return store.Issue{}, err
 	}
-	return s.controlPlane.UpdateIssue(ctx, input)
+	return s.controlPlane.UpdateIssueWithActor(ctx, input, encodedActor)
 }
 
 func sameIssueEditableMetadata(left, right store.Issue) bool {
