@@ -18,8 +18,13 @@ const collectionURL = computed(() => props.projectId
   ? `/api/projects/${encodeURIComponent(props.projectId)}/runners`
   : '/api/runners')
 const { data, pending, error, refresh } = useResource<Runner[] | ProjectRunnerSettings>(() => collectionURL.value)
-const managedRunners = computed(() => Array.isArray(data.value) ? data.value : data.value?.projectRunners ?? [])
-const sharedRunners = computed(() => Array.isArray(data.value) ? [] : data.value?.sharedRunners ?? [])
+const projectSettings = computed<ProjectRunnerSettings | undefined>(() => {
+  if (!data.value || Array.isArray(data.value)) return undefined
+  if (!Array.isArray(data.value.runnerIds) || !Array.isArray(data.value.projectRunners) || !Array.isArray(data.value.sharedRunners)) return undefined
+  return data.value
+})
+const managedRunners = computed(() => Array.isArray(data.value) ? data.value : projectSettings.value?.projectRunners ?? [])
+const sharedRunners = computed(() => projectSettings.value?.sharedRunners ?? [])
 const registrationToken = ref('')
 const runnerToken = ref('')
 const creating = ref(false)
@@ -39,8 +44,8 @@ const internalFallback = ref(props.allowInternalRunner ?? true)
 const fallbackSaving = ref(false)
 const fallbackError = ref<Error>()
 
-watch(data, (value) => {
-  if (!Array.isArray(value) && value) selectedSharedRunnerIds.value = [...value.runnerIds]
+watch(projectSettings, (value) => {
+  if (value) selectedSharedRunnerIds.value = [...value.runnerIds]
 }, { immediate: true })
 watch(() => props.allowInternalRunner, value => {
   if (value !== undefined) internalFallback.value = value
@@ -178,8 +183,9 @@ async function saveSharedPolicy() {
   }
 }
 
-async function saveInternalFallback() {
+async function saveInternalFallback(value = internalFallback.value) {
   if (!props.projectId || !canManage.value || fallbackSaving.value) return
+  internalFallback.value = value
   fallbackSaving.value = true
   fallbackError.value = undefined
   try {
@@ -189,6 +195,7 @@ async function saveInternalFallback() {
     })
     emit('projectUpdated', project)
   } catch (failure) {
+    internalFallback.value = props.allowInternalRunner ?? true
     fallbackError.value = failure as Error
   } finally {
     fallbackSaving.value = false
@@ -312,10 +319,13 @@ function scopeLabel(runner: Runner) {
           </div>
         </template>
         <UAlert v-if="fallbackError" color="error" title="Unable to save internal fallback" :description="fallbackError.message" class="mb-4" />
-        <div class="flex items-center justify-between gap-4">
-          <USwitch v-model="internalFallback" :disabled="!canManage || fallbackSaving" label="Allow internal runner" />
-          <UButton v-if="canManage" label="Save fallback" :loading="fallbackSaving" @click="saveInternalFallback" />
-        </div>
+        <UFormField label="Allow internal runner" name="allowInternalRunner">
+          <USwitch
+            :model-value="internalFallback"
+            :disabled="!canManage || fallbackSaving"
+            @update:model-value="value => saveInternalFallback(Boolean(value))"
+          />
+        </UFormField>
       </UCard>
     </template>
 
