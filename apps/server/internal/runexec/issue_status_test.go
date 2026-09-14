@@ -3,7 +3,7 @@ package runexec
 import (
 	"context"
 	"encoding/json"
-	"strings"
+	"errors"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
@@ -11,24 +11,18 @@ import (
 )
 
 type recordingIssueStatusStore struct {
-	run      store.Run
 	mutation store.IssueStatusMutation
-}
-
-func (s *recordingIssueStatusStore) GetRun(context.Context, string, string) (store.Run, error) {
-	return s.run, nil
+	err      error
 }
 
 func (s *recordingIssueStatusStore) SetIssueStatus(_ context.Context, mutation store.IssueStatusMutation) (store.IssueMutationResult, error) {
 	s.mutation = mutation
-	return store.IssueMutationResult{}, nil
+	return store.IssueMutationResult{}, s.err
 }
 
 func TestIssueStatusUpdaterBindsMutationToActiveRun(t *testing.T) {
 	agentID := "agent-1"
-	statusStore := &recordingIssueStatusStore{run: store.Run{
-		ID: "run-1", ProjectID: "project-1", IssueID: "issue-1", WorkspaceID: "workspace-1", AgentID: &agentID, Status: "RUNNING",
-	}}
+	statusStore := &recordingIssueStatusStore{}
 	updater := &issueStatusUpdater{store: statusStore, safe: executioncontext.SafeContext{
 		Project:   executioncontext.ProjectContext{ID: "project-1"},
 		Issue:     executioncontext.IssueContext{ID: "issue-1"},
@@ -55,24 +49,21 @@ func TestIssueStatusUpdaterBindsMutationToActiveRun(t *testing.T) {
 	}
 }
 
-func TestIssueStatusUpdaterRejectsInvalidOrStaleCapability(t *testing.T) {
-	agentID := "agent-1"
-	statusStore := &recordingIssueStatusStore{run: store.Run{
-		ID: "run-1", ProjectID: "project-1", IssueID: "issue-1", WorkspaceID: "workspace-1", AgentID: &agentID, Status: "RUNNING",
-	}}
+func TestIssueStatusUpdaterRejectsInvalidStatusAndPropagatesStoreFence(t *testing.T) {
+	statusStore := &recordingIssueStatusStore{}
 	updater := &issueStatusUpdater{store: statusStore, safe: executioncontext.SafeContext{
 		Project:   executioncontext.ProjectContext{ID: "project-1"},
 		Issue:     executioncontext.IssueContext{ID: "issue-1"},
 		Run:       executioncontext.RunContext{ID: "run-1"},
-		Agent:     executioncontext.AgentContext{ID: agentID},
+		Agent:     executioncontext.AgentContext{ID: "agent-1"},
 		Workspace: executioncontext.WorkspaceContext{ID: "workspace-1"},
 	}}
 
 	if err := updater.SetStatus(context.Background(), "NOT_A_STATUS"); err == nil {
 		t.Fatal("invalid status unexpectedly accepted")
 	}
-	statusStore.run.Status = "COMPLETED"
-	if err := updater.SetStatus(context.Background(), "DONE"); err == nil || !strings.Contains(err.Error(), "no longer bound") {
-		t.Fatalf("stale capability error=%v", err)
+	statusStore.err = store.ErrConflict
+	if err := updater.SetStatus(context.Background(), "DONE"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("store fence error=%v want conflict", err)
 	}
 }
