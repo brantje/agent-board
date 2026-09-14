@@ -55,6 +55,10 @@ A Runner advertises `max_active_sessions`. The default advertised capacity is 5 
 
 The scheduler admits a Run only against a live authenticated Runner that advertises the Agent's Engine, satisfies Project runner policy, and is below active-session capacity. External persistent Runners are preferred. The server-managed internal Runner is fallback when `allow_internal_runner` is true. Persisted last-seen/capabilities never make a disconnected Runner eligible.
 
+External Runners have exactly two scopes. A shared Runner has no owner Project and remains deployment-global capacity subject to the existing `project_runners` allowlist. A Project-owned Runner stores exactly one owner Project and is eligible only for Runs from that Project; it never participates in the shared allowlist. Project ownership is checked again when a Runner-owned Execution Session is created, so a direct caller cannot bind a foreign Project-owned Runner even if scheduler admission is bypassed. The internal Runner remains deployment-global/server-managed and cannot be Project-owned.
+
+An empty shared-runner allowlist retains its existing meaning: any eligible shared external Runner may execute. One or more allowlist rows restrict shared capacity to those Runners. Project-owned Runners are separate from that policy and require no allowlist row.
+
 Runner placement is not Agent configuration. Agents select Engine and Model Profile; the scheduler selects the eligible Runner at execution time.
 
 ### Atomic admission
