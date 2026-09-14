@@ -71,8 +71,8 @@ export function latestRun(runs: Run[], issueId: string) {
 
 const terminalRunStatuses = new Set(['COMPLETED', 'CANCELLED'])
 
-export function issueCardRunStatus(assignedAgentId: string | null, runStatus?: string | null) {
-  if (!assignedAgentId || !runStatus || terminalRunStatuses.has(runStatus)) return null
+export function issueCardRunStatus(runStatus?: string | null) {
+  if (!runStatus || terminalRunStatuses.has(runStatus)) return null
   return statusLabel(runStatus)
 }
 
