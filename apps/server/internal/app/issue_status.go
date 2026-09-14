@@ -7,23 +7,20 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func (s *Service) SetIssueStatus(ctx context.Context, projectID, issueID, status string, actor json.RawMessage) (store.Issue, error) {
-	if _, err := s.GetProject(ctx, projectID); err != nil {
+// UpdateIssueWithActor preserves the normal transactional Issue mutation while
+// attributing its durable Event to the authenticated caller.
+func (s *Service) UpdateIssueWithActor(ctx context.Context, input store.Issue, actor json.RawMessage) (store.Issue, error) {
+	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
 		return store.Issue{}, err
 	}
-	if !store.ValidIssueStatus(status) {
-		return store.Issue{}, invalid("invalid issue status")
+	if err := validateIssue(input); err != nil {
+		return store.Issue{}, err
 	}
-	mutationStore, ok := s.store.(store.IssueStatusMutationStore)
+	mutationStore, ok := s.store.(store.IssueMutationActorStore)
 	if !ok {
-		return store.Issue{}, NewError("issue_status_unavailable", "issue status mutation is unavailable", store.ErrInvalidArgument)
+		return store.Issue{}, NewError("issue_mutation_unavailable", "actor-aware issue mutation is unavailable", store.ErrInvalidArgument)
 	}
-	result, err := mutationStore.SetIssueStatus(ctx, store.IssueStatusMutation{
-		ProjectID: projectID,
-		IssueID:   issueID,
-		Status:    status,
-		Actor:     actor,
-	})
+	result, err := mutationStore.UpdateIssueMutationWithActor(ctx, input, actor)
 	if err != nil {
 		return store.Issue{}, translateStoreError(err, "issue")
 	}
