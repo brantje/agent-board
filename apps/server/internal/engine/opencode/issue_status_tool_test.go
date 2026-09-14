@@ -110,7 +110,7 @@ func TestIssueStatusToolReconcileAttachRestoresLatestDurableIntentOnce(t *testin
 		map[string]any{
 			"info": map[string]any{"sessionID": "ses_1"},
 			"parts": []any{
-				issueStatusToolPartPayload("ses_1", "part_started", "IN_PROGRESS"),
+				issueStatusToolPartPayload("ses_1", "part_started ", "IN_PROGRESS"),
 				issueStatusToolPartPayload("ses_1", "part_review", "REVIEW"),
 			},
 		},
@@ -123,6 +123,9 @@ func TestIssueStatusToolReconcileAttachRestoresLatestDurableIntentOnce(t *testin
 	}
 	if err := tracker.ReconcileAttach(context.Background(), native, "ses_1", updater); err != nil {
 		t.Fatalf("duplicate ReconcileAttach() error=%v", err)
+	}
+	if err := tracker.Reconcile(context.Background(), native, "ses_1", updater); err != nil {
+		t.Fatalf("Reconcile() after attach error=%v", err)
 	}
 	if len(updater.statuses) != 1 || updater.statuses[0] != "REVIEW" {
 		t.Fatalf("statuses=%v want [REVIEW]", updater.statuses)

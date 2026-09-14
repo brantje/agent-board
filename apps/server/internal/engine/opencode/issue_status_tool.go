@@ -100,8 +100,8 @@ func (t *issueStatusToolTracker) ReconcileAttach(ctx context.Context, native *cl
 		return nil
 	}
 	for _, part := range parts[:len(parts)-1] {
-		if strings.TrimSpace(part.ID) != "" {
-			t.seen[part.ID] = struct{}{}
+		if partID := strings.TrimSpace(part.ID); partID != "" {
+			t.seen[partID] = struct{}{}
 		}
 	}
 	return t.applyPart(ctx, parts[len(parts)-1], sessionID, updater)
