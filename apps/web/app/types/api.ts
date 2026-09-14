@@ -151,20 +151,125 @@ export interface EventEvidence {
   projectId: string
   issueId: string | null
   runId: string | null
+  sequence: number | null
   agentId: string | null
   workspaceId: string | null
   runtimeInstanceId: string | null
   correlationId: string | null
   parentEventId: string | null
-  sequence: number | null
   actor: Record<string, unknown>
   payload: Record<string, unknown>
+}
+
+export interface RuntimeInstanceEvidence {
+  id: string
+  runtimeId: string
+  status: string
+  runnerStatus: string
+  createdAt: string
+  startedAt: string | null
+  stoppedAt: string | null
+  updatedAt: string
+}
+
+export interface ExecutionSessionEvidence {
+  id: string
+  runtimeInstanceId: string | null
+  runnerId: string | null
+  status: string
+  cwd: string
+  command: string[]
+  exitCode: number | null
+  createdAt: string
+  startedAt: string | null
+  completedAt: string | null
+  updatedAt: string
+}
+
+export interface RawOutputChunkEvidence {
+  id: string
+  stream: string
+  sequence: number
+  sizeBytes: number
+  digest: string | null
+  contentPath: string
   createdAt: string
 }
 
-export interface QuestionAnswerResponse {
-  question: Question
-  decisionId: string
+export interface ArtifactEvidence {
+  id: string
+  name: string
+  kind: string
+  mediaType: string | null
+  sizeBytes: number
+  digest: string | null
+  safeMetadata: Record<string, unknown>
+  contentPath: string
+  createdAt: string
+}
+
+export interface RunUsageEvidence {
+  contextTokens: number
+  contextLimitTokens: number | null
+  inputTokens: number
+  outputTokens: number
+  cacheReadTokens: number
+  averageWaitMs: number | null
+  tokensPerSecond: number | null
+}
+
+export interface RunEvidence {
   run: Run
-  resumeJobId?: string | null
+  provenance: Record<string, unknown> | null
+  runtimeInstances: RuntimeInstanceEvidence[]
+  commands: ExecutionSessionEvidence[]
+  events: EventEvidence[]
+  tests: EventEvidence[]
+  fileChanges: EventEvidence[]
+  usage: RunUsageEvidence | null
+  rawOutput: RawOutputChunkEvidence[]
+  artifacts: ArtifactEvidence[]
+}
+
+export interface Review {
+  id: string
+  projectId: string
+  issueId: string
+  runId: string
+  status: string
+  requestedAt: string
+  decidedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ReviewDecision {
+  id: string
+  outcome: 'APPROVED' | 'CHANGES_REQUESTED' | string
+  actorType: string
+  actorId: string | null
+  safeDetails: Record<string, unknown>
+  createdAt: string
+}
+
+export interface ReviewDetail {
+  review: Review
+  decision: ReviewDecision | null
+  testStatus: 'NOT_RUN' | 'PASSED' | 'FAILED' | 'UNKNOWN' | string
+  evidence: RunEvidence
+}
+
+export interface ReviewApprovalResponse {
+  review: Review
+  decision: ReviewDecision
+  run: Run
+  issue: Issue
+}
+
+export interface ReviewRequestChangesResponse {
+  review: Review
+  decision: ReviewDecision
+  run: Run
+  issue: Issue
+  jobId: string
 }
