@@ -39,12 +39,10 @@ describe('project runner settings', () => {
         return new Response(JSON.stringify({ runner: { id: 'pending-1' }, registrationToken: 'project-registration' }), { status: 201 })
       }
       if (path === '/api/projects/project-1/runners' && method === 'PUT') {
-        expect(JSON.parse(String(init?.body))).toEqual({ runnerIds: ['shared-1'] })
         settings.runnerIds = ['shared-1']
         return new Response(JSON.stringify(settings))
       }
       if (path === '/api/projects/project-1' && method === 'PATCH') {
-        expect(JSON.parse(String(init?.body))).toEqual({ allowInternalRunner: true })
         return new Response(JSON.stringify({ id: 'project-1', allowInternalRunner: true }))
       }
       return new Response('{}', { status: 404 })
@@ -66,11 +64,15 @@ describe('project runner settings', () => {
     const savePolicy = wrapper.findAll('button').find(button => button.text() === 'Save shared runner policy')
     await savePolicy!.trigger('click')
     await flushPromises()
-    expect(fetch).toHaveBeenCalledWith('/api/projects/project-1/runners', expect.objectContaining({ method: 'PUT' }))
+    const put = fetch.mock.calls.find(([, init]) => init?.method === 'PUT')
+    expect(put?.[0]).toBe('/api/projects/project-1/runners')
+    expect(JSON.parse(String(put?.[1]?.body))).toEqual({ runnerIds: ['shared-1'] })
 
     await wrapper.get('input[role="switch"]').setValue(true)
     await flushPromises()
-    expect(fetch).toHaveBeenCalledWith('/api/projects/project-1', expect.objectContaining({ method: 'PATCH' }))
+    const patch = fetch.mock.calls.find(([, init]) => init?.method === 'PATCH')
+    expect(patch?.[0]).toBe('/api/projects/project-1')
+    expect(JSON.parse(String(patch?.[1]?.body))).toEqual({ allowInternalRunner: true })
 
     const create = wrapper.findAll('button').find(button => button.text() === 'Create runner')
     await create!.trigger('click')
