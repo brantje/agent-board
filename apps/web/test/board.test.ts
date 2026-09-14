@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { boardColumnSurface, boardColumns, editableStatuses, formatUpdatedLabel, isFailedIssueRun, isLiveIssueRun, issueCardRunStatus, issuePriority, issueStatusPresentation, latestRun, statusLabel } from '../app/utils/issues'
+import { boardColumnSurface, boardColumns, formatUpdatedLabel, isFailedIssueRun, isLiveIssueRun, issueCardRunStatus, issuePriority, issueRuns, issueStatuses, issueStatusPresentation, latestRun, statusLabel } from '../app/utils/issues'
 
 const issue = (id: string, status: string) => ({
   id,
@@ -40,7 +40,7 @@ describe('durable Issue board projection', () => {
     expect(issueStatusPresentation('REVIEW')).toMatchObject({ icon: 'i-lucide-scan-eye', color: 'success', textClass: 'text-success' })
     expect(issueStatusPresentation('DONE')).toMatchObject({ icon: 'i-lucide-circle-check', color: 'primary', textClass: 'text-primary' })
     expect(issueStatusPresentation('UNKNOWN')).toMatchObject({ icon: 'i-lucide-circle', color: 'neutral', label: 'Unknown' })
-    expect(new Set(['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE'].map(status => issueStatusPresentation(status).icon)).size).toBe(6)
+    expect(new Set(issueStatuses.map(status => issueStatusPresentation(status).icon)).size).toBe(6)
   })
 
   it('projects Issue priority as labeled Low/High chips without relying on color alone', () => {
@@ -51,19 +51,18 @@ describe('durable Issue board projection', () => {
     expect(issuePriority(9)).toMatchObject({ label: 'Priority 9', variant: 'subtle' })
   })
 
-  it('protects Review and Done and reopens only into Todo', () => {
-    expect(editableStatuses('REVIEW')).toEqual(['REVIEW'])
-    expect(editableStatuses('DONE')).toEqual(['DONE', 'TODO'])
-    expect(editableStatuses('TODO')).not.toContain('DONE')
-    expect(editableStatuses()).toEqual(['BACKLOG', 'TODO'])
+  it('exposes all six persisted Board statuses without a client transition graph', () => {
+    expect(issueStatuses).toEqual(['BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE'])
   })
 
-  it('selects latest persisted attempt for the same Issue only', () => {
-    expect(latestRun([
+  it('selects and orders persisted attempts for the same Issue only', () => {
+    const runs = [
       { id: 'old', issueId: 'i', attempt: 1 },
       { id: 'other', issueId: 'other', attempt: 8 },
       { id: 'latest', issueId: 'i', attempt: 2 }
-    ] as never, 'i')?.id).toBe('latest')
+    ] as never
+    expect(issueRuns(runs, 'i').map(value => value.id)).toEqual(['latest', 'old'])
+    expect(latestRun(runs, 'i')?.id).toBe('latest')
     expect(latestRun([], 'i')).toBeUndefined()
   })
 
