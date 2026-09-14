@@ -4,10 +4,11 @@ The scheduler is part of the v0.1 critical path. It is backend-owned, PostgreSQL
 
 ## Command vs execution
 
-Starting/assigning work persists a Run and durable scheduling intent, then returns promptly.
+Issue ownership and Board status are persisted independently from scheduler admission. When an automatic lifecycle trigger, execution-configuration reconciliation, or explicit Start Run creates work, the backend persists a normal `QUEUED` Run and durable scheduling intent before returning.
 
 ```text
-HTTP/UI command
+Issue mutation / explicit Start Run / configuration reconciliation
+ -> validate execution configuration when a Run trigger applies
  -> persist QUEUED Run + execution job
  -> return
  -> scheduler claims/admission
@@ -16,7 +17,7 @@ HTTP/UI command
  -> RUNNING
 ```
 
-No HTTP handler owns long-running execution lifetime.
+Runner connectivity, repository-source availability and capacity are scheduler concerns after Run creation; they are not ownership or Board-status validity checks. No HTTP handler owns long-running execution lifetime.
 
 ## Durable ownership
 
@@ -131,11 +132,11 @@ The shared `store.ShouldAutoEnqueueIssue` policy is applied inside the Issue mut
 - all other status changes, User assignment and unassignment do not enqueue;
 - unchanged ownership is an idempotent no-op, including after a prior Run has finished.
 
-Assignment preserves Board status. A valid but currently unrunnable Agent remains assigned successfully, without a pending-execution flag. Execution-configuration reconciliation uses the same enqueue path (see below).
+Assignment preserves Board status. An ownership-eligible Agent remains assigned even when its execution configuration cannot currently create a Run; the mutation succeeds without a pending-execution flag. Execution-configuration reconciliation uses the same enqueue path (see below).
 
 The Issue row lock serializes automatic enqueue, pair-scoped active-Run suppression and Issue-wide attempt numbering. Different Agents can have active Runs on one Issue; automatic enqueue never creates a second active Run for the same Issue/Agent. All attempts reuse the authoritative Issue Workspace and existing scheduler jobs. Workspace execution ownership still serializes access to its checkout.
 
-New automatic Runs atomically persist `run.created` with Run, Agent and Workspace identity. Duplicate suppression and readiness skips create no Run Events. Issue mutation Events remain owned by the canonical Issue commands.
+New automatic Runs atomically persist `run.created` with Run, Agent and Workspace identity. Duplicate suppression and execution-configuration skips create no Run Events. Issue mutation Events remain owned by the canonical Issue commands.
 
 ## Execution configuration recovery and Start Run
 
