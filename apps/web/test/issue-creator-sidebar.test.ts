@@ -27,7 +27,7 @@ it.each([
 ])('shows the resolved issue creator in the Properties sidebar', async (createdBy, expected) => {
   vi.stubGlobal('EventSource', MockEventSource)
   vi.stubGlobal('fetch', vi.fn(async (path: string) => {
-    if (path.endsWith('/agents') || path.endsWith('/runs')) return new Response(JSON.stringify([]))
+    if (path.endsWith('/assignees') || path.endsWith('/runs')) return new Response(JSON.stringify([]))
     return new Response(JSON.stringify({
       id: 'AB-1',
       projectId: 'p',
