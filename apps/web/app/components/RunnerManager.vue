@@ -279,10 +279,6 @@ function scopeLabel(runner: Runner) {
               <UBadge v-for="engine in runnerEngines(runner)" :key="engine" color="primary" variant="subtle" :label="engine" />
               <span v-if="!runnerEngines(runner).length" class="text-xs text-muted">No engines reported yet</span>
             </div>
-            <div v-if="runner.registeredAt && runnerFeatures(runner).length" class="mt-2 flex flex-wrap items-center gap-2" data-testid="runner-features">
-              <span class="text-xs text-muted">Features:</span>
-              <UBadge v-for="feature in runnerFeatures(runner)" :key="feature" color="neutral" variant="subtle" :label="feature" />
-            </div>
             <p v-if="runner.registeredAt" class="mt-2 text-sm text-muted" data-testid="runner-session-summary">{{ runnerSessionSummary(runner) }}</p>
             <p class="mt-1 text-xs text-muted">Last seen: {{ runner.lastSeenAt ?? 'Never' }}</p>
           </UCard>
