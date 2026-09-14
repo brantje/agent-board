@@ -145,6 +145,11 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 
 	state := newRunState(session.ID, request.InteractiveQuestions, activitySink(request.Launcher))
 	statusTools := newIssueStatusToolTracker()
+	if recovered && !promptRequired {
+		if err := statusTools.ReconcileAttach(ctx, native, session.ID, request.IssueStatus); err != nil {
+			return engine.Result{}, err
+		}
+	}
 	state.seedModelUsage(settings.ProviderID, request.Context.Model.Model, nil)
 	if limit, err := native.ModelContextLimit(ctx, settings.ProviderID, request.Context.Model.Model); err == nil {
 		state.contextLimitTokens = cloneInt64(limit)
@@ -172,6 +177,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{Summary: state.lastVisibleMessage}, nil
 	}
 	finishCompleted := func() (engine.Result, error) {
+		if err := statusTools.Reconcile(ctx, native, session.ID, request.IssueStatus); err != nil {
+			return engine.Result{}, err
+		}
 		if err := state.flushPendingMessages(ctx); err != nil {
 			return engine.Result{}, err
 		}
@@ -247,6 +255,12 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			if eventRead.err != nil {
 				_ = stream.Close()
 				if _, reconcileErr := reconcilePendingQuestions(ctx, native, session.ID, state); reconcileErr != nil {
+					return engine.Result{}, errors.Join(
+						fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
+						reconcileErr,
+					)
+				}
+				if reconcileErr := statusTools.Reconcile(ctx, native, session.ID, request.IssueStatus); reconcileErr != nil {
 					return engine.Result{}, errors.Join(
 						fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
 						reconcileErr,
