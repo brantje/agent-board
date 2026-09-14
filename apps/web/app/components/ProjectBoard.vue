@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { Agent, Issue, Project, Run } from '../types/api'
+import type { Issue, Project, Run } from '../types/api'
 import { apiPath } from '../utils/api'
 import { boardColumns, latestRun } from '../utils/issues'
 import { isBoardActivityEvent, applyCurrentBranchToIssues } from '../utils/events'
@@ -10,20 +10,15 @@ import { useProjectEvents } from '../composables/useProjectEvents'
 const props = withDefaults(defineProps<{ projectId: string; canMutate?: boolean }>(), { canMutate: true })
 const project = useResource<Project>(() => apiPath('projects', undefined, props.projectId))
 const issues = useResource<Issue[]>(() => apiPath('issues', props.projectId))
-const agents = useResource<Agent[]>(() => apiPath('agents', props.projectId))
 const runs = useResource<Run[]>(() => apiPath('runs', props.projectId))
 const search = ref('')
 const open = ref(false)
 
 const title = computed(() => project.data.value ? `${project.data.value.name} / Board` : 'Project Board')
 const columns = computed(() => boardColumns(issues.data.value || [], search.value))
-const pending = computed(() => project.pending.value || issues.pending.value || agents.pending.value)
-const error = computed(() => project.error.value || issues.error.value || agents.error.value)
+const pending = computed(() => project.pending.value || issues.pending.value)
+const error = computed(() => project.error.value || issues.error.value)
 const runsError = computed(() => runs.error.value)
-
-function agentName(issue: Issue) {
-  return issue.assignedTo?.name
-}
 
 function runStatus(issue: Issue) {
   const items = runs.data.value
@@ -32,7 +27,7 @@ function runStatus(issue: Issue) {
 }
 
 async function refreshAll() {
-  await Promise.all([project.refresh(), issues.refresh(), agents.refresh(), runs.refresh()])
+  await Promise.all([project.refresh(), issues.refresh(), runs.refresh()])
 }
 
 async function created() {
@@ -89,7 +84,6 @@ useProjectEvents(() => props.projectId, async event => {
               v-for="issue in column.issues"
               :key="issue.id"
               :issue="issue"
-              :agent-name="agentName(issue)"
               :run-status="runStatus(issue)"
             />
             <p v-if="!column.issues.length" class="px-2 py-4 text-xs text-muted">{{ search ? 'No matching issues' : 'No issues' }}</p>
