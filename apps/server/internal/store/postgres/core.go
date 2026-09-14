@@ -172,17 +172,21 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 		issue.AssigneeName = &assignee.Name
 	}
 
+	var runEvent store.Event
 	if assignee != nil && assignee.Type == "AGENT" {
 		_, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, issue.ProjectID, issue.ID)
 		if err != nil {
 			return store.Issue{}, err
 		}
-		if _, err := enqueueIssueMutation(ctx, tx, issue, "", true, repositoryPath, defaultBranch); err != nil {
+		if _, runEvent, err = enqueueIssueMutation(ctx, tx, issue, "", true, repositoryPath, defaultBranch); err != nil {
 			return store.Issue{}, err
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.Issue{}, err
+	}
+	if runEvent.ID != "" {
+		issue.LastEvent = &runEvent
 	}
 	return issue, nil
 }
