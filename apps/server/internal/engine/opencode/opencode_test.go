@@ -277,7 +277,7 @@ func TestEngineAnswersNativeQuestionWithoutSecondPrompt(t *testing.T) {
 		t.Fatalf("split test server address: %v", err)
 	}
 	command := launcher.request.Command
-	if len(command) != 7 || command[0] != "sh" || command[1] != "-c" || command[3] != "agent-board-opencode" || command[4] != host || command[5] != port || !strings.Contains(command[6], "set_issue_status") {
+	if len(command) != 7 || command[0] != "sh" || command[1] != "-c" || !strings.Contains(command[2], "set_issue_status.ts") || command[3] != "agent-board-opencode" || command[4] != host || command[5] != port || !strings.Contains(command[6], "export default tool") {
 		t.Fatalf("server command=%v want bootstrapped address %s:%s", command, host, port)
 	}
 	if harness.promptCalls != 1 {
