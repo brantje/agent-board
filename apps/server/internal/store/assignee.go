@@ -35,6 +35,12 @@ type IssueMutationStore interface {
 	UpdateIssueMutation(context.Context, Issue) (IssueMutationResult, error)
 }
 
+// IssueMutationActorStore preserves the same transactional Issue mutation while
+// attributing its durable Event to the authenticated actor that requested it.
+type IssueMutationActorStore interface {
+	UpdateIssueMutationWithActor(context.Context, Issue, json.RawMessage) (IssueMutationResult, error)
+}
+
 type IssueAssignmentStore interface {
 	SetIssueAssignee(context.Context, string, string, *Assignee, json.RawMessage) (IssueMutationResult, error)
 	ListIssueAssignees(context.Context, string) ([]Assignee, error)
