@@ -134,14 +134,20 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 		t.Fatalf("updated issue creator = type=%v id=%v", issue.CreatedByType, issue.CreatedByID)
 	}
 
-	assigned, run, err := s.AssignIssue(ctx, p1.ID, issue.ID, agent.ID)
+	assignment, err := s.SetIssueAssignee(ctx, p1.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: agent.ID}, store.EmptyObject)
 	if err != nil {
 		t.Fatal(err)
 	}
+	assigned := assignment.Issue
 	if assigned.Status != issue.Status || assigned.AssigneeID == nil || *assigned.AssigneeID != agent.ID {
 		t.Fatalf("unexpected assigned issue: %+v", assigned)
 	}
-	if run.Status != "QUEUED" || run.Attempt != 1 || run.WorkspaceID == "" {
+	runs, err := s.ListRuns(ctx, p1.ID)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("runs=%d err=%v", len(runs), err)
+	}
+	run := runs[0]
+	if run.Status != "QUEUED" || run.Attempt != 1 || run.WorkspaceID == "" || run.AgentID == nil || *run.AgentID != agent.ID {
 		t.Fatalf("unexpected run: %+v", run)
 	}
 	workspace, err := s.GetWorkspaceByIssue(ctx, p1.ID, issue.ID)
@@ -154,19 +160,20 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if workspace.WorkingBranch != "agent-board/"+issue.Key {
 		t.Fatalf("working branch = %q, want agent-board/%s", workspace.WorkingBranch, issue.Key)
 	}
-	runs, err := s.ListRuns(ctx, p1.ID)
-	if err != nil || len(runs) != 1 {
-		t.Fatalf("runs=%d err=%v", len(runs), err)
-	}
-	sameIssue, sameRun, err := s.AssignIssue(ctx, p1.ID, issue.ID, agent.ID)
+
+	sameAssignment, err := s.SetIssueAssignee(ctx, p1.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: agent.ID}, store.EmptyObject)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sameIssue.ID != assigned.ID || sameRun.ID != run.ID {
-		t.Fatalf("same assignment created duplicate run: %s vs %s", sameRun.ID, run.ID)
+	if sameAssignment.Issue.ID != assigned.ID || len(sameAssignment.Events) != 0 {
+		t.Fatalf("same assignment result=%+v", sameAssignment)
 	}
-	if !sameIssue.UpdatedAt.Equal(assigned.UpdatedAt) {
+	if !sameAssignment.Issue.UpdatedAt.Equal(assigned.UpdatedAt) {
 		t.Fatal("unchanged assignment changed updated_at")
+	}
+	runs, err = s.ListRuns(ctx, p1.ID)
+	if err != nil || len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("same assignment created duplicate run: %+v err=%v", runs, err)
 	}
 	var runCount, jobCount int
 	if err = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE issue_id=$1`, issue.ID).Scan(&runCount); err != nil {
@@ -183,11 +190,21 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, replacement, err := s.AssignIssue(ctx, p1.ID, issue.ID, otherAgent.ID)
-	if err != nil {
+	if _, err = s.SetIssueAssignee(ctx, p1.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: otherAgent.ID}, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}
-	if replacement.Attempt != 2 || replacement.ID == run.ID {
+	runs, err = s.ListRuns(ctx, p1.ID)
+	if err != nil || len(runs) != 2 {
+		t.Fatalf("replacement runs=%+v err=%v", runs, err)
+	}
+	var replacement store.Run
+	for _, candidate := range runs {
+		if candidate.AgentID != nil && *candidate.AgentID == otherAgent.ID {
+			replacement = candidate
+			break
+		}
+	}
+	if replacement.ID == "" || replacement.Attempt != 2 || replacement.ID == run.ID || replacement.WorkspaceID != run.WorkspaceID {
 		t.Fatalf("unexpected replacement: %+v", replacement)
 	}
 	old, err := s.GetRun(ctx, p1.ID, run.ID)
@@ -198,16 +215,25 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 		t.Fatalf("old status=%s", old.Status)
 	}
 
-	if _, _, err = s.AssignIssue(ctx, p2.ID, issue.ID, otherAgent.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err = s.SetIssueAssignee(ctx, p2.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: otherAgent.ID}, store.EmptyObject); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-project assignment err=%v", err)
 	}
 	done, err := s.CreateIssue(ctx, store.Issue{ProjectID: p1.ID, Title: "Done", Status: "DONE"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.AssignIssue(ctx, p1.ID, done.ID, otherAgent.ID); err != nil {
+	doneAssignment, err := s.SetIssueAssignee(ctx, p1.ID, done.ID, &store.Assignee{Type: "AGENT", ID: otherAgent.ID}, store.EmptyObject)
+	if err != nil {
 		t.Fatalf("done assignment err=%v", err)
 	}
+	if doneAssignment.Issue.Status != "DONE" {
+		t.Fatalf("done assignment changed status: %s", doneAssignment.Issue.Status)
+	}
+	var doneRuns int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE issue_id=$1 AND status='QUEUED'`, done.ID).Scan(&doneRuns); err != nil || doneRuns != 1 {
+		t.Fatalf("done queued runs=%d err=%v", doneRuns, err)
+	}
+
 	disabled, err := s.CreateAgent(ctx, store.Agent{ProjectID: scope1, Name: "Disabled", Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "DISABLED"})
 	if err != nil {
 		t.Fatal(err)
@@ -216,7 +242,7 @@ func TestControlPlanePersistenceAndProjectIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.AssignIssue(ctx, p1.ID, blocked.ID, disabled.ID); !errors.Is(err, store.ErrInvalidArgument) {
+	if _, err = s.SetIssueAssignee(ctx, p1.ID, blocked.ID, &store.Assignee{Type: "AGENT", ID: disabled.ID}, store.EmptyObject); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("disabled assignment err=%v", err)
 	}
 }
