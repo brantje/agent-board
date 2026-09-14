@@ -1,21 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { IdentityKind } from '../utils/identity'
 import type { Issue } from '../types/api'
 import { formatUpdatedLabel, isFailedIssueRun, isLiveIssueRun, issueCardRunStatus, issuePriority } from '../utils/issues'
 
-const props = withDefaults(defineProps<{
+const props = defineProps<{
   issue: Issue
-  agentName?: string
-  assigneeKind?: IdentityKind
   runStatus?: string | null
-}>(), {
-  assigneeKind: 'agent'
-})
+}>()
 
 const priority = computed(() => issuePriority(props.issue.priority))
-const assignedLabel = computed(() => props.issue.assignedTo?.name || props.agentName || (props.issue.assignedTo ? 'Assignee unavailable' : ''))
-const runStatusLabel = computed(() => issueCardRunStatus(props.issue.assignedTo?.id ?? null, props.runStatus))
+const assignedLabel = computed(() => props.issue.assignedTo?.name || (props.issue.assignedTo ? 'Assignee unavailable' : ''))
+const runStatusLabel = computed(() => issueCardRunStatus(props.runStatus))
 const updatedLabel = computed(() => formatUpdatedLabel(props.issue.updatedAt))
 const liveRun = computed(() => isLiveIssueRun(props.runStatus))
 const failedRun = computed(() => isFailedIssueRun(props.runStatus))
@@ -73,7 +68,7 @@ const failedRun = computed(() => isFailedIssueRun(props.runStatus))
 
       <div class="mt-3 flex items-center justify-between gap-2">
         <div v-if="assignedLabel" class="flex min-w-0 items-center gap-2">
-          <IdentityAvatar :kind="issue.assignedTo?.type === 'USER' ? 'user' : assigneeKind" :name="assignedLabel" />
+          <IdentityAvatar :kind="issue.assignedTo?.type === 'USER' ? 'user' : 'agent'" :name="assignedLabel" />
           <span class="truncate text-xs text-highlighted">{{ assignedLabel }}</span>
         </div>
         <span v-if="updatedLabel" class="ml-auto shrink-0 text-xs text-muted">{{ updatedLabel }}</span>
