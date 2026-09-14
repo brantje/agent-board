@@ -78,6 +78,18 @@ func (a *api) runnerReservationCount(ctx context.Context, id string) (int, error
 	return reserved[id], nil
 }
 
+func (a *api) optionalRunnerDTO(ctx context.Context, value *store.Runner) (*RunnerDTO, error) {
+	if value == nil {
+		return nil, nil
+	}
+	reserved, err := a.runnerReservationCount(ctx, value.ID)
+	if err != nil {
+		return nil, err
+	}
+	dto := a.runnerDTO(*value, reserved)
+	return &dto, nil
+}
+
 type runnerUpdateRequest struct {
 	Name              string `json:"name"`
 	MaxActiveSessions *int   `json:"maxActiveSessions"`
@@ -129,6 +141,7 @@ type projectRunnersResponse struct {
 	RunnerIDs       []string    `json:"runnerIds"`
 	ProjectRunners []RunnerDTO `json:"projectRunners"`
 	SharedRunners  []RunnerDTO `json:"sharedRunners"`
+	InternalRunner *RunnerDTO  `json:"internalRunner"`
 }
 
 func (a *api) projectRunnerSettingsResponse(ctx context.Context, projectID string) (projectRunnersResponse, error) {
@@ -144,7 +157,13 @@ func (a *api) projectRunnerSettingsResponse(ctx context.Context, projectID strin
 	if err != nil {
 		return projectRunnersResponse{}, err
 	}
-	return projectRunnersResponse{RunnerIDs: settings.RunnerIDs, ProjectRunners: projectRunners, SharedRunners: sharedRunners}, nil
+	internalRunner, err := a.optionalRunnerDTO(ctx, settings.InternalRunner)
+	if err != nil {
+		return projectRunnersResponse{}, err
+	}
+	return projectRunnersResponse{
+		RunnerIDs: settings.RunnerIDs, ProjectRunners: projectRunners, SharedRunners: sharedRunners, InternalRunner: internalRunner,
+	}, nil
 }
 
 func (a *api) getProjectRunners(w http.ResponseWriter, r *http.Request) {
