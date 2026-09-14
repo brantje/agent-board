@@ -19,19 +19,19 @@ func TestIssueEnqueueMutationMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, _, err := s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject)
+			result, err := s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.Status != status {
-				t.Fatalf("status changed to %s", got.Status)
+			if result.Issue.Status != status {
+				t.Fatalf("status changed to %s", result.Issue.Status)
 			}
 			want := 0
 			if status != "BACKLOG" {
 				want = 1
 			}
 			assertIssueEnqueueCounts(t, s, p.ID, i.ID, want)
-			if _, _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err != nil {
+			if _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err != nil {
 				t.Fatal(err)
 			}
 			assertIssueEnqueueCounts(t, s, p.ID, i.ID, want)
@@ -78,7 +78,6 @@ func assertIssueEnqueueCounts(t *testing.T, s *Store, pid, iid string, want int)
 	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM events e JOIN runs r ON r.id=e.run_id WHERE e.issue_id=$1 AND e.type='run.created' AND (e.project_id <> $2::uuid OR e.agent_id IS DISTINCT FROM r.agent_id OR e.workspace_id IS DISTINCT FROM r.workspace_id OR e.sequence IS DISTINCT FROM 1 OR e.payload->>'status' IS DISTINCT FROM 'QUEUED' OR (e.payload->>'attempt')::int IS DISTINCT FROM r.attempt)`, iid, pid).Scan(&invalidEvidence); err != nil || invalidEvidence != 0 {
 		t.Fatalf("invalid creation evidence=%d err=%v", invalidEvidence, err)
 	}
-
 }
 
 func TestIssueEnqueueCoexistenceAndRaces(t *testing.T) {
@@ -106,7 +105,7 @@ func TestIssueEnqueueCoexistenceAndRaces(t *testing.T) {
 			if n%2 == 1 {
 				id = b.ID
 			}
-			_, _, err := s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: id}, store.EmptyObject)
+			_, err := s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: id}, store.EmptyObject)
 			errs <- err
 		}(n)
 	}
@@ -140,7 +139,7 @@ func TestIssueEnqueueCoexistenceAndRaces(t *testing.T) {
 	if _, err = s.UpdateIssue(ctx, i); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, nil, store.EmptyObject); err != nil {
+	if _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, nil, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}
 	assertIssueEnqueueCounts(t, s, p.ID, i.ID, 2)
@@ -201,7 +200,7 @@ func TestIssueEnqueueActiveStatesAndUserOwnership(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, target := range []*store.Assignee{{Type: "AGENT", ID: b.ID}, {Type: "AGENT", ID: a.ID}, {Type: "USER", ID: u.ID}, nil} {
-			if _, _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, target, store.EmptyObject); err != nil {
+			if _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, target, store.EmptyObject); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -224,7 +223,7 @@ func TestIssueEnqueueStatusAssignmentRace(t *testing.T) {
 		}
 		errs := make(chan error, 2)
 		go func() {
-			_, _, err := s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject)
+			_, err := s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject)
 			errs <- err
 		}()
 		go func() { next := i; next.Status = "TODO"; _, err := s.UpdateIssue(ctx, next); errs <- err }()
@@ -248,7 +247,7 @@ func TestIssueEnqueueEventFailureRollsBackMutationAndQueue(t *testing.T) {
 	if _, err = s.pool.Exec(ctx, `CREATE FUNCTION reject_run_created() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.type='run.created' THEN RAISE EXCEPTION 'event rejected'; END IF; RETURN NEW; END $$; CREATE TRIGGER reject_run_created BEFORE INSERT ON events FOR EACH ROW EXECUTE FUNCTION reject_run_created()`); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err == nil {
+	if _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err == nil {
 		t.Fatal("expected event failure")
 	}
 	assertIssueEnqueueCounts(t, s, p.ID, i.ID, 0)
@@ -277,7 +276,7 @@ func TestIssueEnqueueUnrunnableMutationAndRetryAfterCompletion(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err != nil {
+		if _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err != nil {
 			t.Fatal(err)
 		}
 		i.Status = "TODO"
@@ -285,12 +284,12 @@ func TestIssueEnqueueUnrunnableMutationAndRetryAfterCompletion(t *testing.T) {
 			t.Fatal(err)
 		}
 		assertIssueEnqueueCounts(t, s, p.ID, i.ID, 0)
-		if _, _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, nil, store.EmptyObject); err != nil {
+		if _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, nil, store.EmptyObject); err != nil {
 			t.Fatal(err)
 		}
-		got, _, err := s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject)
-		if err != nil || got.AssigneeID == nil {
-			t.Fatalf("ownership failed: %+v %v", got, err)
+		result, err := s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject)
+		if err != nil || result.Issue.AssigneeID == nil {
+			t.Fatalf("ownership failed: %+v %v", result.Issue, err)
 		}
 		assertIssueEnqueueCounts(t, s, p.ID, i.ID, 0)
 	}
@@ -304,14 +303,14 @@ func TestIssueEnqueueUnrunnableMutationAndRetryAfterCompletion(t *testing.T) {
 	if _, err = s.pool.Exec(ctx, `UPDATE runs SET status='COMPLETED' WHERE issue_id=$1`, i.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err != nil {
+	if _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}
 	assertIssueEnqueueCounts(t, s, p.ID, i.ID, 1)
-	if _, _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, nil, store.EmptyObject); err != nil {
+	if _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, nil, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err != nil {
+	if _, err = s.SetIssueAssignee(ctx, p.ID, i.ID, &store.Assignee{Type: "AGENT", ID: a.ID}, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}
 	assertIssueEnqueueCounts(t, s, p.ID, i.ID, 2)
