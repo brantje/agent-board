@@ -23,6 +23,10 @@ func (s *Service) recordIssueEvent(ctx context.Context, eventType string, issue 
 	if err != nil {
 		return store.Event{}, err
 	}
+	if issue.LastEvent != nil && issue.LastEvent.Type == "run.created" {
+		publisher, _ := s.events.(persistedEventPublisher)
+		publishPersistedEvents(ctx, publisher, []store.Event{*issue.LastEvent})
+	}
 	if len(actor) == 0 {
 		actor = store.EmptyObject
 	}
