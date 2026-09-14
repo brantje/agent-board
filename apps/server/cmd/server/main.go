@@ -397,6 +397,7 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	processor.SetWorkspaceEnsurer(services.Workspaces)
 	config := scheduler.DefaultConfig(configuredSchedulerOwnerID())
 	config.ReportError = func(err error) { slog.Error("scheduler execution", "error", err) }
+	config.PersistedEvents = processor
 	coordinator, err := scheduler.New(services.ExecutionStore, processor, processor, config)
 	if err != nil {
 		return err
