@@ -43,8 +43,43 @@ func (s *Service) ReconcileIssueExecution(ctx context.Context, filter store.Issu
 	return err
 }
 
+type issueExecutionReadinessSnapshot map[store.IssueExecutionScope]struct{}
+
+func (s *Service) issueExecutionReadinessSnapshot(ctx context.Context, filter store.IssueExecutionFilter) (issueExecutionReadinessSnapshot, bool) {
+	readiness, ok := s.store.(store.IssueExecutionReadinessStore)
+	if !ok {
+		return nil, false
+	}
+	scopes, err := readiness.RunnableIssueExecutionScopes(ctx, filter)
+	if err != nil {
+		slog.ErrorContext(ctx, "snapshot execution configuration readiness", "project_id", filter.ProjectID, "agent_id", filter.AgentID, "model_profile_id", filter.ModelProfileID, "provider_id", filter.ProviderID, "error", err)
+		return nil, false
+	}
+	snapshot := make(issueExecutionReadinessSnapshot, len(scopes))
+	for _, scope := range scopes {
+		snapshot[scope] = struct{}{}
+	}
+	return snapshot, true
+}
+
+func (s *Service) reconcileExecutionConfigurationTransition(ctx context.Context, filter store.IssueExecutionFilter, previous issueExecutionReadinessSnapshot, previousCaptured bool) {
+	if !previousCaptured {
+		return
+	}
+	current, currentCaptured := s.issueExecutionReadinessSnapshot(ctx, filter)
+	if !currentCaptured {
+		return
+	}
+	for scope := range current {
+		if _, alreadyRunnable := previous[scope]; alreadyRunnable {
+			continue
+		}
+		s.reconcileExecutionConfiguration(ctx, store.IssueExecutionFilter{ProjectID: scope.ProjectID, AgentID: scope.AgentID})
+	}
+}
+
 func (s *Service) reconcileExecutionConfiguration(ctx context.Context, filter store.IssueExecutionFilter) {
 	if err := s.ReconcileIssueExecution(ctx, filter); err != nil {
-		slog.ErrorContext(ctx, "reconcile execution configuration", "agent_id", filter.AgentID, "model_profile_id", filter.ModelProfileID, "provider_id", filter.ProviderID, "error", err)
+		slog.ErrorContext(ctx, "reconcile execution configuration", "project_id", filter.ProjectID, "agent_id", filter.AgentID, "model_profile_id", filter.ModelProfileID, "provider_id", filter.ProviderID, "error", err)
 	}
 }

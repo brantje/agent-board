@@ -48,8 +48,10 @@ func (s *Service) ListProviderModels(ctx context.Context, scope *string, provide
 		return ProviderModelListResult{}, NewError("provider_model_discovery_failed", "Unable to discover models from the Provider API.", err)
 	}
 	filtered := len(discovered)
-	if s.persistProviderHealth(ctx, providerID, true, &filtered, &upstreamTotal) && provider.HealthStatus == "UNHEALTHY" {
-		s.reconcileExecutionConfiguration(ctx, store.IssueExecutionFilter{ProviderID: providerID})
+	filter := store.IssueExecutionFilter{ProviderID: providerID}
+	previousReadiness, readinessCaptured := s.issueExecutionReadinessSnapshot(ctx, filter)
+	if s.persistProviderHealth(ctx, providerID, true, &filtered, &upstreamTotal) {
+		s.reconcileExecutionConfigurationTransition(ctx, filter, previousReadiness, readinessCaptured)
 	}
 	out := make([]ProviderModel, 0, len(discovered))
 	for _, model := range discovered {

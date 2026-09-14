@@ -77,6 +77,12 @@ func (s *recoveryHealthStore) ReconcileIssueExecution(_ context.Context, f store
 	s.filters = append(s.filters, f)
 	return nil, s.failure
 }
+func (s *recoveryHealthStore) RunnableIssueExecutionScopes(_ context.Context, f store.IssueExecutionFilter) ([]store.IssueExecutionScope, error) {
+	if f.ProviderID != testProviderID || !s.provider.Enabled || s.provider.HealthStatus == "UNHEALTHY" {
+		return nil, nil
+	}
+	return []store.IssueExecutionScope{{ProjectID: "project", AgentID: "agent"}}, nil
+}
 func TestProviderHealthRecoveryTriggersOnlyOnTransition(t *testing.T) {
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte(`{"data":[{"id":"model"}]}`)) }))
 	defer upstream.Close()
@@ -87,7 +93,7 @@ func TestProviderHealthRecoveryTriggersOnlyOnTransition(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if len(f.filters) != 1 || f.filters[0].ProviderID != testProviderID {
+	if len(f.filters) != 1 || f.filters[0].ProjectID != "project" || f.filters[0].AgentID != "agent" {
 		t.Fatalf("scans=%+v", f.filters)
 	}
 	f.provider.HealthStatus = "UNHEALTHY"

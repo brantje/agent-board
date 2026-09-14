@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/jackc/pgx/v5"
 )
 
 func (s *Store) StartIssueRun(ctx context.Context, projectID, issueID string) (store.Run, store.Event, error) {
@@ -44,13 +45,69 @@ func (s *Store) enqueueCurrentIssue(ctx context.Context, projectID, issueID, exp
 	return run, event, nil
 }
 
+// RunnableIssueExecutionScopes evaluates affected Agent/project pairs using the
+// exact verifyRunnableAgent predicate used by enqueueAssignedIssue. It is a
+// readiness snapshot only; Issue status and active-Run policy remain in the
+// reconciliation/enqueue path.
+func (s *Store) RunnableIssueExecutionScopes(ctx context.Context, filter store.IssueExecutionFilter) ([]store.IssueExecutionScope, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+        SELECT DISTINCT i.project_id::text, a.id::text
+        FROM issues i
+        JOIN agents a ON i.assignee_type='AGENT' AND i.assignee_id=a.id
+        JOIN model_profiles m ON m.id=a.model_profile_id
+        WHERE ($1='' OR i.project_id::text=$1)
+          AND ($2='' OR a.id::text=$2)
+          AND ($3='' OR m.id::text=$3)
+          AND ($4='' OR m.provider_id::text=$4)
+        ORDER BY i.project_id, a.id
+    `, filter.ProjectID, filter.AgentID, filter.ModelProfileID, filter.ProviderID)
+	if err != nil {
+		return nil, err
+	}
+	type candidate struct{ project, agent string }
+	var candidates []candidate
+	for rows.Next() {
+		var c candidate
+		if err = rows.Scan(&c.project, &c.agent); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, c)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	scopes := make([]store.IssueExecutionScope, 0, len(candidates))
+	for _, c := range candidates {
+		err = verifyRunnableAgent(ctx, tx, c.project, c.agent)
+		if err == nil {
+			scopes = append(scopes, store.IssueExecutionScope{ProjectID: c.project, AgentID: c.agent})
+			continue
+		}
+		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		return nil, err
+	}
+	return scopes, nil
+}
+
 func (s *Store) ReconcileIssueExecution(ctx context.Context, filter store.IssueExecutionFilter) ([]store.Event, error) {
 	rows, err := s.pool.Query(ctx, `SELECT i.project_id::text,i.id::text,a.id::text
  FROM issues i JOIN agents a ON i.assignee_type='AGENT' AND i.assignee_id=a.id
  JOIN model_profiles m ON m.id=a.model_profile_id
- WHERE ($1='' OR a.id::text=$1) AND ($2='' OR m.id::text=$2) AND ($3='' OR m.provider_id::text=$3)
- AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.issue_id=i.id AND r.agent_id=a.id AND r.status=ANY($4::text[]))
- ORDER BY i.id`, filter.AgentID, filter.ModelProfileID, filter.ProviderID, activeRunStatuses)
+ WHERE ($1='' OR i.project_id::text=$1) AND ($2='' OR a.id::text=$2) AND ($3='' OR m.id::text=$3) AND ($4='' OR m.provider_id::text=$4)
+ AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.issue_id=i.id AND r.agent_id=a.id AND r.status=ANY($5::text[]))
+ ORDER BY i.id`, filter.ProjectID, filter.AgentID, filter.ModelProfileID, filter.ProviderID, activeRunStatuses)
 	if err != nil {
 		return nil, err
 	}
