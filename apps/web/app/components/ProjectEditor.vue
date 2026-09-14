@@ -18,8 +18,7 @@ const state = reactive({
   cloneUrl: props.project?.cloneUrl ?? '',
   sourceRef: props.project?.sourceRef ?? '',
   repositoryPath: props.project?.repositoryPath ?? '',
-  defaultBranch: props.project?.defaultBranch || 'main',
-  allowInternalRunner: props.project?.allowInternalRunner ?? true
+  defaultBranch: props.project?.defaultBranch || 'main'
 })
 const saving = ref(false)
 const error = ref<Error>()
@@ -55,7 +54,6 @@ function payload() {
     body.repositoryPath = state.repositoryPath.trim()
     body.defaultBranch = state.defaultBranch.trim()
   }
-  if (props.project) body.allowInternalRunner = state.allowInternalRunner
   if (!props.project) body.issuePrefix = state.issuePrefix.trim().toUpperCase()
   return body
 }
@@ -135,14 +133,6 @@ onMounted(async () => {
         <UInput v-model="state.defaultBranch" class="w-full font-mono" :disabled="saving" />
       </UFormField>
     </template>
-    <UFormField
-      v-if="project"
-      label="Allow internal runner"
-      name="allowInternalRunner"
-      description="Permit the server-managed internal runner as scheduler fallback when no eligible external runner is available."
-    >
-      <USwitch v-model="state.allowInternalRunner" :disabled="saving" />
-    </UFormField>
     <div class="flex justify-end gap-2">
       <UButton label="Cancel" color="neutral" variant="outline" :disabled="saving" @click="emit('cancel')" />
       <UButton :label="project ? 'Save project' : 'Create project'" type="submit" :loading="saving" />
