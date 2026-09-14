@@ -182,12 +182,22 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 			return store.Issue{}, err
 		}
 	}
+	issueEvent, err := store.NewIssueCreatedEvent(issue)
+	if err != nil {
+		return store.Issue{}, err
+	}
+	issueEvent, err = appendEventTx(ctx, tx, issueEvent)
+	if err != nil {
+		return store.Issue{}, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.Issue{}, err
 	}
 	if runEvent.ID != "" {
-		issue.LastEvent = &runEvent
+		issue.PersistedEvents = append(issue.PersistedEvents, runEvent)
 	}
+	issue.PersistedEvents = append(issue.PersistedEvents, issueEvent)
+	issue.LastEvent = &issueEvent
 	return issue, nil
 }
 
