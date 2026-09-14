@@ -15,8 +15,18 @@ func ValidIssueStatus(status string) bool {
 	}
 }
 
+type IssueStatusMutation struct {
+	ProjectID   string
+	IssueID     string
+	Status      string
+	Actor       json.RawMessage
+	RunID       *string
+	AgentID     *string
+	WorkspaceID *string
+}
+
 // IssueStatusMutationStore is the canonical status-only Issue mutation boundary.
 // Implementations must persist the status change and its causal Event atomically.
 type IssueStatusMutationStore interface {
-	SetIssueStatus(context.Context, string, string, string, json.RawMessage) (IssueMutationResult, error)
+	SetIssueStatus(context.Context, IssueStatusMutation) (IssueMutationResult, error)
 }

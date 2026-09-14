@@ -2,14 +2,13 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
 )
 
-func (s *Store) SetIssueStatus(ctx context.Context, projectID, issueID, status string, actor json.RawMessage) (store.IssueMutationResult, error) {
-	if !store.ValidIssueStatus(status) {
+func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutation) (store.IssueMutationResult, error) {
+	if !store.ValidIssueStatus(input.Status) {
 		return store.IssueMutationResult{}, store.ErrInvalidArgument
 	}
 
@@ -19,12 +18,12 @@ func (s *Store) SetIssueStatus(ctx context.Context, projectID, issueID, status s
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, projectID, issueID)
+	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.IssueID)
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
-	if previous.Status == status {
-		current, err := getIssue(ctx, tx, projectID, issueID)
+	if previous.Status == input.Status {
+		current, err := getIssue(ctx, tx, input.ProjectID, input.IssueID)
 		if err != nil {
 			return store.IssueMutationResult{}, err
 		}
@@ -39,7 +38,7 @@ func (s *Store) SetIssueStatus(ctx context.Context, projectID, issueID, status s
 		FROM projects AS p
 		WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
 		RETURNING `+issueSelectColumns+`
-	`, projectID, issueID, status))
+	`, input.ProjectID, input.IssueID, input.Status))
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
@@ -48,10 +47,13 @@ func (s *Store) SetIssueStatus(ctx context.Context, projectID, issueID, status s
 		return store.IssueMutationResult{}, err
 	}
 	updated.PreviousStatus = previous.Status
-	issueEvent, err := store.NewIssueUpdatedEventWithActor(updated, previous.Status, actor)
+	issueEvent, err := store.NewIssueUpdatedEventWithActor(updated, previous.Status, input.Actor)
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
+	issueEvent.RunID = input.RunID
+	issueEvent.AgentID = input.AgentID
+	issueEvent.WorkspaceID = input.WorkspaceID
 	issueEvent, err = appendEventTx(ctx, tx, issueEvent)
 	if err != nil {
 		return store.IssueMutationResult{}, err

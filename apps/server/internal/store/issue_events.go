@@ -1,12 +1,9 @@
 package store
 
-import (
-	"encoding/json"
-	"strings"
-)
+import "encoding/json"
 
 func NewIssueCreatedEvent(issue Issue) (Event, error) {
-	actor := EmptyObject
+	actor := append(json.RawMessage(nil), EmptyObject...)
 	if issue.CreatedByType != nil && issue.CreatedByID != nil {
 		encoded, err := json.Marshal(map[string]string{"type": *issue.CreatedByType, "id": *issue.CreatedByID})
 		if err != nil {
@@ -45,12 +42,12 @@ func newIssueMutationEvent(eventType string, issue Issue, actor json.RawMessage,
 	if len(actor) == 0 {
 		actor = EmptyObject
 	}
-	issueID := strings.TrimSpace(issue.ID)
+	issueID := issue.ID
 	return Event{
 		Type:      eventType,
 		ProjectID: issue.ProjectID,
 		IssueID:   &issueID,
-		Actor:     actor,
+		Actor:     append(json.RawMessage(nil), actor...),
 		Payload:   encoded,
 	}, nil
 }

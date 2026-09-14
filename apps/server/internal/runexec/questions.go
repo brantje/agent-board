@@ -27,6 +27,9 @@ type runtimeAcquirer interface {
 
 func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string) (engine.Request, error) {
 	request := engine.Request{Context: safe, Launcher: launcher}
+	if statusStore, ok := any(p.store).(issueStatusStore); ok {
+		request.IssueStatus = &issueStatusUpdater{store: statusStore, events: p.events, safe: safe}
+	}
 	if !store.SupportsQuestionStore(p.store) {
 		return request, nil
 	}

@@ -119,11 +119,18 @@ type InteractiveQuestionReplyTracker interface {
 	ListReplyAccepted(context.Context) ([]AcceptedInteractiveQuestionReply, error)
 }
 
+// IssueStatusUpdater is the narrow server-owned capability for an executing
+// Agent to explicitly update only the Board status of its current Issue.
+type IssueStatusUpdater interface {
+	SetStatus(context.Context, string) error
+}
+
 type Request struct {
 	Context              executioncontext.SafeContext
 	Launcher             ProcessLauncher
 	Questions            Questioner
 	InteractiveQuestions InteractiveQuestioner
+	IssueStatus          IssueStatusUpdater
 	Continuation         *Continuation
 }
 
