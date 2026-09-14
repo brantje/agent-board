@@ -295,6 +295,7 @@ describe('Issue workflow components', () => {
 
   it('uses the generic assignee directory for User, Agent, and unassign mutations', async () => {
     let assignedTo: { type: 'USER' | 'AGENT'; id: string; name: string } | null = null
+    let runCreated = false
     let fail = false
     const directory = [
       { type: 'USER' as const, id: 'u', name: 'Alex' },
@@ -308,10 +309,11 @@ describe('Issue workflow components', () => {
         const body = JSON.parse(options.body as string) as { assignedTo: { type: 'USER' | 'AGENT'; id: string } | null }
         const selected = body.assignedTo && directory.find(value => value.type === body.assignedTo?.type && value.id === body.assignedTo.id)
         assignedTo = selected ? { ...body.assignedTo!, name: selected.name } : null
+        if (body.assignedTo?.type === 'AGENT') runCreated = true
         return new Response(JSON.stringify({ issue: { ...issue, assignedTo } }), { status: 200 })
       }
       if (path.endsWith('/assignees')) return new Response(JSON.stringify(directory))
-      if (path.endsWith('/runs')) return new Response(JSON.stringify(assignedTo?.type === 'AGENT' ? [run] : []))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify(runCreated ? [run] : []))
       return new Response(JSON.stringify({ ...issue, assignedTo }))
     })
     vi.stubGlobal('fetch', fetch)
@@ -354,6 +356,7 @@ describe('Issue workflow components', () => {
     assignmentCall = fetch.mock.calls.filter(([, options]) => options.method === 'POST').at(-1)!
     expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: { type: 'USER', id: 'u' } })
     expect(wrapper.text()).toContain('Alex')
+    expect(wrapper.text()).toContain('Attempt 1 · Queued')
 
     await wrapper.get('[data-field=assignee] select').setValue('__UNASSIGNED__')
     await formForField(wrapper, 'assignee').trigger('submit')
@@ -361,6 +364,7 @@ describe('Issue workflow components', () => {
     assignmentCall = fetch.mock.calls.filter(([, options]) => options.method === 'POST').at(-1)!
     expect(JSON.parse(assignmentCall[1].body as string)).toEqual({ assignedTo: null })
     expect(wrapper.text()).toContain('Unassigned')
+    expect(wrapper.text()).toContain('Attempt 1 · Queued')
 
     await button(wrapper, 'Edit issue').trigger('click')
     await button(wrapper, 'Cancel').trigger('click')
