@@ -110,7 +110,14 @@ func (s *Service) UpdateProvider(ctx context.Context, scope *string, input store
 	if err := validateProvider(input); err != nil {
 		return store.Provider{}, err
 	}
+	previous, err := s.GetProvider(ctx, scope, input.ID)
+	if err != nil {
+		return store.Provider{}, err
+	}
 	value, err := s.store.UpdateProvider(ctx, scope, input)
+	if err == nil && (!previous.Enabled && value.Enabled) {
+		s.reconcileExecutionConfiguration(ctx, store.IssueExecutionFilter{ProviderID: value.ID})
+	}
 	return value, translateStoreError(err, "provider")
 }
 
@@ -118,19 +125,21 @@ func (s *Service) ListAllProviders(ctx context.Context) ([]store.Provider, error
 	return s.store.ListAllProviders(ctx)
 }
 
-func (s *Service) persistProviderHealth(ctx context.Context, providerID string, healthy bool, filtered, total *int) {
+func (s *Service) persistProviderHealth(ctx context.Context, providerID string, healthy bool, filtered, total *int) bool {
 	if s == nil || s.store == nil || providerID == "" {
-		return
+		return false
 	}
 	if healthy {
 		if err := s.store.UpdateProviderHealth(ctx, providerID, "HEALTHY", filtered, total); err != nil {
 			slog.Error("persist provider health", "providerId", providerID, "error", err)
+			return false
 		}
-		return
+		return true
 	}
 	if err := s.store.UpdateProviderHealth(ctx, providerID, "UNHEALTHY", nil, nil); err != nil {
 		slog.Error("persist provider health", "providerId", providerID, "error", err)
 	}
+	return false
 }
 
 func (s *Service) ensureScope(ctx context.Context, scope *string) error {
@@ -177,7 +186,14 @@ func (s *Service) UpdateModelProfile(ctx context.Context, scope *string, input s
 	if _, err := s.GetProvider(ctx, scope, input.ProviderID); err != nil {
 		return store.ModelProfile{}, err
 	}
+	previous, err := s.GetModelProfile(ctx, scope, input.ID)
+	if err != nil {
+		return store.ModelProfile{}, err
+	}
 	value, err := s.store.UpdateModelProfile(ctx, scope, input)
+	if err == nil && (value.Enabled && (!previous.Enabled || previous.ProviderID != value.ProviderID)) {
+		s.reconcileExecutionConfiguration(ctx, store.IssueExecutionFilter{ModelProfileID: value.ID})
+	}
 	return value, translateStoreError(err, "model_profile")
 }
 
@@ -251,7 +267,14 @@ func (s *Service) UpdateAgent(ctx context.Context, scope *string, input store.Ag
 	if _, err := s.GetModelProfile(ctx, scope, input.ModelProfileID); err != nil {
 		return store.Agent{}, err
 	}
+	previous, err := s.GetAgent(ctx, scope, input.ID)
+	if err != nil {
+		return store.Agent{}, err
+	}
 	value, err := s.store.UpdateAgent(ctx, scope, input)
+	if err == nil && (value.State == "ENABLED" && (previous.State != "ENABLED" || previous.ModelProfileID != value.ModelProfileID || previous.Engine != value.Engine)) {
+		s.reconcileExecutionConfiguration(ctx, store.IssueExecutionFilter{AgentID: value.ID})
+	}
 	return value, translateStoreError(err, "agent")
 }
 

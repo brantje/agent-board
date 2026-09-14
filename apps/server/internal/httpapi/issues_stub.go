@@ -22,6 +22,7 @@ func (a *api) registerIssueRunRoutes(r chi.Router) {
 	r.Post("/projects/{projectID}/issues/{issueID}/relationships", a.createIssueRelationship)
 	r.Delete("/projects/{projectID}/issues/{issueID}/relationships/{relationshipID}", a.deleteIssueRelationship)
 	r.Post("/projects/{projectID}/issues/{issueID}/assignment", a.assignIssue)
+	r.Post("/projects/{projectID}/issues/{issueID}/runs", a.startIssueRun)
 	r.Get("/projects/{projectID}/assignees", a.listIssueAssignees)
 	r.Get("/projects/{projectID}/runs", a.listRuns)
 	r.Get("/projects/{projectID}/runs/{runID}", a.getRun)

@@ -186,7 +186,7 @@ Issue ownership is one User, Agent or nobody. The assignment API changes ownersh
 
 The shared automatic enqueue policy (#101) applies to creation with an Agent assignee, assignment and status mutations. Agent assignment enqueues in every status except Backlog, without changing status. For an already assigned Issue, only leaving Backlog for Todo, In Progress, Blocked or Review auto-enqueues. Backlog -> Done and all other status changes do not auto-start. Repeated unchanged ownership is a no-op. Different Agents may have active Runs on one Issue; the same Issue/Agent pair is deduplicated transactionally.
 
-Assigning an Agent to a Done Issue can enqueue; reopening Done -> Todo alone does not. Existing Runs continue through ownership/status changes. Readiness recovery and explicit execution remain separate work (#102).
+Assigning an Agent to a Done Issue can enqueue; reopening Done -> Todo alone does not. Existing Runs continue through ownership/status changes. Execution-configuration recovery reconciles current Agent assignments outside Backlog when configuration becomes usable and during startup. Explicit Start Run uses the current Agent assignee in any status except Backlog, preserves ownership/status, and queues through the normal scheduler even when Runner/source/capacity is unavailable. Active Runs for the same Issue/Agent are deduplicated.
 
 ## Project workflow settings
 

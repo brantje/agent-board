@@ -29,6 +29,7 @@ import (
 	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/secrets"
+	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
@@ -251,6 +252,11 @@ func startScheduler(ctx context.Context, handler http.Handler) (<-chan error, er
 	application, ok := handler.(*applicationHandler)
 	if !ok || application.services == nil || application.services.Scheduler == nil {
 		return nil, fmt.Errorf("scheduler service is unavailable")
+	}
+	if application.services.ControlPlane != nil {
+		if err := application.services.ControlPlane.ReconcileIssueExecution(ctx, store.IssueExecutionFilter{}); err != nil {
+			return nil, fmt.Errorf("recover Issue execution: %w", err)
+		}
 	}
 	done := make(chan error, 1)
 	go func() {

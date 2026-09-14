@@ -146,6 +146,8 @@ paths:
     $ref: ./paths/issues-runs.yaml#/path7
   /api/projects/{projectID}/issues/{issueID}/assignment:
     $ref: ./paths/issues-runs.yaml#/path3
+  /api/projects/{projectID}/issues/{issueID}/runs:
+    $ref: ./paths/issues-runs.yaml#/startRun
   /api/projects/{projectID}/runs:
     $ref: ./paths/issues-runs.yaml#/path4
   /api/projects/{projectID}/runs/{runID}:

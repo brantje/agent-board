@@ -124,3 +124,32 @@ assignees:
               items: {$ref: '../schemas/control-plane.yaml#/Assignee'}
       default:
         $ref: ../components/api-components.yaml#/responses/Error
+
+startRun:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  post:
+    operationId: startIssueRun
+    description: >-
+      Requires Project member authority. Starts work using only the current Agent
+      assignee, preserving Issue ownership and Board status. BACKLOG, unassigned,
+      User-assigned and invalid execution configuration return conflict. All other
+      Board statuses are eligible. Runner/source/capacity availability belongs to
+      the scheduler; a queued Run is a successful result. Returns the existing
+      active Run for this Issue/Agent on a duplicate request while configuration
+      remains valid. Successful creation atomically persists run.created and a START job.
+    requestBody:
+      required: false
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Run
+      '409':
+        $ref: ../components/api-components.yaml#/responses/Error
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

@@ -131,11 +131,39 @@ The shared `store.ShouldAutoEnqueueIssue` policy is applied inside the Issue mut
 - all other status changes, User assignment and unassignment do not enqueue;
 - unchanged ownership is an idempotent no-op, including after a prior Run has finished.
 
-Assignment preserves Board status. A valid but currently unrunnable Agent remains assigned successfully, without a pending-execution flag. Readiness reconciliation is separate work (#102).
+Assignment preserves Board status. A valid but currently unrunnable Agent remains assigned successfully, without a pending-execution flag. Execution-configuration reconciliation uses the same enqueue path (see below).
 
 The Issue row lock serializes automatic enqueue, pair-scoped active-Run suppression and Issue-wide attempt numbering. Different Agents can have active Runs on one Issue; automatic enqueue never creates a second active Run for the same Issue/Agent. All attempts reuse the authoritative Issue Workspace and existing scheduler jobs. Workspace execution ownership still serializes access to its checkout.
 
 New automatic Runs atomically persist `run.created` with Run, Agent and Workspace identity. Duplicate suppression and readiness skips create no Run Events. Issue mutation Events remain owned by the canonical Issue commands.
+
+## Execution configuration recovery and Start Run
+
+Configuration recovery derives work from current Agent ownership, Board status,
+active Issue/Agent Runs and the existing Agent/Model Profile/Provider validity
+checks. It persists no pending-execution flag or recovery history. Startup runs
+this reconciliation before starting the scheduler; configuration updates and
+Provider recovery invoke the same reconciliation for affected assignments.
+
+Recovery and explicit Start Run reuse the assignment eligibility policy: BACKLOG
+stays parked; TODO, IN_PROGRESS, BLOCKED, REVIEW and DONE are eligible. Candidate
+ownership is re-read under the Issue lock, so an intervening User assignment,
+unassignment or Agent change cannot enqueue stale work. Active Runs for the same
+Issue/Agent suppress duplicates. Different Agents retain their existing Runs.
+
+`POST /api/projects/{projectID}/issues/{issueID}/runs` requires Project member
+access, accepts no Agent selection, and preserves ownership and Board status.
+Unassigned/User-assigned Issues, BACKLOG and invalid execution configuration
+return conflict. A duplicate request returns the active Run while configuration
+remains valid. After that Run is terminal, Start Run can create the next attempt.
+Repeating the same assignment remains a no-op.
+
+Both commands reuse the normal Workspace, queued Run, START job and durable
+`run.created` transaction. Live Events publish after commit; rejected/skipped
+attempts produce no lifecycle Events. Runner/source availability and capacity
+never gate Run creation here: the existing scheduler owns those waits. Recovery
+scans omit pairs with active Runs, including queued Runs waiting for admission.
+Routine healthy Provider probes do not trigger assignment scans.
 
 ## Delegation / Automation compatibility
 

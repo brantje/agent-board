@@ -32,20 +32,27 @@ func enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store.Issue, pre
 	if !store.ShouldAutoEnqueueIssue(previousStatus, issue.Status, kind, assignment) || issue.AssigneeID == nil {
 		return store.Run{}, store.Event{}, nil
 	}
+	return enqueueAssignedIssue(ctx, tx, issue, repositoryPath, defaultBranch, false)
+}
+
+func enqueueAssignedIssue(ctx context.Context, tx pgx.Tx, issue store.Issue, repositoryPath, defaultBranch string, strict bool) (store.Run, store.Event, error) {
 	projectID, issueID, agentID := issue.ProjectID, issue.ID, *issue.AssigneeID
+	if err := verifyRunnableAgent(ctx, tx, projectID, agentID); err != nil {
+		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			slog.DebugContext(ctx, "Issue enqueue: Agent configuration unavailable", "issue_id", issueID, "agent_id", agentID)
+			if strict {
+				return store.Run{}, store.Event{}, store.ErrConflict
+			}
+			return store.Run{}, store.Event{}, nil
+		}
+		return store.Run{}, store.Event{}, err
+	}
 	active, err := activeRunForAgent(ctx, tx, projectID, issueID, agentID)
 	if err == nil {
-		slog.DebugContext(ctx, "Issue auto enqueue suppressed: active Run", "issue_id", issueID, "agent_id", agentID, "run_id", active.ID)
+		slog.DebugContext(ctx, "Issue enqueue suppressed: active Run", "issue_id", issueID, "agent_id", agentID, "run_id", active.ID)
 		return active, store.Event{}, nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
-		return store.Run{}, store.Event{}, err
-	}
-	if err := verifyRunnableAgent(ctx, tx, projectID, agentID); err != nil {
-		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
-			slog.DebugContext(ctx, "Issue auto enqueue skipped: Agent unavailable", "issue_id", issueID, "agent_id", agentID)
-			return store.Run{}, store.Event{}, nil
-		}
 		return store.Run{}, store.Event{}, err
 	}
 
