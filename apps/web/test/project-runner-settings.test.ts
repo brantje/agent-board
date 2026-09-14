@@ -11,6 +11,17 @@ const runner = (id: string, projectId: string | null, name: string) => ({
   activeSessions: 0, reservedSessions: 0, maxActiveSessions: 5, createdAt: '', updatedAt: ''
 })
 
+const internalRunner = () => ({
+  ...runner('internal-1', null, 'Internal runner'),
+  internal: true,
+  managed: true,
+  deletable: false,
+  activeSessions: 1,
+  reservedSessions: 1,
+  maxActiveSessions: 3,
+  capabilities: { engines: ['opencode'], features: ['stdin', 'health'] }
+})
+
 const global = {
   stubs: {
     ...uiStubs,
@@ -62,7 +73,8 @@ describe('project runner settings', () => {
     const settings = {
       runnerIds: [] as string[],
       projectRunners: [runner('owned-1', 'project-1', 'owned-host')],
-      sharedRunners: [runner('shared-1', null, 'shared-host')]
+      sharedRunners: [runner('shared-1', null, 'shared-host')],
+      internalRunner: internalRunner()
     }
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
@@ -98,6 +110,10 @@ describe('project runner settings', () => {
     const internal = wrapper.get('[data-testid="internal-runner-capacity"]')
     expect(internal.text()).toContain('Internal runner')
     expect(internal.text()).toContain('Fallback disabled')
+    expect(internal.text()).toContain('opencode')
+    expect(internal.text()).toContain('Sessions: 1 / 3 in use')
+    expect(wrapper.get('[data-testid="internal-runner-features"]').text()).toContain('stdin')
+    expect(wrapper.get('[data-testid="internal-runner-features"]').text()).toContain('health')
 
     await wrapper.find('input[type="checkbox"]').setValue(true)
     const savePolicy = wrapper.findAll('button').find(button => button.text() === 'Save shared runner policy')
@@ -124,7 +140,8 @@ describe('project runner settings', () => {
     const settings = {
       runnerIds: [] as string[],
       projectRunners: [runner('owned-1', 'project-1', 'owned-host')],
-      sharedRunners: [] as ReturnType<typeof runner>[]
+      sharedRunners: [] as ReturnType<typeof runner>[],
+      internalRunner: internalRunner()
     }
     const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = String(input)
@@ -193,7 +210,7 @@ describe('project runner settings', () => {
 
   it('keeps project runner controls read-only without project admin permission', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
-      runnerIds: [], projectRunners: [runner('owned-1', 'project-1', 'owned-host')], sharedRunners: []
+      runnerIds: [], projectRunners: [runner('owned-1', 'project-1', 'owned-host')], sharedRunners: [], internalRunner: internalRunner()
     }))))
     const wrapper = mount(RunnerManager, {
       props: { projectId: 'project-1', canAdmin: false, allowInternalRunner: true },
