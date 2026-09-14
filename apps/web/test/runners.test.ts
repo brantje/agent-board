@@ -4,6 +4,7 @@ import { runnerEngines, runnerSessionSummary } from '../app/utils/runners'
 
 const baseRunner: Runner = {
   id: 'runner-1',
+  projectId: null,
   name: 'build-host',
   internal: false,
   managed: false,
