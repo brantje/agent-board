@@ -257,11 +257,20 @@ func createRemoteScriptedIntegrationRun(t *testing.T, ctx context.Context, contr
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, run, err := control.AssignIssue(ctx, project.ID, issue.ID, agent.ID)
+	if _, err = control.SetIssueAssignee(ctx, project.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: agent.ID}, store.EmptyObject); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := control.ListRuns(ctx, project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return project, run
+	for _, run := range runs {
+		if run.IssueID == issue.ID {
+			return project, run
+		}
+	}
+	t.Fatal("assignment did not create Run")
+	return store.Project{}, store.Run{}
 }
 
 func runSchedulerUntilTerminal(t *testing.T, ctx context.Context, executionStore store.SchedulerStore, processor *Processor, database *postgres.Store, projectID, runID, owner string) {
