@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"sort"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -63,47 +62,39 @@ func (s *Store) ListIssueAssignees(ctx context.Context, projectID string) ([]sto
 		return nil, err
 	}
 	rows, err := s.pool.Query(ctx, `
-        SELECT 'USER',id::text FROM users WHERE status='active'
-        UNION ALL
-        SELECT 'AGENT',id::text FROM agents
-        WHERE state='ENABLED' AND (project_id IS NULL OR project_id=$1)
-    `, projectID)
+		SELECT type,id,name
+		FROM (
+			SELECT DISTINCT 'USER'::text AS type,u.id::text AS id,u.display_name AS name
+			FROM users u
+			LEFT JOIN project_user_access pua
+			  ON pua.user_id=u.id AND pua.project_id=$1 AND pua.role IN ('member','admin')
+			LEFT JOIN group_members gm ON gm.user_id=u.id
+			LEFT JOIN project_group_access pga
+			  ON pga.group_id=gm.group_id AND pga.project_id=$1 AND pga.role IN ('member','admin')
+			WHERE u.status='active'
+			  AND (u.deployment_role='admin' OR pua.user_id IS NOT NULL OR pga.group_id IS NOT NULL)
+			UNION ALL
+			SELECT 'AGENT'::text,a.id::text,a.name
+			FROM agents a
+			WHERE a.state='ENABLED' AND (a.project_id IS NULL OR a.project_id=$1)
+		) assignees
+		ORDER BY name,type,id
+	`, projectID)
 	if err != nil {
 		return nil, err
 	}
-	candidates := []store.Assignee{}
+	defer rows.Close()
+	result := []store.Assignee{}
 	for rows.Next() {
-		var a store.Assignee
-		if err := rows.Scan(&a.Type, &a.ID); err != nil {
-			rows.Close()
+		var assignee store.Assignee
+		if err := rows.Scan(&assignee.Type, &assignee.ID, &assignee.Name); err != nil {
 			return nil, err
 		}
-		candidates = append(candidates, a)
+		result = append(result, assignee)
 	}
-	rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	result := []store.Assignee{}
-	for _, candidate := range candidates {
-		a, err := resolveAssignee(ctx, s.pool, projectID, &candidate)
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalidArgument) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, *a)
-	}
-	sort.Slice(result, func(i, j int) bool {
-		if result[i].Name != result[j].Name {
-			return result[i].Name < result[j].Name
-		}
-		if result[i].Type != result[j].Type {
-			return result[i].Type < result[j].Type
-		}
-		return result[i].ID < result[j].ID
-	})
 	return result, nil
 }
 
