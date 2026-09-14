@@ -19,6 +19,14 @@ func (s *Service) recordIssueEvent(ctx context.Context, eventType string, issue 
 	if s == nil || s.events == nil {
 		return store.Event{}, nil
 	}
+	for _, event := range issue.PersistedEvents {
+		if event.Type != eventType || event.ID == "" {
+			continue
+		}
+		publisher, _ := s.events.(persistedEventPublisher)
+		publishPersistedEvents(ctx, publisher, issue.PersistedEvents)
+		return event, nil
+	}
 	encoded, err := evidence.EncodePayload(payload)
 	if err != nil {
 		return store.Event{}, err
