@@ -40,12 +40,22 @@ func TestIssueStatusUpdaterBindsMutationToActiveRun(t *testing.T) {
 	if statusStore.mutation.RunID == nil || *statusStore.mutation.RunID != "run-1" || statusStore.mutation.AgentID == nil || *statusStore.mutation.AgentID != agentID || statusStore.mutation.WorkspaceID == nil || *statusStore.mutation.WorkspaceID != "workspace-1" {
 		t.Fatalf("mutation provenance=%+v", statusStore.mutation)
 	}
+	if statusStore.mutation.Recovery {
+		t.Fatalf("ordinary mutation unexpectedly marked as recovery: %+v", statusStore.mutation)
+	}
 	var actor map[string]string
 	if err := json.Unmarshal(statusStore.mutation.Actor, &actor); err != nil {
 		t.Fatalf("decode actor: %v", err)
 	}
 	if actor["type"] != store.ActorTypeAgent || actor["id"] != agentID {
 		t.Fatalf("actor=%v", actor)
+	}
+
+	if err := updater.SetRecoveredStatus(context.Background(), "DONE"); err != nil {
+		t.Fatalf("SetRecoveredStatus() error=%v", err)
+	}
+	if !statusStore.mutation.Recovery || statusStore.mutation.Status != "DONE" {
+		t.Fatalf("recovered mutation=%+v", statusStore.mutation)
 	}
 }
 
@@ -65,5 +75,8 @@ func TestIssueStatusUpdaterRejectsInvalidStatusAndPropagatesStoreFence(t *testin
 	statusStore.err = store.ErrConflict
 	if err := updater.SetStatus(context.Background(), "DONE"); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("store fence error=%v want conflict", err)
+	}
+	if err := updater.SetRecoveredStatus(context.Background(), "REVIEW"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("recovery fence error=%v want conflict", err)
 	}
 }

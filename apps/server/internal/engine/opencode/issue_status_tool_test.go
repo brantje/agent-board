@@ -14,13 +14,19 @@ import (
 )
 
 type recordingIssueStatusUpdater struct {
-	statuses []string
-	err      error
+	statuses  []string
+	recovered []string
+	err       error
 }
 
 func (u *recordingIssueStatusUpdater) SetStatus(_ context.Context, status string) error {
 	u.statuses = append(u.statuses, status)
 	return u.err
+}
+
+func (u *recordingIssueStatusUpdater) SetRecoveredStatus(ctx context.Context, status string) error {
+	u.recovered = append(u.recovered, status)
+	return u.SetStatus(ctx, status)
 }
 
 func TestIssueStatusServeCommandInstallsToolOutsideWorkspace(t *testing.T) {
@@ -54,6 +60,9 @@ func TestIssueStatusToolCompletionUsesRunScopedCapabilityOnce(t *testing.T) {
 	if len(updater.statuses) != 1 || updater.statuses[0] != "REVIEW" {
 		t.Fatalf("statuses=%v", updater.statuses)
 	}
+	if len(updater.recovered) != 0 {
+		t.Fatalf("live completion unexpectedly used recovery path: %v", updater.recovered)
+	}
 
 	other := issueStatusToolEvent(t, "ses_other", "part_2", "DONE")
 	if err := tracker.Handle(context.Background(), other, "ses_1", updater); err != nil {
@@ -82,6 +91,9 @@ func TestIssueStatusToolReconcileRecoversMissedCompletionOnce(t *testing.T) {
 	}
 	if len(updater.statuses) != 1 || updater.statuses[0] != "BLOCKED" {
 		t.Fatalf("statuses=%v", updater.statuses)
+	}
+	if len(updater.recovered) != 0 {
+		t.Fatalf("in-process reconciliation unexpectedly used attach recovery path: %v", updater.recovered)
 	}
 }
 
@@ -129,6 +141,9 @@ func TestIssueStatusToolReconcileAttachRestoresLatestDurableIntentOnce(t *testin
 	}
 	if len(updater.statuses) != 1 || updater.statuses[0] != "REVIEW" {
 		t.Fatalf("statuses=%v want [REVIEW]", updater.statuses)
+	}
+	if len(updater.recovered) != 1 || updater.recovered[0] != "REVIEW" {
+		t.Fatalf("recovered statuses=%v want [REVIEW]", updater.recovered)
 	}
 }
 

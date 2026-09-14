@@ -23,6 +23,7 @@ type IssueStatusMutation struct {
 	RunID       *string
 	AgentID     *string
 	WorkspaceID *string
+	Recovery    bool
 }
 
 // IssueStatusMutationStore is the canonical status-only Issue mutation boundary.

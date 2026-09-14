@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"errors"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +19,9 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 	if input.RunID != nil && (input.AgentID == nil || input.WorkspaceID == nil) {
 		return store.IssueMutationResult{}, store.ErrInvalidArgument
 	}
+	if input.Recovery && input.RunID == nil {
+		return store.IssueMutationResult{}, store.ErrInvalidArgument
+	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
@@ -24,12 +29,18 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := lockIssueStatusRunFence(ctx, tx, input); err != nil {
+	run, err := lockIssueStatusRunFence(ctx, tx, input)
+	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
 	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.IssueID)
 	if err != nil {
 		return store.IssueMutationResult{}, err
+	}
+	if input.Recovery {
+		if err := validateIssueStatusRecoveryFence(ctx, tx, input, run); err != nil {
+			return store.IssueMutationResult{}, err
+		}
 	}
 	if previous.Status == input.Status {
 		if err := tx.Commit(ctx); err != nil {
@@ -59,9 +70,9 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 	return result, nil
 }
 
-func lockIssueStatusRunFence(ctx context.Context, tx pgx.Tx, input store.IssueStatusMutation) error {
+func lockIssueStatusRunFence(ctx context.Context, tx pgx.Tx, input store.IssueStatusMutation) (store.Run, error) {
 	if input.RunID == nil {
-		return nil
+		return store.Run{}, nil
 	}
 	run, err := scanRun(tx.QueryRow(ctx, `
 		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
@@ -71,11 +82,41 @@ func lockIssueStatusRunFence(ctx context.Context, tx pgx.Tx, input store.IssueSt
 		FOR UPDATE
 	`, input.ProjectID, *input.RunID))
 	if err != nil {
-		return notFound(err)
+		return store.Run{}, notFound(err)
 	}
 	if run.Status != "RUNNING" || run.IssueID != input.IssueID || run.WorkspaceID != *input.WorkspaceID ||
 		run.AgentID == nil || *run.AgentID != *input.AgentID {
+		return store.Run{}, store.ErrConflict
+	}
+	return run, nil
+}
+
+func validateIssueStatusRecoveryFence(ctx context.Context, tx pgx.Tx, input store.IssueStatusMutation, run store.Run) error {
+	if input.RunID == nil || run.StartedAt == nil {
 		return store.ErrConflict
 	}
-	return nil
+	var eventRunID string
+	var actorType string
+	var eventCreatedAt time.Time
+	err := tx.QueryRow(ctx, `
+		SELECT COALESCE(run_id::text, ''), COALESCE(actor->>'type', ''), created_at
+		FROM events
+		WHERE project_id=$1 AND issue_id=$2
+		  AND type IN ('issue.updated', 'issue.status_changed')
+		ORDER BY created_at DESC, id DESC
+		LIMIT 1
+	`, input.ProjectID, input.IssueID).Scan(&eventRunID, &actorType, &eventCreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !eventCreatedAt.After(*run.StartedAt) {
+		return nil
+	}
+	if eventRunID == *input.RunID && actorType == store.ActorTypeAgent {
+		return nil
+	}
+	return store.ErrConflict
 }

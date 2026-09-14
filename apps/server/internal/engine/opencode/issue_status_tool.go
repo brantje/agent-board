@@ -47,6 +47,10 @@ type issueStatusToolPart struct {
 	} `json:"state"`
 }
 
+type issueStatusRecoveryUpdater interface {
+	SetRecoveredStatus(context.Context, string) error
+}
+
 type issueStatusToolTracker struct {
 	seen map[string]struct{}
 }
@@ -73,7 +77,7 @@ func (t *issueStatusToolTracker) Handle(ctx context.Context, event client.Event,
 	if err != nil {
 		return err
 	}
-	return t.applyPart(ctx, part, sessionID, updater)
+	return t.applyPart(ctx, part, sessionID, updater, false)
 }
 
 func (t *issueStatusToolTracker) Reconcile(ctx context.Context, native *client.Client, sessionID string, updater engine.IssueStatusUpdater) error {
@@ -82,7 +86,7 @@ func (t *issueStatusToolTracker) Reconcile(ctx context.Context, native *client.C
 		return err
 	}
 	for _, part := range parts {
-		if err := t.applyPart(ctx, part, sessionID, updater); err != nil {
+		if err := t.applyPart(ctx, part, sessionID, updater, false); err != nil {
 			return err
 		}
 	}
@@ -104,7 +108,7 @@ func (t *issueStatusToolTracker) ReconcileAttach(ctx context.Context, native *cl
 			t.seen[partID] = struct{}{}
 		}
 	}
-	return t.applyPart(ctx, parts[len(parts)-1], sessionID, updater)
+	return t.applyPart(ctx, parts[len(parts)-1], sessionID, updater, true)
 }
 
 func durableIssueStatusToolParts(ctx context.Context, native *client.Client, sessionID string) ([]issueStatusToolPart, error) {
@@ -150,7 +154,7 @@ func decodeIssueStatusToolPart(raw json.RawMessage) (issueStatusToolPart, error)
 	return part, nil
 }
 
-func (t *issueStatusToolTracker) applyPart(ctx context.Context, part issueStatusToolPart, sessionID string, updater engine.IssueStatusUpdater) error {
+func (t *issueStatusToolTracker) applyPart(ctx context.Context, part issueStatusToolPart, sessionID string, updater engine.IssueStatusUpdater, recovery bool) error {
 	if part.SessionID != "" && part.SessionID != sessionID {
 		return nil
 	}
@@ -173,7 +177,17 @@ func (t *issueStatusToolTracker) applyPart(ctx context.Context, part issueStatus
 	if updater == nil {
 		return fmt.Errorf("opencode engine: Issue status capability is unavailable")
 	}
-	if err := updater.SetStatus(ctx, status); err != nil {
+	var err error
+	if recovery {
+		recoveryUpdater, ok := updater.(issueStatusRecoveryUpdater)
+		if !ok {
+			return fmt.Errorf("opencode engine: recovered Issue status capability is unavailable")
+		}
+		err = recoveryUpdater.SetRecoveredStatus(ctx, status)
+	} else {
+		err = updater.SetStatus(ctx, status)
+	}
+	if err != nil {
 		return fmt.Errorf("opencode engine: set Issue status: %w", err)
 	}
 	t.seen[partID] = struct{}{}
