@@ -4,6 +4,8 @@ This is the operator guide for running `agent-runner` as a persistent systemd se
 
 An external Runner makes one outbound connection to the Agent Board control plane. It does not need an inbound listening port, PostgreSQL credentials, server encryption keys, or SSH access from Agent Board. The host is a trusted execution environment: coding CLIs run with the permissions of the `agent-runner` service account.
 
+External Runners can be deployment-global **shared runners** or **Project runners** owned by exactly one Project. Both scopes use the same `agent-runner` binary, registration token flow, immutable Runner identity, permanent credential, WebSocket protocol, capabilities and reconnect behavior. Project ownership is assigned by Agent Board when the pending Runner is created; the Runner cannot claim or change it.
+
 All repository-relative commands below assume the repository root as the current directory.
 
 ## Prerequisites
@@ -57,16 +59,21 @@ Do not put provider API keys in the systemd unit or Runner env file for the norm
 
 ## 3. Create a pending Runner and one-time registration token
 
-In Agent Board, open **Settings > Runners** and choose **Create runner**. Creation does not ask for a name. It immediately creates the durable pending external Runner with its immutable Runner ID, but it does not create a permanent Runner credential yet. The one-time registration token is displayed once.
+For deployment-global shared capacity, open **Settings > Runners** and choose **Create runner**. For a Runner dedicated to one Project, open that Project's **Settings**, find **Project runners**, and choose **Create runner** there. Creation does not ask for a name. It immediately creates the durable pending external Runner with its immutable Runner ID, but it does not create a permanent Runner credential yet. The one-time registration token is displayed once.
 
-The same operation is available through the API:
+The same operations are available through the API:
 
 ```bash
 export AGENT_BOARD_URL='https://agent-board.example.com'
+
+# Shared deployment-global Runner
 curl -fsS -X POST "$AGENT_BOARD_URL/api/runners"
+
+# Runner owned by exactly one Project
+curl -fsS -X POST "$AGENT_BOARD_URL/api/projects/$PROJECT_ID/runners"
 ```
 
-The response is shaped like:
+Both responses are shaped like:
 
 ```json
 {
@@ -77,7 +84,7 @@ The response is shaped like:
 
 Agent Board stores only the registration-token hash on that pending Runner. Copy the plaintext registration token directly to the host that will be enrolled; do not put it in source control, scripts, examples, or logs.
 
-Registration updates this same Runner identity. It does not create a second Runner. Reusing the registration token after successful enrollment is rejected.
+Registration updates this same Runner identity. It does not create a second Runner. Reusing the registration token after successful enrollment is rejected. For a Project runner, the owner Project association survives registration and reconnect because it is server-owned durable state; no Runner protocol message can select or override it.
 
 ## 4. Install and enroll the Runner
 
@@ -128,7 +135,7 @@ AGENT_RUNNER_WORKSPACE_ROOT=...
 
 `AGENT_RUNNER_TOKEN` always means the permanent post-registration Runner credential. The environment file is written mode `0600`. The one-time registration token is never persisted. If enrollment fails, the installer exits before enabling or starting the service.
 
-The initial hostname is only the display name. An administrator can rename a registered external Runner later from **Settings > Runners** or with `PATCH /api/runners/{runnerID}`. Renaming does not change Runner identity or credentials, and reconnecting does not overwrite the administrator's name.
+The initial hostname is only the display name. An administrator can rename a registered shared Runner later from **Settings > Runners**. A Project administrator can rename a registered Project runner from that Project's **Settings > Project runners** section. Renaming does not change Runner identity, owner scope or credentials, and reconnecting does not overwrite the administrator's name.
 
 ### Manual installation
 
@@ -170,7 +177,7 @@ Normal startup is environment-only: `configFromEnv()` supplies `AGENT_BOARD_URL`
 
 The server-managed internal Runner supplies the same normal runtime environment variables directly and does not use the external registration-token flow.
 
-## 5. Verify the connection
+## 5. Verify the connection and Project policy
 
 Check systemd first:
 
@@ -185,15 +192,22 @@ Follow logs while testing:
 sudo journalctl -u agent-runner.service -f
 ```
 
-Then inspect **Settings > Runners** or query the API:
+Then inspect **Settings > Runners**, the owning Project's settings, or query the API:
 
 ```bash
 curl -fsS "$AGENT_BOARD_URL/api/runners"
+curl -fsS "$AGENT_BOARD_URL/api/projects/$PROJECT_ID/runners"
 ```
 
 A healthy registered external Runner should report `connected: true`. Its capabilities include the embedded Runner version and supported Engines. Before enrollment, the pending Runner is visible with its immutable ID but has no display name or permanent credential and cannot authenticate the Runner WebSocket.
 
-If a Project has an explicit external Runner allowlist, add the registered Runner through `PUT /api/projects/{projectID}/runners`. An empty Project allowlist means any connected external Runner is eligible.
+Project settings separate three concepts:
+
+- **Project runners** are dedicated to exactly that Project and are automatically eligible for their owner Project when otherwise healthy/capable. They are never placed in the shared allowlist and can never execute another Project's Run.
+- **Shared runners** are deployment-global external capacity. The existing `runnerIds` allowlist controls which shared Runners a Project may use. An empty allowlist keeps the existing meaning: any eligible shared Runner is allowed.
+- **Internal runner fallback** is controlled independently by `allow_internal_runner`.
+
+A Project-owned Runner cannot be moved to another Project. Delete it and create/enroll a new Runner in the destination Project instead.
 
 ## 6. Test a real Run
 
@@ -201,7 +215,7 @@ Assign an Issue to an Agent whose Engine is available on this Runner. For OpenCo
 
 No Runtime Instance should be created for this external Runner path.
 
-If the Project uses an explicit Runner allowlist, make sure this Runner ID is included before testing.
+For a shared Runner, make sure it is allowed by the Project's shared-runner policy. A Project-owned Runner needs no shared allowlist attachment; the scheduler admits it only for its owner Project.
 
 ## Operations
 
@@ -232,25 +246,37 @@ sudo systemctl status agent-runner.service
 
 ### Rotate a Runner credential
 
-The existing administrative endpoint remains:
+Shared Runner administration uses:
 
 ```text
 POST /api/runners/{runnerID}/rotate-token
 ```
 
-Its credential-bearing response contains `runnerToken`, the new plaintext permanent credential, once. Rotation is valid only for a registered external Runner. An operator must securely replace the `AGENT_RUNNER_TOKEN` value in `/etc/agent-board/agent-runner.env`, preserve mode `0600`, and restart the service. Rotation never creates a new registration token.
+Project Runner administration uses the same lifecycle through its Project-scoped route:
+
+```text
+POST /api/projects/{projectID}/runners/{runnerID}/rotate-token
+```
+
+Its credential-bearing response contains `runnerToken`, the new plaintext permanent credential, once. Rotation is valid only for a registered external Runner. An operator must securely replace the `AGENT_RUNNER_TOKEN` value in `/etc/agent-board/agent-runner.env`, preserve mode `0600`, and restart the service. Rotation never creates a new registration token or changes Project ownership.
 
 ### Revoke or remove a Runner
 
-To revoke without deleting its historical identity:
+For shared Runners:
 
 ```text
 POST /api/runners/{runnerID}/revoke
+DELETE /api/runners/{runnerID}
 ```
 
-For a pending Runner, revoke permanently invalidates the registration token. For a registered Runner, revoke invalidates its permanent credential and disconnects it.
+For Project-owned Runners:
 
-Deleting the Runner through `DELETE /api/runners/{runnerID}` soft-deletes and revokes it while retaining historical provenance. A deleted pending Runner can never enroll.
+```text
+POST /api/projects/{projectID}/runners/{runnerID}/revoke
+DELETE /api/projects/{projectID}/runners/{runnerID}
+```
+
+For a pending Runner, revoke permanently invalidates the registration token. For a registered Runner, revoke invalidates its permanent credential and disconnects it. Deleting the Runner soft-deletes and revokes it while retaining historical provenance. A deleted pending Runner can never enroll.
 
 To uninstall the service files installed by this repository:
 
