@@ -145,7 +145,7 @@ export async function apiText(path: string, options: { signal?: AbortSignal } = 
   try {
     return await response.text()
   } catch {
-    throw new ApiError(502, 'invalid_response', 'The server returned invalid response. Retry or check deployment configuration.')
+    throw new ApiError(502, 'invalid_response', 'The server returned an invalid response. Retry or check deployment configuration.')
   }
 }
 
