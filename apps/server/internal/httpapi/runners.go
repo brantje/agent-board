@@ -70,6 +70,14 @@ func (a *api) runnerDTOs(ctx context.Context, values []store.Runner) ([]RunnerDT
 	return out, nil
 }
 
+func (a *api) runnerReservationCount(ctx context.Context, id string) (int, error) {
+	reserved, err := a.service.Runners.CountReservations(ctx, []string{id})
+	if err != nil {
+		return 0, err
+	}
+	return reserved[id], nil
+}
+
 type runnerUpdateRequest struct {
 	Name              string `json:"name"`
 	MaxActiveSessions *int   `json:"maxActiveSessions"`
@@ -269,12 +277,17 @@ func (a *api) updateProjectRunner(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	reserved, err := a.runnerReservationCount(r.Context(), id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	v, err := a.service.Runners.UpdateForProject(r.Context(), projectID, id, req.Name, req.MaxActiveSessions)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	a.writeRunner(w, r, v)
+	writeJSON(w, http.StatusOK, a.runnerDTO(v, reserved))
 }
 func (a *api) rotateRunner(w http.ResponseWriter, r *http.Request) {
 	id, ok := resourceID(w, r)
@@ -293,12 +306,18 @@ func (a *api) rotateProjectRunner(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	reserved, err := a.runnerReservationCount(r.Context(), id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	v, runnerToken, err := a.service.Runners.RotateForProject(r.Context(), projectID, id)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	a.writeRunnerCredential(w, r, v, runnerToken)
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, runnerCredentialResponse{Runner: a.runnerDTO(v, reserved), RunnerToken: runnerToken})
 }
 func (a *api) revokeRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, false) }
 func (a *api) deleteRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, true) }
@@ -325,12 +344,25 @@ func (a *api) disableProjectRunner(w http.ResponseWriter, r *http.Request, delet
 	if !ok {
 		return
 	}
+	reserved := 0
+	if !deleted {
+		var err error
+		reserved, err = a.runnerReservationCount(r.Context(), id)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+	}
 	v, err := a.service.Runners.RevokeForProject(r.Context(), projectID, id, deleted)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	a.writeDisabledRunner(w, r, v, deleted)
+	if deleted {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	writeJSON(w, http.StatusOK, a.runnerDTO(v, reserved))
 }
 func (a *api) writeDisabledRunner(w http.ResponseWriter, r *http.Request, v store.Runner, deleted bool) {
 	if deleted {
