@@ -8,27 +8,19 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func (s *projectWorkflowAuthorizationStore) SetIssueStatus(_ context.Context, mutation store.IssueStatusMutation) (store.IssueMutationResult, error) {
-	issue, err := s.GetIssue(context.Background(), mutation.ProjectID, mutation.IssueID)
+func (s *projectWorkflowAuthorizationStore) UpdateIssueMutationWithActor(_ context.Context, input store.Issue, actor json.RawMessage) (store.IssueMutationResult, error) {
+	previous, err := s.GetIssue(context.Background(), input.ProjectID, input.ID)
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
-	if issue.Status == mutation.Status {
-		return store.IssueMutationResult{Issue: issue}, nil
+	event, err := store.NewIssueUpdatedEventWithActor(input, previous.Status, actor)
+	if err != nil {
+		return store.IssueMutationResult{}, err
 	}
-	previousStatus := issue.Status
-	issue.Status = mutation.Status
-	payload, _ := json.Marshal(map[string]any{"status": issue.Status, "previousStatus": previousStatus})
-	event := store.Event{
-		Type:      "issue.status_changed",
-		ProjectID: mutation.ProjectID,
-		IssueID:   &issue.ID,
-		Actor:     append(json.RawMessage(nil), mutation.Actor...),
-		Payload:   payload,
-	}
-	issue.LastEvent = &event
-	s.issues[issue.ID] = issue
-	return store.IssueMutationResult{Issue: issue, Events: []store.Event{event}}, nil
+	s.updateIssueCalls++
+	input.LastEvent = &event
+	s.issues[input.ID] = input
+	return store.IssueMutationResult{Issue: input, Events: []store.Event{event}}, nil
 }
 
 func TestProjectAccessIssueStatusUsesAuthenticatedHumanActor(t *testing.T) {
@@ -52,22 +44,43 @@ func TestProjectAccessIssueStatusUsesAuthenticatedHumanActor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateIssue() error=%v", err)
 	}
-	if updated.Status != "IN_PROGRESS" || fake.updateIssueCalls != 0 {
-		t.Fatalf("updated=%+v genericUpdateCalls=%d", updated, fake.updateIssueCalls)
+	if updated.Status != "IN_PROGRESS" || fake.updateIssueCalls != 1 {
+		t.Fatalf("updated=%+v mutationCalls=%d", updated, fake.updateIssueCalls)
 	}
-	if updated.LastEvent == nil || updated.LastEvent.Type != "issue.status_changed" {
-		t.Fatalf("last event=%+v", updated.LastEvent)
+	assertHumanIssueEventActor(t, updated.LastEvent, actor.ID, "issue.status_changed")
+}
+
+func TestProjectAccessCombinedIssueEditUsesOneActorAttributedMutation(t *testing.T) {
+	const projectID = "project-1"
+	fake := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, Name: "Project", IssuePrefix: "AB"},
+		roles: map[string]string{
+			"member-user": store.ProjectRoleMember,
+		},
+		issues: map[string]store.Issue{
+			"issue-existing": {ID: "issue-existing", ProjectID: projectID, Number: 1, Title: "Existing", Status: "TODO", Priority: 1},
+		},
+		runs: map[string]store.Run{},
 	}
-	var attributed struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
+	access := newProjectWorkflowAccess(t, fake)
+	actor := activeProjectActor("member-user", store.DeploymentRoleMember)
+	input := fake.issues["issue-existing"]
+	input.Status = "REVIEW"
+	input.Title = "Updated title"
+	input.Description = "Updated description"
+	input.Priority = 3
+
+	updated, err := access.UpdateIssue(t.Context(), actor, input)
+	if err != nil {
+		t.Fatalf("UpdateIssue() error=%v", err)
 	}
-	if err := json.Unmarshal(updated.LastEvent.Actor, &attributed); err != nil {
-		t.Fatalf("decode actor: %v", err)
+	if fake.updateIssueCalls != 1 {
+		t.Fatalf("mutationCalls=%d want=1", fake.updateIssueCalls)
 	}
-	if attributed.Type != store.ActorTypeHuman || attributed.ID != actor.ID {
-		t.Fatalf("actor=%+v", attributed)
+	if updated.Status != input.Status || updated.Title != input.Title || updated.Description != input.Description || updated.Priority != input.Priority {
+		t.Fatalf("updated=%+v want=%+v", updated, input)
 	}
+	assertHumanIssueEventActor(t, updated.LastEvent, actor.ID, "issue.status_changed")
 }
 
 func TestProjectAccessIssueUpdateNoOpDoesNotWrite(t *testing.T) {
@@ -91,6 +104,23 @@ func TestProjectAccessIssueUpdateNoOpDoesNotWrite(t *testing.T) {
 		t.Fatalf("UpdateIssue() error=%v", err)
 	}
 	if updated.Status != input.Status || fake.updateIssueCalls != 0 {
-		t.Fatalf("updated=%+v genericUpdateCalls=%d", updated, fake.updateIssueCalls)
+		t.Fatalf("updated=%+v mutationCalls=%d", updated, fake.updateIssueCalls)
+	}
+}
+
+func assertHumanIssueEventActor(t *testing.T, event *store.Event, actorID, eventType string) {
+	t.Helper()
+	if event == nil || event.Type != eventType {
+		t.Fatalf("last event=%+v want type=%s", event, eventType)
+	}
+	var attributed struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	}
+	if err := json.Unmarshal(event.Actor, &attributed); err != nil {
+		t.Fatalf("decode actor: %v", err)
+	}
+	if attributed.Type != store.ActorTypeHuman || attributed.ID != actorID {
+		t.Fatalf("actor=%+v", attributed)
 	}
 }
