@@ -19,6 +19,7 @@ type ProjectRunnerSettings struct {
 	RunnerIDs       []string
 	ProjectRunners []store.Runner
 	SharedRunners  []store.Runner
+	InternalRunner *store.Runner
 }
 
 func (s *RunnerService) ProjectRunners(ctx context.Context, id string) ([]string, error) {
@@ -39,6 +40,8 @@ func (s *RunnerService) ProjectRunnerSettings(ctx context.Context, id string) (P
 	settings.RunnerIDs = append(settings.RunnerIDs, ids...)
 	for _, value := range values {
 		if value.Internal {
+			internal := value
+			settings.InternalRunner = &internal
 			continue
 		}
 		if value.ProjectID == nil {
