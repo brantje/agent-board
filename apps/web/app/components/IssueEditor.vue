@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import type { Issue } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
-import { editableStatuses, statusLabel } from '../utils/issues'
+import { issueStatuses, statusLabel } from '../utils/issues'
 
 const props = defineProps<{ projectId: string; issue?: Issue; initialStatus?: string }>()
 const emit = defineEmits<{ saved: [issue: Issue]; cancel: [] }>()
-const allowedStatuses = computed(() => editableStatuses(props.issue?.status))
-const statusItems = computed(() => allowedStatuses.value.map(status => ({ label: statusLabel(status), value: status })))
+const statusItems = issueStatuses.map(status => ({ label: statusLabel(status), value: status }))
 const priorityItems = [0, 1, 2, 3, 4].map(value => ({ label: value === 0 ? 'Priority 0 (default)' : `Priority ${value}`, value }))
 const initialStatus = props.issue?.status || props.initialStatus || 'BACKLOG'
 const state = reactive({
@@ -22,7 +21,7 @@ const error = ref<Error>()
 function validate() {
   const errors: { name: string; message: string }[] = []
   if (!state.title.trim()) errors.push({ name: 'title', message: 'Title is required.' })
-  if (!allowedStatuses.value.includes(state.status)) errors.push({ name: 'status', message: 'Choose an available Board status.' })
+  if (!issueStatuses.includes(state.status as typeof issueStatuses[number])) errors.push({ name: 'status', message: 'Choose an available Board status.' })
   const priority = Number(state.priority)
   if (!Number.isInteger(priority) || priority < 0 || priority > 4) errors.push({ name: 'priority', message: 'Choose a priority from 0 through 4.' })
   return errors
@@ -68,8 +67,6 @@ async function save() {
         <USelect v-model="state.priority" :items="priorityItems" :disabled="saving" class="w-full" />
       </UFormField>
     </div>
-    <p v-if="issue?.status === 'DONE'" class="text-sm text-muted">Reopen into Todo to allow another Run. Reopening does not start execution.</p>
-    <p v-if="issue?.status === 'REVIEW'" class="text-sm text-muted">Use the Review decision to approve or request changes.</p>
     <div class="flex justify-end gap-2">
       <UButton label="Cancel" color="neutral" variant="outline" :disabled="saving" @click="emit('cancel')" />
       <UButton label="Save issue" type="submit" :loading="saving" />
