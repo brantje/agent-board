@@ -16,6 +16,7 @@ const selected = ref('')
 const assigning = ref(false)
 const assignmentError = ref<Error>()
 const assignmentResult = ref<AssignmentResponse>()
+const assignmentRunBaseline = ref<Set<string> | null>()
 const startingRun = ref(false)
 const startRunError = ref<Error>()
 const startRunResult = ref<Run>()
@@ -38,6 +39,15 @@ const canStartRun = computed(() => Boolean(
   && issue.value.status !== 'BACKLOG'
 ))
 const runActionLabel = computed(() => issueRunHistory.value.length ? 'Run again' : 'Start Run')
+const assignmentRunState = computed(() => {
+  if (assignmentResult.value?.issue.assignedTo?.type !== 'AGENT') return undefined
+  if (runs.pending.value) return 'checking'
+  if (runs.error.value || runs.data.value === undefined) return 'unknown'
+  if (!issueRunHistory.value.length) return 'not-created'
+  const baseline = assignmentRunBaseline.value
+  if (!baseline) return 'unknown'
+  return issueRunHistory.value.some(run => !baseline.has(run.id)) ? 'created' : 'not-created'
+})
 const creatorLabel = computed(() => {
   const creator = issue.value?.createdBy
   if (!creator) return 'Unknown'
@@ -47,7 +57,16 @@ const creatorLabel = computed(() => {
 const assignmentDescription = computed(() => {
   if (!assignmentResult.value) return undefined
   const result = assignmentResult.value
-  return `Board status: ${statusLabel(result.issue.status)}. Ownership updated.`
+  const summary = `Board status: ${statusLabel(result.issue.status)}. Ownership updated.`
+  if (result.issue.assignedTo?.type !== 'AGENT') return summary
+  if (assignmentRunState.value === 'not-created') {
+    const startHint = result.issue.status === 'BACKLOG' ? '' : ' Start a Run to validate and begin execution.'
+    return `${summary} No new execution attempt was created; assignment did not start execution.${startHint}`
+  }
+  if (assignmentRunState.value === 'unknown') {
+    return `${summary} Run creation could not be confirmed from the current Run state.`
+  }
+  return summary
 })
 const startRunDescription = computed(() => {
   const result = startRunResult.value
@@ -82,11 +101,18 @@ async function assign() {
     : assignees.data.value?.find(assignee => `${assignee.type}:${assignee.id}` === selected.value)
   if (selected.value !== unassignedChoice && !selectedAssignee) return
 
+  const runBaseline = runs.data.value !== undefined && !runs.error.value
+    ? new Set(issueRuns(runs.data.value, props.issueId).map(run => run.id))
+    : null
+
   assigning.value = true
   assignmentError.value = undefined
   assignmentResult.value = undefined
+  assignmentRunBaseline.value = undefined
+
+  let result: AssignmentResponse
   try {
-    const result = await apiRequest<AssignmentResponse>(`${apiPath('issues', props.projectId, props.issueId)}/assignment`, {
+    result = await apiRequest<AssignmentResponse>(`${apiPath('issues', props.projectId, props.issueId)}/assignment`, {
       method: 'POST',
       body: {
         assignedTo: selectedAssignee
@@ -94,12 +120,20 @@ async function assign() {
           : null
       }
     })
-    assignmentResult.value = result
-    issue.value = result.issue
-    selected.value = ''
-    await reload()
   } catch (failure) {
     assignmentError.value = failure as Error
+    assigning.value = false
+    return
+  }
+
+  assignmentResult.value = result
+  issue.value = result.issue
+  selected.value = ''
+  try {
+    if (result.issue.assignedTo?.type === 'AGENT') {
+      assignmentRunBaseline.value = runBaseline
+      await runs.refresh()
+    }
   } finally {
     assigning.value = false
   }
