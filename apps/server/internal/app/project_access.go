@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -175,7 +176,32 @@ func (s *ProjectAccessService) UpdateIssue(ctx context.Context, actor Authentica
 	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
 		return store.Issue{}, err
 	}
+	current, err := s.controlPlane.GetIssue(ctx, input.ProjectID, input.ID)
+	if err != nil {
+		return store.Issue{}, err
+	}
+	if current.Status == input.Status && sameIssueEditableMetadata(current, input) {
+		return current, nil
+	}
+	if current.Status != input.Status {
+		encodedActor, err := json.Marshal(map[string]string{"type": store.ActorTypeHuman, "id": actor.ID})
+		if err != nil {
+			return store.Issue{}, err
+		}
+		updated, err := s.controlPlane.SetIssueStatus(ctx, input.ProjectID, input.ID, input.Status, encodedActor)
+		if err != nil {
+			return store.Issue{}, err
+		}
+		if sameIssueEditableMetadata(current, input) {
+			return updated, nil
+		}
+		input.Status = updated.Status
+	}
 	return s.controlPlane.UpdateIssue(ctx, input)
+}
+
+func sameIssueEditableMetadata(left, right store.Issue) bool {
+	return left.Title == right.Title && left.Description == right.Description && left.Priority == right.Priority
 }
 
 func (s *ProjectAccessService) ListRuns(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.Run, error) {
