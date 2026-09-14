@@ -155,16 +155,15 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
 	if err != nil {
 		return store.Issue{}, store.Event{}, err
 	}
-	_, runEvent, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch)
+	if _, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch); err != nil {
+		return store.Issue{}, store.Event{}, err
+	}
+	issue, err = getIssue(ctx, tx, projectID, issueID)
 	if err != nil {
 		return store.Issue{}, store.Event{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return store.Issue{}, store.Event{}, err
-	}
-	issue.LastEvent = &assignmentEvent
-	if runEvent.ID != "" {
-		issue.LastEvent = &runEvent
 	}
 	return issue, assignmentEvent, nil
 }
