@@ -15,10 +15,42 @@ import (
 
 var ErrRunnerAuthentication = errors.New("runner authentication failed")
 
+type ProjectRunnerSettings struct {
+	RunnerIDs       []string
+	ProjectRunners []store.Runner
+	SharedRunners  []store.Runner
+}
+
 func (s *RunnerService) ProjectRunners(ctx context.Context, id string) ([]string, error) {
 	ids, err := s.store.ListProjectRunnerIDs(ctx, id)
 	return ids, translateStoreError(err, "project")
 }
+
+func (s *RunnerService) ProjectRunnerSettings(ctx context.Context, id string) (ProjectRunnerSettings, error) {
+	ids, err := s.ProjectRunners(ctx, id)
+	if err != nil {
+		return ProjectRunnerSettings{}, err
+	}
+	values, err := s.store.ListRunners(ctx)
+	if err != nil {
+		return ProjectRunnerSettings{}, err
+	}
+	settings := ProjectRunnerSettings{RunnerIDs: ids, ProjectRunners: []store.Runner{}, SharedRunners: []store.Runner{}}
+	for _, value := range values {
+		if value.Internal {
+			continue
+		}
+		if value.ProjectID == nil {
+			settings.SharedRunners = append(settings.SharedRunners, value)
+			continue
+		}
+		if *value.ProjectID == id {
+			settings.ProjectRunners = append(settings.ProjectRunners, value)
+		}
+	}
+	return settings, nil
+}
+
 func (s *RunnerService) SetProjectRunners(ctx context.Context, id string, ids []string) error {
 	return translateStoreError(s.store.SetProjectRunnerIDs(ctx, id, ids), "project")
 }
@@ -54,11 +86,26 @@ func runnerCredential() (string, []byte, error) {
 }
 
 func (s *RunnerService) Create(ctx context.Context) (store.Runner, string, error) {
+	return s.create(ctx, nil)
+}
+
+func (s *RunnerService) CreateForProject(ctx context.Context, projectID string) (store.Runner, string, error) {
+	projectID = strings.TrimSpace(projectID)
+	if projectID == "" {
+		return store.Runner{}, "", invalid("projectId is required")
+	}
+	if _, err := s.store.ListProjectRunnerIDs(ctx, projectID); err != nil {
+		return store.Runner{}, "", translateStoreError(err, "project")
+	}
+	return s.create(ctx, &projectID)
+}
+
+func (s *RunnerService) create(ctx context.Context, projectID *string) (store.Runner, string, error) {
 	registrationToken, registrationHash, err := runnerCredential()
 	if err != nil {
 		return store.Runner{}, "", err
 	}
-	r, err := s.store.CreateRunner(ctx, store.Runner{RegistrationTokenHash: registrationHash})
+	r, err := s.store.CreateRunner(ctx, store.Runner{ProjectID: projectID, RegistrationTokenHash: registrationHash})
 	if err != nil {
 		return store.Runner{}, "", translateStoreError(err, "runner")
 	}
@@ -145,6 +192,39 @@ func (s *RunnerService) Revoke(ctx context.Context, id string, deleted bool) (st
 	}
 	return r, translateStoreError(err, "runner")
 }
+
+func (s *RunnerService) UpdateForProject(ctx context.Context, projectID, id, name string, maxActiveSessions *int) (store.Runner, error) {
+	if _, err := s.projectOwnedRunner(ctx, projectID, id); err != nil {
+		return store.Runner{}, err
+	}
+	return s.Update(ctx, id, name, maxActiveSessions)
+}
+
+func (s *RunnerService) RotateForProject(ctx context.Context, projectID, id string) (store.Runner, string, error) {
+	if _, err := s.projectOwnedRunner(ctx, projectID, id); err != nil {
+		return store.Runner{}, "", err
+	}
+	return s.Rotate(ctx, id)
+}
+
+func (s *RunnerService) RevokeForProject(ctx context.Context, projectID, id string, deleted bool) (store.Runner, error) {
+	if _, err := s.projectOwnedRunner(ctx, projectID, id); err != nil {
+		return store.Runner{}, err
+	}
+	return s.Revoke(ctx, id, deleted)
+}
+
+func (s *RunnerService) projectOwnedRunner(ctx context.Context, projectID, id string) (store.Runner, error) {
+	r, err := s.Get(ctx, id)
+	if err != nil {
+		return store.Runner{}, err
+	}
+	if r.ProjectID == nil || *r.ProjectID != projectID {
+		return store.Runner{}, translateStoreError(store.ErrNotFound, "runner")
+	}
+	return r, nil
+}
+
 func (s *RunnerService) Authenticate(ctx context.Context, id, token string) (store.Runner, error) {
 	r, err := s.store.GetRunner(ctx, id)
 	if err != nil {
