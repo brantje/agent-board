@@ -56,18 +56,18 @@ func TestReviewApprovalIntentAndCompletionAreDurableAndIdempotent(t *testing.T) 
 	if err != nil {
 		t.Fatalf("CompleteReviewApproval() error=%v", err)
 	}
-	if completed.Review.Status != "APPROVED" || completed.Run.Status != "COMPLETED" || completed.Issue.Status != "DONE" || completed.Decision.Outcome != "APPROVED" {
-		t.Fatalf("completed approval=%+v", completed)
+	if completed.Review.Status != "APPROVED" || completed.Run.Status != "COMPLETED" || completed.Issue.Status != f.issue.Status || completed.Decision.Outcome != "APPROVED" {
+		t.Fatalf("completed approval=%+v initialIssue=%+v", completed, f.issue)
 	}
 	retry, err := s.CompleteReviewApproval(ctx, store.CompleteReviewApprovalCommand{
 		ProjectID: f.project.ID, ReviewID: review.ID, AcceptedRevision: "accepted-sha", DeliveryComplete: true,
 	})
-	if err != nil || retry.Decision.ID != completed.Decision.ID {
+	if err != nil || retry.Decision.ID != completed.Decision.ID || retry.Issue.Status != f.issue.Status {
 		t.Fatalf("idempotent completion=%+v err=%v", retry, err)
 	}
 }
 
-func TestRequestReviewChangesCreatesNextAttemptOnSameWorkspaceAtomically(t *testing.T) {
+func TestRequestReviewChangesCreatesNextAttemptWithoutChangingIssueStatus(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	f, review := readyReviewFixture(t, s, "changes")
@@ -85,8 +85,8 @@ func TestRequestReviewChangesCreatesNextAttemptOnSameWorkspaceAtomically(t *test
 	if result.Run.Attempt != f.run.Attempt+1 || result.Run.WorkspaceID != f.run.WorkspaceID || result.Run.Status != "QUEUED" {
 		t.Fatalf("follow-up Run=%+v previous=%+v", result.Run, f.run)
 	}
-	if result.Job.Kind != "START" || result.Job.RunID != result.Run.ID || result.Issue.Status != "IN_PROGRESS" {
-		t.Fatalf("follow-up job/issue=%+v %+v", result.Job, result.Issue)
+	if result.Job.Kind != "START" || result.Job.RunID != result.Run.ID || result.Issue.Status != f.issue.Status {
+		t.Fatalf("follow-up job/issue=%+v %+v initialIssue=%+v", result.Job, result.Issue, f.issue)
 	}
 	if len(result.Events) != 2 || result.Events[0].Type != "review.changes_requested" || result.Events[1].Type != "decision.recorded" {
 		t.Fatalf("RequestReviewChanges events=%+v", result.Events)
@@ -95,7 +95,7 @@ func TestRequestReviewChangesCreatesNextAttemptOnSameWorkspaceAtomically(t *test
 	retry, err := s.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{
 		ProjectID: f.project.ID, ReviewID: review.ID, Feedback: "Please add the missing regression test.", ActorID: &actor,
 	})
-	if err != nil || retry.Run.ID != result.Run.ID || retry.Job.ID != result.Job.ID {
+	if err != nil || retry.Run.ID != result.Run.ID || retry.Job.ID != result.Job.ID || retry.Issue.Status != f.issue.Status {
 		t.Fatalf("idempotent RequestReviewChanges()=%+v err=%v", retry, err)
 	}
 	if len(retry.Events) != 0 {
