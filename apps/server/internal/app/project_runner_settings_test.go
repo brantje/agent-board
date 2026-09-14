@@ -21,7 +21,7 @@ func (s *projectRunnerSettingsStore) ListRunners(context.Context) ([]store.Runne
 	return append([]store.Runner(nil), s.runners...), nil
 }
 
-func TestProjectRunnerSettingsClassifiesOwnedAndSharedCapacity(t *testing.T) {
+func TestProjectRunnerSettingsClassifiesOwnedSharedAndInternalCapacity(t *testing.T) {
 	ownerID := "project-1"
 	foreignID := "project-2"
 	memory := &projectRunnerSettingsStore{
@@ -46,5 +46,8 @@ func TestProjectRunnerSettingsClassifiesOwnedAndSharedCapacity(t *testing.T) {
 	}
 	if len(settings.ProjectRunners) != 1 || settings.ProjectRunners[0].ID != "owned" {
 		t.Fatalf("project runners=%v", settings.ProjectRunners)
+	}
+	if settings.InternalRunner == nil || settings.InternalRunner.ID != "internal" {
+		t.Fatalf("internal runner=%v", settings.InternalRunner)
 	}
 }
