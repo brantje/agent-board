@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -12,6 +13,7 @@ import (
 
 type RunnerDTO struct {
 	ID                string          `json:"id"`
+	ProjectID         *string         `json:"projectId"`
 	Name              *string         `json:"name"`
 	Internal          bool            `json:"internal"`
 	Managed           bool            `json:"managed"`
@@ -39,7 +41,7 @@ func (a *api) runnerDTO(v store.Runner, reserved int) RunnerDTO {
 		name = &value
 	}
 	dto := RunnerDTO{
-		ID: v.ID, Name: name, Internal: v.Internal, Managed: v.Internal, Deletable: !v.Internal,
+		ID: v.ID, ProjectID: v.ProjectID, Name: name, Internal: v.Internal, Managed: v.Internal, Deletable: !v.Internal,
 		Connected: a.service.Runners.Connections.Connected(v.ID), RegisteredAt: v.RegisteredAt,
 		RevokedAt: v.RevokedAt, LastSeenAt: v.LastSeenAt, Capabilities: caps,
 		ReservedSessions: reserved, MaxActiveSessions: runnerconn.MaxActiveSessions(v.Capabilities),
@@ -50,6 +52,42 @@ func (a *api) runnerDTO(v store.Runner, reserved int) RunnerDTO {
 		dto.ActiveSessions = &active
 	}
 	return dto
+}
+
+func (a *api) runnerDTOs(ctx context.Context, values []store.Runner) ([]RunnerDTO, error) {
+	ids := make([]string, len(values))
+	for i, value := range values {
+		ids[i] = value.ID
+	}
+	reserved, err := a.service.Runners.CountReservations(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RunnerDTO, 0, len(values))
+	for _, value := range values {
+		out = append(out, a.runnerDTO(value, reserved[value.ID]))
+	}
+	return out, nil
+}
+
+func (a *api) runnerReservationCount(ctx context.Context, id string) (int, error) {
+	reserved, err := a.service.Runners.CountReservations(ctx, []string{id})
+	if err != nil {
+		return 0, err
+	}
+	return reserved[id], nil
+}
+
+func (a *api) optionalRunnerDTO(ctx context.Context, value *store.Runner) (*RunnerDTO, error) {
+	if value == nil {
+		return nil, nil
+	}
+	reserved, err := a.runnerReservationCount(ctx, value.ID)
+	if err != nil {
+		return nil, err
+	}
+	dto := a.runnerDTO(*value, reserved)
+	return &dto, nil
 }
 
 type runnerUpdateRequest struct {
@@ -79,6 +117,11 @@ type runnerCredentialResponse struct {
 func (a *api) registerRunnerRoutes(r chi.Router) {
 	r.Get("/projects/{projectID}/runners", a.getProjectRunners)
 	r.Put("/projects/{projectID}/runners", a.setProjectRunners)
+	r.Post("/projects/{projectID}/runners", a.createProjectRunner)
+	r.Patch("/projects/{projectID}/runners/{resourceID}", a.updateProjectRunner)
+	r.Post("/projects/{projectID}/runners/{resourceID}/rotate-token", a.rotateProjectRunner)
+	r.Post("/projects/{projectID}/runners/{resourceID}/revoke", a.revokeProjectRunner)
+	r.Delete("/projects/{projectID}/runners/{resourceID}", a.deleteProjectRunner)
 	r.Post("/runner/register", a.registerRunner)
 	r.Handle("/runner/ws", a.service.Runners.Connections)
 	r.Get("/runners", a.listRunners)
@@ -94,17 +137,46 @@ type projectRunnersRequest struct {
 	RunnerIDs []string `json:"runnerIds"`
 }
 
+type projectRunnersResponse struct {
+	RunnerIDs       []string    `json:"runnerIds"`
+	ProjectRunners []RunnerDTO `json:"projectRunners"`
+	SharedRunners  []RunnerDTO `json:"sharedRunners"`
+	InternalRunner *RunnerDTO  `json:"internalRunner"`
+}
+
+func (a *api) projectRunnerSettingsResponse(ctx context.Context, projectID string) (projectRunnersResponse, error) {
+	settings, err := a.service.Runners.ProjectRunnerSettings(ctx, projectID)
+	if err != nil {
+		return projectRunnersResponse{}, err
+	}
+	projectRunners, err := a.runnerDTOs(ctx, settings.ProjectRunners)
+	if err != nil {
+		return projectRunnersResponse{}, err
+	}
+	sharedRunners, err := a.runnerDTOs(ctx, settings.SharedRunners)
+	if err != nil {
+		return projectRunnersResponse{}, err
+	}
+	internalRunner, err := a.optionalRunnerDTO(ctx, settings.InternalRunner)
+	if err != nil {
+		return projectRunnersResponse{}, err
+	}
+	return projectRunnersResponse{
+		RunnerIDs: settings.RunnerIDs, ProjectRunners: projectRunners, SharedRunners: sharedRunners, InternalRunner: internalRunner,
+	}, nil
+}
+
 func (a *api) getProjectRunners(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathUUID(w, r, "projectID")
 	if !ok {
 		return
 	}
-	ids, err := a.service.Runners.ProjectRunners(r.Context(), id)
+	response, err := a.projectRunnerSettingsResponse(r.Context(), id)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, 200, projectRunnersRequest{RunnerIDs: ids})
+	writeJSON(w, 200, response)
 }
 func (a *api) setProjectRunners(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathUUID(w, r, "projectID")
@@ -125,10 +197,12 @@ func (a *api) setProjectRunners(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	if req.RunnerIDs == nil {
-		req.RunnerIDs = []string{}
+	response, err := a.projectRunnerSettingsResponse(r.Context(), id)
+	if err != nil {
+		writeAppError(w, err)
+		return
 	}
-	writeJSON(w, 200, req)
+	writeJSON(w, 200, response)
 }
 func (a *api) listRunners(w http.ResponseWriter, r *http.Request) {
 	values, err := a.service.Runners.List(r.Context())
@@ -136,18 +210,10 @@ func (a *api) listRunners(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	ids := make([]string, len(values))
-	for i, v := range values {
-		ids[i] = v.ID
-	}
-	reserved, err := a.service.Runners.CountReservations(r.Context(), ids)
+	out, err := a.runnerDTOs(r.Context(), values)
 	if err != nil {
 		writeAppError(w, err)
 		return
-	}
-	out := make([]RunnerDTO, 0, len(values))
-	for _, v := range values {
-		out = append(out, a.runnerDTO(v, reserved[v.ID]))
 	}
 	writeJSON(w, 200, out)
 }
@@ -157,6 +223,21 @@ func (a *api) createRunner(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
+	writeRunnerCreation(w, v, registrationToken)
+}
+func (a *api) createProjectRunner(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := pathUUID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	v, registrationToken, err := a.service.Runners.CreateForProject(r.Context(), projectID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeRunnerCreation(w, v, registrationToken)
+}
+func writeRunnerCreation(w http.ResponseWriter, v store.Runner, registrationToken string) {
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusCreated, runnerCreationResponse{Runner: runnerIdentityDTO{ID: v.ID}, RegistrationToken: registrationToken})
 }
@@ -204,12 +285,28 @@ func (a *api) updateRunner(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	reserved, err := a.service.Runners.CountReservations(r.Context(), []string{v.ID})
+	a.writeRunner(w, r, v)
+}
+func (a *api) updateProjectRunner(w http.ResponseWriter, r *http.Request) {
+	projectID, id, ok := projectRunnerIDs(w, r)
+	if !ok {
+		return
+	}
+	var req runnerUpdateRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	reserved, err := a.runnerReservationCount(r.Context(), id)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, 200, a.runnerDTO(v, reserved[v.ID]))
+	v, err := a.service.Runners.UpdateForProject(r.Context(), projectID, id, req.Name, req.MaxActiveSessions)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, a.runnerDTO(v, reserved))
 }
 func (a *api) rotateRunner(w http.ResponseWriter, r *http.Request) {
 	id, ok := resourceID(w, r)
@@ -221,16 +318,34 @@ func (a *api) rotateRunner(w http.ResponseWriter, r *http.Request) {
 		writeAppError(w, err)
 		return
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	reserved, err := a.service.Runners.CountReservations(r.Context(), []string{v.ID})
+	a.writeRunnerCredential(w, r, v, runnerToken)
+}
+func (a *api) rotateProjectRunner(w http.ResponseWriter, r *http.Request) {
+	projectID, id, ok := projectRunnerIDs(w, r)
+	if !ok {
+		return
+	}
+	reserved, err := a.runnerReservationCount(r.Context(), id)
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
-	writeJSON(w, 200, runnerCredentialResponse{Runner: a.runnerDTO(v, reserved[v.ID]), RunnerToken: runnerToken})
+	v, runnerToken, err := a.service.Runners.RotateForProject(r.Context(), projectID, id)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusOK, runnerCredentialResponse{Runner: a.runnerDTO(v, reserved), RunnerToken: runnerToken})
 }
 func (a *api) revokeRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, false) }
 func (a *api) deleteRunner(w http.ResponseWriter, r *http.Request) { a.disableRunner(w, r, true) }
+func (a *api) revokeProjectRunner(w http.ResponseWriter, r *http.Request) {
+	a.disableProjectRunner(w, r, false)
+}
+func (a *api) deleteProjectRunner(w http.ResponseWriter, r *http.Request) {
+	a.disableProjectRunner(w, r, true)
+}
 func (a *api) disableRunner(w http.ResponseWriter, r *http.Request, deleted bool) {
 	id, ok := resourceID(w, r)
 	if !ok {
@@ -241,14 +356,65 @@ func (a *api) disableRunner(w http.ResponseWriter, r *http.Request, deleted bool
 		writeAppError(w, err)
 		return
 	}
+	a.writeDisabledRunner(w, r, v, deleted)
+}
+func (a *api) disableProjectRunner(w http.ResponseWriter, r *http.Request, deleted bool) {
+	projectID, id, ok := projectRunnerIDs(w, r)
+	if !ok {
+		return
+	}
+	reserved := 0
+	if !deleted {
+		var err error
+		reserved, err = a.runnerReservationCount(r.Context(), id)
+		if err != nil {
+			writeAppError(w, err)
+			return
+		}
+	}
+	v, err := a.service.Runners.RevokeForProject(r.Context(), projectID, id, deleted)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
 	if deleted {
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
+	writeJSON(w, http.StatusOK, a.runnerDTO(v, reserved))
+}
+func (a *api) writeDisabledRunner(w http.ResponseWriter, r *http.Request, v store.Runner, deleted bool) {
+	if deleted {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	a.writeRunner(w, r, v)
+}
+func (a *api) writeRunner(w http.ResponseWriter, r *http.Request, v store.Runner) {
 	reserved, err := a.service.Runners.CountReservations(r.Context(), []string{v.ID})
 	if err != nil {
 		writeAppError(w, err)
 		return
 	}
 	writeJSON(w, 200, a.runnerDTO(v, reserved[v.ID]))
+}
+func (a *api) writeRunnerCredential(w http.ResponseWriter, r *http.Request, v store.Runner, runnerToken string) {
+	w.Header().Set("Cache-Control", "no-store")
+	reserved, err := a.service.Runners.CountReservations(r.Context(), []string{v.ID})
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	writeJSON(w, 200, runnerCredentialResponse{Runner: a.runnerDTO(v, reserved[v.ID]), RunnerToken: runnerToken})
+}
+func projectRunnerIDs(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+	projectID, ok := pathUUID(w, r, "projectID")
+	if !ok {
+		return "", "", false
+	}
+	id, ok := resourceID(w, r)
+	if !ok {
+		return "", "", false
+	}
+	return projectID, id, true
 }

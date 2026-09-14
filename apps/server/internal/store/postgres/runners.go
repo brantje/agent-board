@@ -9,19 +9,19 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const runnerColumns = `id::text, COALESCE(name,''), token_hash, registration_token_hash, internal, registered_at, revoked_at, deleted_at, last_seen_at, capabilities, created_at, updated_at`
+const runnerColumns = `id::text, project_id::text, COALESCE(name,''), token_hash, registration_token_hash, internal, registered_at, revoked_at, deleted_at, last_seen_at, capabilities, created_at, updated_at`
 
 func scanRunner(row pgx.Row) (store.Runner, error) {
 	var v store.Runner
-	err := row.Scan(&v.ID, &v.Name, &v.TokenHash, &v.RegistrationTokenHash, &v.Internal, &v.RegisteredAt, &v.RevokedAt, &v.DeletedAt, &v.LastSeenAt, &v.Capabilities, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &v.ProjectID, &v.Name, &v.TokenHash, &v.RegistrationTokenHash, &v.Internal, &v.RegisteredAt, &v.RevokedAt, &v.DeletedAt, &v.LastSeenAt, &v.Capabilities, &v.CreatedAt, &v.UpdatedAt)
 	return v, notFound(err)
 }
 
 func (s *Store) CreateRunner(ctx context.Context, v store.Runner) (store.Runner, error) {
 	return scanRunner(s.pool.QueryRow(ctx, `
-		INSERT INTO runners (name,token_hash,registration_token_hash,internal,registered_at)
-		VALUES (NULLIF($1,''),$2,$3,$4,CASE WHEN $2::bytea IS NULL THEN NULL ELSE now() END)
-		RETURNING `+runnerColumns, v.Name, v.TokenHash, v.RegistrationTokenHash, v.Internal))
+		INSERT INTO runners (project_id,name,token_hash,registration_token_hash,internal,registered_at)
+		VALUES ($1,NULLIF($2,''),$3,$4,$5,CASE WHEN $3::bytea IS NULL THEN NULL ELSE now() END)
+		RETURNING `+runnerColumns, v.ProjectID, v.Name, v.TokenHash, v.RegistrationTokenHash, v.Internal))
 }
 
 func (s *Store) GetRunner(ctx context.Context, id string) (store.Runner, error) {

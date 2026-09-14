@@ -30,7 +30,11 @@ const global = {
       props: ['kind', 'projectId', 'resourceId'],
       template: '<div :data-kind="kind" />'
     },
-    RunnerManager: { template: '<div data-runner-manager />' }
+    RunnerManager: { template: '<div data-runner-manager />' },
+    ProjectRunnerSettings: {
+      props: ['projectId'],
+      template: '<div data-project-runner-settings :data-project="projectId" />'
+    }
   }
 }
 
@@ -68,12 +72,12 @@ describe('settings navigation helper', () => {
     expect(links.find(item => item.label === 'Project')?.to).toBe('/projects/p/settings')
     expect(links.find(item => item.label === 'Providers')?.to).toBe('/projects/p/settings/providers')
     expect(links.find(item => item.label === 'Model Profiles')?.to).toBe('/projects/p/settings/model-profiles')
+    expect(links.find(item => item.label === 'Runners')?.to).toBe('/projects/p/settings/runners')
     expect(links.find(item => item.label === 'Users')).toBeUndefined()
     expect(links.find(item => item.label === 'Groups')).toBeUndefined()
     expect(links.find(item => item.label === 'Authentication / Security')).toBeUndefined()
     expect(links.find(item => item.label === 'Runtimes')).toBeUndefined()
     expect(links.find(item => item.label === 'Agents')).toBeUndefined()
-    expect(links.find(item => item.label === 'Runners')).toBeUndefined()
     expect(links.find(item => item.label === 'Executor Profiles')).toBeUndefined()
   })
 })
@@ -143,6 +147,10 @@ describe('settings route wiring', () => {
             ProjectSettings: {
               props: ['projectId'],
               template: '<div data-project-settings :data-project="projectId" />'
+            },
+            ProjectRunnerSettings: {
+              props: ['projectId'],
+              template: '<div data-project-runner-settings :data-project="projectId" />'
             }
           }
         }
@@ -150,7 +158,13 @@ describe('settings route wiring', () => {
       expect(wrapper.find('[data-settings-shell]').exists()).toBe(true)
       if (path.endsWith('/settings/index.vue') && !path.includes('[projectID]')) continue
       if (path.endsWith('/settings/runners.vue')) {
-        expect(wrapper.find('[data-runner-manager]').exists()).toBe(true)
+        if (path.includes('[projectID]')) {
+          expect(wrapper.get('[data-project-runner-settings]').attributes('data-project')).toBe('project-a')
+          expect(wrapper.find('[data-runner-manager]').exists()).toBe(false)
+        } else {
+          expect(wrapper.find('[data-runner-manager]').exists()).toBe(true)
+          expect(wrapper.find('[data-project-runner-settings]').exists()).toBe(false)
+        }
         expect(wrapper.find('[data-kind]').exists()).toBe(false)
         continue
       }

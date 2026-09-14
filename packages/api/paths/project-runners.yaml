@@ -1,15 +1,27 @@
 projectRunnersResponse:
-  description: External runner allowlist for a Project. An empty list allows any connected external runner.
+  description: Dedicated Project runners plus deployment-global internal and shared runner capacity.
   content:
     application/json:
       schema:
         type: object
         additionalProperties: false
-        required: [runnerIds]
+        required: [runnerIds, projectRunners, sharedRunners, internalRunner]
         properties:
           runnerIds:
             type: array
             items: {type: string, format: uuid}
+          projectRunners:
+            type: array
+            items:
+              $ref: ../schemas/runners.yaml#/Runner
+          sharedRunners:
+            type: array
+            items:
+              $ref: ../schemas/runners.yaml#/Runner
+          internalRunner:
+            oneOf:
+              - $ref: ../schemas/runners.yaml#/Runner
+              - type: 'null'
 projectRunnersRequest:
   required: true
   content:
@@ -22,19 +34,85 @@ projectRunnersRequest:
           runnerIds:
             type: array
             items: {type: string, format: uuid}
-get:
-  operationId: getProjectRunners
-  responses:
-    '200':
-      $ref: '#/projectRunnersResponse'
-    default:
-      $ref: ../components/api-components.yaml#/responses/Error
-put:
-  operationId: setProjectRunners
-  requestBody:
-    $ref: '#/projectRunnersRequest'
-  responses:
-    '200':
-      $ref: '#/projectRunnersResponse'
-    default:
-      $ref: ../components/api-components.yaml#/responses/Error
+collection:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: getProjectRunners
+    security:
+      - BearerAuth: []
+    responses:
+      '200':
+        $ref: '#/projectRunnersResponse'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  put:
+    operationId: setProjectRunners
+    security:
+      - BearerAuth: []
+    requestBody:
+      $ref: '#/projectRunnersRequest'
+    responses:
+      '200':
+        $ref: '#/projectRunnersResponse'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createProjectRunner
+    security:
+      - BearerAuth: []
+    responses:
+      '201':
+        $ref: ./runners.yaml#/creationResponse
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+resource:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  patch:
+    operationId: updateProjectRunner
+    security:
+      - BearerAuth: []
+    requestBody:
+      $ref: ./runners.yaml#/nameInput
+    responses:
+      '200':
+        $ref: ./runners.yaml#/runnerResponse
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  delete:
+    operationId: deleteProjectRunner
+    security:
+      - BearerAuth: []
+    responses:
+      '204':
+        description: Permanently soft-deleted and revoked. Historical provenance is retained.
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+rotate:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  post:
+    operationId: rotateProjectRunnerToken
+    security:
+      - BearerAuth: []
+    responses:
+      '200':
+        $ref: ./runners.yaml#/credentialResponse
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+revoke:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  post:
+    operationId: revokeProjectRunner
+    security:
+      - BearerAuth: []
+    responses:
+      '200':
+        $ref: ./runners.yaml#/runnerResponse
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

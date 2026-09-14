@@ -1,9 +1,17 @@
 import type { Runner } from '../types/api'
 
+function runnerCapabilityStrings(runner: Runner, key: 'engines' | 'features'): string[] {
+  const values = runner.capabilities[key]
+  if (!Array.isArray(values)) return []
+  return values.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+}
+
 export function runnerEngines(runner: Runner): string[] {
-  const engines = runner.capabilities.engines
-  if (!Array.isArray(engines)) return []
-  return engines.filter((engine): engine is string => typeof engine === 'string' && engine.trim().length > 0)
+  return runnerCapabilityStrings(runner, 'engines')
+}
+
+export function runnerFeatures(runner: Runner): string[] {
+  return runnerCapabilityStrings(runner, 'features')
 }
 
 export function runnerSessionSummary(runner: Runner): string {

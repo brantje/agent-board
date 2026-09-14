@@ -16,6 +16,7 @@ export interface Project {
 
 export interface Runner {
   id: string
+  projectId: string | null
   name: string | null
   internal: boolean
   managed: boolean
@@ -30,6 +31,13 @@ export interface Runner {
   maxActiveSessions: number
   createdAt: string
   updatedAt: string
+}
+
+export interface ProjectRunnerSettings {
+  runnerIds: string[]
+  projectRunners: Runner[]
+  sharedRunners: Runner[]
+  internalRunner: Runner | null
 }
 
 export interface RepositorySettings {
