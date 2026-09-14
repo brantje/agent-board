@@ -11,9 +11,8 @@ import (
 )
 
 const (
-	issueStatusToolName      = "set_issue_status"
-	issueStatusToolSourceEnv = "AGENT_BOARD_OPENCODE_SET_ISSUE_STATUS_TOOL_SOURCE"
-	issueStatusToolSource    = `import { tool } from "@opencode-ai/plugin"
+	issueStatusToolName   = "set_issue_status"
+	issueStatusToolSource = `import { tool } from "@opencode-ai/plugin"
 
 export default tool({
   description: "Update the Board status of the current Agent Board Issue. This tool is scoped to the current Run and cannot target another Issue.",
@@ -27,16 +26,14 @@ export default tool({
 `
 )
 
-func issueStatusServeCommand(host, port string, env map[string]string) []string {
-	env[issueStatusToolSourceEnv] = issueStatusToolSource
+func issueStatusServeCommand(host, port string, _ map[string]string) []string {
 	const script = `set -eu
 config_home="${XDG_CONFIG_HOME:?XDG_CONFIG_HOME is required}"
 tool_dir="$config_home/opencode/tools"
 mkdir -p "$tool_dir"
-printf '%s' "$AGENT_BOARD_OPENCODE_SET_ISSUE_STATUS_TOOL_SOURCE" > "$tool_dir/set_issue_status.ts"
-unset AGENT_BOARD_OPENCODE_SET_ISSUE_STATUS_TOOL_SOURCE
+printf '%s' "$3" > "$tool_dir/set_issue_status.ts"
 exec opencode serve --hostname "$1" --port "$2"`
-	return []string{"sh", "-c", script, "agent-board-opencode", host, port}
+	return []string{"sh", "-c", script, "agent-board-opencode", host, port, issueStatusToolSource}
 }
 
 type issueStatusToolTracker struct {
