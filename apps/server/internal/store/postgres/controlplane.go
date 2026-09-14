@@ -57,16 +57,16 @@ func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue
 	return out, rows.Err()
 }
 
-func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
+func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return store.IssueMutationResult{}, err
+		return store.Issue{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.ID)
 	if err != nil {
-		return store.IssueMutationResult{}, err
+		return store.Issue{}, err
 	}
 	previousStatus := previous.Status
 
@@ -77,22 +77,20 @@ func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue
 		RETURNING `+issueSelectColumns+`
 	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.Priority))
 	if err != nil {
-		return store.IssueMutationResult{}, err
+		return store.Issue{}, err
 	}
 	_, runEvent, err := enqueueIssueMutation(ctx, tx, updated, previousStatus, false, repositoryPath, defaultBranch)
 	if err != nil {
-		return store.IssueMutationResult{}, err
+		return store.Issue{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return store.IssueMutationResult{}, err
+		return store.Issue{}, err
 	}
 	updated.PreviousStatus = previousStatus
-	events := []store.Event{}
 	if runEvent.ID != "" {
-		events = append(events, runEvent)
 		updated.LastEvent = &runEvent
 	}
-	return store.IssueMutationResult{Issue: updated, Events: events}, nil
+	return updated, nil
 }
 
 func (s *Store) ListRuns(ctx context.Context, projectID string) ([]store.Run, error) {
