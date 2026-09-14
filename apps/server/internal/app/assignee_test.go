@@ -118,7 +118,7 @@ func TestAssigneeSharedAuthorizationActorAndPublication(t *testing.T) {
 	if _, err = svc.ListIssueAssignees(t.Context(), pid); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("directory error=%v", err)
 	}
-	unsupported := New(&fakeStore{})
+	unsupported := New(&missingProjectStore{})
 	if _, err = unsupported.SetIssueAssignee(t.Context(), pid, "issue", nil, nil); err == nil {
 		t.Fatal("missing store accepted")
 	}
