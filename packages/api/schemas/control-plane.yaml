@@ -168,7 +168,7 @@ ModelProfileInput:
   additionalProperties: false
   required: [providerId, name, model]
   properties:
-    providerId: {type: string, format: uuid}
+    providerId: {type: string}
     name: {type: string}
     model: {type: string}
     temperature: {type: [number, 'null'], minimum: 0, maximum: 2}
@@ -250,7 +250,7 @@ IssueCreator:
     name: {type: [string, 'null']}
 Issue:
   type: object
-  required: [id, projectId, number, title, description, status, priority, assignedTo, createdBy, createdAt, updatedAt, lastEvent]
+  required: [id, projectId, number, title, description, status, priority, boardPosition, assignedTo, createdBy, createdAt, updatedAt, lastEvent]
   properties:
     id: {$ref: '#/IssueKey'}
     projectId: {type: string, format: uuid}
@@ -263,6 +263,10 @@ Issue:
       minimum: 0
       maximum: 4
       description: Numeric v0.1 priority. 0 is the default/base priority and larger values mean higher relative priority.
+    boardPosition:
+      type: integer
+      minimum: 0
+      description: Canonical zero-based ordering position within the Issue's current Board status.
     assignedTo:
       oneOf:
       - {$ref: '#/Assignee'}
