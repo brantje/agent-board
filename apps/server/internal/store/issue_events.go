@@ -24,9 +24,10 @@ func NewIssueUpdatedEventWithActor(issue Issue, previousStatus string, actor jso
 
 func newIssueMutationEvent(eventType string, issue Issue, actor json.RawMessage, previousStatus string) (Event, error) {
 	payload := map[string]any{
-		"title":    issue.Title,
-		"status":   issue.Status,
-		"priority": issue.Priority,
+		"title":         issue.Title,
+		"status":        issue.Status,
+		"priority":      issue.Priority,
+		"boardPosition": issue.BoardPosition,
 	}
 	if eventType == "issue.status_changed" {
 		payload["previousStatus"] = previousStatus
