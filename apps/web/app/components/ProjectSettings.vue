@@ -111,7 +111,7 @@ async function saveStrictOrder(value: boolean) {
             </div>
             <div v-if="data.sourceType !== 'git'">
               <dt class="text-sm text-muted">Default branch</dt>
-              <dd>{{ data.defaultBranch }}</dd>
+              <dd class="font-mono">{{ data.defaultBranch }}</dd>
             </div>
           </dl>
         </UCard>
