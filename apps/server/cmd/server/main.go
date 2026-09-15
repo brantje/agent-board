@@ -406,6 +406,9 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git, setE
 	if err != nil {
 		return err
 	}
+	if services.ControlPlane != nil {
+		services.ControlPlane.SetIssueBoardSchedulerWaker(coordinator)
+	}
 	services.Scheduler = coordinator
 	return nil
 }
