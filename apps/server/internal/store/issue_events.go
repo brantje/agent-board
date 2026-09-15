@@ -14,10 +14,6 @@ func NewIssueCreatedEvent(issue Issue) (Event, error) {
 	return newIssueMutationEvent("issue.created", issue, actor, "")
 }
 
-func NewIssueUpdatedEvent(issue Issue, previousStatus string) (Event, error) {
-	return NewIssueUpdatedEventWithActor(issue, previousStatus, EmptyObject)
-}
-
 func NewIssueUpdatedEventWithActor(issue Issue, previousStatus string, actor json.RawMessage) (Event, error) {
 	eventType := "issue.updated"
 	if previousStatus != issue.Status {
