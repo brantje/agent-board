@@ -84,221 +84,241 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	job, run, agentID, modelProfileID, err := lockNextAdmissionCandidate(ctx, tx)
-	if errors.Is(err, errSchedulerConfigurationUnavailable) {
-		if err := deferQueuedJob(ctx, tx, job, schedulerConfigurationWaitReason, backoffMicros); err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
-	if errors.Is(err, store.ErrNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	occupied, err := workspaceAdmissionOccupied(ctx, tx, run)
-	if err != nil {
-		return nil, err
-	}
-	if occupied {
-		if err := deferQueuedJob(ctx, tx, job, store.SchedulerWaitWorkspace, backoffMicros); err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
-
-	agentLimit, modelLimit, err := lockAdmissionResources(ctx, tx, agentID, modelProfileID)
-	if err != nil {
-		return nil, err
-	}
-
-	agentUsed, err := countCapacityReservations(ctx, tx, "AGENT", agentID)
-	if err != nil {
-		return nil, err
-	}
-	if agentUsed >= agentLimit {
-		if err := deferQueuedJob(ctx, tx, job, store.SchedulerWaitAgentCapacity, backoffMicros); err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
-
-	if modelLimit != nil {
-		modelUsed, err := countCapacityReservations(ctx, tx, "MODEL_PROFILE", modelProfileID)
-		if err != nil {
-			return nil, err
-		}
-		if modelUsed >= *modelLimit {
-			if err := deferQueuedJob(ctx, tx, job, store.SchedulerWaitModelCapacity, backoffMicros); err != nil {
+	for {
+		job, run, agentID, modelProfileID, strictOrder, err := lockNextAdmissionCandidate(ctx, tx)
+		if errors.Is(err, errSchedulerConfigurationUnavailable) {
+			if err := deferQueuedJob(ctx, tx, job, schedulerConfigurationWaitReason, backoffMicros); err != nil {
 				return nil, err
+			}
+			if strictOrder {
+				continue
 			}
 			if err := tx.Commit(ctx); err != nil {
 				return nil, err
 			}
 			return nil, nil
 		}
-	}
-
-	runnerID, err := s.lockRunnerCandidate(ctx, tx, run.ProjectID, agentID)
-	if errors.Is(err, store.ErrNotFound) {
-		if err := deferQueuedJob(ctx, tx, job, "runner_capacity", backoffMicros); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			if err := tx.Commit(ctx); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		}
+		if err != nil {
 			return nil, err
 		}
-		return nil, tx.Commit(ctx)
-	}
-	if err != nil {
-		return nil, err
-	}
-	if err := insertCapacityReservation(ctx, tx, job, run, "RUNNER", runnerID); err != nil {
-		return nil, err
-	}
-	if err := insertCapacityReservation(ctx, tx, job, run, "AGENT", agentID); err != nil {
-		return nil, err
-	}
-	if err := insertCapacityReservation(ctx, tx, job, run, "MODEL_PROFILE", modelProfileID); err != nil {
-		return nil, err
-	}
 
-	lease, err := scanSchedulerLease(tx.QueryRow(ctx, `
-		INSERT INTO scheduler_leases (job_id, owner_id, expires_at)
-		VALUES ($1, $2, now() + ($3::bigint * interval '1 microsecond'))
-		RETURNING job_id::text, owner_id, lease_token::text, acquired_at, expires_at
-	`, job.ID, ownerID, leaseMicros))
-	if err != nil {
-		return nil, err
-	}
+		occupied, err := workspaceAdmissionOccupied(ctx, tx, run)
+		if err != nil {
+			return nil, err
+		}
+		if occupied {
+			if err := deferQueuedJob(ctx, tx, job, store.SchedulerWaitWorkspace, backoffMicros); err != nil {
+				return nil, err
+			}
+			if strictOrder {
+				continue
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		}
 
-	job, err = scanSchedulerJob(tx.QueryRow(ctx, `
-		UPDATE scheduler_jobs
-		SET state='CLAIMED', wait_reason=NULL, updated_at=now()
-		WHERE id=$1 AND project_id=$2 AND run_id=$3 AND state='QUEUED'
-		RETURNING id::text, project_id::text, run_id::text, kind, state, wait_reason, idempotency_key, available_at, created_at, updated_at
-	`, job.ID, job.ProjectID, job.RunID))
-	if err != nil {
-		return nil, err
-	}
+		agentLimit, modelLimit, err := lockAdmissionResources(ctx, tx, agentID, modelProfileID)
+		if err != nil {
+			return nil, err
+		}
 
-	run, err = scanRun(tx.QueryRow(ctx, `
-		UPDATE runs
-		SET status='STARTING', queue_reason=NULL, started_at=COALESCE(started_at, now()), updated_at=now()
-		WHERE project_id=$1 AND id=$2 AND status='QUEUED'
-		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-	`, run.ProjectID, run.ID))
-	if err != nil {
-		return nil, err
-	}
+		agentUsed, err := countCapacityReservations(ctx, tx, "AGENT", agentID)
+		if err != nil {
+			return nil, err
+		}
+		if agentUsed >= agentLimit {
+			if err := deferQueuedJob(ctx, tx, job, store.SchedulerWaitAgentCapacity, backoffMicros); err != nil {
+				return nil, err
+			}
+			if strictOrder {
+				continue
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		}
 
-	if err := tx.Commit(ctx); err != nil {
-		return nil, err
+		if modelLimit != nil {
+			modelUsed, err := countCapacityReservations(ctx, tx, "MODEL_PROFILE", modelProfileID)
+			if err != nil {
+				return nil, err
+			}
+			if modelUsed >= *modelLimit {
+				if err := deferQueuedJob(ctx, tx, job, store.SchedulerWaitModelCapacity, backoffMicros); err != nil {
+					return nil, err
+				}
+				if strictOrder {
+					continue
+				}
+				if err := tx.Commit(ctx); err != nil {
+					return nil, err
+				}
+				return nil, nil
+			}
+		}
+
+		runnerID, err := s.lockRunnerCandidate(ctx, tx, run.ProjectID, agentID)
+		if errors.Is(err, store.ErrNotFound) {
+			if err := deferQueuedJob(ctx, tx, job, "runner_capacity", backoffMicros); err != nil {
+				return nil, err
+			}
+			if strictOrder {
+				continue
+			}
+			return nil, tx.Commit(ctx)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := insertCapacityReservation(ctx, tx, job, run, "RUNNER", runnerID); err != nil {
+			return nil, err
+		}
+		if err := insertCapacityReservation(ctx, tx, job, run, "AGENT", agentID); err != nil {
+			return nil, err
+		}
+		if err := insertCapacityReservation(ctx, tx, job, run, "MODEL_PROFILE", modelProfileID); err != nil {
+			return nil, err
+		}
+
+		lease, err := scanSchedulerLease(tx.QueryRow(ctx, `
+			INSERT INTO scheduler_leases (job_id, owner_id, expires_at)
+			VALUES ($1, $2, now() + ($3::bigint * interval '1 microsecond'))
+			RETURNING job_id::text, owner_id, lease_token::text, acquired_at, expires_at
+		`, job.ID, ownerID, leaseMicros))
+		if err != nil {
+			return nil, err
+		}
+
+		job, err = scanSchedulerJob(tx.QueryRow(ctx, `
+			UPDATE scheduler_jobs
+			SET state='CLAIMED', wait_reason=NULL, updated_at=now()
+			WHERE id=$1 AND project_id=$2 AND run_id=$3 AND state='QUEUED'
+			RETURNING id::text, project_id::text, run_id::text, kind, state, wait_reason, idempotency_key, available_at, created_at, updated_at
+		`, job.ID, job.ProjectID, job.RunID))
+		if err != nil {
+			return nil, err
+		}
+
+		run, err = scanRun(tx.QueryRow(ctx, `
+			UPDATE runs
+			SET status='STARTING', queue_reason=NULL, started_at=COALESCE(started_at, now()), updated_at=now()
+			WHERE project_id=$1 AND id=$2 AND status='QUEUED'
+			RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+		`, run.ProjectID, run.ID))
+		if err != nil {
+			return nil, err
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return &store.SchedulerAdmission{
+			RunnerID:       runnerID,
+			Job:            job,
+			Lease:          lease,
+			Run:            run,
+			AgentID:        agentID,
+			ModelProfileID: modelProfileID,
+		}, nil
 	}
-	return &store.SchedulerAdmission{
-		RunnerID:       runnerID,
-		Job:            job,
-		Lease:          lease,
-		Run:            run,
-		AgentID:        agentID,
-		ModelProfileID: modelProfileID,
-	}, nil
 }
 
-func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.SchedulerJob, store.Run, string, string, error) {
+func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.SchedulerJob, store.Run, string, string, bool, error) {
 	var job store.SchedulerJob
 	var run store.Run
 	var agentID, modelProfileID *string
+	var strictOrder bool
 	err := tx.QueryRow(ctx, `
+		WITH ready AS (
+			SELECT
+				job.id AS job_id,
+				job.project_id,
+				job.created_at AS job_created_at,
+				run.id AS run_id,
+				issue.id AS issue_id,
+				issue.status AS issue_status,
+				issue.board_position,
+				COALESCE(project.workflow_settings->'strictOrder' = 'true'::jsonb, false) AS strict_order
+			FROM scheduler_jobs AS job
+			JOIN runs AS run ON run.project_id=job.project_id AND run.id=job.run_id
+			JOIN issues AS issue ON issue.project_id=run.project_id AND issue.id=run.issue_id
+			JOIN projects AS project ON project.id=job.project_id
+			WHERE job.state='QUEUED'
+			  AND job.available_at <= now()
+			  AND run.status='QUEUED'
+		), ranked AS (
+			SELECT
+				ready.*,
+				row_number() OVER (
+					PARTITION BY ready.project_id
+					ORDER BY
+						COALESCE(array_position(ARRAY['TODO','IN_PROGRESS','BLOCKED','REVIEW']::text[], ready.issue_status), 99),
+						ready.board_position,
+						ready.job_created_at,
+						ready.job_id
+				) AS strict_rank
+			FROM ready
+			WHERE NOT ready.strict_order
+			   OR (
+				ready.issue_status = ANY(ARRAY['TODO','IN_PROGRESS','BLOCKED','REVIEW']::text[])
+				AND NOT EXISTS (
+					SELECT 1
+					FROM issue_relationships AS rel
+					JOIN issues AS dependency
+					  ON dependency.project_id=rel.project_id
+					 AND dependency.id=CASE WHEN rel.type='depends_on' THEN rel.target_issue_id ELSE rel.source_issue_id END
+					WHERE rel.project_id=ready.project_id
+					  AND ((rel.type='depends_on' AND rel.source_issue_id=ready.issue_id) OR (rel.type='blocks' AND rel.target_issue_id=ready.issue_id))
+					  AND dependency.status<>'DONE'
+				)
+				AND NOT EXISTS (
+					SELECT 1
+					FROM runs AS peer
+					WHERE peer.project_id=ready.project_id
+					  AND peer.issue_id=ready.issue_id
+					  AND peer.id<>ready.run_id
+					  AND peer.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT','PAUSED','READY_FOR_REVIEW')
+				)
+			   )
+		)
 		SELECT
 			job.id::text, job.project_id::text, job.run_id::text, job.kind, job.state, job.wait_reason, job.idempotency_key, job.available_at, job.created_at, job.updated_at,
 			run.id::text, run.project_id::text, run.issue_id::text, run.workspace_id::text, run.agent_id::text, run.attempt, run.status, run.queue_reason, run.failure_reason, run.created_at, run.started_at, run.completed_at, run.updated_at,
-			agent.id::text, model.id::text
-		FROM scheduler_jobs AS job
+			agent.id::text, model.id::text, candidate.strict_order
+		FROM ranked AS candidate
+		JOIN scheduler_jobs AS job ON job.id=candidate.job_id
 		JOIN runs AS run ON run.project_id=job.project_id AND run.id=job.run_id
-		JOIN issues AS issue ON issue.project_id=run.project_id AND issue.id=run.issue_id
-		JOIN projects AS project ON project.id=job.project_id
 		LEFT JOIN agents AS agent
 		  ON agent.id=run.agent_id
 		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
 		LEFT JOIN model_profiles AS model
 		  ON model.id=agent.model_profile_id
 		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
-		WHERE job.state='QUEUED'
-		  AND job.available_at <= now()
-		  AND run.status='QUEUED'
-		  AND (
-			COALESCE((project.workflow_settings->>'strictOrder')::boolean, false) = false
-			OR (
-			  NOT EXISTS (
-				SELECT 1
-				FROM issue_relationships AS rel
-				JOIN issues AS dependency
-				  ON dependency.project_id=rel.project_id
-				 AND dependency.id=CASE WHEN rel.type='depends_on' THEN rel.target_issue_id ELSE rel.source_issue_id END
-				WHERE rel.project_id=issue.project_id
-				  AND ((rel.type='depends_on' AND rel.source_issue_id=issue.id) OR (rel.type='blocks' AND rel.target_issue_id=issue.id))
-				  AND dependency.status<>'DONE'
-			  )
-			  AND NOT EXISTS (
-				SELECT 1 FROM runs AS peer
-				WHERE peer.project_id=run.project_id AND peer.issue_id=run.issue_id AND peer.id<>run.id
-				  AND peer.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT','PAUSED','READY_FOR_REVIEW')
-			  )
-			  AND NOT EXISTS (
-				SELECT 1
-				FROM scheduler_jobs AS prior_job
-				JOIN runs AS prior_run ON prior_run.project_id=prior_job.project_id AND prior_run.id=prior_job.run_id
-				JOIN issues AS prior_issue ON prior_issue.project_id=prior_run.project_id AND prior_issue.id=prior_run.issue_id
-				WHERE prior_job.project_id=job.project_id
-				  AND prior_job.state='QUEUED' AND prior_run.status='QUEUED'
-				  AND NOT EXISTS (
-					SELECT 1
-					FROM issue_relationships AS prior_rel
-					JOIN issues AS prior_dependency
-					  ON prior_dependency.project_id=prior_rel.project_id
-					 AND prior_dependency.id=CASE WHEN prior_rel.type='depends_on' THEN prior_rel.target_issue_id ELSE prior_rel.source_issue_id END
-					WHERE prior_rel.project_id=prior_issue.project_id
-					  AND ((prior_rel.type='depends_on' AND prior_rel.source_issue_id=prior_issue.id) OR (prior_rel.type='blocks' AND prior_rel.target_issue_id=prior_issue.id))
-					  AND prior_dependency.status<>'DONE'
-				  )
-				  AND NOT EXISTS (
-					SELECT 1 FROM runs AS prior_peer
-					WHERE prior_peer.project_id=prior_run.project_id AND prior_peer.issue_id=prior_run.issue_id AND prior_peer.id<>prior_run.id
-					  AND prior_peer.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT','PAUSED','READY_FOR_REVIEW')
-				  )
-				  AND ROW(
-					COALESCE(array_position(ARRAY['TODO','IN_PROGRESS','BLOCKED','REVIEW']::text[], prior_issue.status), 99),
-					prior_issue.board_position, prior_job.created_at, prior_job.id
-				  ) < ROW(
-					COALESCE(array_position(ARRAY['TODO','IN_PROGRESS','BLOCKED','REVIEW']::text[], issue.status), 99),
-					issue.board_position, job.created_at, job.id
-				  )
-			  )
-			)
-		  )
+		WHERE NOT candidate.strict_order OR candidate.strict_rank=1
 		ORDER BY job.available_at, job.created_at, job.id
 		FOR UPDATE OF job, run SKIP LOCKED
 		LIMIT 1
 	`).Scan(
 		&job.ID, &job.ProjectID, &job.RunID, &job.Kind, &job.State, &job.WaitReason, &job.IdempotencyKey, &job.AvailableAt, &job.CreatedAt, &job.UpdatedAt,
 		&run.ID, &run.ProjectID, &run.IssueID, &run.WorkspaceID, &run.AgentID, &run.Attempt, &run.Status, &run.QueueReason, &run.FailureReason, &run.CreatedAt, &run.StartedAt, &run.CompletedAt, &run.UpdatedAt,
-		&agentID, &modelProfileID,
+		&agentID, &modelProfileID, &strictOrder,
 	)
 	if err != nil {
-		return store.SchedulerJob{}, store.Run{}, "", "", notFound(err)
+		return store.SchedulerJob{}, store.Run{}, "", "", false, notFound(err)
 	}
 	if agentID == nil || modelProfileID == nil {
-		return job, run, "", "", errSchedulerConfigurationUnavailable
+		return job, run, "", "", strictOrder, errSchedulerConfigurationUnavailable
 	}
-	return job, run, *agentID, *modelProfileID, nil
+	return job, run, *agentID, *modelProfileID, strictOrder, nil
 }
 
 // workspaceAdmissionOccupied serializes admission for Runs that share the
