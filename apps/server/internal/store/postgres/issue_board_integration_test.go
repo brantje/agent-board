@@ -184,7 +184,7 @@ func TestIssueBoardCrossStatusPlacementUsesSharedMutationAutomation(t *testing.T
 	}
 }
 
-func TestIssueBoardConcurrentPlacementLastSuccessfulWriteWins(t *testing.T) {
+func TestIssueBoardConcurrentPlacementsRemainCanonicalAndLatestWriteWins(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	project, err := s.CreateProject(ctx, store.Project{
@@ -204,46 +204,68 @@ func TestIssueBoardConcurrentPlacementLastSuccessfulWriteWins(t *testing.T) {
 	}
 	a, b, c, d := create("a"), create("b"), create("c"), create("d")
 
-	completed := make(chan string, 2)
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
-	placements := []struct {
-		name   string
-		before string
-	}{{name: "front", before: a.ID}, {name: "middle", before: c.ID}}
-	for _, placement := range placements {
-		placement := placement
+	for _, before := range []string{a.ID, c.ID} {
+		before := before
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			_, err := s.PlaceIssue(ctx, store.IssueBoardPlacement{
-				ProjectID: project.ID, IssueID: d.ID, Status: "TODO", BeforeIssueID: &placement.before,
+				ProjectID: project.ID, IssueID: d.ID, Status: "TODO", BeforeIssueID: &before,
 			})
 			if err != nil {
 				errs <- err
-				return
 			}
-			completed <- placement.name
 		}()
 	}
 	wg.Wait()
 	close(errs)
-	close(completed)
 	for err := range errs {
 		t.Fatalf("concurrent placement error=%v", err)
 	}
-	var order []string
-	for name := range completed {
-		order = append(order, name)
+
+	// Both concurrent writes must leave one canonical, gap-free ordering. The
+	// exact winner is intentionally unspecified until a later successful write.
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, board_position FROM issues
+		WHERE project_id=$1 AND status='TODO'
+		ORDER BY board_position, id
+	`, project.ID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(order) != 2 {
-		t.Fatalf("completed placements=%v want 2", order)
+	seen := map[string]bool{}
+	position := int64(0)
+	for rows.Next() {
+		var id string
+		var gotPosition int64
+		if err := rows.Scan(&id, &gotPosition); err != nil {
+			rows.Close()
+			t.Fatal(err)
+		}
+		if seen[id] || gotPosition != position {
+			rows.Close()
+			t.Fatalf("corrupt concurrent board id=%s position=%d expected=%d seen=%v", id, gotPosition, position, seen)
+		}
+		seen[id] = true
+		position++
 	}
-	if order[1] == "front" {
-		assertBoardOrder(t, s, project.ID, "TODO", []string{d.ID, a.ID, b.ID, c.ID})
-	} else {
-		assertBoardOrder(t, s, project.ID, "TODO", []string{a.ID, b.ID, d.ID, c.ID})
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
+	if len(seen) != 4 || !seen[a.ID] || !seen[b.ID] || !seen[c.ID] || !seen[d.ID] {
+		t.Fatalf("concurrent board lost or duplicated issues: %v", seen)
+	}
+
+	before := b.ID
+	if _, err := s.PlaceIssue(ctx, store.IssueBoardPlacement{
+		ProjectID: project.ID, IssueID: d.ID, Status: "TODO", BeforeIssueID: &before,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertBoardOrder(t, s, project.ID, "TODO", []string{a.ID, d.ID, b.ID, c.ID})
 }
 
 func assertBoardOrder(t *testing.T, s *Store, projectID, status string, want []string) {
