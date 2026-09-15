@@ -83,6 +83,7 @@ type IssueDTO struct {
 	Description   string           `json:"description"`
 	Status        string           `json:"status"`
 	Priority      int              `json:"priority"`
+	BoardPosition int64            `json:"boardPosition"`
 	AssignedTo    *AssigneeDTO     `json:"assignedTo"`
 	CreatedBy     *ActorDTO        `json:"createdBy,omitempty"`
 	CurrentBranch *string          `json:"currentBranch,omitempty"`
@@ -92,10 +93,10 @@ type IssueDTO struct {
 }
 
 type CreateIssueInput struct {
-	ProjectID  string `json:"projectId" jsonschema:"Agent Board Project UUID"`
-	Title      string `json:"title" jsonschema:"Issue title"`
+	ProjectID   string `json:"projectId" jsonschema:"Agent Board Project UUID"`
+	Title       string `json:"title" jsonschema:"Issue title"`
 	Description string `json:"description,omitempty" jsonschema:"Issue description"`
-	Priority   *int   `json:"priority,omitempty" jsonschema:"priority from 0 through 4"`
+	Priority    *int   `json:"priority,omitempty" jsonschema:"priority from 0 through 4"`
 }
 
 type UpdateIssueInput struct {
@@ -112,6 +113,13 @@ type SetIssueStatusInput struct {
 	ProjectID string      `json:"projectId" jsonschema:"Agent Board Project UUID"`
 	IssueID   string      `json:"issueId" jsonschema:"public Issue key, for example AB-123"`
 	Status    IssueStatus `json:"status" jsonschema:"explicit Board status"`
+}
+
+type PlaceIssueInput struct {
+	ProjectID     string      `json:"projectId" jsonschema:"Agent Board Project UUID"`
+	IssueID       string      `json:"issueId" jsonschema:"public Issue key to move, for example AB-123"`
+	Status        IssueStatus `json:"status" jsonschema:"destination Board status"`
+	BeforeIssueID *string     `json:"beforeIssueId,omitempty" jsonschema:"public Issue key to place this Issue before; omit or null to place it at the end of the destination column"`
 }
 
 type AssigneeType string
@@ -258,20 +266,26 @@ type ReadRunOutputInput struct {
 }
 
 type ReadRunOutputDTO struct {
-	Chunk   RawOutputChunkDTO `json:"chunk"`
-	Content string            `json:"content"`
+	ID      string `json:"id"`
+	Content string `json:"content"`
 }
 
 type ListQuestionsInput struct {
-	ProjectID string   `json:"projectId" jsonschema:"Agent Board Project UUID"`
-	IssueID   *string  `json:"issueId,omitempty" jsonschema:"optional public Issue key"`
-	RunID     *string  `json:"runId,omitempty" jsonschema:"optional Run UUID"`
-	Statuses  []string `json:"statuses,omitempty" jsonschema:"optional Question status filters"`
+	ProjectID string  `json:"projectId" jsonschema:"Agent Board Project UUID"`
+	Status    *string `json:"status,omitempty" jsonschema:"optional Question status filter"`
 }
 
 type QuestionInput struct {
 	ProjectID  string `json:"projectId" jsonschema:"Agent Board Project UUID"`
 	QuestionID string `json:"questionId" jsonschema:"Question UUID"`
+}
+
+type AnswerQuestionInput struct {
+	ProjectID  string   `json:"projectId" jsonschema:"Agent Board Project UUID"`
+	QuestionID string   `json:"questionId" jsonschema:"Question UUID"`
+	Kind       string   `json:"kind" jsonschema:"answer kind"`
+	Text       string   `json:"text,omitempty" jsonschema:"answer text"`
+	OptionIDs  []string `json:"optionIds,omitempty" jsonschema:"selected option IDs"`
 }
 
 type QuestionDTO struct {
@@ -281,7 +295,7 @@ type QuestionDTO struct {
 	RunID          string     `json:"runId"`
 	Prompt         string     `json:"prompt"`
 	Kind           string     `json:"kind"`
-	Options        any        `json:"options,omitempty"`
+	Options        any        `json:"options"`
 	Recommendation *string    `json:"recommendation,omitempty"`
 	Custom         bool       `json:"custom"`
 	Blocking       bool       `json:"blocking"`
@@ -290,44 +304,34 @@ type QuestionDTO struct {
 	AnsweredAt     *time.Time `json:"answeredAt,omitempty"`
 }
 
-type AnswerQuestionInput struct {
-	ProjectID  string   `json:"projectId" jsonschema:"Agent Board Project UUID"`
-	QuestionID string   `json:"questionId" jsonschema:"Question UUID"`
-	Kind       string   `json:"kind" jsonschema:"answer kind expected by the Question"`
-	Text       *string  `json:"text,omitempty"`
-	OptionIDs  []string `json:"optionIds,omitempty"`
-}
-
 type DecisionDTO struct {
-	ID          string    `json:"id"`
-	ProjectID   string    `json:"projectId"`
-	IssueID     *string   `json:"issueId,omitempty"`
-	RunID       *string   `json:"runId,omitempty"`
-	QuestionID  *string   `json:"questionId,omitempty"`
-	Kind        string    `json:"kind"`
-	Outcome     string    `json:"outcome"`
-	ActorType   string    `json:"actorType"`
-	ActorID     *string   `json:"actorId,omitempty"`
-	SafeDetails any       `json:"safeDetails,omitempty"`
-	CreatedAt   time.Time `json:"createdAt"`
-}
-
-type AnswerQuestionDTO struct {
-	Question           QuestionDTO `json:"question"`
-	Decision           DecisionDTO `json:"decision"`
-	Run                RunDTO      `json:"run"`
-	ContinuationQueued bool        `json:"continuationQueued"`
+	ID         string    `json:"id"`
+	ProjectID  string    `json:"projectId"`
+	IssueID    *string   `json:"issueId,omitempty"`
+	RunID      *string   `json:"runId,omitempty"`
+	QuestionID *string   `json:"questionId,omitempty"`
+	Kind       string    `json:"kind"`
+	Outcome    string    `json:"outcome"`
+	ActorType  string    `json:"actorType"`
+	ActorID    *string   `json:"actorId,omitempty"`
+	SafeDetails any      `json:"safeDetails,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 type ListReviewsInput struct {
-	ProjectID string   `json:"projectId" jsonschema:"Agent Board Project UUID"`
-	IssueID   *string  `json:"issueId,omitempty" jsonschema:"optional public Issue key"`
-	Statuses  []string `json:"statuses,omitempty" jsonschema:"optional Review status filters"`
+	ProjectID string  `json:"projectId" jsonschema:"Agent Board Project UUID"`
+	Status    *string `json:"status,omitempty" jsonschema:"optional Review status filter"`
 }
 
 type ReviewInput struct {
 	ProjectID string `json:"projectId" jsonschema:"Agent Board Project UUID"`
 	ReviewID  string `json:"reviewId" jsonschema:"Review UUID"`
+}
+
+type RequestReviewChangesInput struct {
+	ProjectID string `json:"projectId" jsonschema:"Agent Board Project UUID"`
+	ReviewID  string `json:"reviewId" jsonschema:"Review UUID"`
+	Feedback  string `json:"feedback" jsonschema:"human review feedback"`
 }
 
 type ReviewDTO struct {
@@ -337,30 +341,10 @@ type ReviewDTO struct {
 	RunID          string     `json:"runId"`
 	Status         string     `json:"status"`
 	DecisionID     *string    `json:"decisionId,omitempty"`
-	BaseRevision   string     `json:"baseRevision"`
-	ReviewRevision string     `json:"reviewRevision"`
+	BaseRevision   *string    `json:"baseRevision,omitempty"`
+	ReviewRevision *string    `json:"reviewRevision,omitempty"`
 	RequestedAt    time.Time  `json:"requestedAt"`
 	DecidedAt      *time.Time `json:"decidedAt,omitempty"`
 	CreatedAt      time.Time  `json:"createdAt"`
 	UpdatedAt      time.Time  `json:"updatedAt"`
-}
-
-type ReviewInspectionDTO struct {
-	Review     ReviewDTO      `json:"review"`
-	Decision   *DecisionDTO   `json:"decision,omitempty"`
-	Evidence   RunEvidenceDTO `json:"evidence"`
-	TestStatus string         `json:"testStatus"`
-}
-
-type ReviewDecisionDTO struct {
-	Review   ReviewDTO   `json:"review"`
-	Decision DecisionDTO `json:"decision"`
-	Run      RunDTO      `json:"run"`
-	Issue    IssueDTO    `json:"issue"`
-}
-
-type RequestReviewChangesInput struct {
-	ProjectID string `json:"projectId" jsonschema:"Agent Board Project UUID"`
-	ReviewID  string `json:"reviewId" jsonschema:"Review UUID"`
-	Feedback  string `json:"feedback" jsonschema:"human Review feedback persisted with the Decision"`
 }
