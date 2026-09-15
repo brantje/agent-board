@@ -19,10 +19,11 @@ func TestRenewLeaseWaitsForRunLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	claimed, lease, err := s.ClaimNextJob(t.Context(), "worker", time.Minute)
-	if err != nil || claimed == nil || lease == nil || claimed.ID != job.ID {
-		t.Fatalf("claim job=%+v lease=%+v err=%v", claimed, lease, err)
+	admission, err := s.AdmitNextJob(t.Context(), "worker", time.Minute, time.Second)
+	if err != nil || admission == nil || admission.Job.ID != job.ID {
+		t.Fatalf("admission=%+v err=%v", admission, err)
 	}
+	lease := admission.Lease
 
 	lockTx, err := s.pool.Begin(t.Context())
 	if err != nil {
