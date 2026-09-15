@@ -21,13 +21,11 @@ func (s *reviewContinuationEventStore) RequestReviewChanges(_ context.Context, c
 }
 
 func TestReviewRequestChangesPublishesContinuationCreatedEvent(t *testing.T) {
-	base := &reviewServiceStore{}
-	service, err := NewReviewService(&reviewContinuationEventStore{reviewServiceStore: base}, base, nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	publisher := &capturingPublisher{}
-	service.SetPersistedEventPublisher(publisher)
+	service := &ReviewService{
+		store:     &reviewContinuationEventStore{reviewServiceStore: &reviewServiceStore{}},
+		publisher: publisher,
+	}
 
 	result, err := service.RequestChanges(t.Context(), "project-1", "review-1", "fix it", nil)
 	if err != nil {
