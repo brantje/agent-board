@@ -6,13 +6,13 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestFailedRunRecoveryReturnsExactlyPersistedStatusEvent(t *testing.T) {
+func TestFailedRunPreservesExplicitIssueStatus(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
-	f := seedRunFixture(t, s, "failed-recovery-event-result")
+	f := seedRunFixture(t, s, "failed-status-independent")
 	setFixtureIssueStatus(t, s, f, "IN_PROGRESS")
-	enqueueFixtureRun(t, s, f, f.run, "failed-recovery-event-result")
-	admission := mustAdmit(t, s, "failed-recovery-event-result-worker")
+	enqueueFixtureRun(t, s, f, f.run, "failed-status-independent")
+	admission := mustAdmit(t, s, "failed-status-independent-worker")
 	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
 		ProjectID: f.project.ID, JobID: admission.Job.ID, RunID: f.run.ID,
 		LeaseToken: admission.Lease.LeaseToken, RunStatus: "RUNNING",
@@ -27,36 +27,23 @@ func TestFailedRunRecoveryReturnsExactlyPersistedStatusEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed transition mutation: %v", err)
 	}
-	if len(result.Events) != 1 {
-		t.Fatalf("mutation events=%d want 1", len(result.Events))
+	if len(result.Events) != 0 {
+		t.Fatalf("mutation events=%+v want no Issue status Events", result.Events)
 	}
-	event := result.Events[0]
-	if event.Type != "issue.status_changed" || event.RunID == nil || *event.RunID != f.run.ID ||
-		event.AgentID == nil || *event.AgentID != f.agent.ID || event.WorkspaceID == nil || *event.WorkspaceID != f.workspace.ID {
-		t.Fatalf("recovery event=%+v", event)
+	if result.Run.Status != "FAILED" {
+		t.Fatalf("Run status=%s want FAILED", result.Run.Status)
 	}
-	assertStatusEventPayload(t, event.Payload, "IN_PROGRESS", "TODO")
-
-	var persisted int
-	if err := s.pool.QueryRow(ctx, `
-		SELECT count(*) FROM events
-		WHERE id=$1 AND project_id=$2 AND issue_id=$3 AND type='issue.status_changed'
-	`, event.ID, f.project.ID, f.issue.ID).Scan(&persisted); err != nil {
-		t.Fatalf("count persisted recovery Event: %v", err)
-	}
-	if persisted != 1 {
-		t.Fatalf("persisted recovery Event count=%d want 1", persisted)
-	}
-	assertFixtureIssueStatus(t, s, f, "TODO")
+	assertFixtureIssueStatus(t, s, f, "IN_PROGRESS")
+	assertIssueStatusEventCount(t, s, f, 0)
 }
 
-func TestFailedRunWithoutIssueRecoveryReturnsNoStatusEvent(t *testing.T) {
+func TestFailedRunPreservesOtherExplicitIssueStatus(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
-	f := seedRunFixture(t, s, "failed-no-recovery-event")
+	f := seedRunFixture(t, s, "failed-blocked-independent")
 	setFixtureIssueStatus(t, s, f, "BLOCKED")
-	enqueueFixtureRun(t, s, f, f.run, "failed-no-recovery-event")
-	admission := mustAdmit(t, s, "failed-no-recovery-event-worker")
+	enqueueFixtureRun(t, s, f, f.run, "failed-blocked-independent")
+	admission := mustAdmit(t, s, "failed-blocked-independent-worker")
 	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
 		ProjectID: f.project.ID, JobID: admission.Job.ID, RunID: f.run.ID,
 		LeaseToken: admission.Lease.LeaseToken, RunStatus: "RUNNING",
@@ -78,13 +65,13 @@ func TestFailedRunWithoutIssueRecoveryReturnsNoStatusEvent(t *testing.T) {
 	assertIssueStatusEventCount(t, s, f, 0)
 }
 
-func TestFailedReconciliationReturnsPersistedRecoveryStatusEvent(t *testing.T) {
+func TestFailedReconciliationPreservesExplicitIssueStatus(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
-	f := seedRunFixture(t, s, "failed-reconciliation-event-result")
+	f := seedRunFixture(t, s, "failed-reconciliation-status-independent")
 	setFixtureIssueStatus(t, s, f, "IN_PROGRESS")
-	enqueueFixtureRun(t, s, f, f.run, "failed-reconciliation-event-result")
-	admission := mustAdmit(t, s, "failed-reconciliation-event-worker")
+	enqueueFixtureRun(t, s, f, f.run, "failed-reconciliation-status-independent")
+	admission := mustAdmit(t, s, "failed-reconciliation-status-independent-worker")
 	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
 		ProjectID: f.project.ID, JobID: admission.Job.ID, RunID: f.run.ID,
 		LeaseToken: admission.Lease.LeaseToken, RunStatus: "RUNNING",
@@ -92,7 +79,7 @@ func TestFailedReconciliationReturnsPersistedRecoveryStatusEvent(t *testing.T) {
 		t.Fatalf("mark running: %v", err)
 	}
 	expireLease(t, s, admission.Job.ID)
-	reconciled := mustClaimReconciliation(t, s, "failed-reconciliation-event-reconciler")
+	reconciled := mustClaimReconciliation(t, s, "failed-reconciliation-status-independent-reconciler")
 	failure := "external execution failed"
 	result, err := s.ResolveReconciliationMutation(ctx, store.SchedulerReconciliation{
 		ProjectID: f.project.ID, JobID: admission.Job.ID, RunID: f.run.ID,
@@ -101,15 +88,12 @@ func TestFailedReconciliationReturnsPersistedRecoveryStatusEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed reconciliation mutation: %v", err)
 	}
-	if len(result.Events) != 1 {
-		t.Fatalf("reconciliation events=%d want 1", len(result.Events))
+	if len(result.Events) != 0 {
+		t.Fatalf("reconciliation events=%+v want no Issue status Events", result.Events)
 	}
-	event := result.Events[0]
-	if event.Type != "issue.status_changed" || event.RunID == nil || *event.RunID != f.run.ID ||
-		event.AgentID == nil || *event.AgentID != f.agent.ID || event.WorkspaceID == nil || *event.WorkspaceID != f.workspace.ID {
-		t.Fatalf("reconciliation recovery event=%+v", event)
+	if result.Run.Status != "FAILED" {
+		t.Fatalf("Run status=%s want FAILED", result.Run.Status)
 	}
-	assertStatusEventPayload(t, event.Payload, "IN_PROGRESS", "TODO")
-	assertFixtureIssueStatus(t, s, f, "TODO")
-	assertIssueStatusEventCount(t, s, f, 1)
+	assertFixtureIssueStatus(t, s, f, "IN_PROGRESS")
+	assertIssueStatusEventCount(t, s, f, 0)
 }
