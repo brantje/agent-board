@@ -3,8 +3,10 @@
 Agent Board exposes a first-party Model Context Protocol endpoint from the existing Go server process at:
 
 ```text
-http://<agent-board-server>/mcp
+https://<agent-board-server>/mcp
 ```
+
+TLS termination is required before clients send MCP bearer-token credentials. Do not expose the MCP endpoint to clients over cleartext HTTP.
 
 The endpoint uses Streamable HTTP in stateless mode and exposes tools only. It is another transport over the same Agent Board application/domain services used by the HTTP API; it does not own separate Issue, Run, Question, Review, authorization, scheduling, or evidence behavior.
 
