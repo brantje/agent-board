@@ -108,6 +108,35 @@ path7:
       default:
         $ref: ../components/api-components.yaml#/responses/Error
 
+boardPlacement:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  patch:
+    operationId: placeIssue
+    description: Moves an Issue to an exact position in a Board column. The status mutation reuses the canonical Issue lifecycle, including durable Events and any existing enqueue policy. Omit beforeIssueId to append to the target column.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [status]
+            properties:
+              status:
+                type: string
+                enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]
+              beforeIssueId:
+                oneOf:
+                - $ref: ../schemas/control-plane.yaml#/IssueKey
+                - type: 'null'
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Issue
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
 assignees:
   parameters:
   - $ref: ../components/api-components.yaml#/parameters/ProjectID
