@@ -21,6 +21,13 @@ type IssueExecutionStore interface {
 	ReconcileIssueExecution(context.Context, IssueExecutionFilter) ([]Event, error)
 }
 
+// EngineRegistrationStore binds execution-configuration validation to the
+// Engine adapters registered by the application. It is configuration only;
+// Runner availability remains scheduler admission policy.
+type EngineRegistrationStore interface {
+	SetEngineRegistered(func(string) bool)
+}
+
 // IssueExecutionReadinessStore exposes the same Agent execution-validity policy
 // used by Run creation so configuration recovery can detect false -> true
 // transitions without maintaining a second readiness matrix.
