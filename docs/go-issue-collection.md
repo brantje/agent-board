@@ -1,47 +1,82 @@
-# Go Issue ownership
+# Go Issue API ownership
 
-The Go strangler gateway owns the Project Issue **collection** boundary:
+The Go backend owns the Project Issue collection, individual Issue, assignment, execution-state, Start Run, and relationship boundaries used by the current product.
+
+## Go-owned Issue routes
 
 - `GET/HEAD /api/projects/:projectId/issues`
 - `POST /api/projects/:projectId/issues`
-- native `OPTIONS` preflight for that exact collection path
-
-It also owns the Issue **update** boundary:
-
+- `GET/HEAD /api/projects/:projectId/issues/:issueId`
 - `PATCH /api/projects/:projectId/issues/:issueId`
-- native `OPTIONS` preflight for that exact Issue path
+- `POST /api/projects/:projectId/issues/:issueId/assignment`
+- `GET /api/projects/:projectId/issues/:issueId/execution-state`
+- `POST /api/projects/:projectId/issues/:issueId/runs`
+- Issue relationship list/create/delete routes
+- native `OPTIONS` handling for these Go-owned paths
 
-And it owns the Issue **relationship** read, create, and delete boundary:
+PostgreSQL is authoritative for Issue state, ownership, Run creation, scheduler jobs, and Events. There is no TypeScript fallback ownership model for these Issue operations.
 
-- `GET/HEAD /api/projects/:projectId/issues/:issueId/relationships`
-- `POST /api/projects/:projectId/issues/:issueId/relationships`
-- `DELETE /api/projects/:projectId/issues/:issueId/relationships/:relationshipId`
-- native `OPTIONS` preflight for those exact relationship paths
+## Creation
 
-Issue assignment/orchestration is now separately Go-owned as documented in `docs/go-issue-assignment.md`. Other nearby individual-Issue behavior remains TypeScript-owned unless another migration slice already owns that exact subresource. Questions, Reviews, Run start/resume/transition behavior, scheduler/worker execution, Workspace/Git work, and Runtime execution are not transferred by this Issue collection slice. `GET /api/projects/:projectId/issues/:issueId` also remains on the TypeScript fallback.
+Issue creation allocates the Project-scoped Issue number and inserts the Issue in one PostgreSQL transaction. The public create request contains Issue metadata only: title, description, status, and priority. It does not accept an assignee.
 
-## Durable invariants
+New Issues are therefore unassigned through the HTTP creation route. Ownership is changed separately through the assignment endpoint. Internal application/store callers may create an Issue with ownership when required by an already-authoritative workflow; those callers still use the shared enqueue policy.
 
-PostgreSQL remains authoritative. Go lists from the canonical `issues` and `projects` rows and creates an Issue in one transaction that:
+## Partial updates and explicit Board status
 
-1. atomically increments `projects.next_issue_number`, obtaining the old value as the new Issue number;
-2. inserts the Issue using that Project-scoped number; and
-3. commits both changes together.
+`PATCH` accepts any non-empty subset of:
 
-This preserves the existing TypeScript allocation semantics under concurrent Issue creation. There is no in-memory counter or queue.
+- `title`
+- `description`
+- `status`
+- `priority`
 
-Issue updates preserve the TypeScript optimistic status invariant. The handler first reads the current Issue, applies the same protected Review/DONE transition checks, then updates with `where status = <observed status>`. If another request or orchestration path changes the status between the read and write, the update does not overwrite that transition and the API returns `issue_status_changed`. A concurrent delete still returns `issue_not_found` after the failed compare-and-swap. Non-status edits remain allowed while an Issue is in `REVIEW` or `DONE`, exactly as in the TypeScript route.
+Field presence is preserved through the HTTP and application boundaries. PostgreSQL locks the current Issue row, applies only the fields supplied by the request, and emits the canonical mutation Event in the same transaction. A metadata-only PATCH therefore cannot restore a stale status observed before a concurrent explicit status change.
 
-Issue relationships use the canonical `issue_relationships` table and preserve its Project-scoped foreign keys, source/target non-self constraint, relationship type constraint, and uniqueness key `(project_id, source_issue_id, target_issue_id, type)`. Relationship listing remains source-scoped and deterministic by `created_at asc, id asc`. Deletion is scoped by Project, source Issue, and relationship ID.
+Board status is an explicit Issue workflow decision. There are no protected Review/DONE transition gates and no optimistic full-Issue compare-and-swap contract. Run completion, Review approval, Question waiting/resume, assignment changes, and scheduler state do not project Board status.
 
-The public DTO remains compatible with `packages/api`: Issue keys are `<issuePrefix>-<number>`, `assignedTo` contains the current User/Agent `{type, id, name}` or null, nullable execution/assignment fields remain nullable, relationship DTOs preserve their Project/source/target/type fields, and timestamps use the existing TypeScript-compatible UTC millisecond format.
+A no-op PATCH commits without producing a mutation Event.
 
-## HTTP compatibility
+## Ownership and automatic Run creation
 
-Issue creation preserves the existing strict request contract: trimmed title (1-500 UTF-16 code units), description up to 100,000 UTF-16 code units, the canonical Issue status enum, integer priority `0..4`, defaults of empty description / `BACKLOG` / priority `0`, and rejection of unknown fields. Missing Projects continue to return `project_not_found`; invalid Project IDs and bodies retain the `validation_error` envelope.
+Issue ownership is exactly one User, one Agent, or nobody. Ownership changes do not change Board status and never cancel Runs.
 
-Issue updates preserve the strict non-empty `updateIssueSchema` contract. `title`, `description`, `status`, and `priority` remain optional individually; unknown fields are rejected; title uses ECMAScript trim before the same 1-500 UTF-16-code-unit validation; description retains its 100,000-unit maximum; status uses the canonical enum; and priority remains an integer from `0` through `4`. The protected transition errors remain `issue_done_requires_review_approval`, `issue_review_requires_decision`, and `issue_done_requires_reopen`. A stale optimistic write returns `issue_status_changed` rather than overwriting the newer status.
+User assignees are active Users whose effective Project role is `member` or `admin`. Effective access is the highest direct/group Project role, with deployment administrators receiving effective Project admin access. The assignee directory and assignment validation use the same authoritative effective-role query.
 
-Relationship creation preserves the strict `{ targetIssueId, type }` contract and the existing relationship types: `blocks`, `depends_on`, `related_to`, and `duplicates`. Source lookup is scoped to the requested Project and returns `issue_not_found`; missing or cross-Project targets return `issue_relationship_target_not_found`; self-reference returns `issue_relationship_self_reference`; duplicate relationships return `issue_relationship_exists`; missing source-scoped deletes return `issue_relationship_not_found`.
+Enabled Project-visible Agents are valid owners independently of execution readiness. An Agent can remain assigned while its Engine, Model Profile, or Provider configuration is unavailable.
 
-The TypeScript implementation is intentionally retained because direct TypeScript development and unmigrated orchestration still use the same canonical tables and routes. The Go gateway owns only the exact paths documented for each migrated slice; nearby commands and subresources continue through the TypeScript fallback unless explicitly documented as Go-owned.
+The shared automatic enqueue matrix is:
+
+- creating an internally Agent-owned Issue: no Run in `BACKLOG`; other statuses may enqueue
+- changing ownership to an Agent: no Run in `BACKLOG`; other statuses may enqueue
+- status mutation on an already Agent-owned Issue: only leaving `BACKLOG` for `TODO`, `IN_PROGRESS`, `BLOCKED`, or `REVIEW` may enqueue
+- `BACKLOG -> DONE` does not enqueue
+- other non-Backlog status transitions do not enqueue
+- explicit Start Run is rejected in `BACKLOG` and otherwise uses the current Agent owner
+
+The same Issue/Agent pair is transactionally deduplicated while an active Run exists. Different Agents may have independent active attempts for one Issue.
+
+## Execution configuration versus scheduler admission
+
+A Run can be created only when the current Agent configuration is execution-valid:
+
+- Agent is enabled and visible to the Project
+- Agent Engine is registered/supported by the server/runner protocol
+- Model Profile is enabled and visible to the Project
+- Provider is enabled and not unhealthy
+
+Runner connection, Runner/source availability, Agent/Model capacity, and Workspace admission are scheduler concerns. They are deliberately not Run-creation checks. A valid configuration may therefore create a durable `QUEUED` Run even when no Runner is currently available.
+
+The execution-state read, automatic enqueue, explicit Start Run, and configuration-recovery reconciliation all use the same execution-validity predicate.
+
+## Events and concurrency
+
+Issue mutation, ownership mutation, Run creation, and scheduler START-job creation are transactional with their canonical Events. Events are durable product history; `slog` is diagnostic only.
+
+Status-change Events carry `previousStatus` explicitly in their payload. The transient Go `Issue` model does not carry a `PreviousStatus` field.
+
+Issue relationships remain Project-scoped canonical records with source/target non-self validation, relationship-type validation, and uniqueness for `(project_id, source_issue_id, target_issue_id, type)`.
+
+## HTTP validation
+
+Issue creation and update retain strict request decoding: unknown fields are rejected, title/description/status/priority use the canonical validation rules, and PATCH requires at least one editable field. Missing or cross-Project resources preserve the normal not-found isolation behavior.
