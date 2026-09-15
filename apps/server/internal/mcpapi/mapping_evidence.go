@@ -43,7 +43,7 @@ func runtimeInstanceDTO(value store.RuntimeInstance) RuntimeInstanceDTO {
 func executionSessionDTO(value store.ExecutionSession) ExecutionSessionDTO {
 	return ExecutionSessionDTO{
 		ID: value.ID, RuntimeInstanceID: optionalString(value.RuntimeInstanceID), RunnerID: optionalString(value.RunnerID),
-		Status: value.Status, CWD: value.CWD, Command: jsonValue(value.CommandArgv), ExitCode: value.ExitCode,
+		Status: value.Status, ExitCode: value.ExitCode,
 		CreatedAt: value.CreatedAt, StartedAt: value.StartedAt, CompletedAt: value.CompletedAt, UpdatedAt: value.UpdatedAt,
 	}
 }
