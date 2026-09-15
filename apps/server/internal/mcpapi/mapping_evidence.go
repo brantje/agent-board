@@ -1,18 +1,33 @@
 package mcpapi
 
 import (
+	"encoding/json"
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
+	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
+
+type publicRunProvenance struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	ProjectID     string `json:"projectId,omitempty"`
+	IssueID       string `json:"issueId,omitempty"`
+	RunID         string `json:"runId,omitempty"`
+	Attempt       int    `json:"attempt,omitempty"`
+	AgentID       string `json:"agentId,omitempty"`
+}
+
+type publicEventActor struct {
+	Type string `json:"type,omitempty"`
+}
 
 func eventDTO(value store.Event, keys map[string]string) EventDTO {
 	out := EventDTO{
 		ID: value.ID, SchemaVersion: value.SchemaVersion, Type: value.Type, OccurredAt: value.OccurredAt,
 		ProjectID: value.ProjectID, RunID: value.RunID, AgentID: value.AgentID, WorkspaceID: value.WorkspaceID,
 		RuntimeInstanceID: value.RuntimeInstanceID, CorrelationID: value.CorrelationID, ParentEventID: value.ParentEventID,
-		Sequence: value.Sequence, Actor: jsonValue(value.Actor), Payload: jsonValue(value.Payload),
+		Sequence: value.Sequence, Actor: publicEventActorDTO(value.Actor), Payload: publicEventPayload(value.Payload),
 	}
 	if value.IssueID != nil {
 		if key := keys[*value.IssueID]; key != "" {
@@ -20,6 +35,49 @@ func eventDTO(value store.Event, keys map[string]string) EventDTO {
 		}
 	}
 	return out
+}
+
+func publicEventActorDTO(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var actor publicEventActor
+	if err := json.Unmarshal(raw, &actor); err != nil {
+		return publicEventActor{}
+	}
+	return actor
+}
+
+func publicEventPayload(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	// Durable event payloads can contain execution-only fields such as cwd,
+	// command argv, and absolute file paths. MCP v1 has no public event-payload
+	// schema, so expose the event envelope rather than forwarding backend JSON.
+	return map[string]any{}
+}
+
+func publicRunProvenanceDTO(raw json.RawMessage, keys map[string]string) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var value executioncontext.Provenance
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return publicRunProvenance{}
+	}
+	issueKey := value.Context.Issue.Key
+	if issueKey == "" {
+		issueKey = keys[value.Context.Issue.ID]
+	}
+	return publicRunProvenance{
+		SchemaVersion: value.SchemaVersion,
+		ProjectID:     value.Context.Project.ID,
+		IssueID:       issueKey,
+		RunID:         value.Context.Run.ID,
+		Attempt:       value.Context.Run.Attempt,
+		AgentID:       value.Context.Agent.ID,
+	}
 }
 
 func rawOutputChunkDTO(value store.RawOutputChunk) RawOutputChunkDTO {
@@ -50,7 +108,8 @@ func executionSessionDTO(value store.ExecutionSession) ExecutionSessionDTO {
 
 func evidenceDTO(value app.RunEvidence, keys map[string]string) RunEvidenceDTO {
 	out := RunEvidenceDTO{
-		Run: runDTO(value.Run, keys), Provenance: jsonValue(value.Provenance),
+		Run:              runDTO(value.Run, keys),
+		Provenance:       publicRunProvenanceDTO(value.Provenance, keys),
 		RuntimeInstances: make([]RuntimeInstanceDTO, 0, len(value.RuntimeInstances)),
 		Sessions: make([]ExecutionSessionDTO, 0, len(value.Sessions)), Events: make([]EventDTO, 0, len(value.Events)),
 		Tests: make([]EventDTO, 0), FileChanges: make([]EventDTO, 0), Usage: valueFromJSONMarshal(value.Usage),

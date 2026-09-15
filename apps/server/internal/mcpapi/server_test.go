@@ -139,7 +139,11 @@ func newProtocolFixture(t *testing.T) (http.Handler, *protocolStore, *app.AuthSe
 	if err != nil {
 		t.Fatal(err)
 	}
-	services := &app.Services{ControlPlane: controlPlane, Auth: auth, ProjectAccess: access}
+	runEvidence, err := app.NewRunEvidenceService(fake, protocolBlobStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := &app.Services{ControlPlane: controlPlane, Auth: auth, ProjectAccess: access, RunEvidence: runEvidence}
 	return newHandler(services, nil), fake, auth, tokens.AccessToken
 }
 
