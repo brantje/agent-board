@@ -28,6 +28,7 @@ func issueDTO(v store.Issue) IssueDTO {
 		Description:   v.Description,
 		Status:        v.Status,
 		Priority:      v.Priority,
+		BoardPosition: v.BoardPosition,
 		AssignedTo:    v.AssignedTo(),
 		CreatedAt:     v.CreatedAt,
 		UpdatedAt:     v.UpdatedAt,
