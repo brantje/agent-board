@@ -63,7 +63,7 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
-	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject})
+	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "scripted", ModelProfileID: model.ID, EngineSettings: store.EmptyObject})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
