@@ -10,7 +10,7 @@ import (
 func (s *Server) registerRunTools(server *mcp.Server) {
 	mcp.AddTool(server, readOnlyTool("list_runs", "List Runs in one visible Project using public Issue keys."), objectListHandler(s.listRuns))
 	mcp.AddTool(server, readOnlyTool("get_run", "Read one Project Run using a public Issue key in the response."), s.getRun)
-	mcp.AddTool(server, mutationTool("cancel_run", "Explicitly cancel an eligible Run through the canonical scheduler-owned cancellation lifecycle."), s.cancelRun)
+	mcp.AddTool(server, mutationTool("cancel_run", "Explicitly cancel an eligible Run through the canonical scheduler-owned cancellation lifecycle.", true, false), s.cancelRun)
 	mcp.AddTool(server, readOnlyTool("inspect_run", "Inspect safe structured Run evidence including sessions, events, tests, file changes, usage, raw-output metadata, and Artifact metadata."), s.inspectRun)
 	mcp.AddTool(server, readOnlyTool("read_run_output_chunk", "Read one existing durable raw-output chunk through the evidence/redaction boundary."), s.readRunOutputChunk)
 }
