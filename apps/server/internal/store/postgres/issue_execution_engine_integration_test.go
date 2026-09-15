@@ -10,6 +10,7 @@ import (
 
 func TestIssueExecutionRejectsUnregisteredEngineAndRecoversOnCorrection(t *testing.T) {
 	s := New(testPool(t))
+	s.SetEngineRegistered(func(name string) bool { return name == "scripted" })
 	ctx := t.Context()
 	project, _, agent, _ := assignedReadyForReviewRun(t, s, "engine-recovery")
 
