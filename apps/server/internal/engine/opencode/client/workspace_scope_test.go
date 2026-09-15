@@ -79,6 +79,22 @@ func TestClientScopesNativeSessionAPIsToBoundDirectory(t *testing.T) {
 	_ = stream.Close()
 }
 
+func TestClientDirectoryAccessorsHandleNilReceiver(t *testing.T) {
+	var native *Client
+	native.SetDirectory("/tmp/should-not-panic")
+	if got := native.Directory(); got != "" {
+		t.Fatalf("nil Directory()=%q want empty", got)
+	}
+	live, err := New(http.DefaultClient, "http://127.0.0.1:9")
+	if err != nil {
+		t.Fatal(err)
+	}
+	live.SetDirectory("  /tmp/external-runner-workspaces/session-1  ")
+	if got := live.Directory(); got != "/tmp/external-runner-workspaces/session-1" {
+		t.Fatalf("Directory()=%q want trimmed path", got)
+	}
+}
+
 func assertBoundDirectory(t *testing.T, r *http.Request, want string) {
 	t.Helper()
 	if got := r.URL.Query().Get("directory"); got != want {

@@ -156,12 +156,13 @@ func newLauncherExecutionSessionService(sessionStore app.ExecutionSessionStore, 
 }
 
 type launcherClient struct {
-	stdout   string
-	stderr   string
-	exitCode int
-	waitErr  error
-	done     chan struct{}
-	waitGate *launcherWaitGate
+	stdout     string
+	stderr     string
+	exitCode   int
+	waitErr    error
+	workingDir string
+	done       chan struct{}
+	waitGate   *launcherWaitGate
 }
 
 func newLauncherClient(stdout, stderr string, exitCode int, waitErr error) *launcherClient {
@@ -170,13 +171,14 @@ func newLauncherClient(stdout, stderr string, exitCode int, waitErr error) *laun
 
 func (c *launcherClient) transport(sessionID string) runner.ProcessSession {
 	return &launcherTransportProcess{
-		id:       sessionID,
-		stdout:   strings.NewReader(c.stdout),
-		stderr:   strings.NewReader(c.stderr),
-		stdin:    &launcherStdin{},
-		result:   runner.Result{ExitCode: c.exitCode},
-		waitErr:  c.waitErr,
-		waitGate: c.waitGate,
+		id:         sessionID,
+		stdout:     strings.NewReader(c.stdout),
+		stderr:     strings.NewReader(c.stderr),
+		stdin:      &launcherStdin{},
+		result:     runner.Result{ExitCode: c.exitCode},
+		waitErr:    c.waitErr,
+		waitGate:   c.waitGate,
+		workingDir: c.workingDir,
 	}
 }
 
@@ -204,13 +206,14 @@ type launcherStdin struct{ bytes.Buffer }
 func (*launcherStdin) Close() error { return nil }
 
 type launcherTransportProcess struct {
-	id       string
-	stdout   io.Reader
-	stderr   io.Reader
-	stdin    io.WriteCloser
-	result   runner.Result
-	waitErr  error
-	waitGate *launcherWaitGate
+	id         string
+	stdout     io.Reader
+	stderr     io.Reader
+	stdin      io.WriteCloser
+	result     runner.Result
+	waitErr    error
+	waitGate   *launcherWaitGate
+	workingDir string
 }
 
 type launcherWaitGate struct {
@@ -227,10 +230,11 @@ func (g *launcherWaitGate) stop() {
 	g.once.Do(func() { close(g.release) })
 }
 
-func (p *launcherTransportProcess) ID() string            { return p.id }
-func (p *launcherTransportProcess) Stdout() io.Reader     { return p.stdout }
-func (p *launcherTransportProcess) Stderr() io.Reader     { return p.stderr }
-func (p *launcherTransportProcess) Stdin() io.WriteCloser { return p.stdin }
+func (p *launcherTransportProcess) ID() string               { return p.id }
+func (p *launcherTransportProcess) WorkingDirectory() string { return p.workingDir }
+func (p *launcherTransportProcess) Stdout() io.Reader        { return p.stdout }
+func (p *launcherTransportProcess) Stderr() io.Reader        { return p.stderr }
+func (p *launcherTransportProcess) Stdin() io.WriteCloser    { return p.stdin }
 func (p *launcherTransportProcess) Wait(ctx context.Context) (runner.Result, error) {
 	if p.waitGate != nil {
 		close(p.waitGate.started)
