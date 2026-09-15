@@ -137,6 +137,61 @@ func TestStrictOrderSkipsCapacityIneligibleBoardHead(t *testing.T) {
 	assertSchedulerWaitReason(t, s, head.ID, store.SchedulerWaitAgentCapacity)
 }
 
+func TestStrictOrderSkipsModelCapacityIneligibleBoardHead(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f := seedRunFixture(t, s, "strict-model-capacity")
+	setSchedulerLimits(t, s, f.agent.ID, 4, f.model.ID, intPtr(1))
+
+	consumer := enqueueFixtureRun(t, s, f, f.run, "strict-model-capacity-consumer")
+	admitted, err := s.AdmitNextJob(ctx, "strict-model-capacity-owner", time.Minute, time.Second)
+	if err != nil || admitted == nil || admitted.Job.ID != consumer.ID {
+		t.Fatalf("consumer admission=%+v err=%v", admitted, err)
+	}
+
+	enableStrictOrder(t, s, f.project.ID)
+	headRun := createQueuedFixtureRun(t, s, f, "strict-model-capacity-head")
+	head := enqueueFixtureRun(t, s, f, headRun, "strict-model-capacity-head")
+
+	otherModel, err := s.CreateModelProfile(ctx, store.ModelProfile{
+		ProjectID:  &f.project.ID,
+		ProviderID: f.provider.ID,
+		Name:       "strict-model-capacity-other-model",
+		Model:      "test-other",
+		Enabled:    true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherAgent := f.agent
+	otherAgent.ID = ""
+	otherAgent.Name = "strict-model-capacity-other-agent"
+	otherAgent.ModelProfileID = otherModel.ID
+	otherAgent.ConcurrencyLimit = 4
+	otherAgent, err = s.CreateAgent(ctx, otherAgent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextRun := createQueuedFixtureRun(t, s, f, "strict-model-capacity-next")
+	if _, err := s.pool.Exec(ctx, `UPDATE runs SET agent_id=$2 WHERE id=$1`, nextRun.ID, otherAgent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE issues SET assignee_type='AGENT', assignee_id=$2 WHERE id=$1`, nextRun.IssueID, otherAgent.ID); err != nil {
+		t.Fatal(err)
+	}
+	next := enqueueFixtureRun(t, s, f, nextRun, "strict-model-capacity-next")
+	setBoardOrder(t, s, f.project.ID, headRun.IssueID, nextRun.IssueID)
+
+	admission, err := s.AdmitNextJob(ctx, "strict-model-capacity-worker", time.Minute, time.Second)
+	if err != nil || admission == nil {
+		t.Fatalf("admission=%+v err=%v", admission, err)
+	}
+	if admission.Job.ID != next.ID {
+		t.Fatalf("admitted job=%s want next eligible=%s", admission.Job.ID, next.ID)
+	}
+	assertSchedulerWaitReason(t, s, head.ID, store.SchedulerWaitModelCapacity)
+}
+
 func TestStrictOrderSkipsRunnerIneligibleBoardHead(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
@@ -205,6 +260,11 @@ func TestSchedulerTreatsInvalidStoredStrictOrderAsDisabled(t *testing.T) {
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "strict-invalid-stored")
 	setSchedulerLimits(t, s, f.agent.ID, 4, f.model.ID, nil)
+	// Simulate malformed legacy/out-of-band data to keep the scheduler itself
+	// defensive even though normal application/storage writes reject this value.
+	if _, err := s.pool.Exec(ctx, `ALTER TABLE projects DROP CONSTRAINT projects_strict_order_type_check`); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.pool.Exec(ctx, `UPDATE projects SET workflow_settings='{"strictOrder":"banana"}'::jsonb WHERE id=$1`, f.project.ID); err != nil {
 		t.Fatal(err)
 	}
