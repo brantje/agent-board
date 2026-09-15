@@ -107,7 +107,7 @@ func assignedReadyForReviewRun(t *testing.T, s *Store, name string) (store.Proje
 	agent, err := s.CreateAgent(ctx, store.Agent{
 		ProjectID:        &project.ID,
 		Name:             name,
-		Engine:           "test",
+		Engine:           "scripted",
 		ModelProfileID:   model.ID,
 		EngineSettings:   store.EmptyObject,
 		ConcurrencyLimit: 1,
