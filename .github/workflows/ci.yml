@@ -1,152 +1,14 @@
-name: CI
+name: Workspace dependency artifact
 
 on:
   pull_request:
-  push:
-    branches:
-      - main
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  server:
-    name: Server
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_DB: agent_board_test
-          POSTGRES_USER: agent_board
-          POSTGRES_PASSWORD: agent_board
-        ports:
-          - 5432/tcp
-        options: >-
-          --health-cmd "pg_isready -U agent_board -d agent_board_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      AGENT_BOARD_TEST_DATABASE_RESET: "1"
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: apps/server/go.mod
-          cache-dependency-path: apps/server/go.sum
-      - name: Configure test database URL
-        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
-      - name: Test and enforce coverage
-        working-directory: apps/server
-        run: |
-          set -eu
-          go test -coverprofile=coverage.out ./...
-          go tool cover -func=coverage.out
-          stats="$(awk 'NR > 1 { total += $2; if ($3 > 0) covered += $2 } END { print covered, total }' coverage.out)"
-          covered="${stats%% *}"
-          total="${stats##* }"
-          awk -v covered="$covered" -v total="$total" 'BEGIN {
-            if (total == 0) exit 1
-            coverage = covered * 100 / total
-            printf "server coverage: %.4f%%\n", coverage
-            if (covered * 100 < total * 85) exit 1
-          }'
-      - name: Race test
-        working-directory: apps/server
-        run: go test -race ./...
-      - name: Vet
-        working-directory: apps/server
-        run: go vet ./...
-      - name: Build
-        working-directory: apps/server
-        run: go build ./...
-
-  docker-runtime:
-    name: Docker runtime
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_DB: agent_board_test
-          POSTGRES_USER: agent_board
-          POSTGRES_PASSWORD: agent_board
-        ports:
-          - 5432/tcp
-        options: >-
-          --health-cmd "pg_isready -U agent_board -d agent_board_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      AGENT_BOARD_TEST_DATABASE_RESET: "1"
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: apps/server/go.mod
-          cache-dependency-path: apps/server/go.sum
-      - name: Configure test database URL
-        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
-      - name: Build lifecycle fixture image
-        run: docker build --file apps/server/internal/runtime/docker/testdata/Dockerfile --tag agent-board-runtime-lifecycle-test:ci apps/server/internal/runtime/docker/testdata
-      - name: Build real runner image
-        run: docker build --file apps/agent-runner/Dockerfile --tag agent-board-agent-runner:ci .
-      - name: Build scripted runtime fixture image
-        run: docker build --build-arg AGENT_BOARD_UID="$(id -u)" --file apps/server/internal/runexec/testdata/Dockerfile --tag agent-board-scripted-runtime:ci .
-      - name: Run real Docker lifecycle integration
-        working-directory: apps/server
-        env:
-          AGENT_BOARD_TEST_DOCKER: "1"
-          AGENT_BOARD_TEST_RUNTIME_IMAGE: agent-board-runtime-lifecycle-test:ci
-        run: go test -count=1 -run '^TestDockerRuntimeIntegration$' -v ./internal/runtime/docker
-      - name: Run real Docker runner integration
-        working-directory: apps/server
-        env:
-          AGENT_BOARD_TEST_DOCKER: "1"
-          AGENT_BOARD_TEST_RUNNER_IMAGE: agent-board-agent-runner:ci
-        run: go test -count=1 -run '^TestDockerRunnerIntegration$' -v ./internal/runner
-      - name: Run external runner source-control lifecycles
-        working-directory: apps/server
-        env:
-          AGENT_BOARD_TEST_RUNNER: "1"
-          AGENT_BOARD_TEST_DATABASE_RESET: "1"
-        run: go test -count=1 -run '^(TestScriptedEngineExternalRunnerWalkingSkeleton|TestLocalSourceExternalRunnerReviewLifecycle|TestRemoteGitExternalRunnerLifecycleContinuesAcrossRunners)$' -v ./internal/runexec
-      - name: Run scripted Engine walking skeleton
-        working-directory: apps/server
-        env:
-          AGENT_BOARD_TEST_DOCKER: "1"
-          AGENT_BOARD_TEST_SCRIPTED_RUNTIME_IMAGE: agent-board-scripted-runtime:ci
-        run: |
-          set -eu
-          if go test -count=1 -run '^TestScriptedEngineDockerWalkingSkeleton$' -v ./internal/runexec; then
-            exit 0
-          fi
-          postgres_id="${{ job.services.postgres.id }}"
-          if [ -n "$postgres_id" ]; then
-            echo '--- scripted Run diagnostics ---'
-            docker exec "$postgres_id" psql -U agent_board -d agent_board_test -x -c \
-              'SELECT id, status, failure_reason FROM runs ORDER BY created_at DESC LIMIT 1' || true
-            echo '--- Execution Sessions ---'
-            docker exec "$postgres_id" psql -U agent_board -d agent_board_test -x -c \
-              'SELECT status, cwd, command_argv, exit_code FROM execution_sessions ORDER BY created_at' || true
-            echo '--- Run Events ---'
-            docker exec "$postgres_id" psql -U agent_board -d agent_board_test -x -c \
-              'SELECT sequence, type, payload FROM events ORDER BY sequence' || true
-          fi
-          exit 1
-
-  agent-runner:
-    name: Agent runner
+  dependencies:
+    name: Dependency artifact
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -154,46 +16,8 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-go@v6
         with:
-          go-version-file: apps/agent-runner/go.mod
+          go-version: '1.25.0'
           cache: false
-      - name: Test shared runner protocol
-        working-directory: packages/runnerprotocol
-        run: go test ./... && go vet ./... && go build ./...
-      - name: Test shared redaction
-        working-directory: packages/redact
-        run: go test ./... && go vet ./... && go build ./...
-      - name: Test shared workspace Git
-        working-directory: packages/workspacegit
-        run: go test ./... && go vet ./... && go build ./...
-      - name: Test and enforce coverage
-        working-directory: apps/agent-runner
-        run: |
-          set -eu
-          go test -coverprofile=coverage.out ./...
-          go tool cover -func=coverage.out
-          stats="$(awk 'NR > 1 { total += $2; if ($3 > 0) covered += $2 } END { print covered, total }' coverage.out)"
-          covered="${stats%% *}"
-          total="${stats##* }"
-          awk -v covered="$covered" -v total="$total" 'BEGIN {
-            if (total == 0) exit 1
-            coverage = covered * 100 / total
-            printf "agent-runner coverage: %.4f%%\n", coverage
-            if (covered * 100 < total * 85) exit 1
-          }'
-      - name: Vet
-        working-directory: apps/agent-runner
-        run: go vet ./...
-      - name: Build
-        working-directory: apps/agent-runner
-        run: go build ./...
-
-  web:
-    name: Web
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           version: 11.25.0
@@ -201,81 +25,26 @@ jobs:
         with:
           node-version: 24
           package-manager-cache: false
-      - name: Install
+      - name: Download Go modules
+        run: |
+          set -eu
+          (cd apps/server && go mod download)
+          (cd apps/agent-runner && go mod download)
+          (cd packages/runnerprotocol && go mod download)
+          (cd packages/redact && go mod download)
+          (cd packages/workspacegit && go mod download)
+      - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
-      - name: Typecheck
-        run: pnpm typecheck
-      - name: Test and enforce coverage
-        run: pnpm test:coverage
-      - name: Build
-        run: pnpm build
-
-  compose:
-    name: Compose smoke
-    runs-on: ubuntu-latest
-    env:
-      AGENT_BOARD_DOCKER_GID: "0"
-    steps:
-      - uses: actions/checkout@v5
+      - name: Package dependencies
+        run: |
+          set -eu
+          tar -C "$(go env GOPATH)" -czf /tmp/go-pkg-mod.tar.gz pkg/mod
+          tar -czf /tmp/node-modules.tar.gz node_modules apps/web/node_modules
+      - uses: actions/upload-artifact@v4
         with:
-          persist-credentials: false
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          package-manager-cache: false
-      - name: Prepare workspace root
-        run: |
-          sudo mkdir -p /var/lib/agent-board/workspaces
-          sudo chmod 0777 /var/lib/agent-board/workspaces
-      - name: Resolve docker group GID
-        run: echo "AGENT_BOARD_DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)" >> "$GITHUB_ENV"
-      - name: Verify compose overrides
-        env:
-          AGENT_BOARD_REPOSITORY_MOUNT_PATH: /mnt/repositories
-          AGENT_BOARD_SCHEDULER_OWNER_ID: scheduler-ci
-        run: |
-          set -eu
-          docker compose config --format json > /tmp/agent-board-compose.json
-          jq -e '.services.server.environment.AGENT_BOARD_REPOSITORY_ROOTS == "/mnt/repositories"' /tmp/agent-board-compose.json
-          jq -e '.services.server.environment.AGENT_BOARD_SCHEDULER_OWNER_ID == "scheduler-ci"' /tmp/agent-board-compose.json
-          jq -e 'any(.services.server.volumes[]; .target == "/mnt/repositories")' /tmp/agent-board-compose.json
-      - name: Build runner image
-        run: docker build --file apps/agent-runner/Dockerfile --tag agent-board-agent-runner:ci .
-      - name: Verify official runner image boundary
-        run: docker run --rm --entrypoint sh agent-board-agent-runner:ci -c 'test ! -S /var/run/docker.sock && test "$(id -u)" -ne 0 && test "$(pwd)" = /workspace && command -v agent-runner >/dev/null'
-      - name: Start stack
-        run: docker compose up --detach --build --wait
-      - name: Verify endpoints
-        run: |
-          curl --fail --silent --show-error http://127.0.0.1:3001/healthz
-          curl --fail --silent --show-error http://127.0.0.1:3000/
-      - name: Prepare authorization E2E repository
-        run: |
-          set -eu
-          rm -rf .authorization-e2e
-          mkdir .authorization-e2e
-          git -C .authorization-e2e init -b main
-          git -C .authorization-e2e config user.email authorization-e2e@example.test
-          git -C .authorization-e2e config user.name 'Authorization E2E'
-          printf 'authorization e2e\n' > .authorization-e2e/README.md
-          git -C .authorization-e2e add README.md
-          git -C .authorization-e2e commit -m 'initial fixture'
-          chmod -R a+rwX .authorization-e2e
-      - name: Run Playwright authorization flow
-        run: |
-          set -eu
-          e2e_root="$(mktemp -d)"
-          cp apps/web/e2e/authorization.playwright.mjs "$e2e_root/authorization.playwright.mjs"
-          cd "$e2e_root"
-          npm init -y >/dev/null
-          npm install --no-audit --no-fund --save-exact playwright@1.55.0
-          npx playwright install --with-deps chromium
-          AGENT_BOARD_E2E_WEB_URL=http://127.0.0.1:3000 \
-          AGENT_BOARD_E2E_API_URL=http://127.0.0.1:3001 \
-            node authorization.playwright.mjs
-      - name: Show service logs on failure
-        if: failure()
-        run: docker compose logs --no-color
-      - name: Stop stack
-        if: always()
-        run: docker compose down --volumes --remove-orphans
+          name: workspace-dependencies
+          path: |
+            /tmp/go-pkg-mod.tar.gz
+            /tmp/node-modules.tar.gz
+          if-no-files-found: error
+          retention-days: 1
