@@ -43,6 +43,11 @@ BEGIN
     UPDATE projects
     SET workflow_settings = jsonb_set(workflow_settings, '{strictOrder}', 'false'::jsonb, true),
         updated_at = now();
+    ALTER TABLE projects
+        ADD CONSTRAINT projects_strict_order_type_check CHECK (
+            NOT (workflow_settings ? 'strictOrder')
+            OR jsonb_typeof(workflow_settings->'strictOrder') = 'boolean'
+        );
 
     EXECUTE $function$
         CREATE OR REPLACE FUNCTION default_project_workflow_settings() RETURNS trigger AS $body$
