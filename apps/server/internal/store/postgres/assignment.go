@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
 
@@ -66,24 +65,9 @@ func enqueueAssignedIssue(ctx context.Context, tx pgx.Tx, issue store.Issue, rep
 		return store.Run{}, store.Event{}, err
 	}
 
-	run, err := scanRun(tx.QueryRow(ctx, `
-        INSERT INTO runs (project_id, issue_id, workspace_id, agent_id, attempt, status)
-        VALUES ($1, $2, $3, $4, $5, 'QUEUED')
-        RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-    `, projectID, issueID, workspace.ID, agentID, attempt))
-	if err != nil {
-		return store.Run{}, store.Event{}, err
-	}
-
-	if _, err := tx.Exec(ctx, `
-        INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key)
-        VALUES ($1, $2, 'START', 'QUEUED', $3)
-    `, projectID, run.ID, "run:"+run.ID+":start"); err != nil {
-		return store.Run{}, store.Event{}, err
-	}
-
-	payload, _ := json.Marshal(map[string]any{"status": run.Status, "attempt": run.Attempt})
-	event, err := appendEventTx(ctx, tx, store.Event{Type: "run.created", ProjectID: projectID, IssueID: &issueID, RunID: &run.ID, AgentID: &agentID, WorkspaceID: &workspace.ID, Actor: store.EmptyObject, Payload: payload})
+	run, _, event, err := createQueuedRunTx(ctx, tx, queuedRunInput{
+		ProjectID: projectID, IssueID: issueID, WorkspaceID: workspace.ID, AgentID: agentID, Attempt: attempt,
+	})
 	if err != nil {
 		return store.Run{}, store.Event{}, err
 	}
