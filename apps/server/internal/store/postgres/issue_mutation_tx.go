@@ -9,23 +9,31 @@ import (
 )
 
 type issueMutationTxInput struct {
-	Issue          store.Issue
-	Previous       store.Issue
-	RepositoryPath string
-	DefaultBranch  string
-	Actor          json.RawMessage
-	RunID          *string
-	AgentID        *string
-	WorkspaceID    *string
+	Issue            store.Issue
+	Previous         store.Issue
+	RepositoryPath   string
+	DefaultBranch    string
+	Actor            json.RawMessage
+	RunID            *string
+	AgentID          *string
+	WorkspaceID      *string
+	BoardPositionSet bool
 }
 
 func (s *Store) applyIssueMutationTx(ctx context.Context, tx pgx.Tx, input issueMutationTxInput) (store.IssueMutationResult, error) {
+	if input.Issue.Status != input.Previous.Status && !input.BoardPositionSet {
+		position, err := nextBoardPositionTx(ctx, tx, input.Issue.ProjectID, input.Issue.Status)
+		if err != nil {
+			return store.IssueMutationResult{}, err
+		}
+		input.Issue.BoardPosition = position
+	}
 	updated, err := scanIssueJoined(tx.QueryRow(ctx, `
-		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, updated_at=now()
+		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, board_position=$7, updated_at=now()
 		FROM projects AS p
 		WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
 		RETURNING `+issueSelectColumns+`
-	`, input.Issue.ProjectID, input.Issue.ID, input.Issue.Title, input.Issue.Description, input.Issue.Status, input.Issue.Priority))
+	`, input.Issue.ProjectID, input.Issue.ID, input.Issue.Title, input.Issue.Description, input.Issue.Status, input.Issue.Priority, input.Issue.BoardPosition))
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
