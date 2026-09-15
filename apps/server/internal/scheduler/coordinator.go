@@ -22,6 +22,10 @@ const (
 
 var ErrRunCancellation = errors.New("scheduler: run cancellation requested")
 
+type PersistedEventPublisher interface {
+	PublishPersisted(context.Context, store.Event)
+}
+
 type Config struct {
 	OwnerID           string
 	PollInterval      time.Duration
@@ -30,6 +34,7 @@ type Config struct {
 	CapacityBackoff   time.Duration
 	MaxInFlight       int
 	ReportError       func(error)
+	PersistedEvents   PersistedEventPublisher
 }
 
 func DefaultConfig(ownerID string) Config {
@@ -242,7 +247,7 @@ func (c *Coordinator) reconcileOne(ctx context.Context) (*store.SchedulerAdmissi
 		outcome = store.SchedulerReconciliationUnknown
 	}
 
-	_, err = c.store.ResolveReconciliation(ctx, store.SchedulerReconciliation{
+	_, err = c.resolveReconciliation(ctx, store.SchedulerReconciliation{
 		ProjectID:     claim.Job.ProjectID,
 		JobID:         claim.Job.ID,
 		RunID:         claim.Run.ID,
@@ -319,7 +324,7 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 
 	persistCtx, persistCancel := context.WithTimeout(context.WithoutCancel(parent), c.config.LeaseDuration)
 	defer persistCancel()
-	_, err = c.store.TransitionAdmittedJob(persistCtx, store.SchedulerTransition{
+	_, err = c.transitionAdmittedJob(persistCtx, store.SchedulerTransition{
 		ProjectID:     claim.Job.ProjectID,
 		JobID:         claim.Job.ID,
 		RunID:         claim.Run.ID,
@@ -329,6 +334,45 @@ func (c *Coordinator) process(parent context.Context, claim *store.SchedulerAdmi
 	})
 	if err != nil {
 		c.config.ReportError(err)
+	}
+}
+
+func (c *Coordinator) transitionAdmittedJob(ctx context.Context, input store.SchedulerTransition) (store.Run, error) {
+	mutationStore, ok := c.store.(store.SchedulerMutationStore)
+	if !ok {
+		return c.store.TransitionAdmittedJob(ctx, input)
+	}
+	result, err := mutationStore.TransitionAdmittedJobMutation(ctx, input)
+	if err != nil {
+		return store.Run{}, err
+	}
+	c.publishPersistedEvents(ctx, result.Events)
+	return result.Run, nil
+}
+
+func (c *Coordinator) resolveReconciliation(ctx context.Context, input store.SchedulerReconciliation) (store.Run, error) {
+	mutationStore, ok := c.store.(store.SchedulerMutationStore)
+	if !ok {
+		return c.store.ResolveReconciliation(ctx, input)
+	}
+	result, err := mutationStore.ResolveReconciliationMutation(ctx, input)
+	if err != nil {
+		return store.Run{}, err
+	}
+	c.publishPersistedEvents(ctx, result.Events)
+	return result.Run, nil
+}
+
+func (c *Coordinator) publishPersistedEvents(ctx context.Context, events []store.Event) {
+	publisher := c.config.PersistedEvents
+	if publisher == nil {
+		publisher, _ = c.processor.(PersistedEventPublisher)
+	}
+	if publisher == nil {
+		return
+	}
+	for _, event := range events {
+		publisher.PublishPersisted(ctx, event)
 	}
 }
 

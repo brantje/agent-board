@@ -3,6 +3,8 @@ package httpapi
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type ErrorResponse struct {
@@ -36,19 +38,19 @@ type IssueCreatorDTO struct {
 }
 
 type IssueDTO struct {
-	ID              string            `json:"id"`
-	ProjectID       string            `json:"projectId"`
-	Number          int               `json:"number"`
-	Title           string            `json:"title"`
-	Description     string            `json:"description"`
-	Status          string            `json:"status"`
-	Priority        int               `json:"priority"`
-	AssignedAgentID *string           `json:"assignedAgentId"`
-	CreatedBy       *IssueCreatorDTO  `json:"createdBy"`
-	CreatedAt       time.Time         `json:"createdAt"`
-	UpdatedAt       time.Time         `json:"updatedAt"`
-	CurrentBranch   *string           `json:"currentBranch"`
-	LastEvent       *EventEvidenceDTO `json:"lastEvent"`
+	ID            string            `json:"id"`
+	ProjectID     string            `json:"projectId"`
+	Number        int               `json:"number"`
+	Title         string            `json:"title"`
+	Description   string            `json:"description"`
+	Status        string            `json:"status"`
+	Priority      int               `json:"priority"`
+	AssignedTo    *store.Assignee   `json:"assignedTo"`
+	CreatedBy     *IssueCreatorDTO  `json:"createdBy"`
+	CreatedAt     time.Time         `json:"createdAt"`
+	UpdatedAt     time.Time         `json:"updatedAt"`
+	CurrentBranch *string           `json:"currentBranch"`
+	LastEvent     *EventEvidenceDTO `json:"lastEvent"`
 }
 
 type IssueRelationshipDTO struct {
@@ -225,9 +227,9 @@ type CreateProviderRequest struct {
 type UpdateProviderRequest struct {
 	Name          *string          `json:"name"`
 	Kind          *string          `json:"kind"`
-	BaseURL       *string         `json:"baseUrl"`
-	CredentialRef *string         `json:"credentialRef"`
-	Enabled       *bool           `json:"enabled"`
+	BaseURL       *string          `json:"baseUrl"`
+	CredentialRef *string          `json:"credentialRef"`
+	Enabled       *bool            `json:"enabled"`
 	SafeMetadata  *json.RawMessage `json:"safeMetadata"`
 }
 
@@ -267,10 +269,9 @@ type CreateAgentRequest struct {
 }
 
 type AssignmentRequest struct {
-	AgentID string `json:"agentId"`
+	AssignedTo json.RawMessage `json:"assignedTo"`
 }
 
 type AssignmentResponse struct {
 	Issue IssueDTO `json:"issue"`
-	Run   RunDTO   `json:"run"`
 }

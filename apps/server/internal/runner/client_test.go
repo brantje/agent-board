@@ -63,6 +63,43 @@ func TestClientExecutesSessionAndPreservesStreams(t *testing.T) {
 	}
 }
 
+func TestClientSurfacesResolvedWorkingDirectory(t *testing.T) {
+	const hostDir = "/tmp/external-runner-workspaces/session-1"
+	server := newProtocolTestServer(t, protocol.Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"}}, func(conn *websocket.Conn, msg protocol.Message) {
+		if msg.Type != protocol.TypeStart {
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeSessionStarted, msg.SessionID, protocol.SessionStarted{Dir: hostDir}); err != nil {
+			t.Errorf("write session_started: %v", err)
+			return
+		}
+		if err := writeProtocol(conn, protocol.TypeExit, msg.SessionID, protocol.ExitResult{ExitCode: 0}); err != nil {
+			t.Errorf("write exit: %v", err)
+		}
+	})
+	defer server.Close()
+
+	conn, err := Dial(context.Background(), wsURL(server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	session, err := conn.Start(context.Background(), "session-1", Request{Command: []string{"true"}, Dir: "/workspace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := ""
+	if provider, ok := session.(interface{ WorkingDirectory() string }); ok {
+		got = provider.WorkingDirectory()
+	}
+	if got != hostDir {
+		t.Fatalf("working directory=%q want %q", got, hostDir)
+	}
+	if _, err := session.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClientForwardsStdinAndSignals(t *testing.T) {
 	received := make(chan protocol.Message, 4)
 	server := newProtocolTestServer(t, protocol.Capabilities{MaxActiveSessions: 1, Features: []string{"stdin", "stdout", "stderr", "terminate", "kill", "health"}}, func(conn *websocket.Conn, msg protocol.Message) {

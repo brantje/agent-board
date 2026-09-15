@@ -116,16 +116,6 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 		return store.AnswerQuestionResult{}, err
 	}
 
-	var issueStatus string
-	if err := tx.QueryRow(ctx, `
-		SELECT status
-		FROM issues
-		WHERE project_id = $1 AND id = $2
-		FOR UPDATE
-	`, question.ProjectID, question.IssueID).Scan(&issueStatus); err != nil {
-		return store.AnswerQuestionResult{}, notFound(err)
-	}
-
 	binding, bindingErr := scanInteractiveQuestionBinding(tx.QueryRow(ctx, `
 		SELECT question_id::text, project_id::text, run_id::text, engine, correlation_key, state, created_at, updated_at
 		FROM engine_question_bindings
@@ -142,7 +132,7 @@ func (s *Store) AnswerQuestion(ctx context.Context, input store.AnswerQuestionCo
 
 	interactiveLive := false
 	if question.Blocking {
-		if run.Status != "WAITING_FOR_INPUT" || (issueStatus != "BLOCKED" && issueStatus != "DONE") {
+		if run.Status != "WAITING_FOR_INPUT" {
 			return store.AnswerQuestionResult{}, store.ErrConflict
 		}
 		if interactive {

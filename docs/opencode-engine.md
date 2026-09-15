@@ -50,6 +50,8 @@ The adapter may persist explicitly emitted OpenCode messages, plans, rationale, 
 
 This boundary does not authorize Agent Board to infer reasoning from tool calls, reconstruct reasoning that OpenCode did not emit, or make a second model request to classify or manufacture timeline activity. Unclassified visible messages continue to fall back to the generic `agent.message` kind.
 
+The injected task bootstrap includes the persisted Issue Board status plus explicit status guidance. Activity suppression intentionally removes only the exact literal `issueStatusPromptGuidance` paragraph from visible OpenCode text before persistence. The remaining bootstrap prompt may stay visible. v0.1 does not use structural, fuzzy, or generalized prompt suppression; changing that behavior would be a separate product decision.
+
 OpenCode tool lifecycle Events retain the native call identifier as `toolCallId` and may include sanitized `input`, `summary`, a bounded `resultPreview`, and `reason`. The UI uses `toolCallId` to collapse started/completed/failed lifecycle Events into one logical tool row. Large output remains raw/blob evidence rather than being copied into structured Events.
 
 All structured activity still passes through Agent Board's centralized Run-scoped redacting store before persistence. Reasoning text, tool inputs, summaries, result previews, and failure reasons therefore use the same secret-redaction boundary as other Event payloads.

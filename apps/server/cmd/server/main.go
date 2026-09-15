@@ -29,6 +29,7 @@ import (
 	dockerruntime "github.com/brantje/agent-board/apps/server/internal/runtime/docker"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/secrets"
+	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
@@ -252,6 +253,11 @@ func startScheduler(ctx context.Context, handler http.Handler) (<-chan error, er
 	if !ok || application.services == nil || application.services.Scheduler == nil {
 		return nil, fmt.Errorf("scheduler service is unavailable")
 	}
+	if application.services.ControlPlane != nil {
+		if err := application.services.ControlPlane.ReconcileIssueExecution(ctx, store.IssueExecutionFilter{}); err != nil {
+			return nil, fmt.Errorf("recover Issue execution: %w", err)
+		}
+	}
 	done := make(chan error, 1)
 	go func() {
 		done <- application.services.Scheduler.Run(ctx)
@@ -328,16 +334,19 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 		database.SetRunnerCandidates(services.ControlPlane.Runners.Connections.Candidates)
 	}
 	services.ControlPlane.SetProjectRepositoryProvisioner(provisioner)
-	if err := configureExecutionScheduler(services, git); err != nil {
+	if err := configureExecutionScheduler(services, git, database.SetEngineRegistered); err != nil {
 		_ = services.Close()
 		return nil, err
 	}
 	return services, nil
 }
 
-func configureExecutionScheduler(services *app.Services, git workspace.Git) error {
+func configureExecutionScheduler(services *app.Services, git workspace.Git, setEngineRegistered func(func(string) bool)) error {
 	if services == nil || services.ExecutionStore == nil || services.ExecutionContext == nil || services.RuntimeInstances == nil || services.ExecutionSessions == nil || services.Redaction == nil {
 		return fmt.Errorf("execution services are incomplete")
+	}
+	if setEngineRegistered == nil {
+		return fmt.Errorf("Engine registry configuration is unavailable")
 	}
 	baseBlobs, err := evidence.NewFileBlobStore(configuredEvidenceRoot(), defaultEvidenceBlobLimit)
 	if err != nil {
@@ -380,6 +389,7 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if err != nil {
 		return err
 	}
+	setEngineRegistered(engines.Has)
 	var runnerConnector runexec.RunnerConnector
 	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
 		runnerConnector = runexec.NewRegistryConnector(services.ControlPlane.Runners.Connections)
@@ -391,6 +401,7 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	processor.SetWorkspaceEnsurer(services.Workspaces)
 	config := scheduler.DefaultConfig(configuredSchedulerOwnerID())
 	config.ReportError = func(err error) { slog.Error("scheduler execution", "error", err) }
+	config.PersistedEvents = processor
 	coordinator, err := scheduler.New(services.ExecutionStore, processor, processor, config)
 	if err != nil {
 		return err

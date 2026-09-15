@@ -4,6 +4,7 @@ import "context"
 
 type ControlPlaneStore interface {
 	CoreStore
+	IssueMutationStore
 	ConfigurationStore
 	ExecutionStore
 	SchedulerStore
@@ -18,7 +19,6 @@ type ControlPlaneStore interface {
 	CreateIssueRelationship(context.Context, IssueRelationship) (IssueRelationship, error)
 	DeleteIssueRelationship(context.Context, string, string, string) error
 	ListRuns(context.Context, string) ([]Run, error)
-	AssignIssue(context.Context, string, string, string) (Issue, Run, error)
 
 	ListProviders(context.Context, *string) ([]Provider, error)
 	ListAllProviders(context.Context) ([]Provider, error)

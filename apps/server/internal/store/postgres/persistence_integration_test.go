@@ -63,14 +63,19 @@ func seedRunFixture(t *testing.T, s *Store, suffix string) runFixture {
 	if err != nil {
 		t.Fatalf("create runtime: %v", err)
 	}
-	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject})
+	agent, err := s.CreateAgent(ctx, store.Agent{ProjectID: &project.ID, Name: "agent-" + suffix, Engine: "scripted", ModelProfileID: model.ID, EngineSettings: store.EmptyObject})
 	if err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "issue " + suffix, Status: "TODO", AssignedAgentID: &agent.ID})
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "issue " + suffix, Status: "TODO"})
 	if err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
+	// Seed ownership directly: this fixture builds its own Run and Workspace.
+	if _, err := s.pool.Exec(ctx, `UPDATE issues SET assignee_type='AGENT',assignee_id=$2 WHERE id=$1`, issue.ID, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	issue.AssigneeType, issue.AssigneeID = stringPtrPG("AGENT"), &agent.ID
 	workspace, err := s.CreateWorkspace(ctx, store.Workspace{ProjectID: project.ID, IssueID: issue.ID, Path: "/workspace/" + suffix, WorkingBranch: "issue/" + suffix})
 	if err != nil {
 		t.Fatalf("create workspace: %v", err)
@@ -172,7 +177,7 @@ func TestExecutionPersistenceInvariants(t *testing.T) {
 	}
 }
 
-func TestSchedulerPersistenceIsScopedAndClaimsOnce(t *testing.T) {
+func TestSchedulerPersistenceIsScopedAndAdmitsOnce(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "sched")
@@ -193,18 +198,13 @@ func TestSchedulerPersistenceIsScopedAndClaimsOnce(t *testing.T) {
 	if err != nil || dup.ID != job.ID {
 		t.Fatalf("idempotent enqueue: got=%+v err=%v", dup, err)
 	}
-	if _, _, err := s.ClaimNextJob(ctx, "", time.Minute); !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("blank owner error=%v", err)
+	admission, err := s.AdmitNextJob(ctx, "worker-1", time.Minute, time.Second)
+	if err != nil || admission == nil || admission.Job.ID != job.ID || admission.Run.ID != f.run.ID || admission.Run.Status != "STARTING" {
+		t.Fatalf("admission=%+v err=%v", admission, err)
 	}
-	if _, _, err := s.ClaimNextJob(ctx, "worker", 0); !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("zero lease error=%v", err)
-	}
-	claimed, lease, err := s.ClaimNextJob(ctx, "worker-1", time.Minute)
-	if err != nil || claimed == nil || lease == nil || claimed.ID != job.ID {
-		t.Fatalf("claim: job=%+v lease=%+v err=%v", claimed, lease, err)
-	}
-	if next, nextLease, err := s.ClaimNextJob(ctx, "worker-2", time.Minute); err != nil || next != nil || nextLease != nil {
-		t.Fatalf("expected empty queue: job=%+v lease=%+v err=%v", next, nextLease, err)
+	lease := admission.Lease
+	if next, err := s.AdmitNextJob(ctx, "worker-2", time.Minute, time.Second); err != nil || next != nil {
+		t.Fatalf("expected empty queue: admission=%+v err=%v", next, err)
 	}
 	if _, err := s.RenewLease(ctx, other.project.ID, job.ID, lease.LeaseToken, time.Minute); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-project renew error=%v", err)
@@ -222,9 +222,6 @@ func TestSchedulerPersistenceIsScopedAndClaimsOnce(t *testing.T) {
 	}
 	for _, tc := range []struct{ kind, id string }{{"AGENT", f.agent.ID}, {"MODEL_PROFILE", f.model.ID}} {
 		if err := s.ReserveCapacity(ctx, f.project.ID, job.ID, f.run.ID, tc.kind, tc.id); err != nil {
-			t.Fatalf("reserve %s: %v", tc.kind, err)
-		}
-		if err := s.ReserveCapacity(ctx, f.project.ID, job.ID, f.run.ID, tc.kind, tc.id); err != nil {
 			t.Fatalf("idempotent reserve %s: %v", tc.kind, err)
 		}
 	}
@@ -232,7 +229,7 @@ func TestSchedulerPersistenceIsScopedAndClaimsOnce(t *testing.T) {
 		t.Fatalf("foreign release capacity: %v", err)
 	}
 	var count int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, f.project.ID, job.ID).Scan(&count); err != nil || count != 2 {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, f.project.ID, job.ID).Scan(&count); err != nil || count != 3 {
 		t.Fatalf("capacity count=%d err=%v", count, err)
 	}
 	if err := s.ReleaseCapacity(ctx, f.project.ID, job.ID); err != nil {
@@ -246,44 +243,45 @@ func TestSchedulerPersistenceIsScopedAndClaimsOnce(t *testing.T) {
 		t.Fatalf("release lease: %v", err)
 	}
 
+	concurrent := seedRunFixture(t, s, "sched-concurrent")
 	second, err := s.EnqueueJob(ctx, store.SchedulerJob{
-		ProjectID: f.project.ID, RunID: f.run.ID, Kind: "RESUME", IdempotencyKey: "resume-run",
+		ProjectID: concurrent.project.ID, RunID: concurrent.run.ID, IdempotencyKey: "concurrent-start-run",
 	})
 	if err != nil {
 		t.Fatalf("enqueue second: %v", err)
 	}
-	results := make(chan *store.SchedulerJob, 2)
+	results := make(chan *store.SchedulerAdmission, 2)
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
 	for i := 0; i < 2; i++ {
 		wg.Add(1)
-		go func(i int) {
+		go func() {
 			defer wg.Done()
-			j, _, err := s.ClaimNextJob(ctx, "concurrent", time.Minute)
-			if err != nil {
-				errs <- err
+			admitted, admitErr := s.AdmitNextJob(ctx, "concurrent", time.Minute, time.Second)
+			if admitErr != nil {
+				errs <- admitErr
 				return
 			}
-			results <- j
-		}(i)
+			results <- admitted
+		}()
 	}
 	wg.Wait()
 	close(results)
 	close(errs)
 	for err := range errs {
-		t.Fatalf("concurrent claim: %v", err)
+		t.Fatalf("concurrent admission: %v", err)
 	}
 	claims := 0
-	for j := range results {
-		if j != nil {
+	for admitted := range results {
+		if admitted != nil {
 			claims++
-			if j.ID != second.ID {
-				t.Fatalf("claimed wrong job %s", j.ID)
+			if admitted.Job.ID != second.ID {
+				t.Fatalf("admitted wrong job %s", admitted.Job.ID)
 			}
 		}
 	}
 	if claims != 1 {
-		t.Fatalf("claims=%d, want 1", claims)
+		t.Fatalf("admissions=%d, want 1", claims)
 	}
 }
 

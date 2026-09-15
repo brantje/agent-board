@@ -23,7 +23,7 @@ const issue = {
   description: 'Persist leases',
   status: 'TODO',
   priority: 0,
-  assignedAgentId: null,
+  assignedTo: null,
   createdAt: '',
   updatedAt: '',
   currentBranch: 'agent-board/AB-12',

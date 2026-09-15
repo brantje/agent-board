@@ -36,7 +36,7 @@ func TestEngineAttachDoesNotPromptExistingNativeSession(t *testing.T) {
 		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
 	})
 	mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
-		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_existing"}})
+		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_existing", "directory": "/workspace"}})
 	})
 	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
 		call := statusCalls.Add(1)
@@ -88,7 +88,7 @@ func TestEngineAttachOpensPendingQuestions(t *testing.T) {
 		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
 	})
 	mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
-		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_existing"}})
+		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_existing", "directory": "/workspace"}})
 	})
 	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
 		if replied.Load() {
@@ -157,7 +157,7 @@ func TestEngineAttachPromptsWhenNoNativeSession(t *testing.T) {
 		writeNativeJSON(t, w, []any{})
 	})
 	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, _ *http.Request) {
-		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "ses_new"}})
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "ses_new", "directory": "/workspace"}})
 	})
 	mux.HandleFunc("POST /session/ses_new/prompt_async", func(w http.ResponseWriter, _ *http.Request) {
 		promptCalls.Add(1)
@@ -205,7 +205,7 @@ func TestEngineAttachUsesIdleNativeSessionWithoutPrompt(t *testing.T) {
 		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
 	})
 	mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
-		writeNativeJSON(t, w, []any{map[string]any{"id": ""}, map[string]any{"id": "ses_idle"}})
+		writeNativeJSON(t, w, []any{map[string]any{"id": "", "directory": "/workspace"}, map[string]any{"id": "ses_idle", "directory": "/workspace"}})
 	})
 	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, map[string]any{"ses_idle": map[string]any{"type": "idle"}})
@@ -307,7 +307,7 @@ func TestEngineAttachFailsWhenNativeStatusFails(t *testing.T) {
 		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
 	})
 	mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
-		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_existing"}})
+		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_existing", "directory": "/workspace"}})
 	})
 	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "status failed", http.StatusInternalServerError)

@@ -208,7 +208,7 @@ func TestLocalSourceExternalRunnerReviewLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if approved.Review.Status != "APPROVED" || approved.Run.Status != "COMPLETED" || approved.Issue.Status != "DONE" {
+	if approved.Review.Status != "APPROVED" || approved.Run.Status != "COMPLETED" || approved.Issue.Status != "TODO" {
 		t.Fatalf("approval result=%+v", approved)
 	}
 	acceptedAfter, err := projectMaterializer.EnsureProjectWorkspace(ctx, project)
@@ -229,7 +229,7 @@ func TestLocalSourceExternalRunnerReviewLifecycle(t *testing.T) {
 		t.Fatalf("persisted Run=%+v err=%v", persistedRun, err)
 	}
 	persistedIssue, err := database.GetIssue(ctx, project.ID, run.IssueID)
-	if err != nil || persistedIssue.Status != "DONE" {
+	if err != nil || persistedIssue.Status != "TODO" {
 		t.Fatalf("persisted Issue=%+v err=%v", persistedIssue, err)
 	}
 }

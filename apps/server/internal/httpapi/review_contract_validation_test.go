@@ -37,7 +37,7 @@ func TestResponseSchemasRequireAlwaysSerializedNullableFields(t *testing.T) {
 		"Provider":     {"baseUrl"},
 		"ModelProfile": {"temperature", "maxTokens", "maxConcurrent"},
 		"Runtime":      {"cpuLimitMillis", "memoryLimitBytes", "pidLimit", "timeoutSeconds"},
-		"Issue":        {"assignedAgentId"},
+		"Issue":        {"assignedTo"},
 		"Run":          {"agentId", "queueReason", "failureReason", "startedAt", "completedAt"},
 	}
 

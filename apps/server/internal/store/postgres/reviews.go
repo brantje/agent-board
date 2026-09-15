@@ -87,11 +87,11 @@ func (s *Store) BeginReviewApproval(ctx context.Context, input store.BeginReview
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	review, run, issue, err := lockReviewCommandState(ctx, tx, input.ProjectID, input.ReviewID)
+	review, run, _, err := lockReviewCommandState(ctx, tx, input.ProjectID, input.ReviewID)
 	if err != nil {
 		return store.BeginReviewApprovalResult{}, err
 	}
-	if review.Status != "PENDING" || run.Status != "READY_FOR_REVIEW" || issue.Status != "REVIEW" {
+	if review.Status != "PENDING" || run.Status != "READY_FOR_REVIEW" {
 		return store.BeginReviewApprovalResult{}, store.ErrConflict
 	}
 	if err := ensureLatestReviewAttempt(ctx, tx, run); err != nil {
@@ -156,10 +156,10 @@ func (s *Store) CompleteReviewApproval(ctx context.Context, input store.Complete
 			return store.CompleteReviewApprovalResult{}, store.ErrConflict
 		}
 		if input.DeliveryComplete {
-			if run.Status != "COMPLETED" || issue.Status != "DONE" {
+			if run.Status != "COMPLETED" {
 				return store.CompleteReviewApprovalResult{}, store.ErrConflict
 			}
-		} else if run.Status != "READY_FOR_REVIEW" || issue.Status != "REVIEW" {
+		} else if run.Status != "READY_FOR_REVIEW" {
 			return store.CompleteReviewApprovalResult{}, store.ErrConflict
 		}
 		decision, err := decisionByIDTx(ctx, tx, review.ProjectID, *review.DecisionID)
@@ -174,7 +174,7 @@ func (s *Store) CompleteReviewApproval(ctx context.Context, input store.Complete
 		}
 		return store.CompleteReviewApprovalResult{Review: review, Decision: decision, Run: run, Issue: issue}, nil
 	}
-	if review.Status != "PENDING" || run.Status != "READY_FOR_REVIEW" || issue.Status != "REVIEW" || review.DecisionID == nil {
+	if review.Status != "PENDING" || run.Status != "READY_FOR_REVIEW" || review.DecisionID == nil {
 		return store.CompleteReviewApprovalResult{}, store.ErrConflict
 	}
 	if err := ensureLatestReviewAttempt(ctx, tx, run); err != nil {
@@ -223,15 +223,6 @@ func (s *Store) CompleteReviewApproval(ctx context.Context, input store.Complete
 		if err != nil {
 			return store.CompleteReviewApprovalResult{}, err
 		}
-		issue, err = scanIssueJoined(tx.QueryRow(ctx, `
-			UPDATE issues AS i SET status='DONE', updated_at=now()
-			FROM projects AS p
-			WHERE i.project_id=$1 AND i.id=$2 AND i.status='REVIEW' AND p.id=i.project_id
-			RETURNING `+issueSelectColumns+`
-		`, issue.ProjectID, issue.ID))
-		if err != nil {
-			return store.CompleteReviewApprovalResult{}, err
-		}
 	}
 	events, err := appendReviewDecisionEvents(ctx, tx, run, review, decision, "review.approved")
 	if err != nil {
@@ -254,11 +245,11 @@ func (s *Store) FailReviewApproval(ctx context.Context, input store.FailReviewAp
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	review, run, issue, err := lockReviewCommandState(ctx, tx, input.ProjectID, input.ReviewID)
+	review, run, _, err := lockReviewCommandState(ctx, tx, input.ProjectID, input.ReviewID)
 	if err != nil {
 		return store.Review{}, err
 	}
-	if review.Status != "PENDING" || run.Status != "READY_FOR_REVIEW" || issue.Status != "REVIEW" || review.DecisionID == nil {
+	if review.Status != "PENDING" || run.Status != "READY_FOR_REVIEW" || review.DecisionID == nil {
 		return store.Review{}, store.ErrConflict
 	}
 	intent, err := decisionByIDTx(ctx, tx, review.ProjectID, *review.DecisionID)
@@ -320,7 +311,7 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 		}
 		return result, nil
 	}
-	if review.Status != "PENDING" || run.Status != "READY_FOR_REVIEW" || issue.Status != "REVIEW" || run.AgentID == nil {
+	if review.Status != "PENDING" || run.Status != "READY_FOR_REVIEW" || run.AgentID == nil {
 		return store.RequestReviewChangesResult{}, store.ErrConflict
 	}
 	if err := ensureLatestReviewAttempt(ctx, tx, run); err != nil {
@@ -359,30 +350,29 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 		return store.RequestReviewChangesResult{}, err
 	}
 
-	nextRun, err := scanRun(tx.QueryRow(ctx, `
-		INSERT INTO runs (project_id, issue_id, workspace_id, agent_id, attempt, status)
-		VALUES ($1, $2, $3, $4, $5, 'QUEUED')
+	run, err = scanRun(tx.QueryRow(ctx, `
+		UPDATE runs
+		SET status='COMPLETED', completed_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND status='READY_FOR_REVIEW'
 		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
 		          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-	`, run.ProjectID, run.IssueID, run.WorkspaceID, run.AgentID, run.Attempt+1))
+	`, run.ProjectID, run.ID))
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
-	job, err := scanSchedulerJob(tx.QueryRow(ctx, `
-		INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key, available_at)
-		VALUES ($1, $2, 'START', 'QUEUED', $3, now())
-		RETURNING id::text, project_id::text, run_id::text, kind, state, wait_reason,
-		          idempotency_key, available_at, created_at, updated_at
-	`, review.ProjectID, nextRun.ID, "review:"+review.ID+":changes"))
+
+	nextAttempt, err := nextIssueRunAttempt(ctx, tx, run.ProjectID, run.IssueID)
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
-	issue, err = scanIssueJoined(tx.QueryRow(ctx, `
-		UPDATE issues AS i SET status='IN_PROGRESS', updated_at=now()
-		FROM projects AS p
-		WHERE i.project_id=$1 AND i.id=$2 AND i.status='REVIEW' AND p.id=i.project_id
-		RETURNING `+issueSelectColumns+`
-	`, issue.ProjectID, issue.ID))
+	nextRun, job, createdEvent, err := createQueuedRunTx(ctx, tx, queuedRunInput{
+		ProjectID:      run.ProjectID,
+		IssueID:        run.IssueID,
+		WorkspaceID:    run.WorkspaceID,
+		AgentID:        *run.AgentID,
+		Attempt:        nextAttempt,
+		IdempotencyKey: "review:" + review.ID + ":changes",
+	})
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
@@ -390,6 +380,7 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
+	events = append(events, createdEvent)
 	if err := tx.Commit(ctx); err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
@@ -437,7 +428,13 @@ func lockReviewCommandState(ctx context.Context, tx pgx.Tx, projectID, reviewID 
 
 func ensureLatestReviewAttempt(ctx context.Context, tx pgx.Tx, run store.Run) error {
 	var newer bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE project_id=$1 AND issue_id=$2 AND attempt>$3)`, run.ProjectID, run.IssueID, run.Attempt).Scan(&newer); err != nil {
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM runs
+			WHERE project_id=$1 AND issue_id=$2 AND attempt>$3
+			  AND agent_id IS NOT DISTINCT FROM $4::uuid
+		)
+	`, run.ProjectID, run.IssueID, run.Attempt, run.AgentID).Scan(&newer); err != nil {
 		return err
 	}
 	if newer {
@@ -537,5 +534,22 @@ func appendReviewDecisionEvents(ctx context.Context, tx pgx.Tx, run store.Run, r
 	if err != nil {
 		return nil, err
 	}
-	return []store.Event{reviewEvent, decisionEvent}, nil
+	events := []store.Event{reviewEvent, decisionEvent}
+	if run.Status == "COMPLETED" {
+		completedEvent, err := appendEventTx(ctx, tx, store.Event{
+			Type:        "run.completed",
+			ProjectID:   review.ProjectID,
+			IssueID:     &issueID,
+			RunID:       &runID,
+			AgentID:     run.AgentID,
+			WorkspaceID: &workspaceID,
+			Actor:       store.EmptyObject,
+			Payload:     store.EmptyObject,
+		})
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, completedEvent)
+	}
+	return events, nil
 }

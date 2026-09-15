@@ -69,12 +69,6 @@ func (s *ProjectAccessService) EffectiveRole(ctx context.Context, actor Authenti
 	if err := requireNormalAuthenticatedUser(actor); err != nil {
 		return "", err
 	}
-	if actor.DeploymentRole == store.DeploymentRoleAdmin {
-		if _, err := s.controlPlane.GetProject(ctx, projectID); err != nil {
-			return "", err
-		}
-		return store.ProjectRoleAdmin, nil
-	}
 	role, err := s.store.EffectiveProjectRole(ctx, projectID, actor.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		return "", NewError("project_not_found", "project not found", err)
@@ -172,17 +166,14 @@ func (s *ProjectAccessService) CreateIssue(ctx context.Context, actor Authentica
 }
 
 func (s *ProjectAccessService) UpdateIssue(ctx context.Context, actor AuthenticatedUser, input store.Issue) (store.Issue, error) {
-	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
-		return store.Issue{}, err
-	}
-	return s.controlPlane.UpdateIssue(ctx, input)
-}
-
-func (s *ProjectAccessService) AssignIssue(ctx context.Context, actor AuthenticatedUser, projectID, issueID, agentID string) (store.Issue, store.Run, error) {
-	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-	return s.controlPlane.AssignIssue(ctx, projectID, issueID, agentID)
+	return s.PatchIssue(ctx, actor, store.IssuePatch{
+		ProjectID:   input.ProjectID,
+		ID:          input.ID,
+		Title:       &input.Title,
+		Description: &input.Description,
+		Status:      &input.Status,
+		Priority:    &input.Priority,
+	})
 }
 
 func (s *ProjectAccessService) ListRuns(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.Run, error) {

@@ -33,11 +33,14 @@ func (c *Client) Subscribe(ctx context.Context) (*EventStream, error) {
 }
 
 func (c *Client) subscribePath(ctx context.Context, path string) (*EventStream, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+c.scopedPath(path), nil)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: build event subscription: %w", err)
 	}
 	req.Header.Set("Accept", "text/event-stream")
+	if directory := c.Directory(); directory != "" {
+		req.Header.Set("x-opencode-directory", directory)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("opencode: subscribe events: %w", err)

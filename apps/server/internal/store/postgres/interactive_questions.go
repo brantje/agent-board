@@ -158,18 +158,6 @@ func (s *Store) OpenInteractiveQuestions(ctx context.Context, inputs []store.Ope
 		if err != nil {
 			return store.OpenInteractiveQuestionsResult{}, err
 		}
-		command, execErr := tx.Exec(ctx, `
-			UPDATE issues
-			SET status=CASE WHEN status='DONE' THEN status ELSE 'BLOCKED' END,
-			    updated_at=CASE WHEN status='DONE' THEN updated_at ELSE now() END
-			WHERE project_id=$1 AND id=$2
-		`, questionInput.ProjectID, questionInput.IssueID)
-		if execErr != nil {
-			return store.OpenInteractiveQuestionsResult{}, execErr
-		}
-		if command.RowsAffected() != 1 {
-			return store.OpenInteractiveQuestionsResult{}, store.ErrConflict
-		}
 		results[missing[0]].EnteredWaiting = true
 
 		waitingEvent, eventErr := appendInteractiveQuestionEvent(ctx, tx, run, first.RuntimeInstanceID, "run.waiting_for_input", map[string]any{
@@ -362,18 +350,6 @@ func (s *Store) ResolveInteractiveQuestion(ctx context.Context, projectID, quest
 		`, projectID, run.ID))
 		if err != nil {
 			return store.ResolveInteractiveQuestionResult{}, err
-		}
-		command, err := tx.Exec(ctx, `
-			UPDATE issues
-			SET status=CASE WHEN status='DONE' THEN status ELSE 'IN_PROGRESS' END,
-			    updated_at=CASE WHEN status='DONE' THEN updated_at ELSE now() END
-			WHERE project_id=$1 AND id=$2
-		`, projectID, run.IssueID)
-		if err != nil {
-			return store.ResolveInteractiveQuestionResult{}, err
-		}
-		if command.RowsAffected() != 1 {
-			return store.ResolveInteractiveQuestionResult{}, store.ErrConflict
 		}
 		resumed = true
 	}

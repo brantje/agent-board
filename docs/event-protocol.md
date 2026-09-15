@@ -102,6 +102,14 @@ issue.assigned
 issue.status_changed
 ```
 
+`issue.assigned` records `{ "assignedTo": { "type": "USER" | "AGENT", "id": "uuid", "name": "display name" } }`, or `{ "assignedTo": null }` when clearing ownership. Human callers are attributed through the existing `actor` envelope (`type: HUMAN`, durable User `id`). The ownership mutation and Event commit atomically; live publication follows commit. Repeating the current assignment emits no new Event. Validation failures produce no product Event.
+
+This pre-release contract replaces the old Agent-only payload. Existing historical `agentId` payloads remain immutable and readable through the generic Event fallback; new ownership Events use `assignedTo`.
+
+`issue.status_changed` records the canonical Board transition with `previousStatus` and `status`. A real status mutation and its Event commit atomically; setting the current status again is a no-op and emits no status Event. Human callers use HUMAN actor attribution. Agent-originated and failed-Run recovery transitions retain the available Agent/Run/Workspace provenance in the Event envelope rather than inventing a transport-specific history format.
+
+Issue ownership and Board-status Events describe those Issue mutations only. Assignment, unassignment, reassignment and ordinary status changes never synthesize `run.cancelled`; explicit Run cancellation remains a separate Run lifecycle action and Event. Likewise Run creation/completion does not implicitly produce an Issue status Event unless the documented Issue workflow rule actually changes status.
+
 ### Run
 
 ```text

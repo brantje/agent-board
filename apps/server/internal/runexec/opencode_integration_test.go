@@ -465,11 +465,20 @@ func (f *openCodeIntegrationFixture) createRun(t *testing.T, spec openCodeRunSpe
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, run, err := f.services.ControlPlane.AssignIssue(f.ctx, project.ID, issue.ID, agent.ID)
+	if _, err = f.services.ControlPlane.SetIssueAssignee(f.ctx, project.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: agent.ID}, store.EmptyObject); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := f.services.ControlPlane.ListRuns(f.ctx, project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return project, run
+	for _, run := range runs {
+		if run.IssueID == issue.ID && run.AgentID != nil && *run.AgentID == agent.ID {
+			return project, run
+		}
+	}
+	t.Fatal("automatic assignment did not create a Run")
+	return store.Project{}, store.Run{}
 }
 
 func waitForOpenCodeQuestion(t *testing.T, ctx context.Context, database *postgres.Store, projectID, runID string) store.Question {

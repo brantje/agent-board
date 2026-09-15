@@ -160,7 +160,7 @@ func (h *nativeServerHarness) handler(t *testing.T) http.Handler {
 		h.mu.Lock()
 		h.modelProvider, h.modelID, h.location = payload.Model.ProviderID, payload.Model.ID, payload.Location.Directory
 		h.mu.Unlock()
-		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "ses_native"}})
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{"id": "ses_native", "directory": "/workspace"}})
 	})
 	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -277,14 +277,17 @@ func TestEngineAnswersNativeQuestionWithoutSecondPrompt(t *testing.T) {
 		t.Fatalf("split test server address: %v", err)
 	}
 	command := launcher.request.Command
-	if len(command) != 6 || command[0] != "opencode" || command[1] != "serve" || command[2] != "--hostname" || command[3] != host || command[4] != "--port" || command[5] != port {
-		t.Fatalf("server command=%v want address %s:%s", command, host, port)
+	if len(command) != 7 || command[0] != "sh" || command[1] != "-c" || !strings.Contains(command[2], "set_issue_status.ts") || command[3] != "agent-board-opencode" || command[4] != host || command[5] != port || !strings.Contains(command[6], "export default tool") {
+		t.Fatalf("server command=%v want bootstrapped address %s:%s", command, host, port)
+	}
+	if launcher.request.CWD != "/workspace" {
+		t.Fatalf("server cwd=%q want /workspace", launcher.request.CWD)
 	}
 	if harness.promptCalls != 1 {
 		t.Fatalf("prompt calls=%d want 1", harness.promptCalls)
 	}
-	if harness.modelProvider != "anthropic" || harness.modelID != "claude-sonnet" || harness.location != "" {
-		t.Fatalf("model=%s/%s location=%q", harness.modelProvider, harness.modelID, harness.location)
+	if harness.modelProvider != "anthropic" || harness.modelID != "claude-sonnet" || harness.location != "/workspace" {
+		t.Fatalf("model=%s/%s location=%q want /workspace fallback when process does not report a host working directory", harness.modelProvider, harness.modelID, harness.location)
 	}
 	if len(harness.replyAnswers) != 2 || len(harness.replyAnswers[0]) != 1 || harness.replyAnswers[0][0] != "B" || len(harness.replyAnswers[1]) != 1 || harness.replyAnswers[1][0] != "because it is safer" {
 		t.Fatalf("native answers=%v", harness.replyAnswers)

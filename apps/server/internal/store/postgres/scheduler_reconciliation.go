@@ -10,7 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const schedulerReconciliationRetryReason = "reconciliation_retry"
+const (
+	schedulerReconciliationRetryReason         = "reconciliation_retry"
+	schedulerReconciliationConfigurationBackoff = time.Second
+)
 
 func (s *Store) claimExpiredJobForReconciliation(ctx context.Context, ownerID string, leaseDuration time.Duration) (*store.SchedulerAdmission, error) {
 	leaseMicros := leaseDuration.Microseconds()
@@ -127,7 +130,7 @@ func resetInvalidQueuedClaim(ctx context.Context, tx pgx.Tx, job store.Scheduler
 		SET state='QUEUED', wait_reason=$2,
 		    available_at=now() + ($3::bigint * interval '1 microsecond'), updated_at=now()
 		WHERE id=$1 AND state='CLAIMED'
-	`, job.ID, schedulerConfigurationWaitReason, schedulerConfigurationBackoff.Microseconds()); err != nil {
+	`, job.ID, schedulerConfigurationWaitReason, schedulerReconciliationConfigurationBackoff.Microseconds()); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -150,32 +153,32 @@ func resetInvalidQueuedClaim(ctx context.Context, tx pgx.Tx, job store.Scheduler
 	return nil
 }
 
-func (s *Store) resolveReconciliation(ctx context.Context, input store.SchedulerReconciliation) (store.Run, error) {
+func (s *Store) resolveReconciliation(ctx context.Context, input store.SchedulerReconciliation) (store.SchedulerMutationResult, error) {
 	if strings.TrimSpace(input.ProjectID) == "" || strings.TrimSpace(input.JobID) == "" ||
 		strings.TrimSpace(input.RunID) == "" || strings.TrimSpace(input.LeaseToken) == "" {
-		return store.Run{}, store.ErrInvalidArgument
+		return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 	}
 	if input.Outcome == "" {
-		return store.Run{}, store.ErrInvalidArgument
+		return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	current, err := lockFencedRun(ctx, tx, input.ProjectID, input.JobID, input.RunID, input.LeaseToken)
 	if err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
 
 	switch input.Outcome {
 	case store.SchedulerReconciliationActive, store.SchedulerReconciliationUnknown:
 		if err := tx.Commit(ctx); err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
-		return current, nil
+		return store.SchedulerMutationResult{Run: current}, nil
 	case store.SchedulerReconciliationRetry:
 		run, err := scanRun(tx.QueryRow(ctx, `
 			UPDATE runs
@@ -184,37 +187,37 @@ func (s *Store) resolveReconciliation(ctx context.Context, input store.Scheduler
 			RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
 		`, input.ProjectID, input.RunID, schedulerReconciliationRetryReason))
 		if err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
 		if _, err := tx.Exec(ctx, `
 			UPDATE scheduler_jobs
 			SET state='QUEUED', wait_reason=$4, available_at=now(), updated_at=now()
 			WHERE project_id=$1 AND id=$2 AND run_id=$3 AND state='CLAIMED'
 		`, input.ProjectID, input.JobID, input.RunID, schedulerReconciliationRetryReason); err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
 		if err := releaseReconciledOwnership(ctx, tx, input.ProjectID, input.JobID, input.LeaseToken); err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
 		if err := tx.Commit(ctx); err != nil {
-			return store.Run{}, err
+			return store.SchedulerMutationResult{}, err
 		}
-		return run, nil
+		return store.SchedulerMutationResult{Run: run}, nil
 	case store.SchedulerReconciliationCompleted, store.SchedulerReconciliationFailed, store.SchedulerReconciliationCancelled:
 		return s.resolveReconciliationTerminal(ctx, tx, input)
 	default:
-		return store.Run{}, store.ErrInvalidArgument
+		return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 	}
 }
 
-func (s *Store) resolveReconciliationTerminal(ctx context.Context, tx pgx.Tx, input store.SchedulerReconciliation) (store.Run, error) {
+func (s *Store) resolveReconciliationTerminal(ctx context.Context, tx pgx.Tx, input store.SchedulerReconciliation) (store.SchedulerMutationResult, error) {
 	runStatus := "COMPLETED"
 	jobState := "DONE"
 	var failureReason *string
 	switch input.Outcome {
 	case store.SchedulerReconciliationFailed:
 		if input.FailureReason == nil || strings.TrimSpace(*input.FailureReason) == "" {
-			return store.Run{}, store.ErrInvalidArgument
+			return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 		}
 		runStatus = "FAILED"
 		jobState = "FAILED"
@@ -224,7 +227,7 @@ func (s *Store) resolveReconciliationTerminal(ctx context.Context, tx pgx.Tx, in
 		jobState = "CANCELLED"
 	case store.SchedulerReconciliationCompleted:
 	default:
-		return store.Run{}, store.ErrInvalidArgument
+		return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 	}
 
 	run, err := scanRun(tx.QueryRow(ctx, `
@@ -234,22 +237,22 @@ func (s *Store) resolveReconciliationTerminal(ctx context.Context, tx pgx.Tx, in
 		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
 	`, input.ProjectID, input.RunID, runStatus, failureReason))
 	if err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE scheduler_jobs
 		SET state=$4, wait_reason=NULL, updated_at=now()
 		WHERE project_id=$1 AND id=$2 AND run_id=$3 AND state='CLAIMED'
 	`, input.ProjectID, input.JobID, input.RunID, jobState); err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
 	if err := releaseReconciledOwnership(ctx, tx, input.ProjectID, input.JobID, input.LeaseToken); err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return store.Run{}, err
+		return store.SchedulerMutationResult{}, err
 	}
-	return run, nil
+	return store.SchedulerMutationResult{Run: run}, nil
 }
 
 func releaseReconciledOwnership(ctx context.Context, tx pgx.Tx, projectID, jobID, leaseToken string) error {

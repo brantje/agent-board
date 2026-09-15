@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -20,6 +22,9 @@ func (a *api) registerIssueRunRoutes(r chi.Router) {
 	r.Post("/projects/{projectID}/issues/{issueID}/relationships", a.createIssueRelationship)
 	r.Delete("/projects/{projectID}/issues/{issueID}/relationships/{relationshipID}", a.deleteIssueRelationship)
 	r.Post("/projects/{projectID}/issues/{issueID}/assignment", a.assignIssue)
+	r.Get("/projects/{projectID}/issues/{issueID}/execution", a.getIssueExecutionState)
+	r.Post("/projects/{projectID}/issues/{issueID}/runs", a.startIssueRun)
+	r.Get("/projects/{projectID}/assignees", a.listIssueAssignees)
 	r.Get("/projects/{projectID}/runs", a.listRuns)
 	r.Get("/projects/{projectID}/runs/{runID}", a.getRun)
 	if a.eventHub != nil {
@@ -111,30 +116,21 @@ func (a *api) updateIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	current, err := a.service.GetIssue(r.Context(), projectID, issueUUID)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
 	var req UpdateIssueRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.Title != nil {
-		current.Title = *req.Title
+	if req.Priority != nil && !validIssuePriority(*req.Priority) {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
+		return
 	}
-	if req.Description != nil {
-		current.Description = *req.Description
-	}
-	if req.Status != nil {
-		current.Status = *req.Status
-	}
-	if req.Priority != nil {
-		if !validIssuePriority(*req.Priority) {
-			writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
-			return
-		}
-		current.Priority = *req.Priority
+	patch := store.IssuePatch{
+		ProjectID:   projectID,
+		ID:          issueUUID,
+		Title:       req.Title,
+		Description: req.Description,
+		Status:      req.Status,
+		Priority:    req.Priority,
 	}
 	if a.projectAccess != nil {
 		actor, ok := projectActor(r)
@@ -142,7 +138,7 @@ func (a *api) updateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
 			return
 		}
-		value, err := a.projectAccess.UpdateIssue(r.Context(), actor, current)
+		value, err := a.projectAccess.PatchIssue(r.Context(), actor, patch)
 		if err != nil {
 			writeProjectAccessError(w, err)
 			return
@@ -150,7 +146,7 @@ func (a *api) updateIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, issueDTO(value))
 		return
 	}
-	value, err := a.service.UpdateIssue(r.Context(), current)
+	value, err := a.service.PatchIssue(r.Context(), patch)
 	if err != nil {
 		writeAppError(w, err)
 		return
@@ -287,12 +283,25 @@ func (a *api) assignIssue(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if !validUUID(req.AgentID) {
-		writeError(w, http.StatusBadRequest, "invalid_id", "agentId must be a UUID")
+	if len(req.AssignedTo) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "assignedTo is required; use null to unassign")
 		return
 	}
+	var input *struct {
+		Type string `json:"type"`
+		ID   string `json:"id"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(req.AssignedTo))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "invalid assignedTo")
+		return
+	}
+	var target *store.Assignee
+	if input != nil {
+		target = &store.Assignee{Type: input.Type, ID: input.ID}
+	}
 	var issue store.Issue
-	var run store.Run
 	var err error
 	if a.projectAccess != nil {
 		actor, ok := projectActor(r)
@@ -300,14 +309,37 @@ func (a *api) assignIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
 			return
 		}
-		issue, run, err = a.projectAccess.AssignIssue(r.Context(), actor, projectID, issueUUID, req.AgentID)
+		issue, err = a.projectAccess.SetIssueAssignee(r.Context(), actor, projectID, issueUUID, target)
 	} else {
-		issue, run, err = a.service.AssignIssue(r.Context(), projectID, issueUUID, req.AgentID)
+		issue, err = a.service.SetIssueAssignee(r.Context(), projectID, issueUUID, target, store.EmptyObject)
 	}
 	if err != nil {
 		writeProjectAccessError(w, err)
 		return
 	}
-	keys := issueKeysFromPath(issueUUID, chi.URLParam(r, "issueID"))
-	writeJSON(w, http.StatusAccepted, AssignmentResponse{Issue: issueDTO(issue), Run: runDTO(run, keys)})
+	writeJSON(w, http.StatusOK, AssignmentResponse{Issue: issueDTO(issue)})
+}
+
+func (a *api) listIssueAssignees(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := pathUUID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	var result []store.Assignee
+	var err error
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		result, err = a.projectAccess.ListIssueAssignees(r.Context(), actor, projectID)
+	} else {
+		result, err = a.service.ListIssueAssignees(r.Context(), projectID)
+	}
+	if err != nil {
+		writeProjectAccessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
 }

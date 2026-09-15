@@ -34,23 +34,24 @@ type Project struct {
 }
 
 type Issue struct {
-	ID              string
-	ProjectID       string
-	Number          int
-	Key             string
-	Title           string
-	Description     string
-	Status          string
-	Priority        int
-	AssignedAgentID *string
-	CreatedByType   *string
-	CreatedByID     *string
-	CreatedByName   *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	LastEvent       *Event
-	PreviousStatus  string
-	CurrentBranch   *string
+	ID            string
+	ProjectID     string
+	Number        int
+	Key           string
+	Title         string
+	Description   string
+	Status        string
+	Priority      int
+	AssigneeType  *string
+	AssigneeID    *string
+	AssigneeName  *string
+	CreatedByType *string
+	CreatedByID   *string
+	CreatedByName *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	LastEvent     *Event
+	CurrentBranch *string
 }
 
 type IssueRelationship struct {
@@ -63,32 +64,32 @@ type IssueRelationship struct {
 }
 
 type Provider struct {
-	ID            string
-	ProjectID     *string
-	Name          string
-	Kind          string
-	BaseURL       *string
-	CredentialRef *string
+	ID                 string
+	ProjectID          *string
+	Name               string
+	Kind               string
+	BaseURL            *string
+	CredentialRef      *string
 	Enabled            bool
 	HealthStatus       string
 	FilteredModelCount *int
 	TotalModelCount    *int
 	SafeMetadata       json.RawMessage
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type ModelProfile struct {
 	ID                 string
 	ProjectID          *string
-	ProviderID          string
-	Name                string
-	Model               string
+	ProviderID         string
+	Name               string
+	Model              string
 	Temperature        *float64
-	MaxTokens           *int
-	MaxConcurrent       *int
+	MaxTokens          *int
+	MaxConcurrent      *int
 	GenerationSettings json.RawMessage
-	Enabled             bool
+	Enabled            bool
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 }
@@ -214,6 +215,7 @@ type SchedulerLease struct {
 const (
 	SchedulerWaitAgentCapacity = "agent_capacity"
 	SchedulerWaitModelCapacity = "model_capacity"
+	SchedulerWaitWorkspace     = "workspace_occupied"
 )
 
 type SchedulerAdmission struct {

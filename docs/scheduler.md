@@ -4,10 +4,11 @@ The scheduler is part of the v0.1 critical path. It is backend-owned, PostgreSQL
 
 ## Command vs execution
 
-Starting/assigning work persists a Run and durable scheduling intent, then returns promptly.
+Issue ownership and Board status are persisted independently from scheduler admission. When an automatic lifecycle trigger, execution-configuration reconciliation, or explicit Start Run creates work, the backend persists a normal `QUEUED` Run and durable scheduling intent before returning.
 
 ```text
-HTTP/UI command
+Issue mutation / explicit Start Run / configuration reconciliation
+ -> validate execution configuration when a Run trigger applies
  -> persist QUEUED Run + execution job
  -> return
  -> scheduler claims/admission
@@ -16,7 +17,7 @@ HTTP/UI command
  -> RUNNING
 ```
 
-No HTTP handler owns long-running execution lifetime.
+Runner connectivity, repository-source availability and capacity are scheduler concerns after Run creation; they are not ownership or Board-status validity checks. No HTTP handler owns long-running execution lifetime.
 
 ## Durable ownership
 
@@ -126,7 +127,48 @@ Issue #8 deliberately did not activate the coordinator with a placeholder proces
 
 ## Assignment changes
 
-Changing an active Issue assignee cancels the current Run according to product rules and schedules a new attempt through the same scheduler. The Issue Workspace is reused.
+Issue ownership and Board status mutations never cancel Runs. Stopping execution requires an explicit Run command.
+
+The shared `store.ShouldAutoEnqueueIssue` policy is applied inside the Issue mutation transaction:
+
+- assigning/reassigning an Agent (including initial ownership on creation) enqueues in every status except `BACKLOG`;
+- an already Agent-assigned Issue leaving `BACKLOG` enqueues for `TODO`, `IN_PROGRESS`, `BLOCKED` or `REVIEW`, but not `DONE`;
+- all other status changes, User assignment and unassignment do not enqueue;
+- unchanged ownership is an idempotent no-op, including after a prior Run has finished.
+
+Assignment preserves Board status. An ownership-eligible Agent remains assigned even when its execution configuration cannot currently create a Run; the mutation succeeds without a pending-execution flag. Execution-configuration reconciliation uses the same enqueue path (see below).
+
+The Issue row lock serializes automatic enqueue, pair-scoped active-Run suppression and Issue-wide attempt numbering. Different Agents can have active Runs on one Issue; automatic enqueue never creates a second active Run for the same Issue/Agent. All attempts reuse the authoritative Issue Workspace and existing scheduler jobs. Workspace execution ownership still serializes access to its checkout.
+
+New automatic Runs atomically persist `run.created` with Run, Agent and Workspace identity. Duplicate suppression and execution-configuration skips create no Run Events. Issue mutation Events remain owned by the canonical Issue commands.
+
+## Execution configuration recovery and Start Run
+
+Configuration recovery derives work from current Agent ownership, Board status,
+active Issue/Agent Runs and the existing Agent/Model Profile/Provider validity
+checks. It persists no pending-execution flag or recovery history. Startup runs
+this reconciliation before starting the scheduler; configuration updates and
+Provider recovery invoke the same reconciliation for affected assignments.
+
+Recovery and explicit Start Run reuse the assignment eligibility policy: BACKLOG
+stays parked; TODO, IN_PROGRESS, BLOCKED, REVIEW and DONE are eligible. Candidate
+ownership is re-read under the Issue lock, so an intervening User assignment,
+unassignment or Agent change cannot enqueue stale work. Active Runs for the same
+Issue/Agent suppress duplicates. Different Agents retain their existing Runs.
+
+`POST /api/projects/{projectID}/issues/{issueID}/runs` requires Project member
+access, accepts no Agent selection, and preserves ownership and Board status.
+Unassigned/User-assigned Issues, BACKLOG and invalid execution configuration
+return conflict. A duplicate request returns the active Run while configuration
+remains valid. After that Run is terminal, Start Run can create the next attempt.
+Repeating the same assignment remains a no-op.
+
+Both commands reuse the normal Workspace, queued Run, START job and durable
+`run.created` transaction. Live Events publish after commit; rejected/skipped
+attempts produce no lifecycle Events. Runner/source availability and capacity
+never gate Run creation here: the existing scheduler owns those waits. Recovery
+scans omit pairs with active Runs, including queued Runs waiting for admission.
+Routine healthy Provider probes do not trigger assignment scans.
 
 ## Delegation / Automation compatibility
 

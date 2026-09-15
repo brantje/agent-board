@@ -17,7 +17,7 @@ const projectIssue = {
   description: 'Read-only work',
   status: 'TODO',
   priority: 0,
-  assignedAgentId: null,
+  assignedTo: null,
   createdAt: '',
   updatedAt: '',
   currentBranch: null,

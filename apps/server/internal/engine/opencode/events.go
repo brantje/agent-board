@@ -183,6 +183,10 @@ func (s *runState) handleTextPart(ctx context.Context, data json.RawMessage) err
 	if !visible {
 		return nil
 	}
+	part.Text = strings.ReplaceAll(part.Text, issueStatusPromptGuidance, "")
+	if strings.TrimSpace(part.Text) == "" {
+		return nil
+	}
 	return s.bufferOrPersistMessage(ctx, part.ID, "message", part, complete)
 }
 

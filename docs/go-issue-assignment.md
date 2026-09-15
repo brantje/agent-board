@@ -1,36 +1,86 @@
-# Go Issue assignment ownership
+# Issue assignment and execution
 
-The Go strangler backend owns the Issue assignment command:
+Issue ownership, Board workflow state and Agent execution are separate lifecycle concepts.
 
-- `POST /api/projects/:projectId/issues/:issueId/assignment`
-- native `OPTIONS` preflight for that exact route
+The canonical ownership endpoint is:
 
-Other Issue, Run, Review, Question, Workspace, Runtime, Engine, and worker routes retain their existing ownership unless another migration document marks them Go-owned. The TypeScript Run worker remains the single authoritative execution worker in this slice.
+- `POST /api/projects/{projectID}/issues/{issueID}/assignment`
 
-## Command behavior
+`issueID` is the public Issue key. The request is the generic ownership contract:
 
-The request remains the strict `{ "agentId": <uuid> }` contract. Project, Issue, and Agent lookups preserve the existing Project/shared scope rules and the existing `project_not_found`, `issue_not_found`, `issue_done`, `agent_not_found`, `agent_unavailable`, and `execution_configuration_invalid` errors.
+```json
+{
+  "assignedTo": {
+    "type": "AGENT",
+    "id": "<uuid>"
+  }
+}
+```
 
-Assignment reuses the Go execution-configuration checks already used by Review continuation. The Agent must be enabled, resolve its Engine, Model Profile, Provider and Runtime within scope, and resolve a currently supported executable configuration. This does not move Engine execution into Go.
+`type` may be `USER` or `AGENT`. Use `{ "assignedTo": null }` to clear ownership.
 
-A successful first assignment atomically:
+## Ownership command
 
-1. assigns the Agent to the Issue and appends `issue.assigned`;
-2. checks unresolved `blocks`/`depends_on` relationships;
-3. when workflow policy forbids starting blocked work, moves the Issue to `BLOCKED`, clears `execution_status`, and returns `run: null`;
-4. otherwise moves the Issue to `IN_PROGRESS`, creates the next `QUEUED` Run attempt, appends `run.created`, and inserts the durable `START` execution job; and
-5. projects the Issue execution status to `QUEUED` through the same durable scheduling transaction.
+Assignment changes only the Issue owner. It does not imply a Board transition and it does not cancel or otherwise mutate an existing Run.
 
-PostgreSQL is authoritative for the entire command. No in-memory assignment queue or second execution worker is introduced.
+The authoritative command:
 
-## Idempotency and reassignment
+1. resolves the Issue under its Project;
+2. validates the requested owner using the shared assignee-eligibility rules;
+3. preserves the current Board status;
+4. persists the ownership change and canonical `issue.assigned` Event atomically; and
+5. applies the shared automatic-enqueue trigger after the ownership mutation.
 
-Assigning the same Agent again while that Agent already owns the latest active Run returns the existing Run instead of creating another attempt. A queued Run is re-enqueued idempotently through the durable scheduling table, so a missing scheduling intent can be repaired without duplicating the Run.
+Repeating the current ownership is a no-op. It does not append another assignment Event or create another Run.
 
-When assignment changes to a different Agent, the previous active Run is fenced before the replacement is created. Pending execution jobs are finished as `replaced`; claimed/releasing jobs receive `cancel_requested_at`, which the authoritative TypeScript worker observes through its existing heartbeat/lease protocol. Open Questions for the replaced Run are cancelled and a `run.cancelled` Event is appended. The replacement Run then receives its own durable `START` job.
+Eligible Users are active effective Project members/admins, including inherited Group grants and implicit deployment-admin access. Eligible Agents are enabled and visible in the Project. Agent execution configuration is deliberately not part of ownership eligibility: an Issue may remain owned by an Agent whose model/provider configuration cannot currently create a Run.
 
-This preserves the strangler invariant that Go may own the scheduling decision while TypeScript remains the only process that claims and executes Run jobs.
+## Automatic execution after Agent assignment
 
-## Migration boundary
+Changed Agent ownership is an execution trigger in every current Board status except `BACKLOG`.
 
-This slice does not migrate Run claiming, leases, heartbeats, recovery, Engine execution, Runtime materialization, automatic Workspace orchestration, or process cancellation into Go. Those remain TypeScript-owned until their own parity and durability work is proven. The compatibility fallback remains required for those capabilities.
+- `BACKLOG` parks the Agent-owned Issue without creating a Run.
+- `TODO`, `IN_PROGRESS`, `BLOCKED`, `REVIEW` and `DONE` attempt normal Run creation.
+- User ownership and unassignment never auto-enqueue.
+
+Run creation still requires valid execution configuration for the current Agent. When that configuration is invalid or unavailable, the ownership mutation succeeds and no Run is created. Configuration reconciliation later retries eligible Agent-owned work through the same execution path.
+
+Scheduler availability is a separate boundary. Runner connectivity, repository-source availability and concurrency/capacity admission do not invalidate ownership and do not suppress creation of an otherwise valid Run. A successful enqueue persists a normal `QUEUED` Run, `run.created` Event and durable `START` scheduler job; the scheduler may then leave that Run queued until admission becomes possible.
+
+## Board status triggers
+
+Status changes do not reuse “any non-BACKLOG assignment” semantics.
+
+For an already Agent-owned Issue, automatic enqueue occurs only when the Issue leaves `BACKLOG` for one of:
+
+- `TODO`
+- `IN_PROGRESS`
+- `BLOCKED`
+- `REVIEW`
+
+`BACKLOG -> DONE` does not auto-enqueue. Changes between non-BACKLOG statuses do not auto-enqueue. Status mutation is otherwise independent of existing Runs and never implicitly cancels them.
+
+## Reassignment and active Runs
+
+Ownership changes never rewrite execution history.
+
+- Agent A -> Agent B preserves A's existing Runs and may create a new Run for B when the assignment trigger and execution configuration allow it.
+- assigning the same Agent while that Issue/Agent already has an active Run does not create a duplicate active Run;
+- switching to a User or clearing ownership preserves any active Agent Run and prevents future ownership-based reconciliation for that Issue;
+- assignment never synthesizes `run.cancelled`.
+
+Explicit cancellation remains a Run operation.
+
+## Explicit Start Run
+
+Explicit execution is a separate command from ownership:
+
+- `POST /api/projects/{projectID}/issues/{issueID}/runs`
+
+It uses only the Issue's current Agent assignee. `BACKLOG`, User-assigned and unassigned Issues are rejected; all other current Board statuses, including `DONE`, are eligible when execution configuration is valid.
+
+Explicit Start Run preserves Issue ownership and Board status. Scheduler availability does not block creation of the `QUEUED` Run and `START` job, and an already-active Run for the same Issue/Agent is not duplicated.
+
+## Durable evidence
+
+PostgreSQL is authoritative for ownership, Run creation, scheduler jobs and lifecycle Events. Product history comes from canonical persisted Events; operational diagnostics belong in structured logging and are not a second lifecycle record.

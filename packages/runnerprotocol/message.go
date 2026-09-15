@@ -15,28 +15,28 @@ const RunnerIDHeader = "X-Agent-Board-Runner-Id"
 type MessageType string
 
 const (
-	TypeServerHello      MessageType = "server_hello"
-	TypeRunnerHello      MessageType = "runner_hello"
-	TypeHealth           MessageType = "health"
-	TypeStart            MessageType = "start"
-	TypeSessionStarted   MessageType = "session_started"
-	TypeStdin            MessageType = "stdin"
-	TypeStdinClose       MessageType = "stdin_close"
-	TypeStdout           MessageType = "stdout"
-	TypeStderr           MessageType = "stderr"
-	TypeExit             MessageType = "exit"
-	TypeTerminate        MessageType = "terminate"
-	TypeKill             MessageType = "kill"
-	TypeConnect          MessageType = "connect"
-	TypeConnected        MessageType = "connected"
-	TypeConnectData      MessageType = "connect_data"
-	TypeConnectClose     MessageType = "connect_close"
-	TypeTransferBegin    MessageType = "transfer_begin"
-	TypeTransferChunk    MessageType = "transfer_chunk"
-	TypeTransferEnd      MessageType = "transfer_end"
-	TypeTransferFailed   MessageType = "transfer_failed"
-	TypeTransferApplied  MessageType = "transfer_applied"
-	TypeError            MessageType = "error"
+	TypeServerHello     MessageType = "server_hello"
+	TypeRunnerHello     MessageType = "runner_hello"
+	TypeHealth          MessageType = "health"
+	TypeStart           MessageType = "start"
+	TypeSessionStarted  MessageType = "session_started"
+	TypeStdin           MessageType = "stdin"
+	TypeStdinClose      MessageType = "stdin_close"
+	TypeStdout          MessageType = "stdout"
+	TypeStderr          MessageType = "stderr"
+	TypeExit            MessageType = "exit"
+	TypeTerminate       MessageType = "terminate"
+	TypeKill            MessageType = "kill"
+	TypeConnect         MessageType = "connect"
+	TypeConnected       MessageType = "connected"
+	TypeConnectData     MessageType = "connect_data"
+	TypeConnectClose    MessageType = "connect_close"
+	TypeTransferBegin   MessageType = "transfer_begin"
+	TypeTransferChunk   MessageType = "transfer_chunk"
+	TypeTransferEnd     MessageType = "transfer_end"
+	TypeTransferFailed  MessageType = "transfer_failed"
+	TypeTransferApplied MessageType = "transfer_applied"
+	TypeError           MessageType = "error"
 )
 
 var (
@@ -113,6 +113,10 @@ type ConnectClose struct {
 type ExitResult struct {
 	ExitCode int  `json:"exit_code"`
 	Signaled bool `json:"signaled,omitempty"`
+}
+
+type SessionStarted struct {
+	Dir string `json:"dir,omitempty"`
 }
 
 type ErrorPayload struct {

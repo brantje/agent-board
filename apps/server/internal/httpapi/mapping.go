@@ -21,17 +21,17 @@ func projectDTO(v store.Project) ProjectDTO {
 
 func issueDTO(v store.Issue) IssueDTO {
 	dto := IssueDTO{
-		ID:              v.Key,
-		ProjectID:       v.ProjectID,
-		Number:          v.Number,
-		Title:           v.Title,
-		Description:     v.Description,
-		Status:          v.Status,
-		Priority:        v.Priority,
-		AssignedAgentID: v.AssignedAgentID,
-		CreatedAt:       v.CreatedAt,
-		UpdatedAt:       v.UpdatedAt,
-		CurrentBranch:   v.CurrentBranch,
+		ID:            v.Key,
+		ProjectID:     v.ProjectID,
+		Number:        v.Number,
+		Title:         v.Title,
+		Description:   v.Description,
+		Status:        v.Status,
+		Priority:      v.Priority,
+		AssignedTo:    v.AssignedTo(),
+		CreatedAt:     v.CreatedAt,
+		UpdatedAt:     v.UpdatedAt,
+		CurrentBranch: v.CurrentBranch,
 	}
 	if v.CreatedByType != nil && v.CreatedByID != nil {
 		dto.CreatedBy = &IssueCreatorDTO{Type: *v.CreatedByType, ID: *v.CreatedByID, Name: v.CreatedByName}

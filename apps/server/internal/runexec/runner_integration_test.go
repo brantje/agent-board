@@ -209,10 +209,19 @@ func createRunnerScriptedIntegrationRun(t *testing.T, ctx context.Context, contr
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, run, err := control.AssignIssue(ctx, project.ID, issue.ID, agent.ID)
+	assigned, err := control.SetIssueAssignee(ctx, project.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: agent.ID}, store.EmptyObject)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if assigned.Status != "TODO" {
+		t.Fatalf("assignment changed status: %s", assigned.Status)
+	}
+	runs, err := control.ListRuns(ctx, project.ID)
+	if err != nil || len(runs) != 1 {
+		t.Fatalf("automatic Runs=%+v err=%v", runs, err)
+	}
+	run := runs[0]
+
 	return project, run
 }
 

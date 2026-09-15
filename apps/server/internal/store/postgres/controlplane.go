@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -58,59 +59,43 @@ func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue
 }
 
 func (s *Store) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue, error) {
+	result, err := s.UpdateIssueMutation(ctx, input)
+	return result.Issue, err
+}
+
+func (s *Store) UpdateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
+	return s.updateIssueMutation(ctx, input, store.EmptyObject)
+}
+
+func (s *Store) UpdateIssueMutationWithActor(ctx context.Context, input store.Issue, actor json.RawMessage) (store.IssueMutationResult, error) {
+	return s.updateIssueMutation(ctx, input, actor)
+}
+
+func (s *Store) updateIssueMutation(ctx context.Context, input store.Issue, actor json.RawMessage) (store.IssueMutationResult, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	var issueID, previousStatus string
-	if err := tx.QueryRow(ctx, `
-		SELECT id::text, status
-		FROM issues
-		WHERE project_id=$1 AND id=$2
-		FOR UPDATE
-	`, input.ProjectID, input.ID).Scan(&issueID, &previousStatus); err != nil {
-		return store.Issue{}, notFound(err)
-	}
-
-	if input.Status == "DONE" {
-		var active bool
-		if err := tx.QueryRow(ctx, `
-			SELECT EXISTS (
-				SELECT 1
-				FROM runs
-				WHERE project_id=$1 AND issue_id=$2
-				  AND status = ANY($3::text[])
-			) OR EXISTS (
-				SELECT 1
-				FROM scheduler_jobs AS job
-				JOIN runs AS run ON run.id=job.run_id AND run.project_id=job.project_id
-				WHERE run.project_id=$1 AND run.issue_id=$2
-				  AND job.state IN ('QUEUED','CLAIMED')
-			)
-		`, input.ProjectID, input.ID, activeRunStatuses).Scan(&active); err != nil {
-			return store.Issue{}, err
-		}
-		if active {
-			return store.Issue{}, store.ErrConflict
-		}
-	}
-
-	updated, err := scanIssueJoined(tx.QueryRow(ctx, `
-		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, assigned_agent_id=$7, updated_at=now()
-		FROM projects AS p
-		WHERE i.project_id=$1 AND i.id=$2 AND p.id=i.project_id
-		RETURNING `+issueSelectColumns+`
-	`, input.ProjectID, input.ID, input.Title, input.Description, input.Status, input.Priority, input.AssignedAgentID))
+	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.ID)
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
+	}
+	result, err := s.applyIssueMutationTx(ctx, tx, issueMutationTxInput{
+		Issue:          input,
+		Previous:       previous,
+		RepositoryPath: repositoryPath,
+		DefaultBranch:  defaultBranch,
+		Actor:          actor,
+	})
+	if err != nil {
+		return store.IssueMutationResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
-	updated.PreviousStatus = previousStatus
-	return updated, nil
+	return result, nil
 }
 
 func (s *Store) ListRuns(ctx context.Context, projectID string) ([]store.Run, error) {

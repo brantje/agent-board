@@ -15,6 +15,7 @@ func TestProjectAccessSharedAuthorizationPolicy(t *testing.T) {
 			project.ID + ":member": store.ProjectRoleMember,
 			project.ID + ":admin":  store.ProjectRoleAdmin,
 		},
+		users: []store.User{{ID: "deployment-admin", DeploymentRole: store.DeploymentRoleAdmin, Status: store.UserStatusActive}},
 	}
 	service := newProjectAccessServiceForTest(t, fake)
 

@@ -34,7 +34,7 @@ The TypeScript backend therefore still owns:
 
 - `POST /api/projects/:projectId/runs/:runId/questions`;
 - engine-driven Question creation;
-- the blocking transition to `WAITING_FOR_INPUT` and Issue `BLOCKED` state performed during that creation path;
+- the blocking Run transition to `WAITING_FOR_INPUT` performed during that creation path; native Question waiting does not automatically change Issue Board status;
 - the authoritative Run worker/executor that later consumes the durable Go-created RESUME job.
 
 This boundary avoids duplicate authoritative Question creation and does not introduce an in-memory Go queue or a second Run worker.

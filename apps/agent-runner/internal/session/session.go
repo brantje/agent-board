@@ -51,10 +51,11 @@ type Session struct {
 	stdout io.Reader
 	stderr io.Reader
 
-	done   chan struct{}
-	result Result
-	err    error
-	mu     sync.RWMutex
+	workingDir string
+	done       chan struct{}
+	result     Result
+	err        error
+	mu         sync.RWMutex
 }
 
 func start(id, workspaceRoot string, request Request, redactionValues []string) (*Session, error) {
@@ -69,7 +70,7 @@ func start(id, workspaceRoot string, request Request, redactionValues []string) 
 
 	cmd := exec.Command(request.Command[0], request.Command[1:]...)
 	cmd.Dir = workingDir
-	cmd.Env = mergeEnvironment(request.Env, request.Secrets)
+	cmd.Env = mergeEnvironment(request.Env, request.Secrets, workingDir)
 	configureProcessTree(cmd)
 
 	stdin, err := cmd.StdinPipe()
@@ -109,13 +110,15 @@ func start(id, workspaceRoot string, request Request, redactionValues []string) 
 	s := &Session{
 		id: id, cmd: cmd, stdin: newSafeWriteCloser(stdin),
 		stdout: stdoutBuffer, stderr: stderrBuffer,
-		done: make(chan struct{}),
+		workingDir: workingDir,
+		done:       make(chan struct{}),
 	}
 	go s.supervise(stdout, stderr, stdoutBuffer, stderrBuffer, redactionValues)
 	return s, nil
 }
 
 func (s *Session) ID() string            { return s.id }
+func (s *Session) WorkingDir() string    { return s.workingDir }
 func (s *Session) Stdin() io.WriteCloser { return s.stdin }
 func (s *Session) Stdout() io.Reader     { return s.stdout }
 func (s *Session) Stderr() io.Reader     { return s.stderr }
@@ -257,7 +260,7 @@ func resolveWorkingDir(workspaceRoot, requested string) (string, error) {
 	return candidate, nil
 }
 
-func mergeEnvironment(env, secrets map[string]string) []string {
+func mergeEnvironment(env, secrets map[string]string, workingDir string) []string {
 	values := make(map[string]string)
 	for _, key := range inheritedEnvironmentAllowlist {
 		if value, ok := os.LookupEnv(key); ok {
@@ -269,6 +272,9 @@ func mergeEnvironment(env, secrets map[string]string) []string {
 	}
 	for key, value := range secrets {
 		values[key] = value
+	}
+	if workingDir != "" {
+		values["PWD"] = workingDir
 	}
 
 	result := make([]string, 0, len(values))

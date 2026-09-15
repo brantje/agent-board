@@ -9,6 +9,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/providerdiscovery"
 	"github.com/brantje/agent-board/apps/server/internal/secrets"
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type ProviderModel struct {
@@ -47,7 +48,11 @@ func (s *Service) ListProviderModels(ctx context.Context, scope *string, provide
 		return ProviderModelListResult{}, NewError("provider_model_discovery_failed", "Unable to discover models from the Provider API.", err)
 	}
 	filtered := len(discovered)
-	s.persistProviderHealth(ctx, providerID, true, &filtered, &upstreamTotal)
+	filter := store.IssueExecutionFilter{ProviderID: providerID}
+	previousReadiness, readinessCaptured := s.issueExecutionReadinessSnapshot(ctx, filter)
+	if s.persistProviderHealth(ctx, providerID, true, &filtered, &upstreamTotal) {
+		s.reconcileExecutionConfigurationTransition(ctx, filter, previousReadiness, readinessCaptured)
+	}
 	out := make([]ProviderModel, 0, len(discovered))
 	for _, model := range discovered {
 		out = append(out, ProviderModel{ID: model.ID, Name: model.Name})

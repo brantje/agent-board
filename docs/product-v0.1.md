@@ -24,7 +24,7 @@ Project source (local or git)
   -> Question / resume when needed
   -> Review pinned to Git SHAs
   -> Approve
-  -> Done / delivery according to source semantics
+  -> Review/Run delivery complete; Issue Board status remains explicit
 ```
 
 The scripted Engine is a walking-skeleton/test tool; it is not the v0.1 destination.
@@ -178,27 +178,27 @@ BACKLOG -> TODO -> IN_PROGRESS -> BLOCKED -> REVIEW -> DONE
 
 `BLOCKED` is both a durable Issue state and a normal Board column. The column is simply the visual projection of that Issue state.
 
-Board status and Run status are separate. Run states such as `QUEUED`, `RUNNING`, `WAITING_FOR_INPUT` and `FAILED` do not become additional Board columns.
+Board status and Run status are separate. Run states such as `QUEUED`, `RUNNING`, `WAITING_FOR_INPUT`, `FAILED`, and `COMPLETED` do not become Board columns and do not implicitly mutate Issue status.
 
 Issue priority uses one numeric v0.1 vocabulary: `0`, `1`, `2`, `3`, `4`. `0` is the default/base priority and larger values mean higher relative priority. Priority is durable Issue metadata; by itself it does not bypass blockers, change Board state, create/cancel a Run or override scheduler admission policy.
 
-Assigning a runnable Agent normally creates/schedules a Run and moves the Issue into active work. The request returns after durable scheduling; execution continues server-side.
+Issue ownership is one User, Agent or nobody. The assignment API changes ownership without changing Board status or cancelling Runs. Enabled Project-visible Agents remain assignable while their execution configuration is temporarily unavailable.
 
-Changing assignee during active work cancels the current attempt and starts a new attempt on the same Issue branch/Workspace identity.
+The shared automatic enqueue policy (#101) applies to internal creation with an Agent assignee, assignment and status mutations. Agent assignment enqueues in every status except Backlog, without changing status. For an already assigned Issue, only leaving Backlog for Todo, In Progress, Blocked or Review auto-enqueues. Backlog -> Done and all other status changes do not auto-start. Repeated unchanged ownership is a no-op. Different Agents may have active Runs on one Issue; the same Issue/Agent pair is deduplicated transactionally.
 
-Done Issues cannot start Runs. Reopen returns Done -> Todo without auto-starting.
+Assigning an Agent to a Done Issue can enqueue; reopening Done -> Todo alone does not. Existing Runs continue through ownership/status changes. Execution-configuration recovery reconciles current Agent assignments outside Backlog when configuration becomes usable and during startup. Explicit Start Run uses the current Agent assignee in any status except Backlog, preserves ownership/status, and queues through the normal scheduler even when Runner/source/capacity is unavailable. Active Runs for the same Issue/Agent are deduplicated.
 
-## Project workflow settings
+## Locked v0.1 lifecycle behavior
 
-Configurable behavior includes:
+The v0.1 lifecycle is intentionally not a configurable workflow engine. These rules are fixed product contracts:
 
-- successful Run -> auto Review or manual transition
-- failed Run board behavior
-- blocking Question answer -> auto-resume or manual Resume
-- Review changes -> auto new attempt or Todo/manual restart
-- manual execution override for eligible blocked Issues
-- assignment behavior with unresolved blockers
-- whether Todo allows unassigned Issues
+- Board status changes only through an explicit Issue status mutation.
+- Run start, completion, failure, cancellation, scheduler recovery, native Question waiting/resume, Review approval, and Review Request Changes do not project Issue Board status.
+- Review Request Changes creates the next Run attempt on the same durable Issue branch while preserving the reviewed Agent and Workspace; it does not move the Issue to Todo or another Board column.
+- Blocking Questions affect the Run lifecycle only unless an Agent or human separately makes an explicit Issue status decision.
+- Assignment changes never implicitly cancel existing Runs.
+- Execution readiness is derived from current configuration and active Runs; v0.1 does not persist a separate pending/readiness workflow state.
+- Runner/source/capacity availability is scheduler admission policy, not ownership validity or Run-creation policy.
 
 Scheduler capacity waiting is not a board blocker.
 
@@ -220,9 +220,11 @@ A relationship record does not itself mutate Issue status, start/cancel Runs, or
 Blocking Question:
 
 ```text
-Issue -> BLOCKED
-Run   -> WAITING_FOR_INPUT
+Run/session waiting -> WAITING_FOR_INPUT
+Issue Board status   -> unchanged unless explicitly updated
 ```
+
+An Agent may explicitly set the Issue to `BLOCKED` when the workflow is genuinely blocked, but native Question waiting is not an automatic Board transition.
 
 Questions are answered from Issue detail. Inbox contains blocking Questions, Review requests, failed Runs and other human-attention items.
 
@@ -281,7 +283,7 @@ Review also shows tests, Artifacts and relevant execution evidence. Those eviden
 
 Request Changes continues the same Issue branch. Prior Reviews remain immutable because their pinned SHAs do not change.
 
-For a local Project, Approve integrates the exact pinned reviewed commit into the current local Project Workspace target state and then completes the Issue when durable approval finalization succeeds. A real target conflict is explicit and does not silently discard either side.
+For a local Project, Approve integrates the exact pinned reviewed commit into the current local Project Workspace target state and completes Review/Run delivery when durable approval finalization succeeds. The Issue Board status remains unchanged unless it is explicitly updated. A real target conflict is explicit and does not silently discard either side.
 
 For a remote Git Project, publishing the Issue branch is **not** remote target integration. v0.1 does not pretend that internal Review approval merged a remote target branch. Provider PR/MR actions remain later Source Connection work.
 
@@ -295,7 +297,11 @@ Automatic merge/deploy is a separate, stronger permission and must not be implie
 
 ## Execution preflight
 
-The product distinguishes `configured` from `runnable`. Preflight evaluates Agent, Engine, Model Profile/Provider credentials/health, live Runner protocol compatibility/availability and Project source prerequisites.
+The product distinguishes execution configuration from scheduler admission.
+
+Run creation validates only the durable Agent execution configuration: the Agent must be enabled and Project-visible, its Engine must be registered/supported, its Model Profile must be enabled and Project-visible, and its Provider must be enabled and not unhealthy. This same predicate drives automatic enqueue, explicit Start Run, execution-state reads, and configuration-recovery reconciliation.
+
+Connected Runner availability/protocol capability, Project Runner policy, source reachability, Workspace serialization, Agent capacity, Model Profile capacity, and Runner capacity are scheduler admission concerns. A valid configuration may create a durable queued Run while those resources are unavailable.
 
 For remote Git sources, runtime Git authentication failures are explicit; Agent Board does not silently fall back to local transfer.
 

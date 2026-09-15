@@ -36,7 +36,7 @@ admin > member > viewer
 A User's effective Project role is the highest role from direct `ProjectUserAccess` and every `ProjectGroupAccess` reachable through their Group memberships. There are no deny or override rules.
 
 - `viewer`: read-only Project data, Issues, Runs, activity/evidence and Review data.
-- `member`: viewer access plus ordinary workflow mutations such as Issue work, Agent assignment, supported Run actions, Question answers and Review decisions.
+- `member`: viewer access plus ordinary workflow mutations such as Issue work, User/Agent assignment, supported Run actions, Question answers and Review decisions.
 - `admin`: member access plus Project settings and Project access administration.
 
 Deployment administrators evaluate as Project admins without synthetic access rows.

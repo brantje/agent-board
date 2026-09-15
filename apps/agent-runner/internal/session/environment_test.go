@@ -3,9 +3,36 @@ package session
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestSessionPWDMatchesWorkingDirectory(t *testing.T) {
+	workspace := t.TempDir()
+	manager := NewManagerWithWorkspace(1, workspace)
+	execution, err := manager.Start("pwd-session", Request{Command: []string{"sh", "-c", "printf '%s' \"$PWD\""}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(execution.Stdout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := execution.Wait(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want, err := filepath.EvalSymlinks(manager.SessionWorkspacePath("pwd-session"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.WorkingDir() != want {
+		t.Fatalf("session working dir=%q want %q", execution.WorkingDir(), want)
+	}
+	if got := strings.TrimSpace(string(output)); got != want {
+		t.Fatalf("PWD=%q want %q", got, want)
+	}
+}
 
 func TestSessionDoesNotInheritUnapprovedRunnerEnvironment(t *testing.T) {
 	const runnerSecretName = "AGENT_BOARD_RUNNER_INTERNAL_SECRET_TEST"
@@ -35,7 +62,7 @@ func TestSessionDoesNotInheritUnapprovedRunnerEnvironment(t *testing.T) {
 func TestSessionInheritsTLSCertificateEnvironment(t *testing.T) {
 	t.Setenv("SSL_CERT_FILE", "/etc/ssl/certs/ca-certificates.crt")
 	t.Setenv("SSL_CERT_DIR", "/etc/ssl/certs")
-	values := mergeEnvironment(nil, nil)
+	values := mergeEnvironment(nil, nil, "")
 	joined := strings.Join(values, "\n")
 	if !strings.Contains(joined, "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt") {
 		t.Fatalf("expected SSL_CERT_FILE in inherited environment, got %q", joined)
@@ -47,7 +74,7 @@ func TestSessionInheritsTLSCertificateEnvironment(t *testing.T) {
 
 func TestExplicitEnvironmentMayOverrideAllowlistedValue(t *testing.T) {
 	t.Setenv("HOME", "/runner-home")
-	values := mergeEnvironment(map[string]string{"HOME": "/session-home"}, nil)
+	values := mergeEnvironment(map[string]string{"HOME": "/session-home"}, nil, "")
 	joined := strings.Join(values, "\n")
 	if !strings.Contains(joined, "HOME=/session-home") {
 		t.Fatalf("expected explicit HOME override in %q", joined)

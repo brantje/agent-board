@@ -76,8 +76,8 @@ func TestProjectAccessWorkflowWrappersFailBeforeUnavailableDependencies(t *testi
 	member := activeProjectActor("member", store.DeploymentRoleMember)
 	outsider := activeProjectActor("outsider", store.DeploymentRoleMember)
 
-	if _, _, err := access.AssignIssue(t.Context(), viewer, projectID, "issue-1", "agent-1"); appErrorCode(err) != "forbidden" {
-		t.Fatalf("viewer AssignIssue() error=%v", err)
+	if _, err := access.SetIssueAssignee(t.Context(), viewer, projectID, "issue-1", &store.Assignee{Type: "AGENT", ID: "agent-1"}); appErrorCode(err) != "forbidden" {
+		t.Fatalf("viewer SetIssueAssignee() error=%v", err)
 	}
 	answerText := "answer"
 	if _, err := access.AnswerQuestion(t.Context(), viewer, nil, projectID, "question-1", store.QuestionAnswer{Kind: "TEXT", Text: &answerText}); appErrorCode(err) != "forbidden" {

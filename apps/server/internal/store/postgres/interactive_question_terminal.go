@@ -60,18 +60,5 @@ func cleanupTerminalInteractiveQuestions(ctx context.Context, tx pgx.Tx, run sto
 			return err
 		}
 	}
-
-	command, err := tx.Exec(ctx, `
-		UPDATE issues
-		SET status=CASE WHEN status='BLOCKED' THEN 'IN_PROGRESS' ELSE status END,
-		    updated_at=CASE WHEN status='BLOCKED' THEN now() ELSE updated_at END
-		WHERE project_id=$1 AND id=$2
-	`, run.ProjectID, run.IssueID)
-	if err != nil {
-		return err
-	}
-	if command.RowsAffected() != 1 {
-		return store.ErrConflict
-	}
 	return nil
 }

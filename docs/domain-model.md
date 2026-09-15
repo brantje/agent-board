@@ -51,7 +51,11 @@ agent-board/<issue-key>
 
 It may have multiple execution attempts (Runs), all continuing that branch unless the lifecycle explicitly fails closed.
 
-Core Issue fields include title, description, durable Board status, priority and optional assigned Agent.
+Core Issue fields include title, description, durable Board status, priority and one optional current assignee (`USER | AGENT | null`). Persistence uses the paired `assignee_type` / `assignee_id` fields; both are null or both are set. There are no parallel User/Agent ownership columns.
+
+The public `assignedTo` value is `{type, id, name}` or null. Eligible Users are active effective Project members/admins, including inherited Group grants and implicit deployment-admin access. Eligible Agents are enabled and visible in the Project; execution configuration and scheduler availability are separate. Changing eligibility later does not automatically change existing ownership.
+
+The shared ownership command supports assignment, reassignment and unassignment. It preserves Board status and existing Runs, atomically records an `issue.assigned` Event, and emits no mutation Event when ownership is unchanged. The Project assignee directory uses the same eligibility resolution. Automatic enqueue, execution-configuration recovery and explicit Start Run use the shared execution path documented in `scheduler.md`; scheduler admission remains a separate later boundary and none of these mechanisms implicitly change Issue ownership or Board status.
 
 Each Issue has a public key `<project.issue_prefix>-<number>` allocated atomically per Project. The prefix is configured when the Project is created, is globally unique and immutable. The key is the public Issue identifier in URLs and APIs; the internal persistence identity remains a UUID.
 
@@ -128,6 +132,8 @@ One durable execution attempt for an Issue by an Agent.
 
 A Run records status, attempt identity, scheduler ownership, immutable execution provenance, execution evidence and relationships to Workspace/selected Runner (and Runtime Instances only on the legacy managed-compute path).
 
+Run lifecycle is independent of the Issue's Board status. Creating, starting, completing, failing or cancelling a Run does not by itself move the Issue between Board columns; Issue status changes happen only through the explicit Issue workflow command or its documented failed-run recovery rule.
+
 Later attempts continue the Issue's durable Git branch. A blocking Question may keep the exact same live Runner/Execution Session/Engine session and checkout rather than creating a new attempt.
 
 ### Workspace
@@ -148,7 +154,7 @@ Remote Issue branch publication does not create an equivalent remote target-inte
 
 ### Question
 
-Structured request for human input. A blocking Question may place the Run in `WAITING_FOR_INPUT` and the Issue in `BLOCKED`.
+Structured request for human input. A blocking Question may place the Run in `WAITING_FOR_INPUT`. It does not automatically change Issue Board status; an Agent or human uses the explicit Issue-status mutation when the Board should move to `BLOCKED`.
 
 `WAITING_FOR_INPUT` is not a Git finalization boundary. The same live execution checkout may remain dirty while waiting.
 

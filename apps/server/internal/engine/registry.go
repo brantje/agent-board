@@ -51,3 +51,11 @@ func (r *Registry) Get(name string) (Engine, error) {
 	}
 	return adapter, nil
 }
+
+func (r *Registry) Has(name string) bool {
+	if r == nil {
+		return false
+	}
+	_, ok := r.engines[strings.TrimSpace(name)]
+	return ok
+}

@@ -103,16 +103,16 @@ scheduler -> Runner -> Workspace materialization -> Execution Session -> Engine
       |                                     +--> Request changes -> new attempt
       |                                                           same Workspace
       |
-      +--> blocking Question ------------> BLOCKED
+      +--> blocking Question ------------> Run WAITING_FOR_INPUT
       |                                     |
       |                                     +--> answer -> resume same Run
       |
-      +--> execution failure ------------> BLOCKED / retry
+      +--> execution failure ------------> Run FAILED / explicit retry
       |
-      +--> capacity wait ----------------> stays queued
+      +--> capacity/workspace wait ------> Run stays queued
 ```
 
-`BLOCKED` is a durable Issue state and its normal Board column. Run execution states remain separate from Board workflow states.
+`BLOCKED` is a durable Issue state and its normal Board column. Run execution states remain separate from Board workflow states: Questions, failures and scheduler waiting do not implicitly move the Board; Agents or humans use the explicit Issue-status mutation when the workflow state should change.
 
 ## Core product model
 

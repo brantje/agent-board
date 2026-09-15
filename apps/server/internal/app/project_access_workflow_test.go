@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -16,7 +17,7 @@ type projectWorkflowAuthorizationStore struct {
 	runs             map[string]store.Run
 	createIssueCalls int
 	updateIssueCalls int
-	assignIssueCalls int
+	assignmentCalls  int
 }
 
 func (s *projectWorkflowAuthorizationStore) GetProject(_ context.Context, projectID string) (store.Project, error) {
@@ -56,6 +57,11 @@ func (s *projectWorkflowAuthorizationStore) CreateIssue(_ context.Context, input
 	return input, nil
 }
 
+func (s *projectWorkflowAuthorizationStore) CreateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
+	issue, err := s.CreateIssue(ctx, input)
+	return store.IssueMutationResult{Issue: issue}, err
+}
+
 func (s *projectWorkflowAuthorizationStore) GetIssue(_ context.Context, projectID, issueID string) (store.Issue, error) {
 	issue, ok := s.issues[issueID]
 	if !ok || issue.ProjectID != projectID {
@@ -78,6 +84,31 @@ func (s *projectWorkflowAuthorizationStore) UpdateIssue(_ context.Context, input
 	s.updateIssueCalls++
 	s.issues[input.ID] = input
 	return input, nil
+}
+
+func (s *projectWorkflowAuthorizationStore) UpdateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
+	issue, err := s.UpdateIssue(ctx, input)
+	return store.IssueMutationResult{Issue: issue}, err
+}
+
+func (s *projectWorkflowAuthorizationStore) SetIssueAssignee(_ context.Context, projectID, issueID string, target *store.Assignee, _ json.RawMessage) (store.IssueMutationResult, error) {
+	s.assignmentCalls++
+	issue, err := s.GetIssue(context.Background(), projectID, issueID)
+	if err != nil {
+		return store.IssueMutationResult{}, err
+	}
+	if target == nil {
+		issue.AssigneeType, issue.AssigneeID, issue.AssigneeName = nil, nil, nil
+	} else {
+		kind, id, name := target.Type, target.ID, target.Name
+		issue.AssigneeType, issue.AssigneeID, issue.AssigneeName = &kind, &id, &name
+	}
+	s.issues[issueID] = issue
+	return store.IssueMutationResult{Issue: issue}, nil
+}
+
+func (s *projectWorkflowAuthorizationStore) ListIssueAssignees(context.Context, string) ([]store.Assignee, error) {
+	return nil, nil
 }
 
 func (s *projectWorkflowAuthorizationStore) ListRuns(_ context.Context, projectID string) ([]store.Run, error) {
@@ -123,19 +154,6 @@ func (s *projectWorkflowAuthorizationStore) GetProvider(_ context.Context, scope
 	return store.Provider{ID: providerID, ProjectID: &projectID, Enabled: true}, nil
 }
 
-func (s *projectWorkflowAuthorizationStore) AssignIssue(_ context.Context, projectID, issueID, agentID string) (store.Issue, store.Run, error) {
-	s.assignIssueCalls++
-	issue, err := s.GetIssue(context.Background(), projectID, issueID)
-	if err != nil {
-		return store.Issue{}, store.Run{}, err
-	}
-	issue.AssignedAgentID = &agentID
-	s.issues[issueID] = issue
-	run := store.Run{ID: "run-1", ProjectID: projectID, IssueID: issueID, Status: "QUEUED"}
-	s.runs[run.ID] = run
-	return issue, run, nil
-}
-
 func newProjectWorkflowAccess(t *testing.T, fake *projectWorkflowAuthorizationStore) *ProjectAccessService {
 	t.Helper()
 	service, err := NewProjectAccessService(New(fake), fake)
@@ -174,9 +192,10 @@ func TestProjectAccessMemberRunsExistingWorkflowMutations(t *testing.T) {
 		t.Fatalf("member CreateIssue() issue=%+v calls=%d err=%v", created, fake.createIssueCalls, err)
 	}
 
-	assigned, run, err := access.AssignIssue(t.Context(), member, projectID, "issue-existing", "agent-1")
-	if err != nil || assigned.AssignedAgentID == nil || *assigned.AssignedAgentID != "agent-1" || run.ID != "run-1" || fake.assignIssueCalls != 1 {
-		t.Fatalf("member AssignIssue() issue=%+v run=%+v calls=%d err=%v", assigned, run, fake.assignIssueCalls, err)
+	const agentID = "00000000-0000-4000-8000-000000000001"
+	assigned, err := access.SetIssueAssignee(t.Context(), member, projectID, "issue-existing", &store.Assignee{Type: "AGENT", ID: agentID, Name: "Agent"})
+	if err != nil || assigned.AssigneeID == nil || *assigned.AssigneeID != agentID || fake.assignmentCalls != 1 {
+		t.Fatalf("member SetIssueAssignee() issue=%+v calls=%d err=%v", assigned, fake.assignmentCalls, err)
 	}
 
 	questionDB := &questionServiceStore{}

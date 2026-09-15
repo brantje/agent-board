@@ -97,6 +97,28 @@ func TestConnectionPayloadRejectsMalformedOrAmbiguousInput(t *testing.T) {
 	}
 }
 
+func TestSessionStartedPayloadRoundTrip(t *testing.T) {
+	want, err := NewMessage(Version2, TypeSessionStarted, "session-1", SessionStarted{Dir: "/tmp/runner-workspaces/session-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := Encode(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Decode(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := DecodePayload[SessionStarted](got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if payload.Dir != "/tmp/runner-workspaces/session-1" {
+		t.Fatalf("dir=%q", payload.Dir)
+	}
+}
+
 func TestOutboundMessagesEnforceProtocolBoundary(t *testing.T) {
 	for _, message := range []Message{
 		{Version: Version2, Type: "unknown", SessionID: "s"},

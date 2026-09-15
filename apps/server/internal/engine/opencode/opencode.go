@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
+	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 )
 
 const (
@@ -126,6 +128,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, err
 	}
 	defer native.CloseIdleConnections()
+	native.SetDirectory(nativeWorkingDirectory(process))
 	if err := waitHealthy(ctx, native); err != nil {
 		return engine.Result{}, err
 	}
@@ -144,6 +147,12 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	defer cancelEventReads()
 
 	state := newRunState(session.ID, request.InteractiveQuestions, activitySink(request.Launcher))
+	statusTools := newIssueStatusToolTracker()
+	if recovered && !promptRequired {
+		if err := statusTools.ReconcileAttach(ctx, native, session.ID, request.IssueStatus); err != nil {
+			return engine.Result{}, err
+		}
+	}
 	state.seedModelUsage(settings.ProviderID, request.Context.Model.Model, nil)
 	if limit, err := native.ModelContextLimit(ctx, settings.ProviderID, request.Context.Model.Model); err == nil {
 		state.contextLimitTokens = cloneInt64(limit)
@@ -171,6 +180,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{Summary: state.lastVisibleMessage}, nil
 	}
 	finishCompleted := func() (engine.Result, error) {
+		if err := statusTools.Reconcile(ctx, native, session.ID, request.IssueStatus); err != nil {
+			return engine.Result{}, err
+		}
 		if err := state.flushPendingMessages(ctx); err != nil {
 			return engine.Result{}, err
 		}
@@ -251,6 +263,12 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 						reconcileErr,
 					)
 				}
+				if reconcileErr := statusTools.Reconcile(ctx, native, session.ID, request.IssueStatus); reconcileErr != nil {
+					return engine.Result{}, errors.Join(
+						fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
+						reconcileErr,
+					)
+				}
 				stream, err = reconnectEvents(ctx, native)
 				if err != nil {
 					return engine.Result{}, errors.Join(fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err), err)
@@ -285,6 +303,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 					return finishCompleted()
 				}
 				continue
+			}
+			if err := statusTools.Handle(ctx, eventRead.event, session.ID, request.IssueStatus); err != nil {
+				return engine.Result{}, err
 			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
 				return engine.Result{}, err
@@ -385,8 +406,8 @@ func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher,
 		}
 	}
 	process, err := launcher.Start(ctx, engine.ProcessRequest{
-		Command:               []string{"opencode", "serve", "--hostname", host, "--port", port},
-		CWD:                   "/workspace",
+		Command:               issueStatusServeCommand(host, port, env),
+		CWD:                   runtimepkg.WorkspaceTarget,
 		Env:                   env,
 		ProviderCredentialEnv: providerCredentialEnv,
 		Kind:                  "tool",
@@ -429,10 +450,21 @@ func pickNativeSession(ctx context.Context, native *client.Client, sessions []cl
 	if len(sessions) == 0 {
 		return client.Session{}, nil
 	}
+	bound := path.Clean(strings.TrimSpace(native.Directory()))
+	candidates := make([]client.Session, 0, len(sessions))
 	for _, session := range sessions {
 		if strings.TrimSpace(session.ID) == "" {
 			continue
 		}
+		if bound != "." && bound != "" {
+			directory := path.Clean(strings.TrimSpace(session.Directory))
+			if directory != bound {
+				continue
+			}
+		}
+		candidates = append(candidates, session)
+	}
+	for _, session := range candidates {
 		active, err := native.SessionActive(ctx, session.ID)
 		if err != nil {
 			return client.Session{}, fmt.Errorf("opencode engine: query native session %s: %w", session.ID, err)
@@ -441,13 +473,22 @@ func pickNativeSession(ctx context.Context, native *client.Client, sessions []cl
 			return session, nil
 		}
 	}
-	for _, session := range sessions {
-		if strings.TrimSpace(session.ID) != "" {
-			return session, nil
-		}
+	if len(candidates) != 0 {
+		return candidates[0], nil
 	}
 	return client.Session{}, nil
 }
+
+func nativeWorkingDirectory(process engine.Process) string {
+	if provider, ok := process.(engine.WorkingDirectoryProvider); ok {
+		if directory := strings.TrimSpace(provider.WorkingDirectory()); directory != "" {
+			return directory
+		}
+	}
+	return runtimepkg.WorkspaceTarget
+}
+
+const issueStatusPromptGuidance = "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When implementation or other work is complete and ready for human review or handoff, use REVIEW. Completing the requested implementation does not by itself mean DONE. For normal coding or implementation work, a successful final handoff should therefore normally leave the Issue in REVIEW, not DONE. Use DONE only when the Issue is fully finished and no human review, approval, or handoff remains. Before your final response, compare the final work outcome with the persisted Issue Board status and call set_issue_status(status) if the Board state should now be different. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required."
 
 func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	var sections []string
@@ -462,6 +503,7 @@ func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	if safe.ReviewFeedback != nil && strings.TrimSpace(safe.ReviewFeedback.Feedback) != "" {
 		sections = append(sections, "Review feedback:\n"+strings.TrimSpace(safe.ReviewFeedback.Feedback))
 	}
+	sections = append(sections, "Current persisted Issue Board status: "+strings.TrimSpace(safe.Issue.Status)+".\n"+issueStatusPromptGuidance)
 	sections = append(sections, "Work directly in the current project directory and implement the requested issue. Treat /workspace as the logical workspace root: use project-relative paths for workspace files rather than absolute /workspace paths. If human input is required, use OpenCode's native Question capability rather than guessing.")
 	return strings.Join(sections, "\n\n")
 }

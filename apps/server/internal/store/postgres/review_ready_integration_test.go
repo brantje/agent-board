@@ -7,7 +7,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestSchedulerReadyForReviewCreatesPendingReviewAndProjectsIssue(t *testing.T) {
+func TestSchedulerReadyForReviewCreatesPendingReviewWithoutProjectingIssueStatus(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "review-ready")
@@ -42,7 +42,7 @@ func TestSchedulerReadyForReviewCreatesPendingReviewAndProjectsIssue(t *testing.
 	if err := s.pool.QueryRow(ctx, `SELECT status FROM issues WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID).Scan(&issueStatus); err != nil {
 		t.Fatalf("read Issue: %v", err)
 	}
-	if issueStatus != "REVIEW" {
-		t.Fatalf("Issue status=%s want REVIEW", issueStatus)
+	if issueStatus != f.issue.Status {
+		t.Fatalf("Issue status=%s want unchanged %s", issueStatus, f.issue.Status)
 	}
 }

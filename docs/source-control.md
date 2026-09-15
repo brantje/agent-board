@@ -82,7 +82,7 @@ A local Project has one durable backend-owned **Project Workspace** representing
 
 On first use Agent Board materializes the configured target branch, records the exact revision and atomically publishes the Project Workspace. Later Project configuration changes do not silently reset an already-ready Project Workspace.
 
-Local Review approval integrates the exact pinned `review_revision` into the current Project target under the existing Project-scoped lock. Git merge semantics are used; filesystem patches are not. If the target has advanced, clean integration may create a merge commit. A real conflict fails explicitly and leaves the target branch at its prior clean HEAD. The Issue is not marked `DONE` until delivery and durable approval state complete.
+Local Review approval integrates the exact pinned `review_revision` into the current Project target under the existing Project-scoped lock. Git merge semantics are used; filesystem patches are not. If the target has advanced, clean integration may create a merge commit. A real conflict fails explicitly and leaves the target branch at its prior clean HEAD. Durable approval/delivery completes the Review and Run delivery state; the Issue Board status is unchanged unless an explicit Issue status mutation changes it.
 
 ### Local Issue execution and Runner transfer
 
@@ -176,7 +176,7 @@ base A
 
 Older Reviews remain immutable because their pinned SHAs do not change when the branch advances.
 
-Approving one Issue must not mutate another Issue branch. Local delivery changes only the Project target plus the approved Issue's lifecycle state.
+Approving one Issue must not mutate another Issue branch. Local delivery changes only the Project target plus the approved Review/Run delivery state; it does not implicitly change the Issue Board status.
 
 ## Local target delivery versus remote publication
 

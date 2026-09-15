@@ -155,13 +155,16 @@ func createQueuedFixtureRun(t *testing.T, s *Store, f runFixture, suffix string)
 	t.Helper()
 	ctx := context.Background()
 	issue, err := s.CreateIssue(ctx, store.Issue{
-		ProjectID:       f.project.ID,
-		Title:           "issue " + suffix,
-		Status:          "IN_PROGRESS",
-		AssignedAgentID: &f.agent.ID,
+		ProjectID: f.project.ID,
+		Title:     "issue " + suffix,
+		Status:    "IN_PROGRESS",
 	})
 	if err != nil {
 		t.Fatalf("create issue %s: %v", suffix, err)
+	}
+	// This scheduler fixture creates its own Workspace/Run and queues explicitly.
+	if _, err := s.pool.Exec(ctx, `UPDATE issues SET assignee_type='AGENT',assignee_id=$2 WHERE id=$1`, issue.ID, f.agent.ID); err != nil {
+		t.Fatal(err)
 	}
 	workspace, err := s.CreateWorkspace(ctx, store.Workspace{
 		ProjectID:     f.project.ID,

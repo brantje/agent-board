@@ -32,7 +32,12 @@ const issueSelectColumns = `
 	i.description,
 	i.status,
 	i.priority,
-	i.assigned_agent_id::text,
+	i.assignee_type,
+	i.assignee_id::text,
+	CASE
+		WHEN i.assignee_type='USER' THEN (SELECT display_name FROM users WHERE id=i.assignee_id)
+		WHEN i.assignee_type='AGENT' THEN (SELECT name FROM agents WHERE id=i.assignee_id)
+	END,
 	i.number,
 	p.issue_prefix,
 	i.created_by_type,
@@ -113,6 +118,11 @@ func (s *Store) GetProject(ctx context.Context, projectID string) (store.Project
 }
 
 func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue, error) {
+	result, err := s.CreateIssueMutation(ctx, input)
+	return result.Issue, err
+}
+
+func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
 	status := input.Status
 	if status == "" {
 		status = "BACKLOG"
@@ -120,13 +130,26 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	if (input.AssigneeType == nil) != (input.AssigneeID == nil) {
+		return store.IssueMutationResult{}, store.ErrInvalidArgument
+	}
+	var assignee *store.Assignee
+	if input.AssigneeType != nil {
+		if err := lockAssigneeEligibility(ctx, tx); err != nil {
+			return store.IssueMutationResult{}, err
+		}
+		assignee, err = resolveAssignee(ctx, tx, input.ProjectID, input.AssignedTo())
+		if err != nil {
+			return store.IssueMutationResult{}, err
+		}
+	}
 	creatorName, err := issueCreatorName(ctx, tx, input.ProjectID, input.CreatedByType, input.CreatedByID)
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 
 	var prefix string
@@ -137,24 +160,51 @@ func (s *Store) CreateIssue(ctx context.Context, input store.Issue) (store.Issue
 		WHERE id = $1
 		RETURNING issue_prefix, next_issue_number - 1
 	`, input.ProjectID).Scan(&prefix, &number); err != nil {
-		return store.Issue{}, notFound(err)
+		return store.IssueMutationResult{}, notFound(err)
 	}
 
 	issue, err := scanIssueWithPriority(tx.QueryRow(ctx, `
-		INSERT INTO issues (project_id, number, title, description, status, priority, assigned_agent_id, created_by_type, created_by_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id::text, project_id::text, title, description, status, priority, assigned_agent_id::text, number, created_by_type, created_by_id::text, created_at, updated_at
-	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, input.AssignedAgentID, input.CreatedByType, input.CreatedByID))
+		INSERT INTO issues (project_id, number, title, description, status, priority, assignee_type, assignee_id, created_by_type, created_by_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING id::text, project_id::text, title, description, status, priority, assignee_type, assignee_id::text, NULL::text, number, created_by_type, created_by_id::text, created_at, updated_at
+	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, input.AssigneeType, input.AssigneeID, input.CreatedByType, input.CreatedByID))
 	if err != nil {
-		return store.Issue{}, err
+		return store.IssueMutationResult{}, err
 	}
 	issue.Key = store.FormatIssueKey(prefix, issue.Number)
 	issue.CreatedByName = creatorName
-
-	if err := tx.Commit(ctx); err != nil {
-		return store.Issue{}, err
+	if assignee != nil {
+		issue.AssigneeName = &assignee.Name
 	}
-	return issue, nil
+
+	var runEvent store.Event
+	if assignee != nil && assignee.Type == "AGENT" {
+		_, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, issue.ProjectID, issue.ID)
+		if err != nil {
+			return store.IssueMutationResult{}, err
+		}
+		if _, runEvent, err = s.enqueueIssueMutation(ctx, tx, issue, "", true, repositoryPath, defaultBranch); err != nil {
+			return store.IssueMutationResult{}, err
+		}
+	}
+	issueEvent, err := store.NewIssueCreatedEvent(issue)
+	if err != nil {
+		return store.IssueMutationResult{}, err
+	}
+	issueEvent, err = appendEventTx(ctx, tx, issueEvent)
+	if err != nil {
+		return store.IssueMutationResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.IssueMutationResult{}, err
+	}
+	events := make([]store.Event, 0, 2)
+	if runEvent.ID != "" {
+		events = append(events, runEvent)
+	}
+	events = append(events, issueEvent)
+	issue.LastEvent = &issueEvent
+	return store.IssueMutationResult{Issue: issue, Events: events}, nil
 }
 
 func issueCreatorName(ctx context.Context, tx pgx.Tx, projectID string, creatorType, creatorID *string) (*string, error) {
@@ -181,7 +231,11 @@ func issueCreatorName(ctx context.Context, tx pgx.Tx, projectID string, creatorT
 }
 
 func (s *Store) GetIssue(ctx context.Context, projectID, issueID string) (store.Issue, error) {
-	return scanIssueJoinedWithLastEvent(s.pool.QueryRow(ctx, `
+	return getIssue(ctx, s.pool, projectID, issueID)
+}
+
+func getIssue(ctx context.Context, q assigneeQuerier, projectID, issueID string) (store.Issue, error) {
+	return scanIssueJoinedWithLastEvent(q.QueryRow(ctx, `
 		SELECT `+issueSelectColumns+`, `+issueCurrentBranchColumn+`, `+lastEventSelectColumns+`
 		FROM issues AS i
 		JOIN projects AS p ON p.id = i.project_id
@@ -237,7 +291,7 @@ func scanProject(row pgx.Row) (store.Project, error) {
 
 func scanIssueWithPriority(row pgx.Row) (store.Issue, error) {
 	var value store.Issue
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.AssignedAgentID, &value.Number, &value.CreatedByType, &value.CreatedByID, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.AssigneeType, &value.AssigneeID, &value.AssigneeName, &value.Number, &value.CreatedByType, &value.CreatedByID, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Issue{}, notFound(err)
 	}
 	return value, nil
@@ -248,7 +302,7 @@ func scanIssueJoined(row pgx.Row) (store.Issue, error) {
 	var prefix string
 	if err := row.Scan(
 		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
-		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedByName, &value.CreatedAt, &value.UpdatedAt,
+		&value.AssigneeType, &value.AssigneeID, &value.AssigneeName, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedByName, &value.CreatedAt, &value.UpdatedAt,
 	); err != nil {
 		return store.Issue{}, notFound(err)
 	}
@@ -270,7 +324,7 @@ func scanIssueJoinedWithLastEvent(row pgx.Row) (store.Issue, error) {
 	)
 	if err := row.Scan(
 		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
-		&value.AssignedAgentID, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedByName, &value.CreatedAt, &value.UpdatedAt,
+		&value.AssigneeType, &value.AssigneeID, &value.AssigneeName, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedByName, &value.CreatedAt, &value.UpdatedAt,
 		&value.CurrentBranch,
 		&eventID, &schemaVersion, &eventType, &occurredAt, &eventProjectID, &eventIssueID, &eventRunID,
 		&eventAgentID, &eventWorkspaceID, &eventRuntimeInstanceID, &eventCorrelationID, &eventParentID,

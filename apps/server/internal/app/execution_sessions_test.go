@@ -106,6 +106,7 @@ type fakeExecutionTransport struct {
 	id         string
 	stdout     string
 	stderr     string
+	workingDir string
 	resultCh   chan struct{}
 	result     runner.Result
 	waitErr    error
@@ -117,6 +118,9 @@ func newFakeExecutionTransport(id string) *fakeExecutionTransport {
 	return &fakeExecutionTransport{id: id, resultCh: make(chan struct{})}
 }
 func (t *fakeExecutionTransport) ID() string            { return t.id }
+func (t *fakeExecutionTransport) WorkingDirectory() string {
+	return t.workingDir
+}
 func (t *fakeExecutionTransport) Stdout() io.Reader     { return strings.NewReader(t.stdout) }
 func (t *fakeExecutionTransport) Stderr() io.Reader     { return strings.NewReader(t.stderr) }
 func (t *fakeExecutionTransport) Stdin() io.WriteCloser { return nopBuffer{Buffer: &bytes.Buffer{}} }

@@ -8,7 +8,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestExpiredClaimWithBlockingQuestionBecomesWaitingWithoutReplay(t *testing.T) {
+func TestExpiredClaimWithBlockingQuestionBecomesWaitingWithoutChangingIssueStatus(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "question-crash-reconcile")
@@ -59,8 +59,8 @@ func TestExpiredClaimWithBlockingQuestionBecomesWaitingWithoutReplay(t *testing.
 	if err != nil {
 		t.Fatalf("read issue: %v", err)
 	}
-	if issue.Status != "BLOCKED" {
-		t.Fatalf("issue status=%s want BLOCKED", issue.Status)
+	if issue.Status != "IN_PROGRESS" {
+		t.Fatalf("issue status=%s want IN_PROGRESS", issue.Status)
 	}
 	persisted, err := s.GetQuestion(ctx, f.project.ID, question.ID)
 	if err != nil || persisted.Status != "OPEN" {

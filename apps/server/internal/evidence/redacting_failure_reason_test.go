@@ -11,11 +11,17 @@ import (
 
 type failureReasonCaptureStore struct {
 	store.ControlPlaneStore
-	transition store.SchedulerTransition
+	transition     store.SchedulerTransition
+	reconciliation store.SchedulerReconciliation
 }
 
 func (s *failureReasonCaptureStore) TransitionAdmittedJob(_ context.Context, input store.SchedulerTransition) (store.Run, error) {
 	s.transition = input
+	return store.Run{}, nil
+}
+
+func (s *failureReasonCaptureStore) ResolveReconciliation(_ context.Context, input store.SchedulerReconciliation) (store.Run, error) {
+	s.reconciliation = input
 	return store.Run{}, nil
 }
 
@@ -44,5 +50,33 @@ func TestRedactingStoreSanitizesRunFailureReason(t *testing.T) {
 	}
 	if strings.Contains(*base.transition.FailureReason, secret) {
 		t.Fatalf("failure reason leaked secret: %q", *base.transition.FailureReason)
+	}
+}
+
+func TestRedactingStoreSanitizesReconciliationFailureReason(t *testing.T) {
+	const runID = "run-reconciliation-redaction"
+	const secret = "provider-secret"
+
+	registry := redaction.NewRegistry()
+	registry.Register(runID, []string{secret})
+	base := &failureReasonCaptureStore{}
+	secured := NewRedactingStore(base, registry)
+	reason := "reconciliation failed with " + secret
+
+	if _, err := secured.ResolveReconciliationMutation(t.Context(), store.SchedulerReconciliation{
+		ProjectID:     "project",
+		JobID:         "job",
+		RunID:         runID,
+		LeaseToken:    "lease",
+		Outcome:       store.SchedulerReconciliationFailed,
+		FailureReason: &reason,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if base.reconciliation.FailureReason == nil {
+		t.Fatal("reconciliation failure reason was dropped")
+	}
+	if strings.Contains(*base.reconciliation.FailureReason, secret) {
+		t.Fatalf("reconciliation failure reason leaked secret: %q", *base.reconciliation.FailureReason)
 	}
 }

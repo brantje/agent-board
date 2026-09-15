@@ -359,7 +359,13 @@ func newAuthorizedExecutionProcess(process *ExecutionProcess, redactionValues []
 	return authorized
 }
 
-func (p *AuthorizedExecutionProcess) ID() string        { return p.process.ID() }
+func (p *AuthorizedExecutionProcess) ID() string { return p.process.ID() }
+func (p *AuthorizedExecutionProcess) WorkingDirectory() string {
+	if p == nil || p.process == nil {
+		return ""
+	}
+	return p.process.WorkingDirectory()
+}
 func (p *AuthorizedExecutionProcess) Stdout() io.Reader { return p.stdout }
 func (p *AuthorizedExecutionProcess) Stderr() io.Reader { return p.stderr }
 func (p *AuthorizedExecutionProcess) Stdin() io.WriteCloser {
