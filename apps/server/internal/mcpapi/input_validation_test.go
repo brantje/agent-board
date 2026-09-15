@@ -141,6 +141,7 @@ func TestMCPProjectScopedHandlersRejectInvalidProjectIDBeforeServiceLookup(t *te
 		{name: "create_issue", call: func() error { _, _, err := server.createIssue(ctx, nil, CreateIssueInput{ProjectID: "bad"}); return err }},
 		{name: "update_issue", call: func() error { _, _, err := server.updateIssue(ctx, nil, UpdateIssueInput{ProjectID: "bad"}); return err }},
 		{name: "set_issue_status", call: func() error { _, _, err := server.setIssueStatus(ctx, nil, SetIssueStatusInput{ProjectID: "bad"}); return err }},
+		{name: "place_issue_on_board", call: func() error { _, _, err := server.placeIssueOnBoard(ctx, nil, PlaceIssueInput{ProjectID: "bad"}); return err }},
 		{name: "set_issue_assignee", call: func() error { _, _, err := server.setIssueAssignee(ctx, nil, SetIssueAssigneeInput{ProjectID: "bad"}); return err }},
 		{name: "list_issue_relationships", call: func() error { _, _, err := server.listIssueRelationships(ctx, nil, IssueInput{ProjectID: "bad"}); return err }},
 		{name: "create_issue_relationship", call: func() error { _, _, err := server.createIssueRelationship(ctx, nil, CreateRelationshipInput{ProjectID: "bad"}); return err }},
