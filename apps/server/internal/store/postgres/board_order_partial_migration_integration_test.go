@@ -17,7 +17,8 @@ func TestBoardOrderMigrationRepairsPartialUpgrade(t *testing.T) {
 		DROP FUNCTION default_project_workflow_settings();
 		ALTER TABLE projects DROP CONSTRAINT projects_strict_order_type_check;
 		DROP INDEX issues_project_board_idx;
-		ALTER TABLE issues DROP CONSTRAINT issues_board_position_nonnegative;
+		ALTER TABLE issues DROP CONSTRAINT IF EXISTS issues_board_position_nonnegative;
+		ALTER TABLE issues DROP CONSTRAINT IF EXISTS issues_board_position_check;
 		ALTER TABLE issues ALTER COLUMN board_position DROP NOT NULL;
 		ALTER TABLE issues ALTER COLUMN board_position DROP DEFAULT;
 	`); err != nil {
