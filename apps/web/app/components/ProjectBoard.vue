@@ -43,8 +43,8 @@ async function created() {
 type BoardDragEndEvent = {
   canceled: boolean
   operation: {
-    source?: { id: string | number }
-    target?: { id: string | number }
+    source?: { id: string | number } | null
+    target?: { id: string | number } | null
   }
 }
 
