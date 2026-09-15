@@ -137,9 +137,7 @@ func normalizeBoardStatus(ctx context.Context, tx pgx.Tx, projectID, status, exc
 		}
 		ids = append(ids, id)
 	}
-	if err := rows.Close(); err != nil {
-		return err
-	}
+	rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}
