@@ -218,3 +218,134 @@ const (
 	SchedulerWaitModelCapacity = "model_capacity"
 	SchedulerWaitWorkspace     = "workspace_occupied"
 )
+
+type SchedulerAdmission struct {
+	RunnerID       string
+	Job            SchedulerJob
+	Lease          SchedulerLease
+	Run            Run
+	AgentID        string
+	ModelProfileID string
+}
+
+type SchedulerTransition struct {
+	ProjectID     string
+	JobID         string
+	RunID         string
+	LeaseToken    string
+	RunStatus     string
+	FailureReason *string
+}
+
+type SchedulerReconciliationOutcome string
+
+const (
+	SchedulerReconciliationActive    SchedulerReconciliationOutcome = "ACTIVE"
+	SchedulerReconciliationRetry     SchedulerReconciliationOutcome = "RETRY"
+	SchedulerReconciliationCompleted SchedulerReconciliationOutcome = "COMPLETED"
+	SchedulerReconciliationFailed    SchedulerReconciliationOutcome = "FAILED"
+	SchedulerReconciliationCancelled SchedulerReconciliationOutcome = "CANCELLED"
+	SchedulerReconciliationUnknown   SchedulerReconciliationOutcome = "UNKNOWN"
+)
+
+type SchedulerReconciliation struct {
+	ProjectID     string
+	JobID         string
+	RunID         string
+	LeaseToken    string
+	Outcome       SchedulerReconciliationOutcome
+	FailureReason *string
+}
+
+type Question struct {
+	ID             string
+	ProjectID      string
+	IssueID        string
+	RunID          string
+	Prompt         string
+	Kind           string
+	Options        json.RawMessage
+	Recommendation *string
+	Custom         bool
+	Blocking       bool
+	Status         string
+	CreatedAt      time.Time
+	AnsweredAt     *time.Time
+}
+
+type Decision struct {
+	ID          string
+	ProjectID   string
+	IssueID     *string
+	RunID       *string
+	QuestionID  *string
+	Kind        string
+	Outcome     string
+	ActorType   string
+	ActorID     *string
+	SafeDetails json.RawMessage
+	CreatedAt   time.Time
+}
+
+type Review struct {
+	ID             string
+	ProjectID      string
+	IssueID        string
+	RunID          string
+	Status         string
+	DecisionID     *string
+	BaseRevision   string
+	ReviewRevision string
+	RequestedAt    time.Time
+	DecidedAt      *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type Event struct {
+	ID                string
+	SchemaVersion     int
+	Type              string
+	OccurredAt        time.Time
+	ProjectID         string
+	IssueID           *string
+	RunID             *string
+	AgentID           *string
+	WorkspaceID       *string
+	RuntimeInstanceID *string
+	CorrelationID     *string
+	ParentEventID     *string
+	Sequence          *int64
+	Actor             json.RawMessage
+	Payload           json.RawMessage
+	CreatedAt         time.Time
+}
+
+type Artifact struct {
+	ID           string
+	ProjectID    string
+	IssueID      string
+	RunID        string
+	Name         string
+	Kind         string
+	MediaType    *string
+	SizeBytes    int64
+	Digest       *string
+	StorageRef   string
+	SafeMetadata json.RawMessage
+	CreatedAt    time.Time
+	DeletedAt    *time.Time
+}
+
+type RawOutputChunk struct {
+	ID         string
+	ProjectID  string
+	IssueID    string
+	RunID      string
+	Stream     string
+	Sequence   int64
+	StorageRef string
+	SizeBytes  int64
+	Digest     *string
+	CreatedAt  time.Time
+}
