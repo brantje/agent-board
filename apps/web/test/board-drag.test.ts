@@ -126,7 +126,8 @@ describe('ProjectBoard drag ordering', () => {
     let serverIssues = [makeIssue('AB-1', 'TODO', 0), makeIssue('AB-2', 'TODO', 1), makeIssue('AB-3', 'IN_PROGRESS', 0)]
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
       if (String(path).endsWith('/board') && options.method === 'PATCH') {
-        const issueId = String(path).split('/').at(-2) || ''
+        const parts = String(path).split('/')
+        const issueId = parts[parts.length - 2] || ''
         const body = JSON.parse(options.body as string) as { status: string; beforeIssueId: string | null }
         serverIssues = placeIssueOnBoard(serverIssues, issueId, body.status, body.beforeIssueId)
         return new Response(JSON.stringify(serverIssues.find(value => value.id === issueId)))
@@ -153,6 +154,37 @@ describe('ProjectBoard drag ordering', () => {
     expect(boardCalls).toHaveLength(2)
     expect(JSON.parse(boardCalls[0]?.[1].body as string)).toEqual({ status: 'TODO', beforeIssueId: 'AB-1' })
     expect(JSON.parse(boardCalls[1]?.[1].body as string)).toEqual({ status: 'IN_PROGRESS', beforeIssueId: 'AB-3' })
+  })
+
+  it('ignores repeated board mutations while persistence is in flight without losing or duplicating cards', async () => {
+    let serverIssues = [makeIssue('AB-1', 'TODO', 0), makeIssue('AB-2', 'TODO', 1), makeIssue('AB-3', 'TODO', 2)]
+    let finishPatch: ((response: Response) => void) | undefined
+    const pendingPatch = new Promise<Response>(resolve => { finishPatch = resolve })
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      if (String(path).endsWith('/board') && options.method === 'PATCH') return pendingPatch
+      if (String(path).endsWith('/issues')) return new Response(JSON.stringify(serverIssues))
+      if (String(path).endsWith('/runs')) return new Response(JSON.stringify([]))
+      return new Response(JSON.stringify({ id: 'p', name: 'Workspace', workflowSettings: {} }))
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(ProjectBoard, { props: { projectId: 'p', canMutate: true }, global })
+    await flushPromises()
+    const transfer = { effectAllowed: '', dropEffect: '', setData: vi.fn() }
+    await wrapper.get('[data-board-issue="AB-3"]').trigger('dragstart', { dataTransfer: transfer })
+    await wrapper.get('[data-board-issue="AB-1"]').trigger('drop', { dataTransfer: transfer })
+
+    await wrapper.get('[data-board-issue="AB-2"]').trigger('dragstart', { dataTransfer: transfer })
+    await wrapper.get('[data-board-issue="AB-1"]').trigger('drop', { dataTransfer: transfer })
+    expect(fetch.mock.calls.filter(([path, options]) => String(path).endsWith('/board') && options.method === 'PATCH')).toHaveLength(1)
+
+    serverIssues = [makeIssue('AB-3', 'TODO', 0), makeIssue('AB-1', 'TODO', 1), makeIssue('AB-2', 'TODO', 2)]
+    finishPatch?.(new Response(JSON.stringify(serverIssues[0])))
+    await flushPromises()
+
+    const cards = wrapper.get('[data-status="TODO"]').findAll('[data-board-issue]').map(value => value.attributes('data-board-issue'))
+    expect(cards).toEqual(['AB-3', 'AB-1', 'AB-2'])
+    expect(new Set(cards).size).toBe(3)
   })
 
   it('does not expose draggable or keyboard board controls to viewers and pauses reordering while filtered', async () => {
