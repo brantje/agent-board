@@ -45,6 +45,7 @@ type IssueDTO struct {
 	Description   string            `json:"description"`
 	Status        string            `json:"status"`
 	Priority      int               `json:"priority"`
+	BoardPosition int64             `json:"boardPosition"`
 	AssignedTo    *store.Assignee   `json:"assignedTo"`
 	CreatedBy     *IssueCreatorDTO  `json:"createdBy"`
 	CreatedAt     time.Time         `json:"createdAt"`
@@ -207,6 +208,11 @@ type UpdateIssueRequest struct {
 	Description *string `json:"description"`
 	Status      *string `json:"status"`
 	Priority    *int    `json:"priority"`
+}
+
+type PlaceIssueRequest struct {
+	Status        string  `json:"status"`
+	BeforeIssueID *string `json:"beforeIssueId"`
 }
 
 type CreateIssueRelationshipRequest struct {
