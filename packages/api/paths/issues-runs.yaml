@@ -10,7 +10,7 @@ path1:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
     operationId: createIssue
-    description: Initial Agent ownership automatically queues a Run outside BACKLOG when execution configuration is valid. Scheduler availability is evaluated after Run creation.
+    description: Creates an unassigned Issue. Ownership is changed separately through the assignment endpoint, so HTTP Issue creation itself does not automatically queue a Run.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/IssueCreate
     responses:
@@ -31,7 +31,7 @@ path2:
         $ref: ../components/api-components.yaml#/responses/Error
   patch:
     operationId: updateIssue
-    description: Updates Issue state without cancelling Runs. An already Agent-assigned Issue leaving BACKLOG for TODO, IN_PROGRESS, BLOCKED or REVIEW automatically queues a Run when execution configuration is valid. Other status changes do not enqueue. Scheduler availability is evaluated after Run creation.
+    description: Updates only the supplied Issue fields without cancelling Runs. Board status is explicit. An already Agent-assigned Issue leaving BACKLOG for TODO, IN_PROGRESS, BLOCKED or REVIEW automatically queues a Run when execution configuration is valid. Other status changes do not enqueue. Scheduler availability is evaluated after Run creation.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/IssueUpdate
     responses:
