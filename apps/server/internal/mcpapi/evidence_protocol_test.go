@@ -85,13 +85,23 @@ func (s *protocolStore) ListRunEvents(_ context.Context, projectID, runID string
 		return nil, nil
 	}
 	now := time.Date(2026, 9, 15, 17, 0, 0, 0, time.UTC)
-	sequence := int64(1)
 	issueID := mcpTestIssueID
-	return []store.Event{{
-		ID: "event-1", SchemaVersion: 1, Type: "tool.started", OccurredAt: now, ProjectID: projectID, IssueID: &issueID, RunID: &runID, Sequence: &sequence,
-		Actor: json.RawMessage(`{"type":"AGENT","issueId":"66666666-6666-6666-6666-666666666666"}`),
-		Payload: json.RawMessage(`{"cwd":"/var/lib/agent-board/workspaces/private","command":["sh","-c","cat /srv/agent-board/repos/private/token"],"filePath":"/workspace/private/result.txt","storageRef":"blob://internal/event"}`),
-	}}, nil
+	sequence1, sequence2, sequence3 := int64(1), int64(2), int64(3)
+	return []store.Event{
+		{
+			ID: "event-1", SchemaVersion: 1, Type: "tool.started", OccurredAt: now, ProjectID: projectID, IssueID: &issueID, RunID: &runID, Sequence: &sequence1,
+			Actor: json.RawMessage(`{"type":"AGENT","issueId":"66666666-6666-6666-6666-666666666666"}`),
+			Payload: json.RawMessage(`{"cwd":"/var/lib/agent-board/workspaces/private","command":["sh","-c","cat /srv/agent-board/repos/private/token"],"filePath":"/workspace/private/result.txt","storageRef":"blob://internal/event"}`),
+		},
+		{
+			ID: "event-2", SchemaVersion: 1, Type: "test.completed", OccurredAt: now, ProjectID: projectID, IssueID: &issueID, RunID: &runID, Sequence: &sequence2,
+			Payload: json.RawMessage(`{"status":"passed","exitCode":0,"outputChunkIds":["chunk-1"],"command":["go","test","./..."],"cwd":"/var/lib/agent-board/workspaces/private","storageRef":"blob://internal/test"}`),
+		},
+		{
+			ID: "event-3", SchemaVersion: 1, Type: "file.modified", OccurredAt: now, ProjectID: projectID, IssueID: &issueID, RunID: &runID, Sequence: &sequence3,
+			Payload: json.RawMessage(`{"path":"src/result.go","oldPath":"src/old.go","added":4,"removed":1,"source":"git","artifactId":"artifact-1","repositoryPath":"/srv/agent-board/repos/private","storageRef":"blob://internal/file"}`),
+		},
+	}, nil
 }
 
 func (s *protocolStore) GetRawOutputChunk(_ context.Context, projectID, runID, chunkID string) (store.RawOutputChunk, error) {
@@ -137,7 +147,16 @@ func mustProtocolArtifacts(s *protocolStore, projectID, runID string) []store.Ar
 }
 
 func TestMCPInspectRunResponseOmitsBackendExecutionDetails(t *testing.T) {
-	handler, _, _, token := newProtocolFixture(t)
+	handler, fake, _, token := newProtocolFixture(t)
+	storedBefore, err := fake.ListRunEvents(t.Context(), mcpTestProjectID, mcpTestRunID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforePayloads := make(map[string]string, len(storedBefore))
+	for _, event := range storedBefore {
+		beforePayloads[event.ID] = string(event.Payload)
+	}
+
 	httpServer := httptest.NewServer(handler)
 	defer httpServer.Close()
 
@@ -166,8 +185,23 @@ func TestMCPInspectRunResponseOmitsBackendExecutionDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload := string(raw)
-	if !strings.Contains(payload, `"issueId":"MCP-1"`) {
-		t.Fatalf("public Issue key missing from inspect_run response: %s", payload)
+	for _, required := range []string{
+		`"issueId":"MCP-1"`,
+		`"type":"test.completed"`,
+		`"status":"passed"`,
+		`"exitCode":0`,
+		`"outputChunkIds":["chunk-1"]`,
+		`"type":"file.modified"`,
+		`"path":"src/result.go"`,
+		`"oldPath":"src/old.go"`,
+		`"added":4`,
+		`"removed":1`,
+		`"source":"git"`,
+		`"artifactId":"artifact-1"`,
+	} {
+		if !strings.Contains(payload, required) {
+			t.Fatalf("inspect_run response missing safe evidence %q: %s", required, payload)
+		}
 	}
 	var wire struct {
 		Provenance struct {
@@ -204,5 +238,32 @@ func TestMCPInspectRunResponseOmitsBackendExecutionDetails(t *testing.T) {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("inspect_run response leaked %q: %s", forbidden, payload)
 		}
+	}
+
+	storedAfter, err := fake.ListRunEvents(t.Context(), mcpTestProjectID, mcpTestRunID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range storedAfter {
+		if got, want := string(event.Payload), beforePayloads[event.ID]; got != want {
+			t.Fatalf("inspect_run mutated authoritative event %s payload: got %q want %q", event.ID, got, want)
+		}
+	}
+}
+
+func TestPublicRepositoryPathRejectsBackendAndTraversalPaths(t *testing.T) {
+	for _, value := range []string{
+		"/workspace/result.txt",
+		"../secret.txt",
+		"src/../secret.txt",
+		`C:\\workspace\\result.txt`,
+		"file://backend/result.txt",
+	} {
+		if got, ok := publicRepositoryPath(value); ok || got != "" {
+			t.Fatalf("publicRepositoryPath(%q) = %q, %t; want rejected", value, got, ok)
+		}
+	}
+	if got, ok := publicRepositoryPath("src/result.go"); !ok || got != "src/result.go" {
+		t.Fatalf("safe repository path = %q, %t", got, ok)
 	}
 }
