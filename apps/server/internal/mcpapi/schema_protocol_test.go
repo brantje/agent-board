@@ -52,11 +52,11 @@ func TestMCPToolsListAdvertisesLockedInputSchemas(t *testing.T) {
 
 	for _, toolName := range []string{"create_issue", "update_issue"} {
 		priority := schemaProperty(t, tools[toolName], "priority")
-		if got := schemaNumber(priority["minimum"]); got != 0 {
-			t.Fatalf("%s priority minimum = %v, want 0", toolName, got)
+		if got, ok := schemaNumber(priority["minimum"]); !ok || got != 0 {
+			t.Fatalf("%s priority minimum = %v (present=%t), want 0", toolName, got, ok)
 		}
-		if got := schemaNumber(priority["maximum"]); got != 4 {
-			t.Fatalf("%s priority maximum = %v, want 4", toolName, got)
+		if got, ok := schemaNumber(priority["maximum"]); !ok || got != 4 {
+			t.Fatalf("%s priority maximum = %v (present=%t), want 4", toolName, got, ok)
 		}
 	}
 
@@ -231,7 +231,7 @@ func assertRequired(t *testing.T, schema map[string]any, want []string) {
 	}
 }
 
-func schemaNumber(value any) float64 {
-	number, _ := value.(float64)
-	return number
+func schemaNumber(value any) (float64, bool) {
+	number, ok := value.(float64)
+	return number, ok
 }
