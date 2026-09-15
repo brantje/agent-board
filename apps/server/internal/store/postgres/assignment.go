@@ -96,7 +96,7 @@ func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID stri
         WHERE i.project_id=$1 AND i.id=$2
         FOR UPDATE OF i
     `, projectID, issueID).Scan(
-		&issue.ID, &issue.ProjectID, &issue.Title, &issue.Description, &issue.Status, &issue.Priority,
+		&issue.ID, &issue.ProjectID, &issue.Title, &issue.Description, &issue.Status, &issue.Priority, &issue.BoardPosition,
 		&issue.AssigneeType, &issue.AssigneeID, &issue.AssigneeName, &issue.Number, &prefix, &issue.CreatedByType, &issue.CreatedByID, &issue.CreatedByName, &issue.CreatedAt, &issue.UpdatedAt,
 		&repositoryPath, &defaultBranch,
 	)
