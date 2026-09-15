@@ -26,6 +26,9 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockIssueBoardProject(ctx, tx, input.ProjectID); err != nil {
+		return store.IssueMutationResult{}, err
+	}
 
 	run, err := lockIssueStatusRunFence(ctx, tx, input)
 	if err != nil {
