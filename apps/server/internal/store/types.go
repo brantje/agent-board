@@ -34,25 +34,24 @@ type Project struct {
 }
 
 type Issue struct {
-	ID             string
-	ProjectID      string
-	Number         int
-	Key            string
-	Title          string
-	Description    string
-	Status         string
-	Priority       int
-	AssigneeType   *string
-	AssigneeID     *string
-	AssigneeName   *string
-	CreatedByType  *string
-	CreatedByID    *string
-	CreatedByName  *string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	LastEvent      *Event
-	PreviousStatus string
-	CurrentBranch  *string
+	ID            string
+	ProjectID     string
+	Number        int
+	Key           string
+	Title         string
+	Description   string
+	Status        string
+	Priority      int
+	AssigneeType  *string
+	AssigneeID    *string
+	AssigneeName  *string
+	CreatedByType *string
+	CreatedByID   *string
+	CreatedByName *string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	LastEvent     *Event
+	CurrentBranch *string
 }
 
 type IssueRelationship struct {
@@ -91,8 +90,8 @@ type ModelProfile struct {
 	MaxConcurrent      *int
 	GenerationSettings json.RawMessage
 	Enabled            bool
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type Runtime struct {
