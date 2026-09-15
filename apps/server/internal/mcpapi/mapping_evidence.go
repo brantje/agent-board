@@ -58,25 +58,25 @@ func publicEventPayload(raw json.RawMessage) any {
 	return map[string]any{}
 }
 
-func publicRunProvenanceDTO(raw json.RawMessage, keys map[string]string) any {
+func publicRunProvenanceDTO(raw json.RawMessage, run store.Run, keys map[string]string) any {
 	if len(raw) == 0 {
 		return nil
 	}
-	var value executioncontext.Provenance
-	if err := json.Unmarshal(raw, &value); err != nil {
+	var provenance executioncontext.Provenance
+	if err := json.Unmarshal(raw, &provenance); err != nil {
 		return publicRunProvenance{}
 	}
-	issueKey := value.Context.Issue.Key
-	if issueKey == "" {
-		issueKey = keys[value.Context.Issue.ID]
+	agentID := ""
+	if run.AgentID != nil {
+		agentID = *run.AgentID
 	}
 	return publicRunProvenance{
-		SchemaVersion: value.SchemaVersion,
-		ProjectID:     value.Context.Project.ID,
-		IssueID:       issueKey,
-		RunID:         value.Context.Run.ID,
-		Attempt:       value.Context.Run.Attempt,
-		AgentID:       value.Context.Agent.ID,
+		SchemaVersion: provenance.SchemaVersion,
+		ProjectID:     run.ProjectID,
+		IssueID:       keys[run.IssueID],
+		RunID:         run.ID,
+		Attempt:       run.Attempt,
+		AgentID:       agentID,
 	}
 }
 
@@ -109,7 +109,7 @@ func executionSessionDTO(value store.ExecutionSession) ExecutionSessionDTO {
 func evidenceDTO(value app.RunEvidence, keys map[string]string) RunEvidenceDTO {
 	out := RunEvidenceDTO{
 		Run:              runDTO(value.Run, keys),
-		Provenance:       publicRunProvenanceDTO(value.Provenance, keys),
+		Provenance:       publicRunProvenanceDTO(value.Provenance, value.Run, keys),
 		RuntimeInstances: make([]RuntimeInstanceDTO, 0, len(value.RuntimeInstances)),
 		Sessions: make([]ExecutionSessionDTO, 0, len(value.Sessions)), Events: make([]EventDTO, 0, len(value.Events)),
 		Tests: make([]EventDTO, 0), FileChanges: make([]EventDTO, 0), Usage: valueFromJSONMarshal(value.Usage),

@@ -17,7 +17,13 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-const mcpEvidenceRuntimeInstanceID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+const (
+	mcpEvidenceRuntimeInstanceID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+	staleProvenanceProjectID     = "99999999-9999-4999-8999-999999999998"
+	staleProvenanceRunID         = "99999999-9999-4999-8999-999999999997"
+	staleProvenanceIssueKey      = "STALE-999"
+	staleProvenanceAgentID       = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+)
 
 type protocolBlobStore struct{}
 
@@ -37,10 +43,10 @@ func (s *protocolStore) GetRunProvenance(_ context.Context, projectID, runID str
 	value := executioncontext.Provenance{
 		SchemaVersion: executioncontext.ProvenanceSchemaVersion,
 		Context: executioncontext.SafeContext{
-			Project: executioncontext.ProjectContext{ID: projectID, Name: "MCP Project", SourceType: store.ProjectSourceLocal, RepositoryPath: repositoryPath, DefaultBranch: "main"},
-			Issue: executioncontext.IssueContext{ID: mcpTestIssueID, Key: "MCP-1", Title: "First issue", Status: "TODO"},
-			Run: executioncontext.RunContext{ID: runID, Attempt: 1},
-			Agent: executioncontext.AgentContext{ID: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", Name: "Agent", Engine: "opencode", EngineSettings: json.RawMessage(`{"internal":"backend-only"}`)},
+			Project: executioncontext.ProjectContext{ID: staleProvenanceProjectID, Name: "MCP Project", SourceType: store.ProjectSourceLocal, RepositoryPath: repositoryPath, DefaultBranch: "main"},
+			Issue: executioncontext.IssueContext{ID: mcpTestSecondIssueID, Key: staleProvenanceIssueKey, Title: "Stale issue", Status: "TODO"},
+			Run: executioncontext.RunContext{ID: staleProvenanceRunID, Attempt: 99},
+			Agent: executioncontext.AgentContext{ID: staleProvenanceAgentID, Name: "Agent", Engine: "opencode", EngineSettings: json.RawMessage(`{"internal":"backend-only"}`)},
 			Workspace: executioncontext.WorkspaceContext{ID: "workspace-1", Path: "/var/lib/agent-board/workspaces/private", RepositoryPath: &repositoryPath, WorkingBranch: "feat/private"},
 		},
 	}
@@ -163,8 +169,28 @@ func TestMCPInspectRunResponseOmitsBackendExecutionDetails(t *testing.T) {
 	if !strings.Contains(payload, `"issueId":"MCP-1"`) {
 		t.Fatalf("public Issue key missing from inspect_run response: %s", payload)
 	}
+	var wire struct {
+		Provenance struct {
+			ProjectID string `json:"projectId"`
+			IssueID   string `json:"issueId"`
+			RunID     string `json:"runId"`
+			Attempt   int    `json:"attempt"`
+			AgentID   string `json:"agentId"`
+		} `json:"provenance"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Provenance.ProjectID != mcpTestProjectID || wire.Provenance.IssueID != "MCP-1" || wire.Provenance.RunID != mcpTestRunID || wire.Provenance.Attempt != 1 || wire.Provenance.AgentID != "" {
+		t.Fatalf("provenance identifiers were not bound to authorized Run: %+v", wire.Provenance)
+	}
 	for _, forbidden := range []string{
 		mcpTestIssueID,
+		mcpTestSecondIssueID,
+		staleProvenanceProjectID,
+		staleProvenanceRunID,
+		staleProvenanceIssueKey,
+		staleProvenanceAgentID,
 		"/srv/agent-board/repos/private",
 		"/var/lib/agent-board/workspaces/private",
 		"/workspace/private/result.txt",
