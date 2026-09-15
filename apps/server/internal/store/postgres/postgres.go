@@ -15,6 +15,7 @@ type Store struct {
 	pool             *pgxpool.Pool
 	lockPool         *pgxpool.Pool
 	runnerCandidates func(string) []string
+	engineRegistered func(string) bool
 }
 
 // SetRunnerCandidates supplies live authenticated Engine-matching candidates;
@@ -22,6 +23,12 @@ type Store struct {
 // Configure it once before starting scheduler workers.
 func (s *Store) SetRunnerCandidates(candidates func(string) []string) {
 	s.runnerCandidates = candidates
+}
+
+// SetEngineRegistered binds execution-configuration validation to the
+// application Engine registry. Runner availability remains scheduler policy.
+func (s *Store) SetEngineRegistered(registered func(string) bool) {
+	s.engineRegistered = registered
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
