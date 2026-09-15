@@ -474,6 +474,23 @@ func validObject(value json.RawMessage) bool {
 	var object map[string]any
 	return json.Unmarshal(value, &object) == nil && object != nil
 }
+
+func validateProjectWorkflowSettings(value json.RawMessage) error {
+	if len(value) == 0 {
+		return nil
+	}
+	var settings map[string]any
+	if err := json.Unmarshal(value, &settings); err != nil || settings == nil {
+		return invalid("workflowSettings must be a JSON object")
+	}
+	if strictOrder, exists := settings["strictOrder"]; exists {
+		if _, ok := strictOrder.(bool); !ok {
+			return invalid("workflowSettings.strictOrder must be a boolean")
+		}
+	}
+	return nil
+}
+
 func validateProject(v store.Project) error {
 	if strings.TrimSpace(v.Name) == "" {
 		return invalid("project name is required")
@@ -514,8 +531,8 @@ func validateProject(v store.Project) error {
 		return invalid("sourceType must be local or git")
 	}
 
-	if !validObject(v.WorkflowSettings) {
-		return invalid("workflowSettings must be a JSON object")
+	if err := validateProjectWorkflowSettings(v.WorkflowSettings); err != nil {
+		return err
 	}
 	return nil
 }
@@ -600,9 +617,7 @@ func validateIssue(v store.Issue) error {
 	if v.CreatedByType != nil && (!store.ValidActorType(*v.CreatedByType) || strings.TrimSpace(*v.CreatedByID) == "") {
 		return invalid("issue creator must be a HUMAN or AGENT with an id")
 	}
-	switch v.Status {
-	case "BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "REVIEW", "DONE":
-	default:
+	if !store.ValidIssueStatus(v.Status) {
 		return invalid("invalid issue status")
 	}
 	return nil
