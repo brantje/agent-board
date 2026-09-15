@@ -122,3 +122,21 @@ func TestBoardOrderMigrationBackfillsLegacyDataDeterministically(t *testing.T) {
 		t.Fatal("idempotent migration reset an explicitly changed strictOrder value")
 	}
 }
+
+func TestBoardOrderMigrationSkipsEmptyDatabase(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `DROP SCHEMA public CASCADE; CREATE SCHEMA public`); err != nil {
+		t.Fatal(err)
+	}
+	if err := runBoardOrderMigration(ctx, pool); err != nil {
+		t.Fatalf("empty database migration error=%v", err)
+	}
+	var issuesTableExists bool
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.issues') IS NOT NULL`).Scan(&issuesTableExists); err != nil {
+		t.Fatal(err)
+	}
+	if issuesTableExists {
+		t.Fatal("board migration created schema objects in an empty database")
+	}
+}
