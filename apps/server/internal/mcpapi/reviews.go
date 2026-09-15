@@ -83,11 +83,11 @@ func (s *Server) approveReview(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	if err != nil {
 		return nil, ReviewDecisionDTO{}, toolError(ctx, err)
 	}
-	value, err := s.services.ProjectAccess.ApproveReview(ctx, actor, s.reviews, input.ProjectID, input.ReviewID)
+	keys, err := s.issueKeys(ctx, actor, input.ProjectID)
 	if err != nil {
 		return nil, ReviewDecisionDTO{}, toolError(ctx, err)
 	}
-	keys, err := s.issueKeys(ctx, actor, input.ProjectID)
+	value, err := s.services.ProjectAccess.ApproveReview(ctx, actor, s.reviews, input.ProjectID, input.ReviewID)
 	if err != nil {
 		return nil, ReviewDecisionDTO{}, toolError(ctx, err)
 	}
@@ -105,11 +105,11 @@ func (s *Server) requestReviewChanges(ctx context.Context, _ *mcp.CallToolReques
 	if err != nil {
 		return nil, ReviewDecisionDTO{}, toolError(ctx, err)
 	}
-	value, err := s.services.ProjectAccess.RequestReviewChanges(ctx, actor, s.reviews, input.ProjectID, input.ReviewID, input.Feedback)
+	keys, err := s.issueKeys(ctx, actor, input.ProjectID)
 	if err != nil {
 		return nil, ReviewDecisionDTO{}, toolError(ctx, err)
 	}
-	keys, err := s.issueKeys(ctx, actor, input.ProjectID)
+	value, err := s.services.ProjectAccess.RequestReviewChanges(ctx, actor, s.reviews, input.ProjectID, input.ReviewID, input.Feedback)
 	if err != nil {
 		return nil, ReviewDecisionDTO{}, toolError(ctx, err)
 	}
