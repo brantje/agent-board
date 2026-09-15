@@ -1,5 +1,6 @@
+import { DragDropProvider } from '@dnd-kit/vue'
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h, nextTick } from 'vue'
+import { nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import ProjectBoard from '../app/components/ProjectBoard.vue'
 import type { Issue } from '../app/types/api'
@@ -7,18 +8,26 @@ import { boardDragId, boardDropZoneId } from '../app/utils/board-order'
 import { event, MockEventSource } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
-const DragDropProviderStub = defineComponent({
-  name: 'DragDropProvider',
-  emits: ['dragEnd'],
-  setup(_props, { slots }) {
-    return () => h('div', { 'data-dnd-provider': '' }, slots.default?.())
+vi.mock('@dnd-kit/vue', async () => {
+  const actual = await vi.importActual<typeof import('@dnd-kit/vue')>('@dnd-kit/vue')
+  const vue = await vi.importActual<typeof import('vue')>('vue')
+  return {
+    ...actual,
+    DragDropProvider: vue.defineComponent({
+      name: 'DragDropProvider',
+      emits: ['dragEnd'],
+      setup(_props, { slots }) {
+        return () => vue.h('div', { 'data-dnd-provider': '' }, slots.default?.())
+      }
+    }),
+    useDraggable: () => ({ isDragging: vue.ref(false) }),
+    useDroppable: () => ({ isDropTarget: vue.ref(false) })
   }
 })
 
 const global = {
   stubs: {
     ...uiStubs,
-    DragDropProvider: DragDropProviderStub,
     BoardDraggableIssue: {
       props: ['issue', 'disabled'],
       template: '<div :data-card="issue.id" :data-disabled="String(disabled)">{{ issue.status }}</div>'
@@ -54,7 +63,7 @@ function cardOrder(wrapper: ReturnType<typeof mount>) {
 }
 
 function dragEnd(wrapper: ReturnType<typeof mount>, issueId: string, status: string, index: number) {
-  wrapper.getComponent(DragDropProviderStub).vm.$emit('dragEnd', {
+  wrapper.getComponent(DragDropProvider).vm.$emit('dragEnd', {
     canceled: false,
     operation: {
       source: { id: boardDragId(issueId) },

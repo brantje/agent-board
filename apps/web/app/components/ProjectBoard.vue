@@ -8,6 +8,8 @@ import { boardColumns, latestRun } from '../utils/issues'
 import { isBoardActivityEvent, applyCurrentBranchToIssues } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
+import BoardDraggableIssue from './BoardDraggableIssue.vue'
+import BoardDropZone from './BoardDropZone.vue'
 
 const props = withDefaults(defineProps<{ projectId: string; canMutate?: boolean }>(), { canMutate: true })
 const project = useResource<Project>(() => apiPath('projects', undefined, props.projectId))
