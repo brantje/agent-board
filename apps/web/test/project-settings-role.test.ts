@@ -28,8 +28,14 @@ function json(value: unknown, status = 200) {
 afterEach(() => vi.unstubAllGlobals())
 
 function projectSettingsFetch(role: 'viewer' | 'member' | 'admin') {
+  let current = { ...project, workflowSettings: { ...project.workflowSettings } }
   return vi.fn(async (path: string, options: RequestInit = {}) => {
-    if (path === `/api/projects/${projectId}` && options.method === 'GET') return json(project)
+    if (path === `/api/projects/${projectId}` && options.method === 'GET') return json(current)
+    if (path === `/api/projects/${projectId}` && options.method === 'PATCH' && role === 'admin') {
+      const body = JSON.parse(options.body as string) as { workflowSettings?: Record<string, unknown> }
+      current = { ...current, workflowSettings: body.workflowSettings ?? current.workflowSettings }
+      return json(current)
+    }
     if (path === `/api/projects/${projectId}/access/effective-role` && options.method === 'GET') return json({ role })
     if (role === 'admin' && path.endsWith('/access/users') && options.method === 'GET') return json([])
     if (role === 'admin' && path.endsWith('/access/groups') && options.method === 'GET') return json([])
@@ -49,10 +55,12 @@ describe('ProjectSettings role presentation', () => {
     expect(wrapper.text()).toContain('Private Project')
     expect(wrapper.text()).not.toContain('Save project')
     expect(wrapper.find('[data-testid="access-management"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="workflow-settings"] [role="switch"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain(`Project workflow settings are read-only for your ${role} role.`)
     expect(fetch.mock.calls.some(([path, options]) => String(path) === `/api/projects/${projectId}` && options?.method === 'PATCH')).toBe(false)
   })
 
-  it('shows Project admins editable settings and access management', async () => {
+  it('shows Project admins editable settings, strict ordering, and access management', async () => {
     const fetch = projectSettingsFetch('admin')
     vi.stubGlobal('fetch', fetch)
 
@@ -63,5 +71,16 @@ describe('ProjectSettings role presentation', () => {
     expect(wrapper.text()).toContain('Save project')
     expect(wrapper.get('[data-testid="access-management"]').exists()).toBe(true)
     expect(fetch.mock.calls.filter(([path]) => String(path).endsWith('/access/effective-role'))).toHaveLength(1)
+
+    const strictOrder = wrapper.get('[data-testid="workflow-settings"] [role="switch"]')
+    expect((strictOrder.element as HTMLInputElement).checked).toBe(false)
+    await strictOrder.setValue(true)
+    await flushPromises()
+
+    const patch = fetch.mock.calls.find(([path, options]) => String(path) === `/api/projects/${projectId}` && options?.method === 'PATCH')
+    expect(patch).toBeTruthy()
+    expect(JSON.parse(patch?.[1].body as string)).toEqual({ workflowSettings: { strictOrder: true } })
+    expect((wrapper.get('[data-testid="workflow-settings"] [role="switch"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.text()).toContain('Saved')
   })
 })

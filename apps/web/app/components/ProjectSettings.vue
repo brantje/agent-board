@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { Project } from '../types/api'
-import { apiPath } from '../utils/api'
+import { apiPath, apiRequest } from '../utils/api'
 import { useProjectPermissions } from '../composables/useProjectPermissions'
 import { useResource } from '../composables/useResource'
 import ProjectAccessSettings from './ProjectAccessSettings.vue'
@@ -18,6 +18,9 @@ const {
 } = useProjectPermissions(() => props.projectId)
 const saved = ref(false)
 const editorKey = ref(0)
+const workflowSaving = ref(false)
+const workflowError = ref<Error | null>(null)
+const strictOrder = computed(() => data.value?.workflowSettings?.strictOrder === true)
 
 function savedProject(project: Project) {
   saved.value = true
@@ -31,6 +34,30 @@ function cancel() {
 function retry() {
   void refresh()
   void refreshRole()
+}
+
+async function saveStrictOrder(value: boolean) {
+  if (!canAdmin.value || !data.value || workflowSaving.value) return
+  workflowSaving.value = true
+  workflowError.value = null
+  saved.value = false
+  try {
+    const project = await apiRequest<Project>(apiPath('projects', undefined, props.projectId), {
+      method: 'PATCH',
+      body: {
+        workflowSettings: {
+          ...data.value.workflowSettings,
+          strictOrder: value
+        }
+      }
+    })
+    data.value = project
+    saved.value = true
+  } catch (value) {
+    workflowError.value = value instanceof Error ? value : new Error('Unable to save workflow settings.')
+  } finally {
+    workflowSaving.value = false
+  }
 }
 </script>
 
@@ -88,6 +115,35 @@ function retry() {
             </div>
           </dl>
         </UCard>
+
+        <UCard data-testid="workflow-settings" class="mt-4">
+          <template #header>
+            <div>
+              <h2 class="text-base font-semibold">Workflow</h2>
+              <p class="text-sm text-muted">Control how queued agent work follows the shared Board order.</p>
+            </div>
+          </template>
+          <UAlert
+            v-if="workflowError"
+            title="Unable to save workflow settings"
+            :description="workflowError.message"
+            color="error"
+            class="mb-4"
+          />
+          <UFormField
+            label="Strict board order"
+            name="strictOrder"
+            description="Only the earliest queued Issue in Board order is considered for this Project. If it is blocked or cannot be admitted yet, later Issues wait. Issues that are already running do not hold the queue."
+          >
+            <USwitch
+              :model-value="strictOrder"
+              :disabled="!canAdmin || workflowSaving"
+              @update:model-value="value => saveStrictOrder(Boolean(value))"
+            />
+          </UFormField>
+          <p v-if="!canAdmin" class="mt-2 text-xs text-muted">Project workflow settings are read-only for your {{ role }} role.</p>
+        </UCard>
+
         <ProjectAccessSettings :project-id="projectId" :effective-role="role" />
       </template>
     </AsyncState>
