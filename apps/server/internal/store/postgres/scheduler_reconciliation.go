@@ -10,7 +10,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const schedulerReconciliationRetryReason = "reconciliation_retry"
+const (
+	schedulerReconciliationRetryReason         = "reconciliation_retry"
+	schedulerReconciliationConfigurationBackoff = time.Second
+)
 
 func (s *Store) claimExpiredJobForReconciliation(ctx context.Context, ownerID string, leaseDuration time.Duration) (*store.SchedulerAdmission, error) {
 	leaseMicros := leaseDuration.Microseconds()
@@ -127,7 +130,7 @@ func resetInvalidQueuedClaim(ctx context.Context, tx pgx.Tx, job store.Scheduler
 		SET state='QUEUED', wait_reason=$2,
 		    available_at=now() + ($3::bigint * interval '1 microsecond'), updated_at=now()
 		WHERE id=$1 AND state='CLAIMED'
-	`, job.ID, schedulerConfigurationWaitReason, schedulerConfigurationBackoff.Microseconds()); err != nil {
+	`, job.ID, schedulerConfigurationWaitReason, schedulerReconciliationConfigurationBackoff.Microseconds()); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
@@ -236,16 +239,6 @@ func (s *Store) resolveReconciliationTerminal(ctx context.Context, tx pgx.Tx, in
 	if err != nil {
 		return store.SchedulerMutationResult{}, err
 	}
-	events := make([]store.Event, 0, 1)
-	if runStatus == "FAILED" {
-		event, err := rollbackFailedRunIssueStatus(ctx, tx, run)
-		if err != nil {
-			return store.SchedulerMutationResult{}, err
-		}
-		if event.ID != "" {
-			events = append(events, event)
-		}
-	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE scheduler_jobs
 		SET state=$4, wait_reason=NULL, updated_at=now()
@@ -259,7 +252,7 @@ func (s *Store) resolveReconciliationTerminal(ctx context.Context, tx pgx.Tx, in
 	if err := tx.Commit(ctx); err != nil {
 		return store.SchedulerMutationResult{}, err
 	}
-	return store.SchedulerMutationResult{Run: run, Events: events}, nil
+	return store.SchedulerMutationResult{Run: run}, nil
 }
 
 func releaseReconciledOwnership(ctx context.Context, tx pgx.Tx, projectID, jobID, leaseToken string) error {
