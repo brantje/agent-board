@@ -286,8 +286,8 @@ func TestEngineAnswersNativeQuestionWithoutSecondPrompt(t *testing.T) {
 	if harness.promptCalls != 1 {
 		t.Fatalf("prompt calls=%d want 1", harness.promptCalls)
 	}
-	if harness.modelProvider != "anthropic" || harness.modelID != "claude-sonnet" || harness.location != "" {
-		t.Fatalf("model=%s/%s location=%q want serve CWD (omitted directory)", harness.modelProvider, harness.modelID, harness.location)
+	if harness.modelProvider != "anthropic" || harness.modelID != "claude-sonnet" || harness.location != "/workspace" {
+		t.Fatalf("model=%s/%s location=%q want /workspace fallback when process does not report a host working directory", harness.modelProvider, harness.modelID, harness.location)
 	}
 	if len(harness.replyAnswers) != 2 || len(harness.replyAnswers[0]) != 1 || harness.replyAnswers[0][0] != "B" || len(harness.replyAnswers[1]) != 1 || harness.replyAnswers[1][0] != "because it is safer" {
 		t.Fatalf("native answers=%v", harness.replyAnswers)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -127,6 +128,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, err
 	}
 	defer native.CloseIdleConnections()
+	native.SetDirectory(nativeWorkingDirectory(process))
 	if err := waitHealthy(ctx, native); err != nil {
 		return engine.Result{}, err
 	}
@@ -448,10 +450,21 @@ func pickNativeSession(ctx context.Context, native *client.Client, sessions []cl
 	if len(sessions) == 0 {
 		return client.Session{}, nil
 	}
+	bound := path.Clean(strings.TrimSpace(native.Directory()))
+	candidates := make([]client.Session, 0, len(sessions))
 	for _, session := range sessions {
 		if strings.TrimSpace(session.ID) == "" {
 			continue
 		}
+		if bound != "." && bound != "" {
+			directory := path.Clean(strings.TrimSpace(session.Directory))
+			if directory != bound {
+				continue
+			}
+		}
+		candidates = append(candidates, session)
+	}
+	for _, session := range candidates {
 		active, err := native.SessionActive(ctx, session.ID)
 		if err != nil {
 			return client.Session{}, fmt.Errorf("opencode engine: query native session %s: %w", session.ID, err)
@@ -460,12 +473,19 @@ func pickNativeSession(ctx context.Context, native *client.Client, sessions []cl
 			return session, nil
 		}
 	}
-	for _, session := range sessions {
-		if strings.TrimSpace(session.ID) != "" {
-			return session, nil
-		}
+	if len(candidates) != 0 {
+		return candidates[0], nil
 	}
 	return client.Session{}, nil
+}
+
+func nativeWorkingDirectory(process engine.Process) string {
+	if provider, ok := process.(engine.WorkingDirectoryProvider); ok {
+		if directory := strings.TrimSpace(provider.WorkingDirectory()); directory != "" {
+			return directory
+		}
+	}
+	return runtimepkg.WorkspaceTarget
 }
 
 const issueStatusPromptGuidance = "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When the work is ready for human review or handoff, use REVIEW. When the Issue is fully complete, use DONE. Before your final response, compare the final work outcome with the persisted Issue Board status and call set_issue_status(status) if the Board state should now be different. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required."

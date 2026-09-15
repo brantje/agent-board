@@ -40,8 +40,9 @@ func (e *HTTPError) Error() string {
 }
 
 type Client struct {
-	http    *http.Client
-	baseURL string
+	http      *http.Client
+	baseURL   string
+	directory string
 }
 
 func New(httpClient *http.Client, baseURL string) (*Client, error) {
@@ -86,11 +87,28 @@ func (c *Client) CloseIdleConnections() {
 	c.http.CloseIdleConnections()
 }
 
+// SetDirectory pins native OpenCode HTTP calls to one project directory.
+// OpenCode serve is multi-project: omitting this falls back to a global/HOME
+// project such as ~/projects/issue instead of the Execution Session workspace.
+func (c *Client) SetDirectory(directory string) {
+	if c == nil {
+		return
+	}
+	c.directory = strings.TrimSpace(directory)
+}
+
+func (c *Client) Directory() string {
+	if c == nil {
+		return ""
+	}
+	return c.directory
+}
+
 func (c *Client) Health(ctx context.Context) (Health, error) {
 	var health Health
-	err := c.doJSON(ctx, http.MethodGet, "/api/health", nil, &health)
+	err := c.doJSONUnscoped(ctx, http.MethodGet, "/api/health", nil, &health)
 	if isNotFound(err) {
-		err = c.doJSON(ctx, http.MethodGet, "/global/health", nil, &health)
+		err = c.doJSONUnscoped(ctx, http.MethodGet, "/global/health", nil, &health)
 	}
 	if err != nil {
 		return Health{}, err
@@ -132,7 +150,11 @@ func (c *Client) CreateSession(ctx context.Context, request CreateSessionRequest
 			Directory string `json:"directory"`
 		} `json:"location,omitempty"`
 	}{Model: request.Model}
-	if directory := strings.TrimSpace(request.Directory); directory != "" {
+	directory := strings.TrimSpace(request.Directory)
+	if directory == "" {
+		directory = c.Directory()
+	}
+	if directory != "" {
 		payload.Location = &struct {
 			Directory string `json:"directory"`
 		}{Directory: directory}
@@ -300,7 +322,26 @@ func isNotFound(err error) bool {
 	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound
 }
 
+func (c *Client) scopedPath(path string) string {
+	directory := c.Directory()
+	if directory == "" {
+		return path
+	}
+	parsed, err := url.Parse(path)
+	if err != nil {
+		return path
+	}
+	query := parsed.Query()
+	query.Set("directory", directory)
+	parsed.RawQuery = query.Encode()
+	return parsed.String()
+}
+
 func (c *Client) doJSON(ctx context.Context, method, path string, payload, output any) error {
+	return c.doJSONUnscoped(ctx, method, c.scopedPath(path), payload, output)
+}
+
+func (c *Client) doJSONUnscoped(ctx context.Context, method, path string, payload, output any) error {
 	if c == nil || c.http == nil {
 		return fmt.Errorf("opencode: client is unavailable")
 	}
@@ -320,6 +361,9 @@ func (c *Client) doJSON(ctx context.Context, method, path string, payload, outpu
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("Accept", "application/json")
+	if directory := c.Directory(); directory != "" {
+		req.Header.Set("x-opencode-directory", directory)
+	}
 	ctx, cancel := context.WithTimeout(ctx, jsonRequestTimeout)
 	defer cancel()
 	req = req.WithContext(ctx)

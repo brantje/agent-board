@@ -86,6 +86,7 @@ type Session struct {
 
 	started chan error
 	result  chan waitResult
+	dir     string
 
 	mu          sync.Mutex
 	startedDone bool
@@ -105,7 +106,12 @@ func newSession(id string, conn *Connection) *Session {
 	return s
 }
 
-func (s *Session) ID() string            { return s.id }
+func (s *Session) ID() string { return s.id }
+func (s *Session) WorkingDirectory() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.dir
+}
 func (s *Session) Stdout() io.Reader     { return s.stdout.reader }
 func (s *Session) Stderr() io.Reader     { return s.stderr.reader }
 func (s *Session) Stdin() io.WriteCloser { return s.stdin }
@@ -129,8 +135,11 @@ func (s *Session) Kill(context.Context) error {
 	return s.conn.writeSessionSignal(s.id, true)
 }
 
-func (s *Session) markStarted(err error) {
+func (s *Session) markStarted(err error, dir string) {
 	s.mu.Lock()
+	if dir != "" {
+		s.dir = dir
+	}
 	if s.startedDone {
 		s.mu.Unlock()
 		return
@@ -150,7 +159,7 @@ func (s *Session) finish(result Result, err error) {
 	startedDone := s.startedDone
 	s.mu.Unlock()
 	if !startedDone {
-		s.markStarted(err)
+		s.markStarted(err, "")
 	}
 	s.stdout.close(err)
 	s.stderr.close(err)

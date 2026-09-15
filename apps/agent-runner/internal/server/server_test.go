@@ -16,7 +16,7 @@ import (
 )
 
 func TestWebSocketExecutionLifecycle(t *testing.T) {
-	_, httpServer := newTestRunner(t)
+	runner, httpServer := newTestRunner(t)
 	conn := dialAndHandshake(t, httpServer.URL, 1)
 	defer conn.Close()
 
@@ -27,6 +27,17 @@ func TestWebSocketExecutionLifecycle(t *testing.T) {
 	started := read(t, conn)
 	if started.Type != protocol.TypeSessionStarted || started.SessionID != "session-1" {
 		t.Fatalf("unexpected start response %#v", started)
+	}
+	startedPayload, err := protocol.DecodePayload[protocol.SessionStarted](started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDir, err := filepath.EvalSymlinks(filepath.Join(runner.manager.WorkspaceRoot(), "session-1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if startedPayload.Dir != wantDir {
+		t.Fatalf("session_started dir=%q want %q", startedPayload.Dir, wantDir)
 	}
 	send(t, conn, protocol.TypeStdin, "session-1", protocol.StreamData{Data: []byte("hello\n")})
 	send(t, conn, protocol.TypeStdinClose, "session-1", nil)

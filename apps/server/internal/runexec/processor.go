@@ -651,7 +651,13 @@ func startCapture(ctx context.Context, recorder *evidence.OutputRecorder, scope 
 	return streamReader, done
 }
 
-func (p *capturingProcess) ID() string            { return p.process.ID() }
+func (p *capturingProcess) ID() string { return p.process.ID() }
+func (p *capturingProcess) WorkingDirectory() string {
+	if p == nil || p.process == nil {
+		return ""
+	}
+	return p.process.WorkingDirectory()
+}
 func (p *capturingProcess) Stdout() io.Reader     { return p.stdout.Reader() }
 func (p *capturingProcess) Stderr() io.Reader     { return p.stderr.Reader() }
 func (p *capturingProcess) Stdin() io.WriteCloser { return p.process.Stdin() }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -68,19 +69,19 @@ type transferWaiter struct {
 type Connection struct {
 	conn *websocket.Conn
 
-	writeMu   sync.Mutex
-	mu        sync.RWMutex
-	sessions  map[string]*Session
-	pending   map[string]*pendingSessionMessages
-	connects  map[string]map[string]*sessionConn
-	transfers map[string]*incomingTransferState
+	writeMu         sync.Mutex
+	mu              sync.RWMutex
+	sessions        map[string]*Session
+	pending         map[string]*pendingSessionMessages
+	connects        map[string]map[string]*sessionConn
+	transfers       map[string]*incomingTransferState
 	transferWaiters map[string]*transferWaiter
 	transferDone    map[string]transferResult
-	health    protocol.Health
-	caps      protocol.Capabilities
-	err       error
-	done      chan struct{}
-	closeOnce sync.Once
+	health          protocol.Health
+	caps            protocol.Capabilities
+	err             error
+	done            chan struct{}
+	closeOnce       sync.Once
 }
 
 func Dial(ctx context.Context, endpoint string) (*Connection, error) {
@@ -277,7 +278,7 @@ func (c *Connection) Attach(sessionID string) (ProcessSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	session.markStarted(nil)
+	session.markStarted(nil, "")
 	return session, nil
 }
 
@@ -406,7 +407,15 @@ func (c *Connection) bufferPendingLocked(msg protocol.Message) error {
 func deliverSessionMessage(session *Session, msg protocol.Message) (bool, error) {
 	switch msg.Type {
 	case protocol.TypeSessionStarted:
-		session.markStarted(nil)
+		dir := ""
+		if len(msg.Payload) > 0 {
+			started, err := protocol.DecodePayload[protocol.SessionStarted](msg)
+			if err != nil {
+				return false, err
+			}
+			dir = strings.TrimSpace(started.Dir)
+		}
+		session.markStarted(nil, dir)
 		return false, nil
 	case protocol.TypeStdout, protocol.TypeStderr:
 		stream, err := protocol.DecodePayload[protocol.StreamData](msg)
