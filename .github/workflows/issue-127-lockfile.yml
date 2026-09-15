@@ -4,7 +4,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   lockfile:
@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          persist-credentials: false
+          ref: tmp/127-lockfile
       - uses: pnpm/action-setup@v4
         with:
           version: 11.25.0
@@ -23,8 +23,13 @@ jobs:
           package-manager-cache: false
       - name: Generate lockfile
         run: pnpm install --lockfile-only --no-frozen-lockfile
-      - uses: actions/upload-artifact@v4
-        with:
-          name: issue-127-pnpm-lock
-          path: pnpm-lock.yaml
-          if-no-files-found: error
+      - name: Persist generated lockfile on helper branch
+        run: |
+          if git diff --quiet -- pnpm-lock.yaml; then
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add pnpm-lock.yaml
+          git commit -m 'chore: persist generated issue 127 lockfile'
+          git push origin HEAD:tmp/127-lockfile
