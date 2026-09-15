@@ -94,8 +94,6 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
 		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	// Serialize eligibility checks with changes to Users, grants, memberships and
-	// Agent scope/state, using the existing administration lock order.
 	if err = lockAssigneeEligibility(ctx, tx); err != nil {
 		return store.IssueMutationResult{}, err
 	}
@@ -139,7 +137,7 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
-	_, runEvent, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch)
+	_, runEvent, err := s.enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch)
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
