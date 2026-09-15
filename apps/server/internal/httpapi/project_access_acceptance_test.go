@@ -63,6 +63,14 @@ func (s *projectAccessHTTPStore) ListProjectsForUser(_ context.Context, userID s
 }
 
 func (s *projectAccessHTTPStore) EffectiveProjectRole(_ context.Context, projectID, userID string) (string, error) {
+	if user, ok := s.users[userID]; ok && user.DeploymentRole == store.DeploymentRoleAdmin {
+		for _, project := range s.projects {
+			if project.ID == projectID {
+				return store.ProjectRoleAdmin, nil
+			}
+		}
+		return "", store.ErrNotFound
+	}
 	role, ok := s.roles[projectGrantKey(projectID, userID)]
 	if !ok {
 		return "", store.ErrNotFound
