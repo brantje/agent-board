@@ -182,6 +182,6 @@ func TestInteractiveWaitingClaimCanFailWithoutRecoveryReplay(t *testing.T) {
 	if failed.Status != "FAILED" {
 		t.Fatalf("failed run=%+v", failed)
 	}
-	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "TODO")
+	assertIssueStatus(t, s, f.project.ID, f.issue.ID, "IN_PROGRESS")
 	assertSchedulerOwnershipCounts(t, s, admission.Job.ID, 0, 0)
 }
