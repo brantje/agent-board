@@ -46,14 +46,14 @@ var builtInOpenCodeProviders = map[string]struct{}{
 	"gitlab":         {},
 	"google":         {},
 	"google-vertex":  {},
-	"groq":            {},
-	"mistral":         {},
-	"openai":          {},
-	"openrouter":      {},
-	"opencode":        {},
-	"perplexity":      {},
-	"together":        {},
-	"xai":             {},
+	"groq":           {},
+	"mistral":        {},
+	"openai":         {},
+	"openrouter":     {},
+	"opencode":       {},
+	"perplexity":     {},
+	"together":       {},
+	"xai":            {},
 }
 
 type Engine struct {
