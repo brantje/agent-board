@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Issue, Project, Run } from '../types/api'
-import { apiPath } from '../utils/api'
-import { boardColumns, latestRun } from '../utils/issues'
+import { apiPath, apiRequest } from '../utils/api'
+import { boardColumns, latestRun, placeIssueOnBoard } from '../utils/issues'
 import { isBoardActivityEvent, applyCurrentBranchToIssues } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
@@ -13,12 +13,16 @@ const issues = useResource<Issue[]>(() => apiPath('issues', props.projectId))
 const runs = useResource<Run[]>(() => apiPath('runs', props.projectId))
 const search = ref('')
 const open = ref(false)
+const draggingIssueId = ref<string | null>(null)
+const moving = ref(false)
+const moveError = ref<Error | null>(null)
 
 const title = computed(() => project.data.value ? `${project.data.value.name} / Board` : 'Project Board')
 const columns = computed(() => boardColumns(issues.data.value || [], search.value))
 const pending = computed(() => project.pending.value || issues.pending.value)
 const error = computed(() => project.error.value || issues.error.value)
 const runsError = computed(() => runs.error.value)
+const canReorder = computed(() => props.canMutate && !moving.value && !search.value.trim())
 
 function runStatus(issue: Issue) {
   const items = runs.data.value
@@ -33,6 +37,66 @@ async function refreshAll() {
 async function created() {
   open.value = false
   await refreshAll()
+}
+
+function startDrag(event: DragEvent, issueId: string) {
+  if (!canReorder.value) {
+    event.preventDefault()
+    return
+  }
+  draggingIssueId.value = issueId
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', issueId)
+  }
+}
+
+function endDrag() {
+  draggingIssueId.value = null
+}
+
+function allowDrop(event: DragEvent) {
+  if (!canReorder.value || !draggingIssueId.value) return
+  event.preventDefault()
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+async function persistPlacement(status: string, beforeIssueId: string | null = null) {
+  const issueId = draggingIssueId.value
+  const previous = issues.data.value
+  if (!issueId || !canReorder.value || !Array.isArray(previous)) return
+
+  const optimistic = placeIssueOnBoard(previous, issueId, status, beforeIssueId)
+  if (optimistic === previous) return
+
+  issues.data.value = optimistic
+  moving.value = true
+  moveError.value = null
+  try {
+    await apiRequest<Issue>(`${apiPath('issues', props.projectId, issueId)}/board`, {
+      method: 'PATCH',
+      body: { status, beforeIssueId }
+    })
+    await Promise.all([issues.refresh(), runs.refresh()])
+  } catch (value) {
+    issues.data.value = previous
+    moveError.value = value instanceof Error ? value : new Error('Unable to move issue.')
+  } finally {
+    moving.value = false
+    draggingIssueId.value = null
+  }
+}
+
+function dropBefore(event: DragEvent, status: string, beforeIssueId: string) {
+  if (!canReorder.value) return
+  event.preventDefault()
+  void persistPlacement(status, beforeIssueId)
+}
+
+function dropAtEnd(event: DragEvent, status: string) {
+  if (!canReorder.value) return
+  event.preventDefault()
+  void persistPlacement(status)
 }
 
 useProjectEvents(() => props.projectId, async event => {
@@ -65,12 +129,22 @@ useProjectEvents(() => props.projectId, async event => {
         class="mb-3"
         :actions="[{ label: 'Retry', onClick: () => runs.refresh() }]"
       />
+      <UAlert
+        v-if="moveError"
+        title="Unable to move issue"
+        :description="moveError.message"
+        color="error"
+        class="mb-3"
+      />
+      <p v-if="canMutate && search.trim()" class="mb-3 text-xs text-muted">Clear the filter to reorder issues.</p>
       <div class="flex min-h-[calc(100dvh-10rem)] gap-3 overflow-x-auto pb-3" role="region" aria-label="Issue board" tabindex="0">
         <section
           v-for="column in columns"
           :key="column.status"
           :data-status="column.status"
           :class="['w-64 min-w-64 flex-1 border border-default', column.surface]"
+          @dragover="allowDrop"
+          @drop="dropAtEnd($event, column.status)"
         >
           <header class="flex items-center justify-between gap-2 border-b border-default p-3">
             <h2 class="section-label flex min-w-0 items-center gap-1.5">
@@ -79,13 +153,23 @@ useProjectEvents(() => props.projectId, async event => {
             </h2>
             <UBadge :label="String(column.issues.length)" color="neutral" variant="subtle" />
           </header>
-          <div class="space-y-2 p-2">
-            <IssueCard
+          <div class="min-h-16 space-y-2 p-2">
+            <div
               v-for="issue in column.issues"
               :key="issue.id"
-              :issue="issue"
-              :run-status="runStatus(issue)"
-            />
+              :data-board-issue="issue.id"
+              :draggable="canReorder"
+              :class="{ 'cursor-grab': canReorder, 'opacity-50': draggingIssueId === issue.id }"
+              @dragstart="startDrag($event, issue.id)"
+              @dragend="endDrag"
+              @dragover.stop="allowDrop"
+              @drop.stop="dropBefore($event, column.status, issue.id)"
+            >
+              <IssueCard
+                :issue="issue"
+                :run-status="runStatus(issue)"
+              />
+            </div>
             <p v-if="!column.issues.length" class="px-2 py-4 text-xs text-muted">{{ search ? 'No matching issues' : 'No issues' }}</p>
           </div>
         </section>
