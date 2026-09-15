@@ -26,6 +26,9 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockIssueBoardOrder(ctx, tx, input.ProjectID); err != nil {
+		return store.IssueMutationResult{}, err
+	}
 
 	run, err := lockIssueStatusRunFence(ctx, tx, input)
 	if err != nil {
@@ -45,6 +48,9 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 			return store.IssueMutationResult{}, err
 		}
 		return store.IssueMutationResult{Issue: previous}, nil
+	}
+	if err := moveIssueToStatusTopTx(ctx, tx, input.ProjectID, input.IssueID, previous.Status, input.Status); err != nil {
+		return store.IssueMutationResult{}, err
 	}
 
 	updated := previous

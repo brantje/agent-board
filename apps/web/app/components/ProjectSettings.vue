@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import type { Project } from '../types/api'
 import { apiPath } from '../utils/api'
+import { projectNewIssuePlacement } from '../utils/project-settings'
 import { useProjectPermissions } from '../composables/useProjectPermissions'
 import { useResource } from '../composables/useResource'
 import ProjectAccessSettings from './ProjectAccessSettings.vue'
@@ -69,6 +70,10 @@ function retry() {
             <div>
               <dt class="text-sm text-muted">Issue prefix</dt>
               <dd class="font-mono">{{ data.issuePrefix }}</dd>
+            </div>
+            <div>
+              <dt class="text-sm text-muted">New issue placement</dt>
+              <dd class="capitalize">{{ projectNewIssuePlacement(data.workflowSettings) }}</dd>
             </div>
             <div>
               <dt class="text-sm text-muted">Source</dt>
