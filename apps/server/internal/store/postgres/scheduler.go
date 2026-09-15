@@ -10,10 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const (
-	schedulerConfigurationWaitReason = "configuration_unavailable"
-	schedulerConfigurationBackoff    = time.Second
-)
+const schedulerConfigurationWaitReason = "configuration_unavailable"
 
 var errSchedulerConfigurationUnavailable = errors.New("scheduler configuration unavailable")
 
@@ -343,76 +340,6 @@ func insertCapacityReservation(ctx context.Context, tx pgx.Tx, job store.Schedul
 		VALUES ($1, $2, $3, $4, $5)
 	`, job.ProjectID, job.ID, run.ID, resourceKind, resourceID)
 	return err
-}
-
-// ClaimNextJob is retained for low-level persistence compatibility. Scheduler
-// orchestration must use AdmitNextJob so claim and capacity are atomic.
-func (s *Store) ClaimNextJob(ctx context.Context, ownerID string, leaseDuration time.Duration) (*store.SchedulerJob, *store.SchedulerLease, error) {
-	leaseMicros := leaseDuration.Microseconds()
-	if strings.TrimSpace(ownerID) == "" || leaseMicros <= 0 {
-		return nil, nil, store.ErrInvalidArgument
-	}
-
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	var job store.SchedulerJob
-	var agentID, modelProfileID *string
-	err = tx.QueryRow(ctx, `
-		SELECT
-			job.id::text, job.project_id::text, job.run_id::text, job.kind, job.state, job.wait_reason, job.idempotency_key, job.available_at, job.created_at, job.updated_at,
-			agent.id::text, model.id::text
-		FROM scheduler_jobs AS job
-		JOIN runs AS run ON run.project_id=job.project_id AND run.id=job.run_id
-		LEFT JOIN agents AS agent
-		  ON agent.id=run.agent_id
-		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
-		LEFT JOIN model_profiles AS model
-		  ON model.id=agent.model_profile_id
-		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
-		WHERE job.state='QUEUED' AND job.available_at <= now()
-		ORDER BY job.available_at, job.created_at, job.id
-		FOR UPDATE OF job, run SKIP LOCKED
-		LIMIT 1
-	`).Scan(
-		&job.ID, &job.ProjectID, &job.RunID, &job.Kind, &job.State, &job.WaitReason, &job.IdempotencyKey, &job.AvailableAt, &job.CreatedAt, &job.UpdatedAt,
-		&agentID, &modelProfileID,
-	)
-	if errors.Is(notFound(err), store.ErrNotFound) {
-		return nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-	if agentID == nil || modelProfileID == nil {
-		if err := deferQueuedJob(ctx, tx, job, schedulerConfigurationWaitReason, schedulerConfigurationBackoff.Microseconds()); err != nil {
-			return nil, nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, nil, err
-		}
-		return nil, nil, nil
-	}
-
-	lease, err := scanSchedulerLease(tx.QueryRow(ctx, `
-		INSERT INTO scheduler_leases (job_id, owner_id, expires_at)
-		VALUES ($1, $2, now() + ($3::bigint * interval '1 microsecond'))
-		RETURNING job_id::text, owner_id, lease_token::text, acquired_at, expires_at
-	`, job.ID, ownerID, leaseMicros))
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, err := tx.Exec(ctx, `UPDATE scheduler_jobs SET state = 'CLAIMED', updated_at = now() WHERE id = $1`, job.ID); err != nil {
-		return nil, nil, err
-	}
-	job.State = "CLAIMED"
-	if err := tx.Commit(ctx); err != nil {
-		return nil, nil, err
-	}
-	return &job, &lease, nil
 }
 
 func (s *Store) RenewLease(ctx context.Context, projectID, jobID, leaseToken string, leaseDuration time.Duration) (store.SchedulerLease, error) {
