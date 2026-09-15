@@ -15,7 +15,7 @@ const newIssuePlacementOptions = [
   { label: 'Bottom', value: 'bottom' },
   { label: 'Top', value: 'top' }
 ]
-const initialNewIssuePlacement = projectNewIssuePlacement(props.project?.workflowSettings)
+let initialNewIssuePlacement = projectNewIssuePlacement(props.project?.workflowSettings)
 
 const state = reactive({
   name: props.project?.name ?? '',
@@ -81,6 +81,7 @@ async function save() {
       method: props.project ? 'PATCH' : 'POST',
       body: payload()
     })
+    initialNewIssuePlacement = projectNewIssuePlacement(saved.workflowSettings)
     emit('saved', saved)
   } catch (failure) {
     error.value = failure as Error
