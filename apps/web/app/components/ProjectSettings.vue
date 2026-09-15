@@ -133,7 +133,7 @@ async function saveStrictOrder(value: boolean) {
           <UFormField
             label="Strict board order"
             name="strictOrder"
-            description="Agents consider queued Issues in Board order, skipping Issues that are already running or blocked by unresolved dependencies. Other admission constraints keep the selected Issue in place until it can run."
+            description="Only the earliest queued Issue in Board order is considered for this Project. If it is blocked or cannot be admitted yet, later Issues wait. Issues that are already running do not hold the queue."
           >
             <USwitch
               :model-value="strictOrder"
