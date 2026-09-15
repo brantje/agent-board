@@ -1,6 +1,6 @@
 package postgres
 
-const effectiveProjectRoleSQL = `
+const effectiveProjectRoleExpression = `
 CASE
 	WHEN u.deployment_role='admin' THEN 'admin'
 	ELSE (
