@@ -300,6 +300,9 @@ func (s *Service) CreateIssue(ctx context.Context, input store.Issue) (store.Iss
 	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
 		return store.Issue{}, err
 	}
+	if input.Status == "" {
+		input.Status = "BACKLOG"
+	}
 	if err := validateIssue(input); err != nil {
 		return store.Issue{}, err
 	}

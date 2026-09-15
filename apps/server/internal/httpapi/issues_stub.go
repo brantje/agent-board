@@ -58,10 +58,6 @@ func (a *api) createIssue(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	status := req.Status
-	if status == "" {
-		status = "BACKLOG"
-	}
 	priority := 0
 	if req.Priority != nil {
 		priority = *req.Priority
@@ -70,7 +66,7 @@ func (a *api) createIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
 		return
 	}
-	input := store.Issue{ProjectID: projectID, Title: req.Title, Description: req.Description, Status: status, Priority: priority}
+	input := store.Issue{ProjectID: projectID, Title: req.Title, Description: req.Description, Status: req.Status, Priority: priority}
 	var value store.Issue
 	var err error
 	if a.projectAccess != nil {
@@ -163,9 +159,20 @@ func (a *api) listIssueRelationships(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	values, err := a.service.ListIssueRelationships(r.Context(), projectID, issueUUID)
+	var values []store.IssueRelationship
+	var err error
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		values, err = a.projectAccess.ListIssueRelationships(r.Context(), actor, projectID, issueUUID)
+	} else {
+		values, err = a.service.ListIssueRelationships(r.Context(), projectID, issueUUID)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	keys, err := a.issueKeyMap(r.Context(), projectID)
@@ -197,9 +204,21 @@ func (a *api) createIssueRelationship(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	value, err := a.service.CreateIssueRelationship(r.Context(), store.IssueRelationship{ProjectID: projectID, SourceIssueID: issueUUID, TargetIssueID: targetUUID, Type: req.Type})
+	input := store.IssueRelationship{ProjectID: projectID, SourceIssueID: issueUUID, TargetIssueID: targetUUID, Type: req.Type}
+	var value store.IssueRelationship
+	var err error
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		value, err = a.projectAccess.CreateIssueRelationship(r.Context(), actor, input)
+	} else {
+		value, err = a.service.CreateIssueRelationship(r.Context(), input)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	keys := issueKeysFromResolved(issueUUID, chi.URLParam(r, "issueID"), targetUUID, req.TargetIssueID)
@@ -219,8 +238,19 @@ func (a *api) deleteIssueRelationship(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if err := a.service.DeleteIssueRelationship(r.Context(), projectID, issueUUID, relationshipID); err != nil {
-		writeAppError(w, err)
+	var err error
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		err = a.projectAccess.DeleteIssueRelationship(r.Context(), actor, projectID, issueUUID, relationshipID)
+	} else {
+		err = a.service.DeleteIssueRelationship(r.Context(), projectID, issueUUID, relationshipID)
+	}
+	if err != nil {
+		writeProjectAccessError(w, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -35,6 +35,13 @@ type ProjectGroupAccessView struct {
 	Group  Group
 }
 
+type ProjectMember struct {
+	UserID      string
+	Username    string
+	DisplayName string
+	Role        string
+}
+
 func ValidProjectRole(role string) bool {
 	return role == ProjectRoleViewer || role == ProjectRoleMember || role == ProjectRoleAdmin
 }
@@ -63,6 +70,7 @@ type ProjectAccessStore interface {
 	CreateProjectWithAdmin(context.Context, Project, string) (Project, error)
 	ListProjectsForUser(context.Context, string) ([]Project, error)
 	EffectiveProjectRole(context.Context, string, string) (string, error)
+	ListProjectMembers(context.Context, string) ([]ProjectMember, error)
 
 	ListProjectUserAccess(context.Context, string) ([]ProjectUserAccessView, error)
 	UpsertProjectUserAccess(context.Context, ProjectUserAccess) (ProjectUserAccess, error)
