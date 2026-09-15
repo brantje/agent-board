@@ -154,7 +154,7 @@ func TestMCPProtocolInitializesListsExactV1ToolsAndCallsTool(t *testing.T) {
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "agent-board-test", Version: "v0.1.0"}, nil)
 	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
-		Endpoint: httpServer.URL,
+		Endpoint:   httpServer.URL,
 		HTTPClient: &http.Client{Transport: bearerRoundTripper{token: token}},
 	}, nil)
 	if err != nil {
@@ -175,7 +175,7 @@ func TestMCPProtocolInitializesListsExactV1ToolsAndCallsTool(t *testing.T) {
 		"answer_question", "approve_review", "cancel_run", "create_issue", "create_issue_relationship", "delete_issue_relationship",
 		"get_agent", "get_issue", "get_issue_execution_state", "get_project", "get_project_role", "get_question", "get_review", "get_run",
 		"inspect_run", "list_agents", "list_issue_assignees", "list_issue_relationships", "list_issues", "list_project_members", "list_projects",
-		"list_questions", "list_reviews", "list_runs", "read_run_output_chunk", "request_review_changes", "set_issue_assignee", "set_issue_status",
+		"list_questions", "list_reviews", "list_runs", "place_issue_on_board", "read_run_output_chunk", "request_review_changes", "set_issue_assignee", "set_issue_status",
 		"start_issue_run", "update_issue",
 	}
 	sort.Strings(want)
