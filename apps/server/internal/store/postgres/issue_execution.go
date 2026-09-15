@@ -43,7 +43,7 @@ func (s *Store) GetIssueExecutionState(ctx context.Context, projectID, issueID s
 	if !errors.Is(err, store.ErrNotFound) {
 		return store.IssueExecutionState{}, err
 	}
-	if err := verifyRunnableAgent(ctx, tx, projectID, *assigneeID); err != nil {
+	if err := s.verifyRunnableAgent(ctx, tx, projectID, *assigneeID); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			return store.IssueExecutionState{State: store.IssueExecutionConfigurationUnavailable}, nil
 		}
@@ -52,8 +52,6 @@ func (s *Store) GetIssueExecutionState(ctx context.Context, projectID, issueID s
 	return store.IssueExecutionState{State: store.IssueExecutionReady, CanStart: true}, nil
 }
 
-// Candidate identity is only a hint. Re-read ownership and policy under the same
-// Issue lock used by assignment/status mutations before creating anything.
 func (s *Store) enqueueCurrentIssue(ctx context.Context, projectID, issueID, expectedAgentID string, strict bool) (store.Run, store.Event, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -74,7 +72,7 @@ func (s *Store) enqueueCurrentIssue(ctx context.Context, projectID, issueID, exp
 		}
 		return store.Run{}, store.Event{}, nil
 	}
-	run, event, err := enqueueAssignedIssue(ctx, tx, issue, path, branch, strict)
+	run, event, err := s.enqueueAssignedIssue(ctx, tx, issue, path, branch, strict)
 	if err != nil {
 		return store.Run{}, store.Event{}, err
 	}
@@ -84,10 +82,6 @@ func (s *Store) enqueueCurrentIssue(ctx context.Context, projectID, issueID, exp
 	return run, event, nil
 }
 
-// RunnableIssueExecutionScopes evaluates affected Agent/project pairs using the
-// exact verifyRunnableAgent predicate used by enqueueAssignedIssue. It is a
-// readiness snapshot only; Issue status and active-Run policy remain in the
-// reconciliation/enqueue path.
 func (s *Store) RunnableIssueExecutionScopes(ctx context.Context, filter store.IssueExecutionFilter) ([]store.IssueExecutionScope, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
@@ -127,7 +121,7 @@ func (s *Store) RunnableIssueExecutionScopes(ctx context.Context, filter store.I
 
 	scopes := make([]store.IssueExecutionScope, 0, len(candidates))
 	for _, c := range candidates {
-		err = verifyRunnableAgent(ctx, tx, c.project, c.agent)
+		err = s.verifyRunnableAgent(ctx, tx, c.project, c.agent)
 		if err == nil {
 			scopes = append(scopes, store.IssueExecutionScope{ProjectID: c.project, AgentID: c.agent})
 			continue
