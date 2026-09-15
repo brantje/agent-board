@@ -93,25 +93,7 @@ func TestSchedulerAdmissionDefersPersistedInvalidProfileChain(t *testing.T) {
 	assertSchedulerOwnershipCounts(t, s, jobID, 0, 0)
 }
 
-func TestLegacyClaimDefersInvalidProfileChainWithoutLease(t *testing.T) {
-	s := New(testPool(t))
-	ctx := context.Background()
-	f := seedRunFixture(t, s, "invalid-legacy-claim")
-	run := createRunWithoutAgent(t, s, f, "invalid-legacy-claim")
-	jobID := insertRawSchedulerJob(t, s, f.project.ID, run.ID, "invalid-legacy-claim", "QUEUED")
-
-	job, lease, err := s.ClaimNextJob(ctx, "worker", time.Minute)
-	if err != nil {
-		t.Fatalf("legacy claim invalid profile chain: %v", err)
-	}
-	if job != nil || lease != nil {
-		t.Fatalf("job=%+v lease=%+v want no claim", job, lease)
-	}
-	assertConfigurationWait(t, s, jobID, run.ID)
-	assertSchedulerOwnershipCounts(t, s, jobID, 0, 0)
-}
-
-func TestReconciliationRecoversExpiredInvalidLegacyClaim(t *testing.T) {
+func TestReconciliationRecoversExpiredInvalidClaim(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "invalid-reconciliation")
@@ -142,17 +124,11 @@ func TestSchedulerPublicClaimsValidateOwnershipAndDurations(t *testing.T) {
 	if _, err := s.AdmitNextJob(ctx, "", time.Minute, time.Second); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("admit blank owner error=%v want invalid argument", err)
 	}
-	if _, _, err := s.ClaimNextJob(ctx, "", time.Minute); !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("legacy claim blank owner error=%v want invalid argument", err)
-	}
 	if _, err := s.ClaimExpiredJobForReconciliation(ctx, "", time.Minute); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("reconciliation blank owner error=%v want invalid argument", err)
 	}
 	if _, err := s.AdmitNextJob(ctx, "worker", 0, time.Second); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("admit zero lease error=%v want invalid argument", err)
-	}
-	if _, _, err := s.ClaimNextJob(ctx, "worker", 0); !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("legacy claim zero lease error=%v want invalid argument", err)
 	}
 	if _, err := s.ClaimExpiredJobForReconciliation(ctx, "worker", 0); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("reconciliation zero lease error=%v want invalid argument", err)
