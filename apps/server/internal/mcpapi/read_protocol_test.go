@@ -83,6 +83,21 @@ func (s *protocolStore) ListIssueRelationships(_ context.Context, projectID, iss
 	return []store.IssueRelationship{{ID: mcpTestRelationshipID, ProjectID: projectID, SourceIssueID: mcpTestIssueID, TargetIssueID: mcpTestSecondIssueID, Type: "blocks"}}, nil
 }
 
+func (s *protocolStore) CreateIssueRelationship(_ context.Context, input store.IssueRelationship) (store.IssueRelationship, error) {
+	if input.ProjectID != s.project.ID || input.SourceIssueID != mcpTestIssueID || input.TargetIssueID != mcpTestSecondIssueID {
+		return store.IssueRelationship{}, store.ErrNotFound
+	}
+	input.ID = mcpTestRelationshipID
+	return input, nil
+}
+
+func (s *protocolStore) DeleteIssueRelationship(_ context.Context, projectID, issueID, relationshipID string) error {
+	if projectID != s.project.ID || issueID != mcpTestIssueID || relationshipID != mcpTestRelationshipID {
+		return store.ErrNotFound
+	}
+	return nil
+}
+
 func (s *protocolStore) GetIssueExecutionState(_ context.Context, projectID, issueID string) (store.IssueExecutionState, error) {
 	if projectID != s.project.ID || issueID != mcpTestIssueID {
 		return store.IssueExecutionState{}, store.ErrNotFound
@@ -116,6 +131,42 @@ func TestMCPReadToolsUseSharedProjectAccessBoundaries(t *testing.T) {
 		{name: "list_runs", args: map[string]any{"projectId": mcpTestProjectID}},
 		{name: "get_run", args: map[string]any{"projectId": mcpTestProjectID, "runId": mcpTestRunID}},
 		{name: "get_agent", args: map[string]any{"projectId": mcpTestProjectID, "agentId": mcpTestAgentID}},
+	}
+
+	for _, call := range calls {
+		t.Run(call.name, func(t *testing.T) {
+			result, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: call.name, Arguments: call.args})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.IsError {
+				t.Fatalf("%s tool error: %+v", call.name, result.Content)
+			}
+		})
+	}
+}
+
+func TestMCPRelationshipMutationsUseSharedProjectAccessBoundaries(t *testing.T) {
+	handler, _, _, token := newProtocolFixture(t)
+	httpServer := httptest.NewServer(handler)
+	defer httpServer.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "agent-board-test", Version: "v0.1.0"}, nil)
+	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
+		Endpoint:   httpServer.URL,
+		HTTPClient: &http.Client{Transport: bearerRoundTripper{token: token}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+
+	calls := []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "create_issue_relationship", args: map[string]any{"projectId": mcpTestProjectID, "issueId": "MCP-1", "targetIssueId": "MCP-2", "type": "blocks"}},
+		{name: "delete_issue_relationship", args: map[string]any{"projectId": mcpTestProjectID, "issueId": "MCP-1", "relationshipId": mcpTestRelationshipID}},
 	}
 
 	for _, call := range calls {
