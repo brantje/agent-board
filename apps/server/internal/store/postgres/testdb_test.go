@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,9 +81,10 @@ func testProjectInput(name, repositoryPath, issuePrefix string) store.Project {
 		issuePrefix = prefixForTestName(name)
 	}
 	return store.Project{
-		Name:           name,
-		RepositoryPath: repositoryPath,
-		IssuePrefix:    issuePrefix,
+		Name:             name,
+		RepositoryPath:   repositoryPath,
+		IssuePrefix:      issuePrefix,
+		WorkflowSettings: json.RawMessage(`{"strictOrder":false}`),
 	}
 }
 
