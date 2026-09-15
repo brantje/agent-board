@@ -87,13 +87,13 @@ func TestAgentIssueStatusMutationPersistsCanonicalEventAttribution(t *testing.T)
 	assertStatusEventPayload(t, event.Payload, "TODO", "IN_PROGRESS")
 }
 
-func TestFailedRunRecoveryMovesLastInProgressIssueToTodo(t *testing.T) {
+func TestFailedRunDoesNotProjectInProgressIssueStatus(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
-	f := seedRunFixture(t, s, "status-failed-recovery")
+	f := seedRunFixture(t, s, "status-failed-independent")
 	setFixtureIssueStatus(t, s, f, "IN_PROGRESS")
-	enqueueFixtureRun(t, s, f, f.run, "status-failed-recovery")
-	admission := mustAdmit(t, s, "worker-status-failed-recovery")
+	enqueueFixtureRun(t, s, f, f.run, "status-failed-independent")
+	admission := mustAdmit(t, s, "worker-status-failed-independent")
 
 	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
 		ProjectID:  f.project.ID,
@@ -116,12 +116,11 @@ func TestFailedRunRecoveryMovesLastInProgressIssueToTodo(t *testing.T) {
 		t.Fatalf("transition failed: %v", err)
 	}
 
-	assertFixtureIssueStatus(t, s, f, "TODO")
-	assertIssueStatusEventCount(t, s, f, 1)
-	assertRecoveryStatusEvent(t, s, f)
+	assertFixtureIssueStatus(t, s, f, "IN_PROGRESS")
+	assertIssueStatusEventCount(t, s, f, 0)
 }
 
-func TestFailedRunRecoveryPreservesInProgressWhenAnotherRunIsActive(t *testing.T) {
+func TestFailedRunPreservesInProgressWhenAnotherRunIsActive(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
 	f := seedRunFixture(t, s, "status-failed-concurrent")
@@ -195,7 +194,7 @@ func TestReconciliationRetryDoesNotRollbackInProgressIssue(t *testing.T) {
 	assertIssueStatusEventCount(t, s, f, 0)
 }
 
-func TestFailedReconciliationRecoversLastInProgressIssueToTodo(t *testing.T) {
+func TestFailedReconciliationDoesNotProjectInProgressIssueStatus(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
 	f := seedRunFixture(t, s, "status-reconcile-failed")
@@ -229,9 +228,8 @@ func TestFailedReconciliationRecoversLastInProgressIssueToTodo(t *testing.T) {
 	if run.Status != "FAILED" {
 		t.Fatalf("reconciled Run status=%s want FAILED", run.Status)
 	}
-	assertFixtureIssueStatus(t, s, f, "TODO")
-	assertIssueStatusEventCount(t, s, f, 1)
-	assertRecoveryStatusEvent(t, s, f)
+	assertFixtureIssueStatus(t, s, f, "IN_PROGRESS")
+	assertIssueStatusEventCount(t, s, f, 0)
 }
 
 func setFixtureIssueStatus(t *testing.T, s *Store, f runFixture, status string) {
@@ -261,25 +259,6 @@ func assertIssueStatusEventCount(t *testing.T, s *Store, f runFixture, want int)
 	if got != want {
 		t.Fatalf("Issue status event count=%d want %d", got, want)
 	}
-}
-
-func assertRecoveryStatusEvent(t *testing.T, s *Store, f runFixture) {
-	t.Helper()
-	var payload []byte
-	var runID, agentID, workspaceID *string
-	if err := s.pool.QueryRow(t.Context(), `
-		SELECT payload, run_id::text, agent_id::text, workspace_id::text
-		FROM events
-		WHERE project_id=$1 AND issue_id=$2 AND type='issue.status_changed'
-		ORDER BY created_at DESC, id DESC
-		LIMIT 1
-	`, f.project.ID, f.issue.ID).Scan(&payload, &runID, &agentID, &workspaceID); err != nil {
-		t.Fatalf("read recovery status event: %v", err)
-	}
-	if runID == nil || *runID != f.run.ID || agentID == nil || *agentID != f.agent.ID || workspaceID == nil || *workspaceID != f.workspace.ID {
-		t.Fatalf("recovery event provenance run=%v agent=%v workspace=%v", runID, agentID, workspaceID)
-	}
-	assertStatusEventPayload(t, payload, "IN_PROGRESS", "TODO")
 }
 
 func assertStatusEventPayload(t *testing.T, raw []byte, previous, current string) {
