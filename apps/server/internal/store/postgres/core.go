@@ -134,6 +134,9 @@ func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (sto
 		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockIssueBoardProject(ctx, tx, input.ProjectID); err != nil {
+		return store.IssueMutationResult{}, err
+	}
 
 	if (input.AssigneeType == nil) != (input.AssigneeID == nil) {
 		return store.IssueMutationResult{}, store.ErrInvalidArgument
