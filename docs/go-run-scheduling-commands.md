@@ -1,67 +1,69 @@
-# Go Run scheduling command migration
+# Go Run scheduling and admission
 
-This slice moves the public Run `start` and `resume` scheduling commands from the TypeScript fallback to the native Go backend while deliberately leaving claim/lease/concurrency/recovery and actual Run execution with the existing TypeScript `RunWorker`.
+The Go backend owns durable Run creation, scheduler jobs, admission, lease/recovery state, and execution orchestration for the current product. PostgreSQL is the authoritative queue; there is no TypeScript RunWorker or parallel scheduler authority.
 
-## Go-owned routes
+## Issue-level Start Run
 
-- `POST /api/projects/:projectId/runs/:runId/start`
-- `POST /api/projects/:projectId/runs/:runId/resume`
-- native `OPTIONS` preflight for those exact routes
+The public explicit start command is:
 
-Core Run reads, inspection views, creation, generic transitions, and these scheduling commands are Go-owned. Scheduler claiming, queue-reason refresh, leases/heartbeats, stale-claim recovery, stranded-queue recovery, Runtime Instance lifecycle, Workspace execution, engines, and execution orchestration remain TypeScript-owned.
+- `POST /api/projects/:projectId/issues/:issueId/runs`
 
-## Durable scheduling boundary
+It uses the Issue's current Agent assignee. The command preserves Issue ownership and Board status.
 
-PostgreSQL remains the authoritative queue. Go writes the existing `run_execution_jobs` table; it does not introduce an in-memory queue or a second worker.
+Start Run is rejected when:
 
-The existing database trigger on `run_execution_jobs` inserts the canonical `run.queued` Event in the same transaction as a newly created scheduler job. The TypeScript `RunWorker` continues polling the shared durable scheduler table and remains the only process that claims and executes jobs.
+- the Issue is `BACKLOG`
+- the Issue is unassigned or User-owned
+- the current Agent execution configuration is unavailable
 
-This means moving the HTTP scheduling command does not create duplicate execution authority. At most it removes the old in-process `worker.wake()` optimization; the authoritative TypeScript worker still polls on its existing interval.
+All other Board statuses, including `DONE`, are eligible. An existing active Run for the same Issue/Agent pair is returned instead of creating a duplicate.
 
-## Start contract
+Successful creation atomically persists:
 
-`POST .../start` preserves the existing behavior:
+- the new `QUEUED` Run
+- its durable `START` scheduler job
+- the canonical `run.created` Event
 
-- validates Project and Run ids
-- returns `project_not_found` for a missing Project
-- returns `run_not_found` for a missing/cross-Project Run or missing owning Issue
-- rejects a Done Issue with `issue_done`
-- requires the Run to be `QUEUED`
-- coalesces onto an existing active durable execution job for the Run
-- otherwise inserts one `START` job atomically
-- projects the owning Issue `execution_status` to `QUEUED` only for the matching Agent/latest attempt
-- returns the Run with `202 Accepted`
+Run creation does not require a connected Runner, materialized source, or free Agent/Model capacity.
 
-## Resume contract
+## Execution configuration boundary
 
-`POST .../resume` preserves the public behavior while making its persistence boundary crash-safe:
+Run creation validates the shared execution-configuration predicate: enabled/visible Agent, registered Engine, enabled/visible Model Profile, and enabled/non-unhealthy Provider.
 
-- accepts `WAITING_FOR_INPUT` and `PAUSED`
-- remains idempotent if a previous resume already transitioned the Run to `QUEUED` and an active `RESUME` job exists
-- rejects open blocking Questions for that Project/Run with `unresolved_blocking_question`
-- waits for the previous active scheduler job to finish before queueing the resume, using the existing 500 x 10 ms settle window
-- re-checks Run state, Issue state, blocking Questions, and active scheduler work inside the resume transaction
-- transitions the Run to `QUEUED`, projects Issue `execution_status`, moves a still-`BLOCKED` Issue to `IN_PROGRESS`, and inserts the durable `RESUME` job in one PostgreSQL transaction
-- rolls the entire resume back if the job/event insert or any other write fails, so a retry cannot observe a stranded `QUEUED` Run without resume intent
-- returns the queued Run with `202 Accepted`
+Runner/source availability, Workspace serialization, Runner capacity, Agent concurrency, and Model Profile capacity belong to scheduler admission. Keeping those concerns separate allows valid work to queue durably while infrastructure is temporarily unavailable.
 
-Invalid state edges continue returning `invalid_run_transition` with `409`.
+Automatic enqueue, explicit Start Run, execution-state reads, and configuration-recovery reconciliation use the same execution-validity policy.
 
-## Scheduler persistence parity
+## Durable scheduler
 
-The Go store preserves the important enqueue invariants from the TypeScript scheduler repository:
+`scheduler_jobs` is the durable execution queue. Production scheduler workers use `AdmitNextJob`; there is no claim-only compatibility path.
 
-- the target Run row is locked before queueability is checked
-- only a `QUEUED` Run may receive a scheduling job
-- only one active (`PENDING`, `CLAIMED`, or `RELEASING`) job exists per Run
-- repeat start enqueue requests return that active job rather than inserting a duplicate
-- resume idempotency coalesces only with an already-active `RESUME` job for a `QUEUED` Run
-- Project scoping is enforced when resolving the Run
-- Issue execution-status projection ignores older Run attempts and does not regress a Done Issue
-- the `run.queued` Event remains database-triggered and atomic with a newly inserted job
+Admission performs the authoritative scheduling decision in one PostgreSQL transaction. It:
 
-## Authority boundary
+1. locks the next eligible queued job and Run with `SKIP LOCKED`;
+2. confirms the persisted Agent/Model relationship still exists;
+3. enforces Issue Workspace exclusivity against claimed peer Runs and live Execution Sessions;
+4. checks Agent and Model Profile capacity;
+5. selects an eligible connected Runner according to Project Runner policy and advertised Engine capability;
+6. reserves Runner, Agent, and Model capacity;
+7. creates the scheduler lease;
+8. marks the job `CLAIMED`; and
+9. moves the Run from `QUEUED` to `STARTING`.
 
-This slice does **not** migrate `claimNext`, capacity/concurrency admission, queue-reason refresh, lease ownership, heartbeat, cancellation handoff, recovery, reconciliation, or Run execution. Those behaviors are still consumed from the TypeScript scheduler repository by the TypeScript `RunWorker`.
+If configuration, Workspace, Runner, or capacity is temporarily unavailable, the queued job receives a durable wait reason/backoff and holds no accidental execution ownership.
 
-There must remain exactly one authoritative Run execution worker until the future Go scheduler/worker slice has complete concurrency, restart, stale-ownership, recovery, and duplicate-execution parity coverage.
+## Leases and recovery
+
+Lease renewal is scoped to the Project/job/token and serializes with the Run row. Expired claims are recovered through the scheduler reconciliation path, which re-evaluates persisted configuration and either restores queued work or resolves the durable Run/job state according to the observed execution outcome.
+
+Scheduler restart does not depend on in-memory wakeups or ownership. Queued jobs, leases, capacity reservations, Runs, Workspaces, Execution Sessions, and Events are durable PostgreSQL state.
+
+## Questions and continuation
+
+A native blocking Question may move a Run to `WAITING_FOR_INPUT` while the same Runner, Execution Session, native Engine session, and Workspace remain attached. Answering the Question continues that same execution path when possible; it does not project Issue Board status.
+
+Review Request Changes is a separate continuation command. It completes the reviewed attempt and creates the next queued Run/START job transactionally, preserving the reviewed Agent and Workspace and using the Issue-wide attempt allocator. The continuation emits its own canonical `run.created` Event.
+
+## Board-state independence
+
+Run and scheduler lifecycle never implicitly mutate the Issue Board status. Run completion, failure, Review approval, Review Request Changes, Question waiting/resume, scheduler admission, and scheduler recovery are independent from explicit Issue status mutations.
