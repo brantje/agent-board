@@ -18,6 +18,10 @@ CREATE TABLE projects (
     repository_path text NOT NULL DEFAULT '',
     default_branch text NOT NULL DEFAULT 'main',
     workflow_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(workflow_settings) = 'object'),
+    CONSTRAINT projects_strict_order_type_check CHECK (
+        NOT (workflow_settings ? 'strictOrder')
+        OR jsonb_typeof(workflow_settings->'strictOrder') = 'boolean'
+    ),
     allow_internal_runner boolean NOT NULL DEFAULT true,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -69,7 +73,7 @@ CREATE TABLE groups (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX groups_name_uq ON groups (name);
+CREATE UNIQUE INDEX groups_name_uq ON groups (lower(name));
 
 CREATE TABLE group_members (
     group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
