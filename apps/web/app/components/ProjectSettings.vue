@@ -111,7 +111,7 @@ async function saveStrictOrder(value: boolean) {
             </div>
             <div v-if="data.sourceType !== 'git'">
               <dt class="text-sm text-muted">Default branch</dt>
-              <dd class="font-mono">{{ data.defaultBranch }}</dd>
+              <dd>{{ data.defaultBranch }}</dd>
             </div>
           </dl>
         </UCard>
@@ -133,7 +133,7 @@ async function saveStrictOrder(value: boolean) {
           <UFormField
             label="Strict board order"
             name="strictOrder"
-            description="Agents consider queued Issues in Board order, skipping Issues that are already running or blocked by unresolved dependencies. Other admission constraints keep the selected Issue in place until it can run."
+            description="Agents consider queued Issues in Board order and run the first Issue that currently passes the existing dependency, workspace, capacity, runner, and other admission checks."
           >
             <USwitch
               :model-value="strictOrder"
