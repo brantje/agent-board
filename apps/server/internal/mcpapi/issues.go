@@ -83,7 +83,7 @@ func (s *Server) createIssue(ctx context.Context, _ *mcp.CallToolRequest, input 
 	if input.Priority != nil {
 		priority = *input.Priority
 	}
-	value, err := s.services.ProjectAccess.CreateIssue(ctx, actor, store.Issue{ProjectID: input.ProjectID, Title: input.Title, Description: input.Description, Status: "BACKLOG", Priority: priority})
+	value, err := s.services.ProjectAccess.CreateIssue(ctx, actor, store.Issue{ProjectID: input.ProjectID, Title: input.Title, Description: input.Description, Priority: priority})
 	if err != nil {
 		return nil, IssueDTO{}, toolError(ctx, err)
 	}
