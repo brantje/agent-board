@@ -24,6 +24,8 @@ const error = computed(() => project.error.value || issues.error.value)
 const runsError = computed(() => runs.error.value)
 const canReorder = computed(() => props.canMutate && !moving.value && !search.value.trim())
 
+type BoardMoveDirection = 'up' | 'down' | 'left' | 'right'
+
 function runStatus(issue: Issue) {
   const items = runs.data.value
   if (!Array.isArray(items)) return undefined
@@ -61,13 +63,12 @@ function allowDrop(event: DragEvent) {
   if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
 }
 
-async function persistPlacement(status: string, beforeIssueId: string | null = null) {
-  const issueId = draggingIssueId.value
-  const previous = issues.data.value
-  if (!issueId || !canReorder.value || !Array.isArray(previous)) return
+async function persistPlacement(issueId: string, status: string, beforeIssueId: string | null = null) {
+  const current = issues.data.value
+  if (!issueId || !canReorder.value || !Array.isArray(current)) return
 
-  const optimistic = placeIssueOnBoard(previous, issueId, status, beforeIssueId)
-  if (optimistic === previous) return
+  const optimistic = placeIssueOnBoard(current, issueId, status, beforeIssueId)
+  if (optimistic === current) return
 
   issues.data.value = optimistic
   moving.value = true
@@ -79,8 +80,10 @@ async function persistPlacement(status: string, beforeIssueId: string | null = n
     })
     await Promise.all([issues.refresh(), runs.refresh()])
   } catch (value) {
-    issues.data.value = previous
     moveError.value = value instanceof Error ? value : new Error('Unable to move issue.')
+    // Re-read durable state rather than restoring a stale pre-mutation snapshot.
+    // A realtime refresh may have advanced the board while this request was in flight.
+    await Promise.all([issues.refresh(), runs.refresh()])
   } finally {
     moving.value = false
     draggingIssueId.value = null
@@ -88,15 +91,54 @@ async function persistPlacement(status: string, beforeIssueId: string | null = n
 }
 
 function dropBefore(event: DragEvent, status: string, beforeIssueId: string) {
-  if (!canReorder.value) return
+  const issueId = draggingIssueId.value
+  if (!canReorder.value || !issueId) return
   event.preventDefault()
-  void persistPlacement(status, beforeIssueId)
+  void persistPlacement(issueId, status, beforeIssueId)
 }
 
 function dropAtEnd(event: DragEvent, status: string) {
-  if (!canReorder.value) return
+  const issueId = draggingIssueId.value
+  if (!canReorder.value || !issueId) return
   event.preventDefault()
-  void persistPlacement(status)
+  void persistPlacement(issueId, status)
+}
+
+function keyboardPlacement(issueId: string, direction: BoardMoveDirection) {
+  if (!canReorder.value) return null
+  const sourceColumnIndex = columns.value.findIndex(column => column.issues.some(issue => issue.id === issueId))
+  if (sourceColumnIndex < 0) return null
+  const sourceColumn = columns.value[sourceColumnIndex]
+  if (!sourceColumn) return null
+  const sourceIndex = sourceColumn.issues.findIndex(issue => issue.id === issueId)
+  if (sourceIndex < 0) return null
+
+  if (direction === 'up') {
+    const before = sourceColumn.issues[sourceIndex - 1]
+    return before ? { status: sourceColumn.status, beforeIssueId: before.id } : null
+  }
+  if (direction === 'down') {
+    if (sourceIndex >= sourceColumn.issues.length - 1) return null
+    return { status: sourceColumn.status, beforeIssueId: sourceColumn.issues[sourceIndex + 2]?.id ?? null }
+  }
+
+  const targetColumnIndex = direction === 'left' ? sourceColumnIndex - 1 : sourceColumnIndex + 1
+  const targetColumn = columns.value[targetColumnIndex]
+  if (!targetColumn) return null
+  return {
+    status: targetColumn.status,
+    beforeIssueId: targetColumn.issues[Math.min(sourceIndex, targetColumn.issues.length)]?.id ?? null
+  }
+}
+
+function canKeyboardMove(issueId: string, direction: BoardMoveDirection) {
+  return keyboardPlacement(issueId, direction) !== null
+}
+
+function moveWithKeyboard(issueId: string, direction: BoardMoveDirection) {
+  const placement = keyboardPlacement(issueId, direction)
+  if (!placement) return
+  void persistPlacement(issueId, placement.status, placement.beforeIssueId)
 }
 
 useProjectEvents(() => props.projectId, async event => {
@@ -169,6 +211,36 @@ useProjectEvents(() => props.projectId, async event => {
                 :issue="issue"
                 :run-status="runStatus(issue)"
               />
+              <div v-if="canMutate && !search.trim()" class="mt-1 flex justify-end gap-1" aria-label="Board position controls">
+                <button
+                  type="button"
+                  class="rounded px-1 text-xs text-muted disabled:opacity-30"
+                  :aria-label="`Move ${issue.id} left`"
+                  :disabled="!canKeyboardMove(issue.id, 'left')"
+                  @click="moveWithKeyboard(issue.id, 'left')"
+                >←</button>
+                <button
+                  type="button"
+                  class="rounded px-1 text-xs text-muted disabled:opacity-30"
+                  :aria-label="`Move ${issue.id} up`"
+                  :disabled="!canKeyboardMove(issue.id, 'up')"
+                  @click="moveWithKeyboard(issue.id, 'up')"
+                >↑</button>
+                <button
+                  type="button"
+                  class="rounded px-1 text-xs text-muted disabled:opacity-30"
+                  :aria-label="`Move ${issue.id} down`"
+                  :disabled="!canKeyboardMove(issue.id, 'down')"
+                  @click="moveWithKeyboard(issue.id, 'down')"
+                >↓</button>
+                <button
+                  type="button"
+                  class="rounded px-1 text-xs text-muted disabled:opacity-30"
+                  :aria-label="`Move ${issue.id} right`"
+                  :disabled="!canKeyboardMove(issue.id, 'right')"
+                  @click="moveWithKeyboard(issue.id, 'right')"
+                >→</button>
+              </div>
             </div>
             <p v-if="!column.issues.length" class="px-2 py-4 text-xs text-muted">{{ search ? 'No matching issues' : 'No issues' }}</p>
           </div>
