@@ -15,10 +15,10 @@ jobs:
         with:
           persist-credentials: false
       - name: Package source
-        run: tar --exclude=.git -czf agent-board-source.tar.gz .
+        run: tar --exclude=.git -czf /tmp/agent-board-source.tar.gz .
       - uses: actions/upload-artifact@v4
         with:
           name: agent-board-source
-          path: agent-board-source.tar.gz
+          path: /tmp/agent-board-source.tar.gz
           if-no-files-found: error
           retention-days: 1
