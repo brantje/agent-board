@@ -275,6 +275,7 @@ CREATE TABLE issues (
     description text NOT NULL DEFAULT '',
     status text NOT NULL DEFAULT 'BACKLOG' CHECK (status IN ('BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE')),
     priority integer NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 4),
+    board_position bigint NOT NULL DEFAULT 0 CHECK (board_position >= 0),
     assignee_type text,
     assignee_id uuid,
     CONSTRAINT issues_assignee_pair CHECK ((assignee_type IS NULL AND assignee_id IS NULL) OR (assignee_type IS NOT NULL AND assignee_type IN ('USER','AGENT') AND assignee_id IS NOT NULL)),
@@ -287,7 +288,7 @@ CREATE TABLE issues (
     CHECK ((created_by_type IS NULL) = (created_by_id IS NULL))
 );
 
-CREATE INDEX issues_project_status_idx ON issues (project_id, status, created_at);
+CREATE INDEX issues_project_status_idx ON issues (project_id, status, board_position, created_at, id);
 CREATE INDEX issues_assignee_idx ON issues (assignee_type, assignee_id) WHERE assignee_id IS NOT NULL;
 
 CREATE TABLE issue_relationships (

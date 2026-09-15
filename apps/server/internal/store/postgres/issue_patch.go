@@ -14,6 +14,11 @@ func (s *Store) UpdateIssuePatchMutation(ctx context.Context, patch store.IssueP
 		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if patch.Status != nil {
+		if err := lockIssueBoardOrder(ctx, tx, patch.ProjectID); err != nil {
+			return store.IssueMutationResult{}, err
+		}
+	}
 
 	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, patch.ProjectID, patch.ID)
 	if err != nil {
@@ -41,6 +46,11 @@ func (s *Store) UpdateIssuePatchMutation(ctx context.Context, patch store.IssueP
 			return store.IssueMutationResult{}, err
 		}
 		return store.IssueMutationResult{Issue: current}, nil
+	}
+	if updated.Status != previous.Status {
+		if err := moveIssueToStatusTopTx(ctx, tx, patch.ProjectID, patch.ID, previous.Status, updated.Status); err != nil {
+			return store.IssueMutationResult{}, err
+		}
 	}
 
 	result, err := s.applyIssueMutationTx(ctx, tx, issueMutationTxInput{

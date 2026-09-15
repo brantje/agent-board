@@ -134,6 +134,7 @@ func newRouterWithProjectAccess(service *app.Service, runEvidence *app.RunEviden
 			a.registerRunnerRoutes(r)
 		}
 		a.registerIssueRunRoutes(r)
+		a.registerBoardPlacementRoutes(r)
 		a.registerRunEvidenceRoutes(r)
 		if a.questions != nil {
 			a.registerQuestionRoutes(r)
