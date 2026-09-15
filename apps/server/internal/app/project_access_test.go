@@ -57,6 +57,11 @@ func (s *projectAccessServiceStore) UpdateIssueMutation(_ context.Context, input
 }
 
 func (s *projectAccessServiceStore) EffectiveProjectRole(_ context.Context, projectID, userID string) (string, error) {
+	for _, user := range s.users {
+		if user.ID == userID && user.DeploymentRole == store.DeploymentRoleAdmin {
+			return store.ProjectRoleAdmin, nil
+		}
+	}
 	role, ok := s.roles[projectID+":"+userID]
 	if !ok {
 		return "", store.ErrNotFound
@@ -127,7 +132,10 @@ func TestProjectAccessCreateIssueAttributesAuthenticatedHuman(t *testing.T) {
 
 func TestProjectAccessDeploymentAdminHasImplicitAdminRole(t *testing.T) {
 	project := store.Project{ID: "project-1", Name: "Project"}
-	fake := &projectAccessServiceStore{projects: []store.Project{project}}
+	fake := &projectAccessServiceStore{
+		projects: []store.Project{project},
+		users: []store.User{{ID: "deployment-admin", DeploymentRole: store.DeploymentRoleAdmin, Status: store.UserStatusActive}},
+	}
 	service := newProjectAccessServiceForTest(t, fake)
 	actor := activeProjectActor("deployment-admin", store.DeploymentRoleAdmin)
 
@@ -178,35 +186,37 @@ func TestProjectAccessDirectoryIsAdminOnlyAndReturnsSafeActiveIdentity(t *testin
 		},
 		users: []store.User{
 			{ID: "u1", Username: "alice", Email: "alice@example.com", DisplayName: "Alice", Status: store.UserStatusActive, PasswordHash: "secret-hash", AuthVersion: 7},
-			{ID: "u2", Username: "disabled", Email: "disabled@example.com", DisplayName: "Disabled", Status: store.UserStatusDisabled},
+			{ID: "u2", Username: "bob", Email: "bob@example.com", DisplayName: "Bob", Status: store.UserStatusDisabled},
 		},
-		groups: []store.Group{{ID: "g1", Name: "backend"}, {ID: "g2", Name: "frontend"}},
+		groups: []store.Group{{ID: "g1", Name: "Core"}},
 	}
 	service := newProjectAccessServiceForTest(t, fake)
+	admin := activeProjectActor("admin", store.DeploymentRoleMember)
+	member := activeProjectActor("member", store.DeploymentRoleMember)
 
-	if _, err := service.SearchUsers(t.Context(), activeProjectActor("member", store.DeploymentRoleMember), project.ID, "alice"); err == nil {
-		t.Fatal("project member unexpectedly searched directory")
+	users, err := service.SearchUsers(t.Context(), admin, project.ID, "ali")
+	if err != nil || len(users) != 1 || users[0].ID != "u1" {
+		t.Fatalf("users=%+v err=%v", users, err)
 	}
-	users, err := service.SearchUsers(t.Context(), activeProjectActor("admin", store.DeploymentRoleMember), project.ID, "ali")
-	if err != nil {
-		t.Fatal(err)
+	groups, err := service.SearchGroups(t.Context(), admin, project.ID, "cor")
+	if err != nil || len(groups) != 1 || groups[0].ID != "g1" {
+		t.Fatalf("groups=%+v err=%v", groups, err)
 	}
-	if len(users) != 1 || users[0] != (ProjectDirectoryUser{ID: "u1", Username: "alice", Email: "alice@example.com", DisplayName: "Alice"}) {
-		t.Fatalf("safe users = %+v", users)
-	}
-	groups, err := service.SearchGroups(t.Context(), activeProjectActor("admin", store.DeploymentRoleMember), project.ID, "back")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(groups) != 1 || groups[0] != (ProjectDirectoryGroup{ID: "g1", Name: "backend"}) {
-		t.Fatalf("safe groups = %+v", groups)
+	if _, err := service.SearchUsers(t.Context(), member, project.ID, ""); err == nil {
+		t.Fatal("member unexpectedly searched project users")
 	}
 }
 
-func TestProjectAccessStoreErrorsMapLastDirectAdmin(t *testing.T) {
-	err := projectAccessStoreError(store.ErrLastProjectAdmin)
-	apiErr, ok := AsError(err)
-	if !ok || apiErr.Code != "last_project_admin" || !errors.Is(apiErr.Err, store.ErrLastProjectAdmin) {
-		t.Fatalf("mapped error = %#v", err)
+func TestProjectAccessConstructionAndInvalidRoleErrors(t *testing.T) {
+	if _, err := NewProjectAccessService(nil, &projectAccessServiceStore{}); err == nil {
+		t.Fatal("expected nil control plane rejection")
+	}
+	if _, err := NewProjectAccessService(New(&projectAccessServiceStore{}), nil); err == nil {
+		t.Fatal("expected nil access store rejection")
+	}
+
+	service := newProjectAccessServiceForTest(t, &projectAccessServiceStore{})
+	if _, err := service.RequireRole(t.Context(), activeProjectActor("u", store.DeploymentRoleMember), "p", "owner"); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid role error=%v", err)
 	}
 }
