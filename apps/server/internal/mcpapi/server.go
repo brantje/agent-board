@@ -49,6 +49,6 @@ func readOnlyTool(name, description string) *mcp.Tool {
 func mutationTool(name, description string, destructive, idempotent bool) *mcp.Tool {
 	return &mcp.Tool{
 		Name: name, Description: description,
-		Annotations: &mcp.ToolAnnotations{DestructiveHint: destructive, IdempotentHint: idempotent},
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: &destructive, IdempotentHint: idempotent},
 	}
 }
