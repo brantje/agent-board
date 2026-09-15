@@ -83,11 +83,11 @@ func (s *Server) answerQuestion(ctx context.Context, _ *mcp.CallToolRequest, inp
 	if err != nil {
 		return nil, AnswerQuestionDTO{}, toolError(ctx, err)
 	}
-	value, err := s.services.ProjectAccess.AnswerQuestion(ctx, actor, s.services.Questions, input.ProjectID, input.QuestionID, store.QuestionAnswer{Kind: input.Kind, Text: input.Text, OptionIDs: input.OptionIDs})
+	keys, err := s.issueKeys(ctx, actor, input.ProjectID)
 	if err != nil {
 		return nil, AnswerQuestionDTO{}, toolError(ctx, err)
 	}
-	keys, err := s.issueKeys(ctx, actor, input.ProjectID)
+	value, err := s.services.ProjectAccess.AnswerQuestion(ctx, actor, s.services.Questions, input.ProjectID, input.QuestionID, store.QuestionAnswer{Kind: input.Kind, Text: input.Text, OptionIDs: input.OptionIDs})
 	if err != nil {
 		return nil, AnswerQuestionDTO{}, toolError(ctx, err)
 	}
