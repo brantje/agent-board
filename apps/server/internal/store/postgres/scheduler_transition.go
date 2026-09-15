@@ -62,17 +62,6 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 		}
 	}
 
-	events := make([]store.Event, 0, 1)
-	if input.RunStatus == "FAILED" {
-		event, err := rollbackFailedRunIssueStatus(ctx, tx, run)
-		if err != nil {
-			return store.SchedulerMutationResult{}, err
-		}
-		if event.ID != "" {
-			events = append(events, event)
-		}
-	}
-
 	if release {
 		if _, err := tx.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, input.ProjectID, input.JobID); err != nil {
 			return store.SchedulerMutationResult{}, err
@@ -92,7 +81,7 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 	if err := tx.Commit(ctx); err != nil {
 		return store.SchedulerMutationResult{}, err
 	}
-	return store.SchedulerMutationResult{Run: run, Events: events}, nil
+	return store.SchedulerMutationResult{Run: run}, nil
 }
 
 func createPendingReview(ctx context.Context, tx pgx.Tx, run store.Run) error {
