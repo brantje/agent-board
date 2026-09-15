@@ -23,7 +23,8 @@ type CreateSessionRequest struct {
 }
 
 type Session struct {
-	ID string `json:"id"`
+	ID        string `json:"id"`
+	Directory string `json:"directory"`
 }
 
 type QuestionOption struct {
