@@ -199,13 +199,19 @@ func controlPlaneHandler(ctx context.Context, databaseURL string) (http.Handler,
 			return nil, nil, fmt.Errorf("configure secret write authorization: %w", err)
 		}
 	}
+	application, err := newApplicationHandler(httpapi.NewRouterWithApplication(services, secretWriteAuthorizer), services)
+	if err != nil {
+		_ = services.Close()
+		database.Close()
+		return nil, nil, fmt.Errorf("configure MCP transport: %w", err)
+	}
 	closeApplication := func() {
 		if err := services.Close(); err != nil {
 			slog.Error("close application services", "error", err)
 		}
 		database.Close()
 	}
-	return &applicationHandler{Handler: httpapi.NewRouterWithApplication(services, secretWriteAuthorizer), services: services}, closeApplication, nil
+	return application, closeApplication, nil
 }
 
 func reconcileRuntimeInstances(ctx context.Context, handler http.Handler) error {

@@ -1,23 +1,29 @@
 package main
 
 import (
-	"log/slog"
 	"net/http"
 
+	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/mcpapi"
 )
 
-func (a *applicationHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/mcp" {
-		a.Handler.ServeHTTP(w, r)
-		return
-	}
-
-	handler, err := mcpapi.NewHandler(a.services)
+func newApplicationHandler(base http.Handler, services *app.Services) (*applicationHandler, error) {
+	mcpHandler, err := mcpapi.NewHandler(services)
 	if err != nil {
-		slog.Error("initialize MCP transport", "error", err)
-		http.Error(w, "MCP unavailable", http.StatusServiceUnavailable)
-		return
+		return nil, err
 	}
-	handler.ServeHTTP(w, r)
+	return &applicationHandler{
+		Handler:  mountMCPHandler(base, mcpHandler),
+		services: services,
+	}, nil
+}
+
+func mountMCPHandler(base, mcpHandler http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" {
+			mcpHandler.ServeHTTP(w, r)
+			return
+		}
+		base.ServeHTTP(w, r)
+	})
 }
