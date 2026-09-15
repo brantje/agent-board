@@ -41,6 +41,10 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
+	if err := runBoardOrderMigration(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
 
 	lockPool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
