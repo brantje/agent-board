@@ -17,6 +17,7 @@ type Service struct {
 	assignmentStore     store.IssueAssignmentStore
 	projectRepositories repository.ProjectRepositoryProvisioner
 	events              issueEventRecorder
+	schedulerWaker      issueBoardSchedulerWaker
 	Runners             *RunnerService
 	providerHealth      *ProviderHealthWorker
 }
