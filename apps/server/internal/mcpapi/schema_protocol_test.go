@@ -43,7 +43,9 @@ func TestMCPToolsListAdvertisesLockedInputSchemas(t *testing.T) {
 		tools[tool.Name] = schema
 	}
 
-	assertSchemaEnum(t, tools["set_issue_status"], []string{"status"}, []string{"BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "REVIEW", "DONE"})
+	statuses := []string{"BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "REVIEW", "DONE"}
+	assertSchemaEnum(t, tools["set_issue_status"], []string{"status"}, statuses)
+	assertSchemaEnum(t, tools["place_issue_on_board"], []string{"status"}, statuses)
 	assertSchemaEnum(t, tools["set_issue_assignee"], []string{"assignedTo", "type"}, []string{"USER", "AGENT"})
 	assertSchemaEnum(t, tools["create_issue_relationship"], []string{"type"}, []string{"blocks", "depends_on", "related_to", "duplicates"})
 	assertSchemaItemsEnum(t, tools["list_questions"], "statuses", []string{"OPEN", "ANSWERED", "CANCELLED"})
@@ -77,6 +79,16 @@ func TestMCPToolsListAdvertisesLockedInputSchemas(t *testing.T) {
 		if schemaRequired(update, optional) {
 			t.Fatalf("update_issue %s unexpectedly required", optional)
 		}
+	}
+
+	placement := tools["place_issue_on_board"]
+	assertRequired(t, placement, []string{"projectId", "issueId", "status"})
+	beforeIssue := schemaProperty(t, placement, "beforeIssueId")
+	if !schemaAllowsNull(beforeIssue) {
+		t.Fatalf("place_issue_on_board beforeIssueId must accept null: %#v", beforeIssue)
+	}
+	if schemaRequired(placement, "beforeIssueId") {
+		t.Fatal("place_issue_on_board beforeIssueId must remain optional")
 	}
 
 	assignee := schemaProperty(t, tools["set_issue_assignee"], "assignedTo")
