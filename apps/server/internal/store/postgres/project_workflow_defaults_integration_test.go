@@ -8,7 +8,9 @@ import (
 func TestNewProjectStrictOrderDefaultAndExplicitOverride(t *testing.T) {
 	s := New(testPool(t))
 
-	defaulted, err := s.CreateProject(t.Context(), testProjectInput("strict-order-default", "/repo/strict-order-default", "SOD"))
+	defaultInput := testProjectInput("strict-order-default", "/repo/strict-order-default", "SOD")
+	defaultInput.WorkflowSettings = nil
+	defaulted, err := s.CreateProject(t.Context(), defaultInput)
 	if err != nil {
 		t.Fatal(err)
 	}
