@@ -48,6 +48,34 @@ describe('new issue placement project setting', () => {
     expect(JSON.parse(String(patch?.body)).workflowSettings).toEqual({ custom: true, newIssuePlacement: 'top' })
   })
 
+  it('persists changing the placement twice without remounting the editor', async () => {
+    let savedProject = { ...project, workflowSettings: {} as Record<string, unknown> }
+    const patches: Record<string, unknown>[] = []
+    const fetch = vi.fn(async (_path: string, options: RequestInit = {}) => {
+      if (options.method === 'PATCH') {
+        const body = JSON.parse(String(options.body)) as Record<string, unknown>
+        patches.push(body)
+        if (body.workflowSettings) savedProject = { ...savedProject, workflowSettings: body.workflowSettings as Record<string, unknown> }
+        return new Response(JSON.stringify(savedProject))
+      }
+      return new Response(JSON.stringify({ defaultRepositoryPath: '', repositoryRoots: [] }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectEditor, { props: { project: savedProject }, global })
+    const placement = wrapper.get('[data-field=newIssuePlacement] select')
+
+    await placement.setValue('top')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    await placement.setValue('bottom')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(patches).toHaveLength(2)
+    expect(patches[0]?.workflowSettings).toEqual({ newIssuePlacement: 'top' })
+    expect(patches[1]?.workflowSettings).toEqual({ newIssuePlacement: 'bottom' })
+  })
+
   it('shows the effective default to read-only project roles', async () => {
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       if (path.endsWith('/access/effective-role')) return new Response(JSON.stringify({ role: 'viewer' }))
