@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 
@@ -69,12 +68,6 @@ func (s *ProjectAccessService) CreateProject(ctx context.Context, actor Authenti
 func (s *ProjectAccessService) EffectiveRole(ctx context.Context, actor AuthenticatedUser, projectID string) (string, error) {
 	if err := requireNormalAuthenticatedUser(actor); err != nil {
 		return "", err
-	}
-	if actor.DeploymentRole == store.DeploymentRoleAdmin {
-		if _, err := s.controlPlane.GetProject(ctx, projectID); err != nil {
-			return "", err
-		}
-		return store.ProjectRoleAdmin, nil
 	}
 	role, err := s.store.EffectiveProjectRole(ctx, projectID, actor.ID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -173,25 +166,14 @@ func (s *ProjectAccessService) CreateIssue(ctx context.Context, actor Authentica
 }
 
 func (s *ProjectAccessService) UpdateIssue(ctx context.Context, actor AuthenticatedUser, input store.Issue) (store.Issue, error) {
-	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
-		return store.Issue{}, err
-	}
-	current, err := s.controlPlane.GetIssue(ctx, input.ProjectID, input.ID)
-	if err != nil {
-		return store.Issue{}, err
-	}
-	if current.Status == input.Status && sameIssueEditableMetadata(current, input) {
-		return current, nil
-	}
-	encodedActor, err := json.Marshal(map[string]string{"type": store.ActorTypeHuman, "id": actor.ID})
-	if err != nil {
-		return store.Issue{}, err
-	}
-	return s.controlPlane.UpdateIssueWithActor(ctx, input, encodedActor)
-}
-
-func sameIssueEditableMetadata(left, right store.Issue) bool {
-	return left.Title == right.Title && left.Description == right.Description && left.Priority == right.Priority
+	return s.PatchIssue(ctx, actor, store.IssuePatch{
+		ProjectID:   input.ProjectID,
+		ID:          input.ID,
+		Title:       &input.Title,
+		Description: &input.Description,
+		Status:      &input.Status,
+		Priority:    &input.Priority,
+	})
 }
 
 func (s *ProjectAccessService) ListRuns(ctx context.Context, actor AuthenticatedUser, projectID string) ([]store.Run, error) {

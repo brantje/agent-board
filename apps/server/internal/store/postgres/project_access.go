@@ -106,28 +106,22 @@ func (s *Store) EffectiveProjectRole(ctx context.Context, projectID, userID stri
 }
 
 func effectiveProjectRole(ctx context.Context, q assigneeQuerier, projectID, userID string) (string, error) {
-	var role string
+	var role *string
 	if err := q.QueryRow(ctx, `
-		SELECT role
-		FROM (
-			SELECT pua.role
-			FROM project_user_access pua
-			WHERE pua.project_id=$1 AND pua.user_id=$2
-			UNION ALL
-			SELECT pga.role
-			FROM project_group_access pga
-			JOIN group_members gm ON gm.group_id=pga.group_id
-			WHERE pga.project_id=$1 AND gm.user_id=$2
-		) grants
-		ORDER BY CASE role WHEN 'admin' THEN 3 WHEN 'member' THEN 2 WHEN 'viewer' THEN 1 ELSE 0 END DESC
-		LIMIT 1
+		SELECT `+effectiveProjectRoleExpression+`
+		FROM users AS u
+		JOIN projects AS p ON p.id=$1
+		WHERE u.id=$2
 	`, projectID, userID).Scan(&role); err != nil {
 		return "", notFound(err)
 	}
-	if !store.ValidProjectRole(role) {
+	if role == nil {
+		return "", store.ErrNotFound
+	}
+	if !store.ValidProjectRole(*role) {
 		return "", store.ErrInvalidArgument
 	}
-	return role, nil
+	return *role, nil
 }
 
 func (s *Store) ListProjectUserAccess(ctx context.Context, projectID string) ([]store.ProjectUserAccessView, error) {

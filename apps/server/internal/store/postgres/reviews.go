@@ -365,21 +365,14 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
-	nextRun, err := scanRun(tx.QueryRow(ctx, `
-		INSERT INTO runs (project_id, issue_id, workspace_id, agent_id, attempt, status)
-		VALUES ($1, $2, $3, $4, $5, 'QUEUED')
-		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
-		          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-	`, run.ProjectID, run.IssueID, run.WorkspaceID, run.AgentID, nextAttempt))
-	if err != nil {
-		return store.RequestReviewChangesResult{}, err
-	}
-	job, err := scanSchedulerJob(tx.QueryRow(ctx, `
-		INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key, available_at)
-		VALUES ($1, $2, 'START', 'QUEUED', $3, now())
-		RETURNING id::text, project_id::text, run_id::text, kind, state, wait_reason,
-		          idempotency_key, available_at, created_at, updated_at
-	`, review.ProjectID, nextRun.ID, "review:"+review.ID+":changes"))
+	nextRun, job, createdEvent, err := createQueuedRunTx(ctx, tx, queuedRunInput{
+		ProjectID:      run.ProjectID,
+		IssueID:        run.IssueID,
+		WorkspaceID:    run.WorkspaceID,
+		AgentID:        *run.AgentID,
+		Attempt:        nextAttempt,
+		IdempotencyKey: "review:" + review.ID + ":changes",
+	})
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
@@ -387,6 +380,7 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
+	events = append(events, createdEvent)
 	if err := tx.Commit(ctx); err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}

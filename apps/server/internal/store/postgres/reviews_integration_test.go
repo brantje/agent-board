@@ -85,6 +85,9 @@ func TestRequestReviewChangesCreatesNextAttemptWithoutChangingIssueStatus(t *tes
 	if result.Run.Attempt != f.run.Attempt+1 || result.Run.WorkspaceID != f.run.WorkspaceID || result.Run.Status != "QUEUED" {
 		t.Fatalf("follow-up Run=%+v previous=%+v", result.Run, f.run)
 	}
+	if result.Run.AgentID == nil || *result.Run.AgentID != f.agent.ID {
+		t.Fatalf("follow-up Agent=%+v want=%s", result.Run.AgentID, f.agent.ID)
+	}
 	if result.Job.Kind != "START" || result.Job.RunID != result.Run.ID || result.Issue.Status != f.issue.Status {
 		t.Fatalf("follow-up job/issue=%+v %+v initialIssue=%+v", result.Job, result.Issue, f.issue)
 	}
@@ -96,8 +99,12 @@ func TestRequestReviewChangesCreatesNextAttemptWithoutChangingIssueStatus(t *tes
 	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE issue_id=$1 AND agent_id=$2 AND status=ANY($3::text[])`, f.issue.ID, f.agent.ID, activeRunStatuses).Scan(&active); err != nil || active != 1 {
 		t.Fatalf("active pair Runs=%d err=%v", active, err)
 	}
-	if len(result.Events) != 3 || result.Events[0].Type != "review.changes_requested" || result.Events[1].Type != "decision.recorded" || result.Events[2].Type != "run.completed" {
+	if len(result.Events) != 4 || result.Events[0].Type != "review.changes_requested" || result.Events[1].Type != "decision.recorded" || result.Events[2].Type != "run.completed" || result.Events[3].Type != "run.created" {
 		t.Fatalf("RequestReviewChanges events=%+v", result.Events)
+	}
+	created := result.Events[3]
+	if created.ProjectID != f.project.ID || created.IssueID == nil || *created.IssueID != f.issue.ID || created.RunID == nil || *created.RunID != result.Run.ID || created.AgentID == nil || *created.AgentID != f.agent.ID || created.WorkspaceID == nil || *created.WorkspaceID != f.workspace.ID {
+		t.Fatalf("run.created provenance=%+v", created)
 	}
 
 	retry, err := s.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{
@@ -108,6 +115,47 @@ func TestRequestReviewChangesCreatesNextAttemptWithoutChangingIssueStatus(t *tes
 	}
 	if len(retry.Events) != 0 {
 		t.Fatalf("idempotent RequestReviewChanges published extra events=%+v", retry.Events)
+	}
+}
+
+func TestRequestReviewChangesRollsBackWhenRunCreatedEventFails(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f, review := readyReviewFixture(t, s, "changes-rollback")
+	if _, err := s.pool.Exec(ctx, `
+		CREATE FUNCTION reject_review_continuation_created_event() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.type = 'run.created' THEN RAISE EXCEPTION 'reject continuation run.created'; END IF;
+			RETURN NEW;
+		END $$;
+		CREATE TRIGGER reject_review_continuation_created_event BEFORE INSERT ON events
+		FOR EACH ROW EXECUTE FUNCTION reject_review_continuation_created_event()
+	`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(), `DROP TRIGGER IF EXISTS reject_review_continuation_created_event ON events; DROP FUNCTION IF EXISTS reject_review_continuation_created_event()`)
+	})
+	if _, err := s.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{ProjectID: f.project.ID, ReviewID: review.ID, Feedback: "must rollback"}); err == nil {
+		t.Fatal("RequestReviewChanges unexpectedly committed without run.created")
+	}
+	persistedReview, err := s.GetReview(ctx, f.project.ID, review.ID)
+	if err != nil || persistedReview.Status != "PENDING" {
+		t.Fatalf("review after rollback=%+v err=%v", persistedReview, err)
+	}
+	persistedRun, err := s.GetRun(ctx, f.project.ID, f.run.ID)
+	if err != nil || persistedRun.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("predecessor after rollback=%+v err=%v", persistedRun, err)
+	}
+	var continuations, decisions int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE issue_id=$1 AND id<>$2`, f.issue.ID, f.run.ID).Scan(&continuations); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM decisions WHERE project_id=$1 AND run_id=$2 AND outcome='CHANGES_REQUESTED'`, f.project.ID, f.run.ID).Scan(&decisions); err != nil {
+		t.Fatal(err)
+	}
+	if continuations != 0 || decisions != 0 {
+		t.Fatalf("rollback leaked continuations=%d decisions=%d", continuations, decisions)
 	}
 }
 

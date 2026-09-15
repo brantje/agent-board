@@ -14,19 +14,7 @@ type assigneeQuerier interface {
 
 const eligibleAgentAssigneePredicate = `a.state='ENABLED' AND (a.project_id IS NULL OR a.project_id=$1)`
 
-const eligibleUserAssigneePredicate = `u.status='active' AND (
-	u.deployment_role='admin'
-	OR EXISTS (
-		SELECT 1 FROM project_user_access AS pua
-		WHERE pua.project_id=$1 AND pua.user_id=u.id AND pua.role IN ('member','admin')
-	)
-	OR EXISTS (
-		SELECT 1
-		FROM group_members AS gm
-		JOIN project_group_access AS pga ON pga.group_id=gm.group_id
-		WHERE gm.user_id=u.id AND pga.project_id=$1 AND pga.role IN ('member','admin')
-	)
-)`
+const eligibleUserAssigneePredicate = `u.status='active' AND COALESCE((` + effectiveProjectRoleExpression + `),'') IN ('member','admin')`
 
 // Resolve both directory entries and mutation targets through the same eligibility
 // check. Execution readiness is deliberately outside ownership validation.
