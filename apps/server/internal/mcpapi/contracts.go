@@ -193,8 +193,6 @@ type ExecutionSessionDTO struct {
 	RuntimeInstanceID *string    `json:"runtimeInstanceId,omitempty"`
 	RunnerID          *string    `json:"runnerId,omitempty"`
 	Status            string     `json:"status"`
-	CWD               string     `json:"cwd"`
-	Command           any        `json:"command"`
 	ExitCode          *int       `json:"exitCode,omitempty"`
 	CreatedAt         time.Time  `json:"createdAt"`
 	StartedAt         *time.Time `json:"startedAt,omitempty"`
@@ -241,16 +239,16 @@ type ArtifactDTO struct {
 }
 
 type RunEvidenceDTO struct {
-	Run              RunDTO               `json:"run"`
-	Provenance       any                  `json:"provenance,omitempty"`
-	RuntimeInstances []RuntimeInstanceDTO `json:"runtimeInstances"`
+	Run              RunDTO                `json:"run"`
+	Provenance       any                   `json:"provenance,omitempty"`
+	RuntimeInstances []RuntimeInstanceDTO  `json:"runtimeInstances"`
 	Sessions         []ExecutionSessionDTO `json:"executionSessions"`
-	Events           []EventDTO           `json:"events"`
-	Tests            []EventDTO           `json:"tests"`
-	FileChanges      []EventDTO           `json:"fileChanges"`
-	Usage            any                  `json:"usage,omitempty"`
-	RawOutput        []RawOutputChunkDTO   `json:"rawOutput"`
-	Artifacts        []ArtifactDTO         `json:"artifacts"`
+	Events           []EventDTO            `json:"events"`
+	Tests            []EventDTO            `json:"tests"`
+	FileChanges      []EventDTO            `json:"fileChanges"`
+	Usage            any                   `json:"usage,omitempty"`
+	RawOutput        []RawOutputChunkDTO    `json:"rawOutput"`
+	Artifacts        []ArtifactDTO          `json:"artifacts"`
 }
 
 type ReadRunOutputInput struct {
@@ -301,24 +299,24 @@ type AnswerQuestionInput struct {
 }
 
 type DecisionDTO struct {
-	ID         string    `json:"id"`
-	ProjectID  string    `json:"projectId"`
-	IssueID    *string   `json:"issueId,omitempty"`
-	RunID      *string   `json:"runId,omitempty"`
-	QuestionID *string   `json:"questionId,omitempty"`
-	Kind       string    `json:"kind"`
-	Outcome    string    `json:"outcome"`
-	ActorType  string    `json:"actorType"`
-	ActorID    *string   `json:"actorId,omitempty"`
-	SafeDetails any      `json:"safeDetails,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
+	ID          string    `json:"id"`
+	ProjectID   string    `json:"projectId"`
+	IssueID     *string   `json:"issueId,omitempty"`
+	RunID       *string   `json:"runId,omitempty"`
+	QuestionID  *string   `json:"questionId,omitempty"`
+	Kind        string    `json:"kind"`
+	Outcome     string    `json:"outcome"`
+	ActorType   string    `json:"actorType"`
+	ActorID     *string   `json:"actorId,omitempty"`
+	SafeDetails any       `json:"safeDetails,omitempty"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 type AnswerQuestionDTO struct {
-	Question          QuestionDTO `json:"question"`
-	Decision          DecisionDTO `json:"decision"`
-	Run               RunDTO      `json:"run"`
-	ContinuationQueued bool       `json:"continuationQueued"`
+	Question           QuestionDTO `json:"question"`
+	Decision           DecisionDTO `json:"decision"`
+	Run                RunDTO      `json:"run"`
+	ContinuationQueued bool        `json:"continuationQueued"`
 }
 
 type ListReviewsInput struct {
