@@ -75,6 +75,7 @@ type Coordinator struct {
 	processor  Processor
 	reconciler Reconciler
 	config     Config
+	wake       chan struct{}
 
 	activeMu  sync.Mutex
 	activeSeq uint64
@@ -102,8 +103,21 @@ func New(s store.SchedulerStore, processor Processor, reconciler Reconciler, con
 	}
 	return &Coordinator{
 		store: s, processor: processor, reconciler: reconciler, config: config,
+		wake: make(chan struct{}, 1),
 		active: make(map[string]activeRun),
 	}, nil
+}
+
+// Wake interrupts the coordinator's idle poll wait. Signals are coalesced so
+// callers can request prompt re-evaluation without creating another work queue.
+func (c *Coordinator) Wake() {
+	if c == nil {
+		return
+	}
+	select {
+	case c.wake <- struct{}{}:
+	default:
+	}
 }
 
 func activeRunKey(projectID, runID string) string {
@@ -167,7 +181,7 @@ func (c *Coordinator) Run(ctx context.Context) error {
 		active, handled, err := c.reconcileOne(ctx)
 		if err != nil {
 			c.config.ReportError(err)
-			if !waitFor(ctx, c.config.PollInterval) {
+			if !c.waitForPoll(ctx) {
 				return nil
 			}
 			continue
@@ -189,19 +203,32 @@ func (c *Coordinator) Run(ctx context.Context) error {
 		if err != nil {
 			<-slots
 			c.config.ReportError(err)
-			if !waitFor(ctx, c.config.PollInterval) {
+			if !c.waitForPoll(ctx) {
 				return nil
 			}
 			continue
 		}
 		if admission == nil {
 			<-slots
-			if !waitFor(ctx, c.config.PollInterval) {
+			if !c.waitForPoll(ctx) {
 				return nil
 			}
 			continue
 		}
 		c.launchWorker(ctx, &workers, slots, admission)
+	}
+}
+
+func (c *Coordinator) waitForPoll(ctx context.Context) bool {
+	timer := time.NewTimer(c.config.PollInterval)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-c.wake:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }
 
