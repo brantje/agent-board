@@ -44,7 +44,7 @@ func TestProjectAccessListProjectMembersUsesViewerAuthorization(t *testing.T) {
 	if len(members) != 1 || members[0].UserID != "member" || members[0].Role != store.ProjectRoleMember {
 		t.Fatalf("members = %+v", members)
 	}
-	if _, err := service.ListProjectMembers(t.Context(), activeProjectActor("outsider", store.DeploymentRoleMember), project.ID); errorCode(err) != "project_not_found" {
+	if _, err := service.ListProjectMembers(t.Context(), activeProjectActor("outsider", store.DeploymentRoleMember), project.ID); appErrorCode(err) != "project_not_found" {
 		t.Fatalf("outsider error = %v", err)
 	}
 }

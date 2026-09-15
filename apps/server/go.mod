@@ -12,6 +12,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/moby/moby/api v1.55.0
 	github.com/moby/moby/client v0.5.1
+	github.com/modelcontextprotocol/go-sdk v1.2.0
 )
 
 replace github.com/brantje/agent-board/packages/redact => ../../packages/redact
