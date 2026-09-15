@@ -22,7 +22,7 @@ func assigneeDTO(value store.Assignee) AssigneeDTO {
 }
 
 func issueDTO(value store.Issue) IssueDTO {
-	out := IssueDTO{ID: value.Key, ProjectID: value.ProjectID, Title: value.Title, Description: value.Description, Status: value.Status, Priority: value.Priority, CurrentBranch: value.CurrentBranch, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
+	out := IssueDTO{ID: value.Key, ProjectID: value.ProjectID, Title: value.Title, Description: value.Description, Status: value.Status, Priority: value.Priority, BoardPosition: value.BoardPosition, CurrentBranch: value.CurrentBranch, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
 	if value.AssigneeType != nil && value.AssigneeID != nil {
 		out.AssignedTo = &AssigneeDTO{Type: *value.AssigneeType, ID: *value.AssigneeID}
 		if value.AssigneeName != nil {
