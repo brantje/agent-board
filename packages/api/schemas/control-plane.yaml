@@ -1,6 +1,11 @@
 JSONMap:
   type: object
   additionalProperties: true
+ProjectWorkflowSettings:
+  type: object
+  additionalProperties: true
+  properties:
+    strictOrder: {type: boolean}
 IssueKey:
   type: string
   description: Public Issue identifier in the form PREFIX-NUMBER, for example AB-12.
@@ -44,7 +49,7 @@ Project:
     defaultBranch:
       type: string
       description: Local Project default branch when sourceType is local; empty for git sources.
-    workflowSettings: {$ref: '#/JSONMap'}
+    workflowSettings: {$ref: '#/ProjectWorkflowSettings'}
     allowInternalRunner: {type: boolean}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
@@ -68,7 +73,7 @@ ProjectCreate:
     sourceRef: {type: [string, 'null']}
     repositoryPath: {type: string}
     defaultBranch: {type: string, default: main}
-    workflowSettings: {$ref: '#/JSONMap'}
+    workflowSettings: {$ref: '#/ProjectWorkflowSettings'}
 ProjectUpdate:
   type: object
   additionalProperties: false
@@ -79,7 +84,7 @@ ProjectUpdate:
     sourceRef: {type: [string, 'null']}
     repositoryPath: {type: string}
     defaultBranch: {type: string}
-    workflowSettings: {$ref: '#/JSONMap'}
+    workflowSettings: {$ref: '#/ProjectWorkflowSettings'}
     allowInternalRunner: {type: boolean}
 RepositorySettings:
   type: object
@@ -168,7 +173,7 @@ ModelProfileInput:
   additionalProperties: false
   required: [providerId, name, model]
   properties:
-    providerId: {type: string}
+    providerId: {type: string, format: uuid}
     name: {type: string}
     model: {type: string}
     temperature: {type: [number, 'null'], minimum: 0, maximum: 2}
