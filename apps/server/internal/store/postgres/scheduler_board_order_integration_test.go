@@ -64,7 +64,7 @@ func TestSchedulerAdmissionPreservesExistingOrderWhenStrictOrderDisabled(t *test
 	}
 }
 
-func TestSchedulerAdmissionSkipsDependencyBlockedBoardHead(t *testing.T) {
+func TestSchedulerAdmissionWaitsOnDependencyBlockedBoardHead(t *testing.T) {
 	s := New(testPool(t))
 	ctx := context.Background()
 	f := seedRunFixture(t, s, "board-order-dependency")
@@ -93,10 +93,39 @@ func TestSchedulerAdmissionSkipsDependencyBlockedBoardHead(t *testing.T) {
 	}
 
 	admission, err := s.AdmitNextJob(ctx, "dependency-worker", time.Minute, time.Second)
-	if err != nil || admission == nil {
-		t.Fatalf("admission=%+v err=%v", admission, err)
+	if err != nil {
+		t.Fatalf("blocked admission err=%v", err)
 	}
-	if admission.Job.ID != nextJob.ID || admission.Job.ID == blockedJob.ID {
-		t.Fatalf("admitted job=%s want unblocked job=%s", admission.Job.ID, nextJob.ID)
+	if admission != nil {
+		t.Fatalf("blocked admission=%+v want wait", admission)
+	}
+	var waitReason *string
+	if err := s.pool.QueryRow(ctx, `SELECT wait_reason FROM scheduler_jobs WHERE id=$1`, blockedJob.ID).Scan(&waitReason); err != nil {
+		t.Fatal(err)
+	}
+	if waitReason == nil || *waitReason != schedulerDependencyWaitReason {
+		t.Fatalf("blocked wait reason=%v want %q", waitReason, schedulerDependencyWaitReason)
+	}
+
+	admission, err = s.AdmitNextJob(ctx, "dependency-worker-2", time.Minute, time.Second)
+	if err != nil {
+		t.Fatalf("second admission err=%v", err)
+	}
+	if admission != nil {
+		t.Fatalf("second admission=%+v; strict head backoff must not expose job %s", admission, nextJob.ID)
+	}
+
+	if _, err := s.pool.Exec(ctx, `UPDATE issues SET status='DONE' WHERE id=$1`, dependency.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE scheduler_jobs SET available_at=now() WHERE id=$1`, blockedJob.ID); err != nil {
+		t.Fatal(err)
+	}
+	admission, err = s.AdmitNextJob(ctx, "dependency-worker-3", time.Minute, time.Second)
+	if err != nil || admission == nil {
+		t.Fatalf("unblocked admission=%+v err=%v", admission, err)
+	}
+	if admission.Job.ID != blockedJob.ID {
+		t.Fatalf("admitted job=%s want formerly blocked head=%s", admission.Job.ID, blockedJob.ID)
 	}
 }
