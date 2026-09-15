@@ -58,10 +58,6 @@ func (a *api) createIssue(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	status := req.Status
-	if status == "" {
-		status = "BACKLOG"
-	}
 	priority := 0
 	if req.Priority != nil {
 		priority = *req.Priority
@@ -70,7 +66,7 @@ func (a *api) createIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
 		return
 	}
-	input := store.Issue{ProjectID: projectID, Title: req.Title, Description: req.Description, Status: status, Priority: priority}
+	input := store.Issue{ProjectID: projectID, Title: req.Title, Description: req.Description, Status: req.Status, Priority: priority}
 	var value store.Issue
 	var err error
 	if a.projectAccess != nil {
