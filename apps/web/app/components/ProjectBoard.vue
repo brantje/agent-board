@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { DragDropProvider } from '@dnd-kit/vue'
 import { computed, ref } from 'vue'
 import type { Issue, Project, Run } from '../types/api'
-import { apiPath } from '../utils/api'
+import { apiPath, apiRequest } from '../utils/api'
+import { issueIdFromBoardDragId, parseBoardDropZoneId, previewBoardPlacement } from '../utils/board-order'
 import { boardColumns, latestRun } from '../utils/issues'
 import { isBoardActivityEvent, applyCurrentBranchToIssues } from '../utils/events'
 import { useResource } from '../composables/useResource'
@@ -13,12 +15,15 @@ const issues = useResource<Issue[]>(() => apiPath('issues', props.projectId))
 const runs = useResource<Run[]>(() => apiPath('runs', props.projectId))
 const search = ref('')
 const open = ref(false)
+const placing = ref(false)
+const placementError = ref<Error>()
 
 const title = computed(() => project.data.value ? `${project.data.value.name} / Board` : 'Project Board')
 const columns = computed(() => boardColumns(issues.data.value || [], search.value))
 const pending = computed(() => project.pending.value || issues.pending.value)
 const error = computed(() => project.error.value || issues.error.value)
 const runsError = computed(() => runs.error.value)
+const canReorder = computed(() => props.canMutate && !placing.value && !search.value.trim())
 
 function runStatus(issue: Issue) {
   const items = runs.data.value
@@ -33,6 +38,45 @@ async function refreshAll() {
 async function created() {
   open.value = false
   await refreshAll()
+}
+
+type BoardDragEndEvent = {
+  canceled: boolean
+  operation: {
+    source?: { id: string | number }
+    target?: { id: string | number }
+  }
+}
+
+async function onDragEnd(event: BoardDragEndEvent) {
+  if (event.canceled || !canReorder.value) return
+  const issueId = issueIdFromBoardDragId(String(event.operation.source?.id ?? ''))
+  const target = parseBoardDropZoneId(String(event.operation.target?.id ?? ''))
+  if (!issueId || !target || !Array.isArray(issues.data.value)) return
+
+  const preview = previewBoardPlacement(issues.data.value, issueId, target.status, target.index)
+  if (!preview || !preview.changed) return
+
+  const previous = issues.data.value.map(issue => ({ ...issue }))
+  issues.data.value = preview.issues
+  placementError.value = undefined
+  placing.value = true
+  try {
+    await apiRequest<Issue>(`${apiPath('issues', props.projectId, issueId)}/placement`, {
+      method: 'POST',
+      body: {
+        ...(preview.sourceStatus === preview.destinationStatus ? {} : { status: preview.destinationStatus }),
+        beforeId: preview.beforeId,
+        afterId: preview.afterId
+      }
+    })
+  } catch (failure) {
+    issues.data.value = previous
+    placementError.value = failure as Error
+    await issues.refresh()
+  } finally {
+    placing.value = false
+  }
 }
 
 useProjectEvents(() => props.projectId, async event => {
@@ -65,31 +109,51 @@ useProjectEvents(() => props.projectId, async event => {
         class="mb-3"
         :actions="[{ label: 'Retry', onClick: () => runs.refresh() }]"
       />
-      <div class="flex min-h-[calc(100dvh-10rem)] gap-3 overflow-x-auto pb-3" role="region" aria-label="Issue board" tabindex="0">
-        <section
-          v-for="column in columns"
-          :key="column.status"
-          :data-status="column.status"
-          :class="['w-64 min-w-64 flex-1 border border-default', column.surface]"
-        >
-          <header class="flex items-center justify-between gap-2 border-b border-default p-3">
-            <h2 class="section-label flex min-w-0 items-center gap-1.5">
-              <UIcon :name="column.icon" :class="['size-3.5 shrink-0', column.textClass]" aria-hidden="true" />
-              {{ column.label }}
-            </h2>
-            <UBadge :label="String(column.issues.length)" color="neutral" variant="subtle" />
-          </header>
-          <div class="space-y-2 p-2">
-            <IssueCard
-              v-for="issue in column.issues"
-              :key="issue.id"
-              :issue="issue"
-              :run-status="runStatus(issue)"
-            />
-            <p v-if="!column.issues.length" class="px-2 py-4 text-xs text-muted">{{ search ? 'No matching issues' : 'No issues' }}</p>
-          </div>
-        </section>
-      </div>
+      <UAlert
+        v-if="placementError"
+        title="Unable to move issue"
+        :description="placementError.message"
+        color="error"
+        class="mb-3"
+      />
+      <UAlert
+        v-if="canMutate && search.trim()"
+        title="Reordering paused while filtering"
+        description="Clear the issue filter to drag and reorder cards."
+        color="neutral"
+        variant="subtle"
+        class="mb-3"
+      />
+      <DragDropProvider @drag-end="onDragEnd">
+        <div class="flex min-h-[calc(100dvh-10rem)] gap-3 overflow-x-auto pb-3" role="region" aria-label="Issue board" tabindex="0">
+          <section
+            v-for="column in columns"
+            :key="column.status"
+            :data-status="column.status"
+            :class="['w-64 min-w-64 flex-1 border border-default', column.surface]"
+          >
+            <header class="flex items-center justify-between gap-2 border-b border-default p-3">
+              <h2 class="section-label flex min-w-0 items-center gap-1.5">
+                <UIcon :name="column.icon" :class="['size-3.5 shrink-0', column.textClass]" aria-hidden="true" />
+                {{ column.label }}
+              </h2>
+              <UBadge :label="String(column.issues.length)" color="neutral" variant="subtle" />
+            </header>
+            <div class="p-2">
+              <BoardDropZone :status="column.status" :index="0" :disabled="!canReorder" :empty="!column.issues.length" />
+              <template v-for="(issue, index) in column.issues" :key="issue.id">
+                <BoardDraggableIssue
+                  :issue="issue"
+                  :run-status="runStatus(issue)"
+                  :disabled="!canReorder"
+                />
+                <BoardDropZone :status="column.status" :index="index + 1" :disabled="!canReorder" />
+              </template>
+              <p v-if="!column.issues.length" class="px-2 py-4 text-xs text-muted">{{ search ? 'No matching issues' : 'No issues' }}</p>
+            </div>
+          </section>
+        </div>
+      </DragDropProvider>
     </AsyncState>
 
     <UModal v-if="canMutate" v-model:open="open" title="New issue" description="Create work in this Project.">

@@ -2,18 +2,15 @@
   "name": "@agent-board/web",
   "private": true,
   "type": "module",
-  "engines": {
-    "node": ">=24"
-  },
   "scripts": {
     "dev": "nuxt dev --host 0.0.0.0 --port 3000",
-    "typecheck": "nuxt typecheck",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage.enabled",
     "build": "nuxt build",
-    "start": "node .output/server/index.mjs"
+    "typecheck": "nuxt prepare && vue-tsc --noEmit",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@dnd-kit/vue": "0.5.0",
     "@iconify-json/lucide": "^1.2.129",
     "@nuxt/ui": "4.11.0",
     "nuxt": "4.5.2",
