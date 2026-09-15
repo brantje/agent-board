@@ -28,17 +28,7 @@ func (s *protocolStore) ListAgents(_ context.Context, projectID *string) ([]stor
 	}}, nil
 }
 
-func (s *protocolStore) ListIssueAssignees(_ context.Context, projectID string) ([]store.Assignee, error) {
-	if projectID != s.project.ID {
-		return nil, store.ErrNotFound
-	}
-	return []store.Assignee{
-		{Type: "USER", ID: s.user.ID, Name: s.user.DisplayName},
-		{Type: "AGENT", ID: mcpTestAgentID, Name: "MCP Agent"},
-	}, nil
-}
-
-func TestMCPProjectDirectoryToolsUseCanonicalAccessPaths(t *testing.T) {
+func TestMCPAgentDirectoryUsesCanonicalAccessPath(t *testing.T) {
 	handler, _, _, token := newProtocolFixture(t)
 	httpServer := httptest.NewServer(handler)
 	defer httpServer.Close()
@@ -53,18 +43,14 @@ func TestMCPProjectDirectoryToolsUseCanonicalAccessPaths(t *testing.T) {
 	}
 	defer session.Close()
 
-	for _, name := range []string{"list_agents", "list_issue_assignees"} {
-		t.Run(name, func(t *testing.T) {
-			result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
-				Name:      name,
-				Arguments: map[string]any{"projectId": mcpTestProjectID},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			if result.IsError {
-				t.Fatalf("%s tool error: %+v", name, result.Content)
-			}
-		})
+	result, err := session.CallTool(t.Context(), &mcp.CallToolParams{
+		Name:      "list_agents",
+		Arguments: map[string]any{"projectId": mcpTestProjectID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError {
+		t.Fatalf("list_agents tool error: %+v", result.Content)
 	}
 }
