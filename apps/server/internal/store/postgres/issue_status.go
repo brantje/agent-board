@@ -49,7 +49,7 @@ func (s *Store) SetIssueStatus(ctx context.Context, input store.IssueStatusMutat
 
 	updated := previous
 	updated.Status = input.Status
-	result, err := s.applyIssueMutationTx(ctx, tx, issueMutationTxInput{
+	result, err := applyIssueMutationTx(ctx, tx, issueMutationTxInput{
 		Issue:          updated,
 		Previous:       previous,
 		RepositoryPath: repositoryPath,
@@ -93,6 +93,11 @@ func validateIssueStatusRecoveryFence(ctx context.Context, tx pgx.Tx, input stor
 	if input.RunID == nil || input.AgentID == nil || input.WorkspaceID == nil || run.StartedAt == nil {
 		return store.ErrConflict
 	}
+
+	// OpenCode durable history does not share a trusted clock or sequence with
+	// Agent Board's Event stream, especially on external runners. Treat canonical
+	// status Events proven to come from this exact Run capability as earlier
+	// same-Run progress, but conservatively fence any other explicit Issue mutation.
 	var superseded bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (

@@ -19,7 +19,7 @@ type issueMutationTxInput struct {
 	WorkspaceID    *string
 }
 
-func (s *Store) applyIssueMutationTx(ctx context.Context, tx pgx.Tx, input issueMutationTxInput) (store.IssueMutationResult, error) {
+func applyIssueMutationTx(ctx context.Context, tx pgx.Tx, input issueMutationTxInput) (store.IssueMutationResult, error) {
 	updated, err := scanIssueJoined(tx.QueryRow(ctx, `
 		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, updated_at=now()
 		FROM projects AS p
@@ -30,7 +30,7 @@ func (s *Store) applyIssueMutationTx(ctx context.Context, tx pgx.Tx, input issue
 		return store.IssueMutationResult{}, err
 	}
 
-	_, runEvent, err := s.enqueueIssueMutation(ctx, tx, updated, input.Previous.Status, false, input.RepositoryPath, input.DefaultBranch)
+	_, runEvent, err := enqueueIssueMutation(ctx, tx, updated, input.Previous.Status, false, input.RepositoryPath, input.DefaultBranch)
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}

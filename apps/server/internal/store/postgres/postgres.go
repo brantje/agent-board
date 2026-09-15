@@ -6,7 +6,6 @@ import (
 	"errors"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
-	"github.com/brantje/agent-board/packages/runnerprotocol"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -16,17 +15,13 @@ type Store struct {
 	pool             *pgxpool.Pool
 	lockPool         *pgxpool.Pool
 	runnerCandidates func(string) []string
-	engineRegistered func(string) bool
 }
 
+// SetRunnerCandidates supplies live authenticated Engine-matching candidates;
+// PostgreSQL still validates policy and reserves each selected runner atomically.
+// Configure it once before starting scheduler workers.
 func (s *Store) SetRunnerCandidates(candidates func(string) []string) {
 	s.runnerCandidates = candidates
-}
-
-// SetEngineRegistered binds execution-configuration validation to the
-// application Engine registry. Runner availability remains scheduler policy.
-func (s *Store) SetEngineRegistered(registered func(string) bool) {
-	s.engineRegistered = registered
 }
 
 func Open(ctx context.Context, databaseURL string) (*Store, error) {
@@ -38,6 +33,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
+
 	lockPool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
 		pool.Close()
@@ -48,9 +44,7 @@ func Open(ctx context.Context, databaseURL string) (*Store, error) {
 		pool.Close()
 		return nil, err
 	}
-	store := NewWithPools(pool, lockPool)
-	store.SetEngineRegistered(runnerprotocol.KnownEngine)
-	return store, nil
+	return NewWithPools(pool, lockPool), nil
 }
 
 func New(pool *pgxpool.Pool) *Store {

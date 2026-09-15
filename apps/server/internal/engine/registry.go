@@ -41,14 +41,6 @@ func isNilEngine(adapter Engine) bool {
 	}
 }
 
-func (r *Registry) Has(name string) bool {
-	if r == nil {
-		return false
-	}
-	_, ok := r.engines[strings.TrimSpace(name)]
-	return ok
-}
-
 func (r *Registry) Get(name string) (Engine, error) {
 	if r == nil {
 		return nil, fmt.Errorf("engine: registry is unavailable")
