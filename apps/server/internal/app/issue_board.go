@@ -22,6 +22,9 @@ func (s *Service) PlaceIssue(ctx context.Context, input store.IssueBoardPlacemen
 	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
 		return store.Issue{}, err
 	}
+	if !store.ValidIssueStatus(input.Status) {
+		return store.Issue{}, invalid("invalid issue status")
+	}
 	board, ok := s.store.(store.IssueBoardStore)
 	if !ok {
 		return store.Issue{}, errors.New("issue board store is unavailable")
