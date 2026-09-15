@@ -32,6 +32,7 @@ const issueSelectColumns = `
 	i.description,
 	i.status,
 	i.priority,
+	i.board_position,
 	i.assignee_type,
 	i.assignee_id::text,
 	CASE
@@ -162,12 +163,16 @@ func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (sto
 	`, input.ProjectID).Scan(&prefix, &number); err != nil {
 		return store.IssueMutationResult{}, notFound(err)
 	}
+	boardPosition, err := nextBoardPositionTx(ctx, tx, input.ProjectID, status)
+	if err != nil {
+		return store.IssueMutationResult{}, err
+	}
 
 	issue, err := scanIssueWithPriority(tx.QueryRow(ctx, `
-		INSERT INTO issues (project_id, number, title, description, status, priority, assignee_type, assignee_id, created_by_type, created_by_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-		RETURNING id::text, project_id::text, title, description, status, priority, assignee_type, assignee_id::text, NULL::text, number, created_by_type, created_by_id::text, created_at, updated_at
-	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, input.AssigneeType, input.AssigneeID, input.CreatedByType, input.CreatedByID))
+		INSERT INTO issues (project_id, number, title, description, status, priority, board_position, assignee_type, assignee_id, created_by_type, created_by_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		RETURNING id::text, project_id::text, title, description, status, priority, board_position, assignee_type, assignee_id::text, NULL::text, number, created_by_type, created_by_id::text, created_at, updated_at
+	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, boardPosition, input.AssigneeType, input.AssigneeID, input.CreatedByType, input.CreatedByID))
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
@@ -205,6 +210,18 @@ func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (sto
 	events = append(events, issueEvent)
 	issue.LastEvent = &issueEvent
 	return store.IssueMutationResult{Issue: issue, Events: events}, nil
+}
+
+func nextBoardPositionTx(ctx context.Context, tx pgx.Tx, projectID, status string) (int64, error) {
+	var position int64
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(MAX(board_position), -1) + 1
+		FROM issues
+		WHERE project_id=$1 AND status=$2
+	`, projectID, status).Scan(&position); err != nil {
+		return 0, err
+	}
+	return position, nil
 }
 
 func issueCreatorName(ctx context.Context, tx pgx.Tx, projectID string, creatorType, creatorID *string) (*string, error) {
@@ -291,7 +308,7 @@ func scanProject(row pgx.Row) (store.Project, error) {
 
 func scanIssueWithPriority(row pgx.Row) (store.Issue, error) {
 	var value store.Issue
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.AssigneeType, &value.AssigneeID, &value.AssigneeName, &value.Number, &value.CreatedByType, &value.CreatedByID, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.BoardPosition, &value.AssigneeType, &value.AssigneeID, &value.AssigneeName, &value.Number, &value.CreatedByType, &value.CreatedByID, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Issue{}, notFound(err)
 	}
 	return value, nil
@@ -301,7 +318,7 @@ func scanIssueJoined(row pgx.Row) (store.Issue, error) {
 	var value store.Issue
 	var prefix string
 	if err := row.Scan(
-		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
+		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.BoardPosition,
 		&value.AssigneeType, &value.AssigneeID, &value.AssigneeName, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedByName, &value.CreatedAt, &value.UpdatedAt,
 	); err != nil {
 		return store.Issue{}, notFound(err)
@@ -323,7 +340,7 @@ func scanIssueJoinedWithLastEvent(row pgx.Row) (store.Issue, error) {
 		actor, payload                                            json.RawMessage
 	)
 	if err := row.Scan(
-		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority,
+		&value.ID, &value.ProjectID, &value.Title, &value.Description, &value.Status, &value.Priority, &value.BoardPosition,
 		&value.AssigneeType, &value.AssigneeID, &value.AssigneeName, &value.Number, &prefix, &value.CreatedByType, &value.CreatedByID, &value.CreatedByName, &value.CreatedAt, &value.UpdatedAt,
 		&value.CurrentBranch,
 		&eventID, &schemaVersion, &eventType, &occurredAt, &eventProjectID, &eventIssueID, &eventRunID,
