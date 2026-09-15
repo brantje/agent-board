@@ -46,14 +46,14 @@ var builtInOpenCodeProviders = map[string]struct{}{
 	"gitlab":         {},
 	"google":         {},
 	"google-vertex":  {},
-	"groq":           {},
-	"mistral":        {},
-	"openai":         {},
-	"openrouter":     {},
-	"opencode":       {},
-	"perplexity":     {},
-	"together":       {},
-	"xai":            {},
+	"groq":            {},
+	"mistral":         {},
+	"openai":          {},
+	"openrouter":      {},
+	"opencode":        {},
+	"perplexity":      {},
+	"together":        {},
+	"xai":             {},
 }
 
 type Engine struct {
@@ -488,7 +488,7 @@ func nativeWorkingDirectory(process engine.Process) string {
 	return runtimepkg.WorkspaceTarget
 }
 
-const issueStatusPromptGuidance = "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When the work is ready for human review or handoff, use REVIEW. When the Issue is fully complete, use DONE. Before your final response, compare the final work outcome with the persisted Issue Board status and call set_issue_status(status) if the Board state should now be different. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required."
+const issueStatusPromptGuidance = "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When implementation or other work is complete and ready for human review or handoff, use REVIEW. Completing the requested implementation does not by itself mean DONE. For normal coding or implementation work, a successful final handoff should therefore normally leave the Issue in REVIEW, not DONE. Use DONE only when the Issue is fully finished and no human review, approval, or handoff remains. Before your final response, compare the final work outcome with the persisted Issue Board status and call set_issue_status(status) if the Board state should now be different. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required."
 
 func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	var sections []string
