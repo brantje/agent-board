@@ -280,7 +280,7 @@ See `execution-evidence.md`.
 
 ## Questions and continuation
 
-Blocking Questions move the same Run to `WAITING_FOR_INPUT` and the Issue to `BLOCKED`. `BLOCKED` is both a durable Issue state and its normal Board column projection. Answering may resume the same Run according to Project policy.
+Blocking Questions may move the same Run to `WAITING_FOR_INPUT`. Native Question waiting does not itself change Issue Board status; `BLOCKED` is an explicit durable Issue state set through the normal Issue-status mutation boundary when workflow state should change. Answering may resume the same Run according to Project policy.
 
 For native OpenCode Questions, the same live Runner Execution Session, native Engine session and checkout remain attached while waiting. The answer continues that native session; Agent Board does not finalize or publish/return the Issue branch merely because input is pending. If the Runner/transport actually fails, the server reconciles the durable Execution Session before deciding a terminal outcome or safe recovery.
 

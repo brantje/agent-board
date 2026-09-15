@@ -57,6 +57,11 @@ func (s *projectWorkflowAuthorizationStore) CreateIssue(_ context.Context, input
 	return input, nil
 }
 
+func (s *projectWorkflowAuthorizationStore) CreateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
+	issue, err := s.CreateIssue(ctx, input)
+	return store.IssueMutationResult{Issue: issue}, err
+}
+
 func (s *projectWorkflowAuthorizationStore) GetIssue(_ context.Context, projectID, issueID string) (store.Issue, error) {
 	issue, ok := s.issues[issueID]
 	if !ok || issue.ProjectID != projectID {
@@ -79,6 +84,11 @@ func (s *projectWorkflowAuthorizationStore) UpdateIssue(_ context.Context, input
 	s.updateIssueCalls++
 	s.issues[input.ID] = input
 	return input, nil
+}
+
+func (s *projectWorkflowAuthorizationStore) UpdateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
+	issue, err := s.UpdateIssue(ctx, input)
+	return store.IssueMutationResult{Issue: issue}, err
 }
 
 func (s *projectWorkflowAuthorizationStore) SetIssueAssignee(_ context.Context, projectID, issueID string, target *store.Assignee, _ json.RawMessage) (store.IssueMutationResult, error) {

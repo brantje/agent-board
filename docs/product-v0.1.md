@@ -220,9 +220,11 @@ A relationship record does not itself mutate Issue status, start/cancel Runs, or
 Blocking Question:
 
 ```text
-Issue -> BLOCKED
-Run   -> WAITING_FOR_INPUT
+Run/session waiting -> WAITING_FOR_INPUT
+Issue Board status   -> unchanged unless explicitly updated
 ```
+
+An Agent may explicitly set the Issue to `BLOCKED` when the workflow is genuinely blocked, but native Question waiting is not an automatic Board transition.
 
 Questions are answered from Issue detail. Inbox contains blocking Questions, Review requests, failed Runs and other human-attention items.
 

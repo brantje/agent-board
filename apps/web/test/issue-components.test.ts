@@ -324,6 +324,9 @@ describe('Issue workflow components', () => {
       }
       if (path.endsWith('/assignees')) return new Response(JSON.stringify(directory))
       if (path.endsWith('/runs')) return new Response(JSON.stringify(runHistory))
+      if (path.endsWith('/execution')) return new Response(JSON.stringify(assignedTo?.type === 'AGENT'
+        ? runHistory.length ? { state: 'ACTIVE', canStart: false, activeRun: runHistory[0] } : { state: 'READY', canStart: true, activeRun: null }
+        : { state: 'NOT_AGENT_OWNED', canStart: false, activeRun: null }))
       return new Response(JSON.stringify({ ...issue, assignedTo }))
     })
     vi.stubGlobal('fetch', fetch)
@@ -353,7 +356,7 @@ describe('Issue workflow components', () => {
     expect(wrapper.text()).toContain('Attempt 1')
     expect(wrapper.text()).toContain('Queued')
     expect(wrapper.text()).toContain('Queue reason: capacity')
-    expect(hasButton(wrapper, 'Run again')).toBe(true)
+    expect(hasButton(wrapper, 'Run again')).toBe(false)
 
     await wrapper.get('[data-field=assignee] select').setValue('USER:u')
     await formForField(wrapper, 'assignee').trigger('submit')
@@ -393,6 +396,9 @@ describe('Issue workflow components', () => {
       }
       if (path.endsWith('/assignees')) return new Response(JSON.stringify([{ type: 'AGENT', id: 'a', name: 'Coder' }]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/execution')) return new Response(JSON.stringify(current.assignedTo
+        ? { state: 'CONFIGURATION_UNAVAILABLE', canStart: false, activeRun: null }
+        : { state: 'NOT_AGENT_OWNED', canStart: false, activeRun: null }))
       return new Response(JSON.stringify(current))
     })
     vi.stubGlobal('fetch', fetch)
@@ -404,12 +410,9 @@ describe('Issue workflow components', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Coder')
     expect(wrapper.text()).toContain('No Runs yet')
-    expect(hasButton(wrapper, 'Start Run')).toBe(true)
-
-    await button(wrapper, 'Start Run').trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('Unable to start Run')
-    expect(wrapper.text()).toContain('selected execution configuration is not runnable')
+    expect(hasButton(wrapper, 'Start Run')).toBe(false)
+    expect(wrapper.text()).toContain('Execution unavailable')
+    expect(wrapper.text()).toContain('execution configuration prevents a new Run')
     expect(wrapper.text()).not.toContain('unsafe backend detail')
     expect(wrapper.text()).toContain('Coder')
     expect(wrapper.text()).toContain('Board status')
@@ -434,6 +437,9 @@ describe('Issue workflow components', () => {
       vi.stubGlobal('fetch', vi.fn(async (path: string) => {
         if (path.endsWith('/assignees')) return new Response(JSON.stringify([]))
         if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+        if (path.endsWith('/execution')) return new Response(JSON.stringify(assignedTo?.type === 'AGENT'
+          ? status === 'BACKLOG' ? { state: 'BACKLOG', canStart: false, activeRun: null } : { state: 'READY', canStart: true, activeRun: null }
+          : { state: 'NOT_AGENT_OWNED', canStart: false, activeRun: null }))
         return new Response(JSON.stringify(current))
       }))
       const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id }, global })
@@ -446,6 +452,7 @@ describe('Issue workflow components', () => {
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       if (path.endsWith('/assignees')) return new Response(JSON.stringify([]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/execution')) return new Response(JSON.stringify({ state: 'READY', canStart: true, activeRun: null }))
       return new Response(JSON.stringify(readonly))
     }))
     const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: issue.id, canMutate: false }, global })
@@ -464,6 +471,9 @@ describe('Issue workflow components', () => {
       }
       if (path.endsWith('/assignees')) return new Response(JSON.stringify([{ type: 'AGENT', id: 'a', name: 'Coder' }]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify(runHistory))
+      if (path.endsWith('/execution')) return new Response(JSON.stringify(runHistory.length
+        ? { state: 'ACTIVE', canStart: false, activeRun: runHistory[0] }
+        : { state: 'READY', canStart: true, activeRun: null }))
       return new Response(JSON.stringify(current))
     })
     vi.stubGlobal('fetch', fetch)
@@ -481,7 +491,7 @@ describe('Issue workflow components', () => {
     expect(wrapper.text()).toContain('Queue reason: capacity')
     expect(wrapper.text()).toContain('Board status')
     expect(wrapper.text()).toContain('Todo')
-    expect(hasButton(wrapper, 'Run again')).toBe(true)
+    expect(hasButton(wrapper, 'Run again')).toBe(false)
     wrapper.unmount()
   })
 
@@ -495,6 +505,7 @@ describe('Issue workflow components', () => {
         { type: 'AGENT', id: 'b', name: 'Agent B' }
       ]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([runA, runB]))
+      if (path.endsWith('/execution')) return new Response(JSON.stringify({ state: 'ACTIVE', canStart: false, activeRun: runB }))
       return new Response(JSON.stringify(current))
     })
     vi.stubGlobal('fetch', fetch)
@@ -507,7 +518,7 @@ describe('Issue workflow components', () => {
     expect(text).toContain('Attempt 1')
     expect(text.indexOf('Attempt 2')).toBeLessThan(text.indexOf('Attempt 1'))
     expect(wrapper.findAll('button').filter(value => value.text() === 'Open Run')).toHaveLength(2)
-    expect(hasButton(wrapper, 'Run again')).toBe(true)
+    expect(hasButton(wrapper, 'Run again')).toBe(false)
     wrapper.unmount()
   })
 
@@ -521,6 +532,9 @@ describe('Issue workflow components', () => {
       }
       if (path.endsWith('/assignees')) return new Response(JSON.stringify([{ type: 'AGENT', id: 'a', name: 'Coder' }]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/execution')) return new Response(JSON.stringify(current.assignedTo
+        ? { state: 'READY', canStart: true, activeRun: null }
+        : { state: 'NOT_AGENT_OWNED', canStart: false, activeRun: null }))
       return new Response(JSON.stringify(current))
     })
     vi.stubGlobal('fetch', fetch)

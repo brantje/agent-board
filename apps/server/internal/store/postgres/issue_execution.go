@@ -13,6 +13,45 @@ func (s *Store) StartIssueRun(ctx context.Context, projectID, issueID string) (s
 	return s.enqueueCurrentIssue(ctx, projectID, issueID, "", true)
 }
 
+func (s *Store) GetIssueExecutionState(ctx context.Context, projectID, issueID string) (store.IssueExecutionState, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		return store.IssueExecutionState{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var status string
+	var assigneeType, assigneeID *string
+	if err := tx.QueryRow(ctx, `
+		SELECT status, assignee_type, assignee_id::text
+		FROM issues
+		WHERE project_id=$1 AND id=$2
+	`, projectID, issueID).Scan(&status, &assigneeType, &assigneeID); err != nil {
+		return store.IssueExecutionState{}, notFound(err)
+	}
+	if status == "BACKLOG" {
+		return store.IssueExecutionState{State: store.IssueExecutionBacklog}, nil
+	}
+	if assigneeType == nil || *assigneeType != "AGENT" || assigneeID == nil {
+		return store.IssueExecutionState{State: store.IssueExecutionNotAgentOwned}, nil
+	}
+
+	active, err := activeRunForAgent(ctx, tx, projectID, issueID, *assigneeID)
+	if err == nil {
+		return store.IssueExecutionState{State: store.IssueExecutionActive, ActiveRun: &active}, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return store.IssueExecutionState{}, err
+	}
+	if err := verifyRunnableAgent(ctx, tx, projectID, *assigneeID); err != nil {
+		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			return store.IssueExecutionState{State: store.IssueExecutionConfigurationUnavailable}, nil
+		}
+		return store.IssueExecutionState{}, err
+	}
+	return store.IssueExecutionState{State: store.IssueExecutionReady, CanStart: true}, nil
+}
+
 // Candidate identity is only a hint. Re-read ownership and policy under the same
 // Issue lock used by assignment/status mutations before creating anything.
 func (s *Store) enqueueCurrentIssue(ctx context.Context, projectID, issueID, expectedAgentID string, strict bool) (store.Run, store.Event, error) {

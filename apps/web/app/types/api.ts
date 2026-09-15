@@ -95,6 +95,12 @@ export interface AssignmentResponse {
   issue: Issue
 }
 
+export interface IssueExecutionState {
+  state: 'BACKLOG' | 'NOT_AGENT_OWNED' | 'CONFIGURATION_UNAVAILABLE' | 'ACTIVE' | 'READY'
+  canStart: boolean
+  activeRun: Run | null
+}
+
 export interface Agent {
   id: string
   projectId: string | null

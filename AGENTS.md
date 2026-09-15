@@ -257,7 +257,7 @@ Runner output is normalized/redacted before durable persistence. A WebSocket dis
 
 ## Questions and Review
 
-Blocking Questions pause the same Run. For native OpenCode Questions, the same live Runner Execution Session and Runner Workspace remain attached through `WAITING_FOR_INPUT`; answering continues the same native Engine session without a replacement prompt/process. The Issue moves to the `BLOCKED` state/column when human input is required according to workflow policy.
+Blocking Questions pause the same Run. For native OpenCode Questions, the same live Runner Execution Session and Runner Workspace remain attached through `WAITING_FOR_INPUT`; answering continues the same native Engine session without a replacement prompt/process. Native Question waiting does not automatically change Issue Board status; move the Issue to `BLOCKED` only through the explicit Issue-status mutation when workflow state should change.
 
 Resume/Question state is server-owned. If the Runner transport actually disconnects, reconcile the same durable Execution Session during the configured reconnect grace before declaring infrastructure failure or allowing retry; do not blindly start duplicate work. Legacy Runtime recovery rules apply only when that managed-compute path was actually used.
 

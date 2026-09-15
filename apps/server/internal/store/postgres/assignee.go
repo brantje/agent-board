@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"encoding/json"
-	"errors"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -12,6 +11,22 @@ import (
 type assigneeQuerier interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
+
+const eligibleAgentAssigneePredicate = `a.state='ENABLED' AND (a.project_id IS NULL OR a.project_id=$1)`
+
+const eligibleUserAssigneePredicate = `u.status='active' AND (
+	u.deployment_role='admin'
+	OR EXISTS (
+		SELECT 1 FROM project_user_access AS pua
+		WHERE pua.project_id=$1 AND pua.user_id=u.id AND pua.role IN ('member','admin')
+	)
+	OR EXISTS (
+		SELECT 1
+		FROM group_members AS gm
+		JOIN project_group_access AS pga ON pga.group_id=gm.group_id
+		WHERE gm.user_id=u.id AND pga.project_id=$1 AND pga.role IN ('member','admin')
+	)
+)`
 
 // Resolve both directory entries and mutation targets through the same eligibility
 // check. Execution readiness is deliberately outside ownership validation.
@@ -23,33 +38,26 @@ func resolveAssignee(ctx context.Context, q assigneeQuerier, projectID string, t
 	switch target.Type {
 	case "AGENT":
 		var state string
-		err := q.QueryRow(ctx, `SELECT id::text,name,state FROM agents WHERE id=$2 AND (project_id IS NULL OR project_id=$1)`, projectID, target.ID).Scan(&value.ID, &value.Name, &state)
+		var eligible bool
+		err := q.QueryRow(ctx, `SELECT a.id::text,a.name,a.state,(`+eligibleAgentAssigneePredicate+`) FROM agents AS a WHERE a.id=$2`, projectID, target.ID).Scan(&value.ID, &value.Name, &state, &eligible)
 		if err != nil {
 			return nil, notFound(err)
 		}
-		if state != "ENABLED" {
+		if !eligible {
+			if state == "ENABLED" {
+				return nil, store.ErrNotFound
+			}
 			return nil, store.ErrInvalidArgument
 		}
 	case "USER":
-		var status, deploymentRole string
-		err := q.QueryRow(ctx, `SELECT id::text,display_name,status,deployment_role FROM users WHERE id=$1`, target.ID).Scan(&value.ID, &value.Name, &status, &deploymentRole)
+		var status string
+		var eligible bool
+		err := q.QueryRow(ctx, `SELECT u.id::text,u.display_name,u.status,(`+eligibleUserAssigneePredicate+`) FROM users AS u WHERE u.id=$2`, projectID, target.ID).Scan(&value.ID, &value.Name, &status, &eligible)
 		if err != nil {
 			return nil, notFound(err)
 		}
-		if status != store.UserStatusActive {
+		if status != store.UserStatusActive || !eligible {
 			return nil, store.ErrInvalidArgument
-		}
-		if deploymentRole != store.DeploymentRoleAdmin {
-			role, err := effectiveProjectRole(ctx, q, projectID, target.ID)
-			if errors.Is(err, store.ErrNotFound) {
-				return nil, store.ErrInvalidArgument
-			}
-			if err != nil {
-				return nil, err
-			}
-			if !store.ProjectRoleAtLeast(role, store.ProjectRoleMember) {
-				return nil, store.ErrInvalidArgument
-			}
 		}
 	default:
 		return nil, store.ErrInvalidArgument
@@ -64,19 +72,13 @@ func (s *Store) ListIssueAssignees(ctx context.Context, projectID string) ([]sto
 	rows, err := s.pool.Query(ctx, `
 		SELECT type,id,name
 		FROM (
-			SELECT DISTINCT 'USER'::text AS type,u.id::text AS id,u.display_name AS name
-			FROM users u
-			LEFT JOIN project_user_access pua
-			  ON pua.user_id=u.id AND pua.project_id=$1 AND pua.role IN ('member','admin')
-			LEFT JOIN group_members gm ON gm.user_id=u.id
-			LEFT JOIN project_group_access pga
-			  ON pga.group_id=gm.group_id AND pga.project_id=$1 AND pga.role IN ('member','admin')
-			WHERE u.status='active'
-			  AND (u.deployment_role='admin' OR pua.user_id IS NOT NULL OR pga.group_id IS NOT NULL)
+			SELECT 'USER'::text AS type,u.id::text AS id,u.display_name AS name
+			FROM users AS u
+			WHERE `+eligibleUserAssigneePredicate+`
 			UNION ALL
 			SELECT 'AGENT'::text,a.id::text,a.name
-			FROM agents a
-			WHERE a.state='ENABLED' AND (a.project_id IS NULL OR a.project_id=$1)
+			FROM agents AS a
+			WHERE `+eligibleAgentAssigneePredicate+`
 		) assignees
 		ORDER BY name,type,id
 	`, projectID)

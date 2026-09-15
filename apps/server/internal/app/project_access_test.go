@@ -47,6 +47,15 @@ func (s *projectAccessServiceStore) CreateIssue(_ context.Context, input store.I
 	return input, nil
 }
 
+func (s *projectAccessServiceStore) CreateIssueMutation(ctx context.Context, input store.Issue) (store.IssueMutationResult, error) {
+	issue, err := s.CreateIssue(ctx, input)
+	return store.IssueMutationResult{Issue: issue}, err
+}
+
+func (s *projectAccessServiceStore) UpdateIssueMutation(_ context.Context, input store.Issue) (store.IssueMutationResult, error) {
+	return store.IssueMutationResult{Issue: input}, nil
+}
+
 func (s *projectAccessServiceStore) EffectiveProjectRole(_ context.Context, projectID, userID string) (string, error) {
 	role, ok := s.roles[projectID+":"+userID]
 	if !ok {

@@ -88,7 +88,15 @@ func TestRequestReviewChangesCreatesNextAttemptWithoutChangingIssueStatus(t *tes
 	if result.Job.Kind != "START" || result.Job.RunID != result.Run.ID || result.Issue.Status != f.issue.Status {
 		t.Fatalf("follow-up job/issue=%+v %+v initialIssue=%+v", result.Job, result.Issue, f.issue)
 	}
-	if len(result.Events) != 2 || result.Events[0].Type != "review.changes_requested" || result.Events[1].Type != "decision.recorded" {
+	predecessor, err := s.GetRun(ctx, f.project.ID, f.run.ID)
+	if err != nil || predecessor.Status != "COMPLETED" || predecessor.CompletedAt == nil {
+		t.Fatalf("predecessor=%+v err=%v", predecessor, err)
+	}
+	var active int
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM runs WHERE issue_id=$1 AND agent_id=$2 AND status=ANY($3::text[])`, f.issue.ID, f.agent.ID, activeRunStatuses).Scan(&active); err != nil || active != 1 {
+		t.Fatalf("active pair Runs=%d err=%v", active, err)
+	}
+	if len(result.Events) != 3 || result.Events[0].Type != "review.changes_requested" || result.Events[1].Type != "decision.recorded" || result.Events[2].Type != "run.completed" {
 		t.Fatalf("RequestReviewChanges events=%+v", result.Events)
 	}
 
@@ -119,5 +127,94 @@ func TestFailedApprovalIntentCanBeChanged(t *testing.T) {
 		ProjectID: f.project.ID, ReviewID: review.ID, Feedback: "Resolve the accepted-state conflict.", ActorID: &actor,
 	}); err != nil {
 		t.Fatalf("request changes after failed apply: %v", err)
+	}
+}
+
+func TestReviewAttemptSafetyIsScopedToReviewedAgent(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f, reviewA := readyReviewFixture(t, s, "review-pairs")
+
+	agentB := f.agent
+	agentB.ID = ""
+	agentB.Name = "review-pairs-b"
+	agentB, err := s.CreateAgent(ctx, agentB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runB, err := s.CreateRun(ctx, store.Run{
+		ProjectID: f.project.ID, IssueID: f.issue.ID, WorkspaceID: f.workspace.ID,
+		AgentID: &agentB.ID, Attempt: f.run.Attempt + 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enqueueFixtureRun(t, s, f, runB, "review-pairs-b")
+	claimB := mustAdmit(t, s, "worker-review-pairs-b")
+	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: claimB.Job.ID, RunID: claimB.Run.ID,
+		LeaseToken: claimB.Lease.LeaseToken, RunStatus: "RUNNING",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: claimB.Job.ID, RunID: claimB.Run.ID,
+		LeaseToken: claimB.Lease.LeaseToken, RunStatus: "READY_FOR_REVIEW",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reviewB, err := s.GetReviewByRun(ctx, f.project.ID, runB.ID)
+	if err != nil || reviewB.Status != "PENDING" {
+		t.Fatalf("agent B review=%+v err=%v", reviewB, err)
+	}
+
+	result, err := s.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{
+		ProjectID: f.project.ID, ReviewID: reviewA.ID, Feedback: "Agent A follow-up",
+	})
+	if err != nil {
+		t.Fatalf("Agent B's newer review blocked Agent A: %v", err)
+	}
+	if result.Run.AgentID == nil || *result.Run.AgentID != f.agent.ID || result.Run.Attempt <= runB.Attempt {
+		t.Fatalf("Agent A continuation=%+v Agent B run=%+v", result.Run, runB)
+	}
+	reviewB, err = s.GetReview(ctx, f.project.ID, reviewB.ID)
+	if err != nil || reviewB.Status != "PENDING" {
+		t.Fatalf("Agent B pinned review changed=%+v err=%v", reviewB, err)
+	}
+}
+
+func TestFailedReviewContinuationAllowsExplicitNextAttempt(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	f, review := readyReviewFixture(t, s, "review-retry")
+	result, err := s.RequestReviewChanges(ctx, store.RequestReviewChangesCommand{
+		ProjectID: f.project.ID, ReviewID: review.ID, Feedback: "Retry after this follow-up",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := mustAdmit(t, s, "worker-review-retry")
+	if claim.Run.ID != result.Run.ID {
+		t.Fatalf("admitted=%s want continuation=%s", claim.Run.ID, result.Run.ID)
+	}
+	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: claim.Job.ID, RunID: claim.Run.ID,
+		LeaseToken: claim.Lease.LeaseToken, RunStatus: "RUNNING",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reason := "follow-up failed"
+	if _, err := s.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: claim.Job.ID, RunID: claim.Run.ID,
+		LeaseToken: claim.Lease.LeaseToken, RunStatus: "FAILED", FailureReason: &reason,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	next, _, err := s.StartIssueRun(ctx, f.project.ID, f.issue.ID)
+	if err != nil {
+		t.Fatalf("StartIssueRun after failed continuation: %v", err)
+	}
+	if next.ID == result.Run.ID || next.Status != "QUEUED" || next.Attempt <= result.Run.Attempt {
+		t.Fatalf("next explicit attempt=%+v failed continuation=%+v", next, result.Run)
 	}
 }

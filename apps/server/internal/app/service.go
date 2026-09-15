@@ -303,28 +303,13 @@ func (s *Service) CreateIssue(ctx context.Context, input store.Issue) (store.Iss
 	if err := validateIssue(input); err != nil {
 		return store.Issue{}, err
 	}
-	if mutationStore, ok := s.store.(store.IssueMutationStore); ok {
-		result, err := mutationStore.CreateIssueMutation(ctx, input)
-		if err != nil {
-			return store.Issue{}, translateStoreError(err, "issue")
-		}
-		publisher, _ := s.events.(persistedEventPublisher)
-		publishPersistedEvents(ctx, publisher, result.Events)
-		return result.Issue, nil
-	}
-	value, err := s.store.CreateIssue(ctx, input)
+	result, err := s.store.CreateIssueMutation(ctx, input)
 	if err != nil {
 		return store.Issue{}, translateStoreError(err, "issue")
 	}
-	creatorActor, err := issueCreatorActor(value)
-	if err != nil {
-		return store.Issue{}, err
-	}
-	event, err := s.recordIssueEvent(ctx, "issue.created", value, creatorActor, issueMutationPayload(value))
-	if err != nil {
-		return store.Issue{}, err
-	}
-	return attachIssueEvent(value, event), nil
+	publisher, _ := s.events.(persistedEventPublisher)
+	publishPersistedEvents(ctx, publisher, result.Events)
+	return result.Issue, nil
 }
 func (s *Service) UpdateIssue(ctx context.Context, input store.Issue) (store.Issue, error) {
 	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
@@ -333,38 +318,13 @@ func (s *Service) UpdateIssue(ctx context.Context, input store.Issue) (store.Iss
 	if err := validateIssue(input); err != nil {
 		return store.Issue{}, err
 	}
-	if mutationStore, ok := s.store.(store.IssueMutationStore); ok {
-		result, err := mutationStore.UpdateIssueMutation(ctx, input)
-		if err != nil {
-			return store.Issue{}, translateStoreError(err, "issue")
-		}
-		publisher, _ := s.events.(persistedEventPublisher)
-		publishPersistedEvents(ctx, publisher, result.Events)
-		return result.Issue, nil
-	}
-	current, err := s.GetIssue(ctx, input.ProjectID, input.ID)
-	if err != nil {
-		return store.Issue{}, err
-	}
-	value, err := s.store.UpdateIssue(ctx, input)
+	result, err := s.store.UpdateIssueMutation(ctx, input)
 	if err != nil {
 		return store.Issue{}, translateStoreError(err, "issue")
 	}
-	eventType := "issue.updated"
-	payload := issueMutationPayload(value)
-	previousStatus := value.PreviousStatus
-	if previousStatus == "" {
-		previousStatus = current.Status
-	}
-	if previousStatus != value.Status {
-		eventType = "issue.status_changed"
-		payload["previousStatus"] = previousStatus
-	}
-	event, err := s.recordIssueEvent(ctx, eventType, value, store.EmptyObject, payload)
-	if err != nil {
-		return store.Issue{}, err
-	}
-	return attachIssueEvent(value, event), nil
+	publisher, _ := s.events.(persistedEventPublisher)
+	publishPersistedEvents(ctx, publisher, result.Events)
+	return result.Issue, nil
 }
 func (s *Service) ListRuns(ctx context.Context, projectID string) ([]store.Run, error) {
 	if _, err := s.GetProject(ctx, projectID); err != nil {

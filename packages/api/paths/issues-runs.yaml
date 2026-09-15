@@ -125,6 +125,33 @@ assignees:
       default:
         $ref: ../components/api-components.yaml#/responses/Error
 
+executionState:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  get:
+    operationId: getIssueExecutionState
+    description: Derived execution eligibility for the current Issue ownership. This does not persist pending execution state.
+    responses:
+      '200':
+        description: Current execution eligibility
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, canStart, activeRun]
+              properties:
+                state:
+                  type: string
+                  enum: [BACKLOG, NOT_AGENT_OWNED, CONFIGURATION_UNAVAILABLE, ACTIVE, READY]
+                canStart: {type: boolean}
+                activeRun:
+                  anyOf:
+                  - $ref: ../schemas/control-plane.yaml#/Run
+                  - type: 'null'
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
 startRun:
   parameters:
   - $ref: ../components/api-components.yaml#/parameters/ProjectID

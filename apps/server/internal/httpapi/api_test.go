@@ -168,6 +168,15 @@ func (f *fakeControlPlaneStore) CreateIssue(_ context.Context, v store.Issue) (s
 	v.Number = 1
 	return v, nil
 }
+
+func (f *fakeControlPlaneStore) CreateIssueMutation(ctx context.Context, v store.Issue) (store.IssueMutationResult, error) {
+	issue, err := f.CreateIssue(ctx, v)
+	return store.IssueMutationResult{Issue: issue}, err
+}
+
+func (f *fakeControlPlaneStore) UpdateIssueMutation(_ context.Context, v store.Issue) (store.IssueMutationResult, error) {
+	return store.IssueMutationResult{Issue: v}, nil
+}
 func (f *fakeControlPlaneStore) GetIssue(_ context.Context, pid, id string) (store.Issue, error) {
 	if pid != projectID || id != issueID {
 		return store.Issue{}, store.ErrNotFound

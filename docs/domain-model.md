@@ -154,7 +154,7 @@ Remote Issue branch publication does not create an equivalent remote target-inte
 
 ### Question
 
-Structured request for human input. A blocking Question may place the Run in `WAITING_FOR_INPUT` and the Issue in `BLOCKED`.
+Structured request for human input. A blocking Question may place the Run in `WAITING_FOR_INPUT`. It does not automatically change Issue Board status; an Agent or human uses the explicit Issue-status mutation when the Board should move to `BLOCKED`.
 
 `WAITING_FOR_INPUT` is not a Git finalization boundary. The same live execution checkout may remain dirty while waiting.
 

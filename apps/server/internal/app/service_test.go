@@ -33,6 +33,14 @@ func (f *fakeStore) GetIssueUUIDByKey(_ context.Context, projectID, key string) 
 	return "issue", nil
 }
 
+func (f *fakeStore) CreateIssueMutation(_ context.Context, value store.Issue) (store.IssueMutationResult, error) {
+	return store.IssueMutationResult{Issue: value}, nil
+}
+
+func (f *fakeStore) UpdateIssueMutation(_ context.Context, value store.Issue) (store.IssueMutationResult, error) {
+	return store.IssueMutationResult{Issue: value}, nil
+}
+
 func TestCreateRuntimeRejectsInvalidPolicyBeforeStore(t *testing.T) {
 	projectID := "project"
 	svc := New(&fakeStore{project: store.Project{ID: projectID}})

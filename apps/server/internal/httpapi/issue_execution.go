@@ -7,6 +7,34 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+type IssueExecutionStateDTO struct {
+	State     string  `json:"state"`
+	CanStart  bool    `json:"canStart"`
+	ActiveRun *RunDTO `json:"activeRun"`
+}
+
+func (a *api) getIssueExecutionState(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := pathUUID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	issueID, ok := pathIssueKey(w, r, projectID, a.service.ResolveIssueUUID)
+	if !ok {
+		return
+	}
+	state, err := a.service.GetIssueExecutionState(r.Context(), projectID, issueID)
+	if err != nil {
+		writeAppError(w, err)
+		return
+	}
+	out := IssueExecutionStateDTO{State: state.State, CanStart: state.CanStart}
+	if state.ActiveRun != nil {
+		run := runDTO(*state.ActiveRun, issueKeysFromPath(issueID, chi.URLParam(r, "issueID")))
+		out.ActiveRun = &run
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 func (a *api) startIssueRun(w http.ResponseWriter, r *http.Request) {
 	projectID, ok := pathUUID(w, r, "projectID")
 	if !ok {

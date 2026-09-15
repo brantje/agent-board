@@ -4,6 +4,7 @@ import "context"
 
 type ControlPlaneStore interface {
 	CoreStore
+	IssueMutationStore
 	ConfigurationStore
 	ExecutionStore
 	SchedulerStore

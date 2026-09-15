@@ -216,6 +216,7 @@ type SchedulerLease struct {
 const (
 	SchedulerWaitAgentCapacity = "agent_capacity"
 	SchedulerWaitModelCapacity = "model_capacity"
+	SchedulerWaitWorkspace     = "workspace_occupied"
 )
 
 type SchedulerAdmission struct {

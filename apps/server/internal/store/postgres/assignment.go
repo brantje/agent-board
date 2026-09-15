@@ -61,8 +61,8 @@ func enqueueAssignedIssue(ctx context.Context, tx pgx.Tx, issue store.Issue, rep
 		return store.Run{}, store.Event{}, err
 	}
 
-	var attempt int
-	if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(attempt), 0) + 1 FROM runs WHERE issue_id=$1`, issueID).Scan(&attempt); err != nil {
+	attempt, err := nextIssueRunAttempt(ctx, tx, projectID, issueID)
+	if err != nil {
 		return store.Run{}, store.Event{}, err
 	}
 
@@ -88,6 +88,18 @@ func enqueueAssignedIssue(ctx context.Context, tx pgx.Tx, issue store.Issue, rep
 		return store.Run{}, store.Event{}, err
 	}
 	return run, event, nil
+}
+
+func nextIssueRunAttempt(ctx context.Context, tx pgx.Tx, projectID, issueID string) (int, error) {
+	var attempt int
+	if err := tx.QueryRow(ctx, `
+		SELECT COALESCE(MAX(attempt), 0) + 1
+		FROM runs
+		WHERE project_id=$1 AND issue_id=$2
+	`, projectID, issueID).Scan(&attempt); err != nil {
+		return 0, err
+	}
+	return attempt, nil
 }
 
 func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID string) (store.Issue, string, string, error) {

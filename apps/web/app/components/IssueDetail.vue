@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { Assignee, AssignmentResponse, Issue, Run } from '../types/api'
+import type { Assignee, AssignmentResponse, Issue, IssueExecutionState, Run } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { issueRuns, statusLabel } from '../utils/issues'
 import { isBoardActivityEvent, applyCurrentBranchToIssue } from '../utils/events'
@@ -12,12 +12,11 @@ const props = withDefaults(defineProps<{ projectId: string; issueId: string; can
 const { data: issue, pending, error, refresh } = useResource<Issue>(() => apiPath('issues', props.projectId, props.issueId))
 const assignees = useResource<Assignee[]>(() => apiPath('assignees', props.projectId))
 const runs = useResource<Run[]>(() => apiPath('runs', props.projectId))
+const execution = useResource<IssueExecutionState>(() => `${apiPath('issues', props.projectId, props.issueId)}/execution`)
 const selected = ref('')
 const assigning = ref(false)
 const assignmentError = ref<Error>()
 const assignmentResult = ref<AssignmentResponse>()
-const assignmentRunBaseline = ref<Set<string> | null>()
-const checkingAssignmentRuns = ref(false)
 const startingRun = ref(false)
 const startRunError = ref<Error>()
 const startRunResult = ref<Run>()
@@ -34,20 +33,27 @@ const choices = computed(() => [
   }))
 ])
 const assignedName = computed(() => issue.value?.assignedTo?.name)
-const canStartRun = computed(() => Boolean(
-  props.canMutate
-  && issue.value?.assignedTo?.type === 'AGENT'
-  && issue.value.status !== 'BACKLOG'
-))
+const canStartRun = computed(() => Boolean(props.canMutate && execution.data.value?.canStart))
 const runActionLabel = computed(() => issueRunHistory.value.length ? 'Run again' : 'Start Run')
-const assignmentRunState = computed(() => {
-  if (assignmentResult.value?.issue.assignedTo?.type !== 'AGENT') return undefined
-  if (checkingAssignmentRuns.value || runs.pending.value) return 'checking'
-  if (runs.error.value || runs.data.value === undefined) return 'unknown'
-  if (!issueRunHistory.value.length) return 'not-created'
-  const baseline = assignmentRunBaseline.value
-  if (!baseline) return 'unknown'
-  return issueRunHistory.value.some(run => !baseline.has(run.id)) ? 'created' : 'not-created'
+const executionFeedback = computed(() => {
+  const state = execution.data.value
+  if (!state || state.state === 'NOT_AGENT_OWNED') return undefined
+  if (state.state === 'BACKLOG') {
+    return { title: 'Execution parked', description: 'This Issue is in Backlog. Move it out of Backlog before starting a Run.' }
+  }
+  if (state.state === 'CONFIGURATION_UNAVAILABLE') {
+    return { title: 'Execution unavailable', description: 'The current Agent assignment is valid, but its execution configuration prevents a new Run from being created.' }
+  }
+  if (state.state === 'READY') {
+    return { title: 'Execution available', description: 'No active Run exists for the current Agent. You can start a Run.' }
+  }
+  const run = state.activeRun
+  if (!run) return { title: 'Execution active', description: 'The current Agent already has an active Run for this Issue.' }
+  if (run.status === 'QUEUED') {
+    const wait = run.queueReason ? ` Queue reason: ${run.queueReason}.` : ''
+    return { title: 'Execution queued', description: `Attempt ${run.attempt} is waiting for scheduler admission.${wait}` }
+  }
+  return { title: 'Execution active', description: `Attempt ${run.attempt} is already ${statusLabel(run.status)}.` }
 })
 const creatorLabel = computed(() => {
   const creator = issue.value?.createdBy
@@ -57,17 +63,7 @@ const creatorLabel = computed(() => {
 })
 const assignmentDescription = computed(() => {
   if (!assignmentResult.value) return undefined
-  const result = assignmentResult.value
-  const summary = `Board status: ${statusLabel(result.issue.status)}. Ownership updated.`
-  if (result.issue.assignedTo?.type !== 'AGENT') return summary
-  if (assignmentRunState.value === 'not-created') {
-    const startHint = result.issue.status === 'BACKLOG' ? '' : ' Start a Run to validate and begin execution.'
-    return `${summary} No new execution attempt was created; assignment did not start execution.${startHint}`
-  }
-  if (assignmentRunState.value === 'unknown') {
-    return `${summary} Run creation could not be confirmed from the current Run state.`
-  }
-  return summary
+  return `Board status: ${statusLabel(assignmentResult.value.issue.status)}. Ownership updated.`
 })
 const startRunDescription = computed(() => {
   const result = startRunResult.value
@@ -79,7 +75,7 @@ const startRunDescription = computed(() => {
 const questionsPanel = ref<{ refresh?: () => Promise<unknown> }>()
 
 async function reload() {
-  await Promise.all([refresh(), assignees.refresh(), runs.refresh(), questionsPanel.value?.refresh?.()])
+  await Promise.all([refresh(), assignees.refresh(), runs.refresh(), execution.refresh(), questionsPanel.value?.refresh?.()])
 }
 
 useProjectEvents(() => props.projectId, async event => {
@@ -102,15 +98,9 @@ async function assign() {
     : assignees.data.value?.find(assignee => `${assignee.type}:${assignee.id}` === selected.value)
   if (selected.value !== unassignedChoice && !selectedAssignee) return
 
-  const runBaseline = runs.data.value !== undefined && !runs.error.value
-    ? new Set(issueRuns(runs.data.value, props.issueId).map(run => run.id))
-    : null
-
   assigning.value = true
   assignmentError.value = undefined
   assignmentResult.value = undefined
-  assignmentRunBaseline.value = undefined
-  checkingAssignmentRuns.value = false
 
   let result: AssignmentResponse
   try {
@@ -132,15 +122,7 @@ async function assign() {
   issue.value = result.issue
   selected.value = ''
   try {
-    if (result.issue.assignedTo?.type === 'AGENT') {
-      assignmentRunBaseline.value = runBaseline
-      checkingAssignmentRuns.value = true
-      try {
-        await runs.refresh()
-      } finally {
-        checkingAssignmentRuns.value = false
-      }
-    }
+    await Promise.all([runs.refresh(), execution.refresh()])
   } finally {
     assigning.value = false
   }
@@ -157,7 +139,7 @@ async function startRun() {
       method: 'POST'
     })
     startRunResult.value = result
-    await runs.refresh()
+    await Promise.all([runs.refresh(), execution.refresh()])
   } catch (failure) {
     startRunError.value = failure as Error
   } finally {
@@ -200,6 +182,8 @@ async function saved(savedIssue: Issue) {
                 @click="startRun"
               />
             </div>
+            <UAlert v-if="execution.error.value" title="Execution state unavailable" :description="execution.error.value.message" color="error" class="mb-3" />
+            <UAlert v-else-if="executionFeedback" :title="executionFeedback.title" :description="executionFeedback.description" class="mb-3" />
             <UAlert v-if="startRunError" title="Unable to start Run" :description="startRunError.message" color="error" class="mb-3" />
             <UAlert v-if="startRunResult" title="Run accepted" :description="startRunDescription" color="success" class="mb-3" />
             <AsyncState

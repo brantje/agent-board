@@ -27,3 +27,21 @@ type IssueExecutionStore interface {
 type IssueExecutionReadinessStore interface {
 	RunnableIssueExecutionScopes(context.Context, IssueExecutionFilter) ([]IssueExecutionScope, error)
 }
+
+const (
+	IssueExecutionBacklog                  = "BACKLOG"
+	IssueExecutionNotAgentOwned            = "NOT_AGENT_OWNED"
+	IssueExecutionConfigurationUnavailable = "CONFIGURATION_UNAVAILABLE"
+	IssueExecutionActive                   = "ACTIVE"
+	IssueExecutionReady                    = "READY"
+)
+
+type IssueExecutionState struct {
+	State     string
+	CanStart  bool
+	ActiveRun *Run
+}
+
+type IssueExecutionStateStore interface {
+	GetIssueExecutionState(context.Context, string, string) (IssueExecutionState, error)
+}

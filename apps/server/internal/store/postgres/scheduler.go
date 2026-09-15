@@ -104,6 +104,20 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 		return nil, err
 	}
 
+	occupied, err := workspaceAdmissionOccupied(ctx, tx, run)
+	if err != nil {
+		return nil, err
+	}
+	if occupied {
+		if err := deferQueuedJob(ctx, tx, job, store.SchedulerWaitWorkspace, backoffMicros); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
 	agentLimit, modelLimit, err := lockAdmissionResources(ctx, tx, agentID, modelProfileID)
 	if err != nil {
 		return nil, err
@@ -236,6 +250,51 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 		return job, run, "", "", errSchedulerConfigurationUnavailable
 	}
 	return job, run, *agentID, *modelProfileID, nil
+}
+
+// workspaceAdmissionOccupied serializes admission for Runs that share the
+// durable Issue Workspace. A peer claim covers the short pre-session window; a
+// live Execution Session keeps ownership while native Question input is pending.
+// Capacity is intentionally checked only after this fence so waiting work holds
+// no Agent, Model Profile or Runner reservation.
+func workspaceAdmissionOccupied(ctx context.Context, tx pgx.Tx, run store.Run) (bool, error) {
+	var workspaceID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id::text
+		FROM workspaces
+		WHERE project_id=$1 AND id=$2
+		FOR UPDATE
+	`, run.ProjectID, run.WorkspaceID).Scan(&workspaceID); err != nil {
+		return false, notFound(err)
+	}
+
+	var occupied bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM runs AS peer
+			WHERE peer.project_id=$1
+			  AND peer.workspace_id=$2
+			  AND peer.id<>$3
+			  AND (
+				EXISTS (
+					SELECT 1 FROM scheduler_jobs AS claimed
+					WHERE claimed.project_id=peer.project_id
+					  AND claimed.run_id=peer.id
+					  AND claimed.state='CLAIMED'
+				)
+				OR EXISTS (
+					SELECT 1 FROM execution_sessions AS session
+					WHERE session.project_id=peer.project_id
+					  AND session.run_id=peer.id
+					  AND session.status IN ('PENDING','STARTING','RUNNING')
+				)
+			  )
+		)
+	`, run.ProjectID, workspaceID, run.ID).Scan(&occupied); err != nil {
+		return false, err
+	}
+	return occupied, nil
 }
 
 func lockAdmissionResources(ctx context.Context, tx pgx.Tx, agentID, modelProfileID string) (int, *int, error) {

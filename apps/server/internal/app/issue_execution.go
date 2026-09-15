@@ -7,6 +7,18 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+func (s *Service) GetIssueExecutionState(ctx context.Context, projectID, issueID string) (store.IssueExecutionState, error) {
+	stateStore, ok := s.store.(store.IssueExecutionStateStore)
+	if !ok {
+		return store.IssueExecutionState{}, invalid("Issue execution unavailable")
+	}
+	state, err := stateStore.GetIssueExecutionState(ctx, projectID, issueID)
+	if err != nil {
+		return store.IssueExecutionState{}, translateStoreError(err, "issue")
+	}
+	return state, nil
+}
+
 func (s *Service) StartIssueRun(ctx context.Context, projectID, issueID string) (store.Run, error) {
 	execution, ok := s.store.(store.IssueExecutionStore)
 	if !ok {

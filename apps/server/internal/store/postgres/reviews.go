@@ -350,12 +350,27 @@ func (s *Store) RequestReviewChanges(ctx context.Context, input store.RequestRev
 		return store.RequestReviewChangesResult{}, err
 	}
 
+	run, err = scanRun(tx.QueryRow(ctx, `
+		UPDATE runs
+		SET status='COMPLETED', completed_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND status='READY_FOR_REVIEW'
+		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+	`, run.ProjectID, run.ID))
+	if err != nil {
+		return store.RequestReviewChangesResult{}, err
+	}
+
+	nextAttempt, err := nextIssueRunAttempt(ctx, tx, run.ProjectID, run.IssueID)
+	if err != nil {
+		return store.RequestReviewChangesResult{}, err
+	}
 	nextRun, err := scanRun(tx.QueryRow(ctx, `
 		INSERT INTO runs (project_id, issue_id, workspace_id, agent_id, attempt, status)
 		VALUES ($1, $2, $3, $4, $5, 'QUEUED')
 		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
 		          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-	`, run.ProjectID, run.IssueID, run.WorkspaceID, run.AgentID, run.Attempt+1))
+	`, run.ProjectID, run.IssueID, run.WorkspaceID, run.AgentID, nextAttempt))
 	if err != nil {
 		return store.RequestReviewChangesResult{}, err
 	}
@@ -419,7 +434,13 @@ func lockReviewCommandState(ctx context.Context, tx pgx.Tx, projectID, reviewID 
 
 func ensureLatestReviewAttempt(ctx context.Context, tx pgx.Tx, run store.Run) error {
 	var newer bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM runs WHERE project_id=$1 AND issue_id=$2 AND attempt>$3)`, run.ProjectID, run.IssueID, run.Attempt).Scan(&newer); err != nil {
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS(
+			SELECT 1 FROM runs
+			WHERE project_id=$1 AND issue_id=$2 AND attempt>$3
+			  AND agent_id IS NOT DISTINCT FROM $4::uuid
+		)
+	`, run.ProjectID, run.IssueID, run.Attempt, run.AgentID).Scan(&newer); err != nil {
 		return err
 	}
 	if newer {
@@ -519,5 +540,22 @@ func appendReviewDecisionEvents(ctx context.Context, tx pgx.Tx, run store.Run, r
 	if err != nil {
 		return nil, err
 	}
-	return []store.Event{reviewEvent, decisionEvent}, nil
+	events := []store.Event{reviewEvent, decisionEvent}
+	if run.Status == "COMPLETED" {
+		completedEvent, err := appendEventTx(ctx, tx, store.Event{
+			Type:        "run.completed",
+			ProjectID:   review.ProjectID,
+			IssueID:     &issueID,
+			RunID:       &runID,
+			AgentID:     run.AgentID,
+			WorkspaceID: &workspaceID,
+			Actor:       store.EmptyObject,
+			Payload:     store.EmptyObject,
+		})
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, completedEvent)
+	}
+	return events, nil
 }
