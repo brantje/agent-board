@@ -10,7 +10,7 @@ import (
 func (s *Server) registerQuestionTools(server *mcp.Server) {
 	mcp.AddTool(server, readOnlyTool("list_questions", "List blocking or historical Questions with optional public Issue key, Run, and status filters."), objectListHandler(s.listQuestions))
 	mcp.AddTool(server, readOnlyTool("get_question", "Read one Question."), s.getQuestion)
-	mcp.AddTool(server, mutationTool("answer_question", "Answer a Question as the authenticated human User through the durable Decision and continuation path."), s.answerQuestion)
+	mcp.AddTool(server, mutationTool("answer_question", "Answer a Question as the authenticated human User through the durable Decision and continuation path.", false, false), s.answerQuestion)
 }
 
 func (s *Server) listQuestions(ctx context.Context, _ *mcp.CallToolRequest, input ListQuestionsInput) (*mcp.CallToolResult, []QuestionDTO, error) {
