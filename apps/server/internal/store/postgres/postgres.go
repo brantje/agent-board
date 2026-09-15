@@ -94,23 +94,23 @@ func notFound(err error) error {
 	return err
 }
 
-func objectJSON(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
+func objectJSON(value json.RawMessage) json.RawMessage {
+	if len(value) == 0 {
 		return store.EmptyObject
 	}
-	return raw
+	return value
 }
 
-func arrayJSON(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return store.EmptyArray
+func arrayJSON(value json.RawMessage) json.RawMessage {
+	if len(value) == 0 {
+		return json.RawMessage(`[]`)
 	}
-	return raw
+	return value
 }
 
-func commandArgvJSON(raw json.RawMessage) json.RawMessage {
-	if len(raw) == 0 {
-		return store.EmptyArray
+func commandArgvJSON(value json.RawMessage) json.RawMessage {
+	if len(value) == 0 {
+		return nil
 	}
-	return raw
+	return arrayJSON(value)
 }
