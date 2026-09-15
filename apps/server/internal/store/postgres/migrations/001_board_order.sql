@@ -49,7 +49,7 @@ BEGIN
         SELECT 1
         FROM pg_constraint
         WHERE conrelid = 'issues'::regclass
-          AND conname = 'issues_board_position_nonnegative'
+          AND conname IN ('issues_board_position_nonnegative', 'issues_board_position_check')
     ) THEN
         ALTER TABLE issues
             ADD CONSTRAINT issues_board_position_nonnegative CHECK (board_position >= 0);
