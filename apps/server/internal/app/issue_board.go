@@ -8,6 +8,16 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+type issueBoardSchedulerWaker interface {
+	Wake()
+}
+
+func (s *Service) SetIssueBoardSchedulerWaker(waker issueBoardSchedulerWaker) {
+	if s != nil {
+		s.schedulerWaker = waker
+	}
+}
+
 func (s *Service) PlaceIssue(ctx context.Context, input store.IssueBoardPlacement) (store.Issue, error) {
 	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
 		return store.Issue{}, err
@@ -22,6 +32,9 @@ func (s *Service) PlaceIssue(ctx context.Context, input store.IssueBoardPlacemen
 	}
 	publisher, _ := s.events.(persistedEventPublisher)
 	publishPersistedEvents(ctx, publisher, result.Events)
+	if s.schedulerWaker != nil {
+		s.schedulerWaker.Wake()
+	}
 	return result.Issue, nil
 }
 
