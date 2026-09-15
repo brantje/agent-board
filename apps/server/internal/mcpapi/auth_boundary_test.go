@@ -132,10 +132,12 @@ func TestMCPProjectScopedToolsPreserveNotFoundIsolation(t *testing.T) {
 	if len(tests) != 29 {
 		t.Fatalf("scoped tool test inventory = %d, want 29", len(tests))
 	}
+	const want = "project_not_found: project not found"
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := test.call(); err == nil {
-				t.Fatal("handler exposed a Project-scoped resource to an unauthorized actor")
+			err := test.call()
+			if err == nil || err.Error() != want {
+				t.Fatalf("handler returned %v; want %s", err, want)
 			}
 		})
 	}
