@@ -8,13 +8,13 @@ import (
 )
 
 func (s *Server) registerIssueTools(server *mcp.Server) {
-	mcp.AddTool(server, readOnlyTool("list_issues", "List Issues in one visible Project using public Issue keys."), s.listIssues)
+	mcp.AddTool(server, readOnlyTool("list_issues", "List Issues in one visible Project using public Issue keys."), objectListHandler(s.listIssues))
 	mcp.AddTool(server, readOnlyTool("get_issue", "Read one Issue by public Issue key."), s.getIssue)
 	mcp.AddTool(server, mutationTool("create_issue", "Create an Issue as the authenticated human User.", false, false), s.createIssue)
 	mcp.AddTool(server, mutationTool("update_issue", "Patch Issue title, description, and/or priority. Board status and ownership are separate tools.", false, false), s.updateIssue)
 	mcp.AddTool(server, mutationTool("set_issue_status", "Set explicit Issue Board status to BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, or DONE. This does not change ownership.", false, true), s.setIssueStatus)
 	mcp.AddTool(server, mutationTool("set_issue_assignee", "Set or clear Issue ownership using USER or AGENT plus UUID. This does not change Board status or cancel Runs.", false, false), s.setIssueAssignee)
-	mcp.AddTool(server, readOnlyTool("list_issue_relationships", "List canonical relationships for an Issue by public Issue key."), s.listIssueRelationships)
+	mcp.AddTool(server, readOnlyTool("list_issue_relationships", "List canonical relationships for an Issue by public Issue key."), objectListHandler(s.listIssueRelationships))
 	mcp.AddTool(server, mutationTool("create_issue_relationship", "Create blocks, depends_on, related_to, or duplicates relationship through canonical validation.", false, false), s.createIssueRelationship)
 	mcp.AddTool(server, mutationTool("delete_issue_relationship", "Delete one Issue relationship through canonical validation.", true, false), s.deleteIssueRelationship)
 	mcp.AddTool(server, readOnlyTool("get_issue_execution_state", "Read the canonical derived Issue execution state including canStart and activeRun."), s.getIssueExecutionState)

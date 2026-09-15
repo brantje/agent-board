@@ -7,13 +7,13 @@ import (
 )
 
 func (s *Server) registerProjectTools(server *mcp.Server) {
-	mcp.AddTool(server, readOnlyTool("list_projects", "List Projects visible to the authenticated Agent Board User."), s.listProjects)
+	mcp.AddTool(server, readOnlyTool("list_projects", "List Projects visible to the authenticated Agent Board User."), objectListHandler(s.listProjects))
 	mcp.AddTool(server, readOnlyTool("get_project", "Read one visible Project."), s.getProject)
 	mcp.AddTool(server, readOnlyTool("get_project_role", "Return the authenticated User's effective role for one Project."), s.getProjectRole)
-	mcp.AddTool(server, readOnlyTool("list_project_members", "List the safe human roster with effective Project roles."), s.listProjectMembers)
-	mcp.AddTool(server, readOnlyTool("list_agents", "List Agent configurations visible in Project scope without secret material."), s.listAgents)
+	mcp.AddTool(server, readOnlyTool("list_project_members", "List the safe human roster with effective Project roles."), objectListHandler(s.listProjectMembers))
+	mcp.AddTool(server, readOnlyTool("list_agents", "List Agent configurations visible in Project scope without secret material."), objectListHandler(s.listAgents))
 	mcp.AddTool(server, readOnlyTool("get_agent", "Read one Agent configuration visible in Project scope without secret material."), s.getAgent)
-	mcp.AddTool(server, readOnlyTool("list_issue_assignees", "List current valid Issue ownership targets using the canonical assignee directory."), s.listIssueAssignees)
+	mcp.AddTool(server, readOnlyTool("list_issue_assignees", "List current valid Issue ownership targets using the canonical assignee directory."), objectListHandler(s.listIssueAssignees))
 }
 
 func (s *Server) listProjects(ctx context.Context, _ *mcp.CallToolRequest, _ EmptyInput) (*mcp.CallToolResult, []ProjectDTO, error) {
