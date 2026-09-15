@@ -12,12 +12,8 @@ func validateIssuePatch(patch store.IssuePatch) error {
 	if patch.Title != nil && strings.TrimSpace(*patch.Title) == "" {
 		return invalid("issue title is required")
 	}
-	if patch.Status != nil {
-		switch *patch.Status {
-		case "BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "REVIEW", "DONE":
-		default:
-			return invalid("invalid issue status")
-		}
+	if patch.Status != nil && !store.ValidIssueStatus(*patch.Status) {
+		return invalid("invalid issue status")
 	}
 	if patch.Priority != nil && (*patch.Priority < 0 || *patch.Priority > 4) {
 		return invalid("issue priority must be between 0 and 4")
