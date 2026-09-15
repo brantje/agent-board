@@ -11,6 +11,7 @@ type issueToolInputSchemas struct {
 	createIssue        *jsonschema.Schema
 	updateIssue        *jsonschema.Schema
 	setIssueStatus     *jsonschema.Schema
+	placeIssue         *jsonschema.Schema
 	setIssueAssignee   *jsonschema.Schema
 	createRelationship *jsonschema.Schema
 }
@@ -38,6 +39,7 @@ func lockedIssueToolInputSchemas() issueToolInputSchemas {
 		createIssue:        createIssue,
 		updateIssue:        updateIssue,
 		setIssueStatus:     mustInferToolSchema[SetIssueStatusInput](statusTypes),
+		placeIssue:         mustInferToolSchema[PlaceIssueInput](statusTypes),
 		setIssueAssignee:   mustInferToolSchema[SetIssueAssigneeInput](assigneeTypes),
 		createRelationship: mustInferToolSchema[CreateRelationshipInput](relationshipTypes),
 	}
