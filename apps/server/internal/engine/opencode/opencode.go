@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
+	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 )
 
 const (
@@ -404,7 +406,7 @@ func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher,
 	}
 	process, err := launcher.Start(ctx, engine.ProcessRequest{
 		Command:               issueStatusServeCommand(host, port, env),
-		CWD:                   "/workspace",
+		CWD:                   runtimepkg.WorkspaceTarget,
 		Env:                   env,
 		ProviderCredentialEnv: providerCredentialEnv,
 		Kind:                  "tool",
@@ -431,6 +433,7 @@ func ensureNativeSession(ctx context.Context, native *client.Client, safe execut
 		}
 	}
 	session, err := native.CreateSession(ctx, client.CreateSessionRequest{
+		Directory: runtimepkg.WorkspaceTarget,
 		Model: client.ModelRef{
 			ID:         safe.Model.Model,
 			ProviderID: settings.ProviderID,
@@ -447,10 +450,15 @@ func pickNativeSession(ctx context.Context, native *client.Client, sessions []cl
 	if len(sessions) == 0 {
 		return client.Session{}, nil
 	}
+	candidates := make([]client.Session, 0, len(sessions))
 	for _, session := range sessions {
-		if strings.TrimSpace(session.ID) == "" {
+		directory := strings.TrimSpace(session.Directory)
+		if strings.TrimSpace(session.ID) == "" || directory == "" || path.Clean(directory) != runtimepkg.WorkspaceTarget {
 			continue
 		}
+		candidates = append(candidates, session)
+	}
+	for _, session := range candidates {
 		active, err := native.SessionActive(ctx, session.ID)
 		if err != nil {
 			return client.Session{}, fmt.Errorf("opencode engine: query native session %s: %w", session.ID, err)
@@ -459,10 +467,8 @@ func pickNativeSession(ctx context.Context, native *client.Client, sessions []cl
 			return session, nil
 		}
 	}
-	for _, session := range sessions {
-		if strings.TrimSpace(session.ID) != "" {
-			return session, nil
-		}
+	if len(candidates) != 0 {
+		return candidates[0], nil
 	}
 	return client.Session{}, nil
 }
