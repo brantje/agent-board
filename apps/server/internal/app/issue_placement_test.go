@@ -81,11 +81,12 @@ func TestIssuePlacementApplicationBoundaryValidatesCapabilityAndStoreErrors(t *t
 	other := "issue-2"
 
 	for name, input := range map[string]store.IssuePlacement{
-		"missing issue":  {ProjectID: project.ID},
-		"invalid status": {ProjectID: project.ID, IssueID: valid.IssueID, Status: &badStatus},
-		"before self":    {ProjectID: project.ID, IssueID: valid.IssueID, BeforeID: &self},
-		"after self":     {ProjectID: project.ID, IssueID: valid.IssueID, AfterID: &self},
-		"same anchors":   {ProjectID: project.ID, IssueID: valid.IssueID, BeforeID: &other, AfterID: &other},
+		"missing project": {IssueID: valid.IssueID},
+		"missing issue":   {ProjectID: project.ID},
+		"invalid status":  {ProjectID: project.ID, IssueID: valid.IssueID, Status: &badStatus},
+		"before self":     {ProjectID: project.ID, IssueID: valid.IssueID, BeforeID: &self},
+		"after self":      {ProjectID: project.ID, IssueID: valid.IssueID, AfterID: &self},
+		"same anchors":    {ProjectID: project.ID, IssueID: valid.IssueID, BeforeID: &other, AfterID: &other},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := service.PlaceIssue(t.Context(), input); err == nil {
