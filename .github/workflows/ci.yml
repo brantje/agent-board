@@ -49,8 +49,15 @@ jobs:
           set -eu
           go test -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out
-          total="$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
-          awk -v coverage="$total" 'BEGIN { printf "server coverage: %.1f%%\n", coverage; if (coverage + 0 < 85) exit 1 }'
+          stats="$(awk 'NR > 1 { total += $2; if ($3 > 0) covered += $2 } END { print covered, total }' coverage.out)"
+          covered="${stats%% *}"
+          total="${stats##* }"
+          awk -v covered="$covered" -v total="$total" 'BEGIN {
+            if (total == 0) exit 1
+            coverage = covered * 100 / total
+            printf "server coverage: %.4f%%\n", coverage
+            if (covered * 100 < total * 85) exit 1
+          }'
       - name: Race test
         working-directory: apps/server
         run: go test -race ./...
@@ -164,8 +171,15 @@ jobs:
           set -eu
           go test -coverprofile=coverage.out ./...
           go tool cover -func=coverage.out
-          total="$(go tool cover -func=coverage.out | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
-          awk -v coverage="$total" 'BEGIN { printf "agent-runner coverage: %.1f%%\n", coverage; if (coverage + 0 < 85) exit 1 }'
+          stats="$(awk 'NR > 1 { total += $2; if ($3 > 0) covered += $2 } END { print covered, total }' coverage.out)"
+          covered="${stats%% *}"
+          total="${stats##* }"
+          awk -v covered="$covered" -v total="$total" 'BEGIN {
+            if (total == 0) exit 1
+            coverage = covered * 100 / total
+            printf "agent-runner coverage: %.4f%%\n", coverage
+            if (covered * 100 < total * 85) exit 1
+          }'
       - name: Vet
         working-directory: apps/agent-runner
         run: go vet ./...
