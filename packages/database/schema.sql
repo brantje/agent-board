@@ -31,6 +31,19 @@ CREATE TABLE projects (
 CREATE UNIQUE INDEX projects_name_uq ON projects (lower(name));
 CREATE UNIQUE INDEX projects_issue_prefix_uq ON projects (issue_prefix);
 
+CREATE FUNCTION default_project_workflow_settings() RETURNS trigger AS $$
+BEGIN
+    IF NOT (NEW.workflow_settings ? 'strictOrder') THEN
+        NEW.workflow_settings = jsonb_set(NEW.workflow_settings, '{strictOrder}', 'true'::jsonb, true);
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER projects_workflow_defaults
+    BEFORE INSERT ON projects
+    FOR EACH ROW EXECUTE FUNCTION default_project_workflow_settings();
+
 CREATE TABLE users (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     username text NOT NULL CHECK (btrim(username) <> '' AND username = lower(btrim(username))),
@@ -275,6 +288,7 @@ CREATE TABLE issues (
     description text NOT NULL DEFAULT '',
     status text NOT NULL DEFAULT 'BACKLOG' CHECK (status IN ('BACKLOG', 'TODO', 'IN_PROGRESS', 'BLOCKED', 'REVIEW', 'DONE')),
     priority integer NOT NULL DEFAULT 0 CHECK (priority BETWEEN 0 AND 4),
+    board_position bigint NOT NULL DEFAULT 0 CHECK (board_position >= 0),
     assignee_type text,
     assignee_id uuid,
     CONSTRAINT issues_assignee_pair CHECK ((assignee_type IS NULL AND assignee_id IS NULL) OR (assignee_type IS NOT NULL AND assignee_type IN ('USER','AGENT') AND assignee_id IS NOT NULL)),
@@ -288,6 +302,7 @@ CREATE TABLE issues (
 );
 
 CREATE INDEX issues_project_status_idx ON issues (project_id, status, created_at);
+CREATE INDEX issues_project_board_idx ON issues (project_id, status, board_position, id);
 CREATE INDEX issues_assignee_idx ON issues (assignee_type, assignee_id) WHERE assignee_id IS NOT NULL;
 
 CREATE TABLE issue_relationships (
