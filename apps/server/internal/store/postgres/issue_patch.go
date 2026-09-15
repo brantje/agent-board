@@ -14,6 +14,11 @@ func (s *Store) UpdateIssuePatchMutation(ctx context.Context, patch store.IssueP
 		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if patch.Status != nil {
+		if err := lockIssueBoardProject(ctx, tx, patch.ProjectID); err != nil {
+			return store.IssueMutationResult{}, err
+		}
+	}
 
 	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, patch.ProjectID, patch.ID)
 	if err != nil {
