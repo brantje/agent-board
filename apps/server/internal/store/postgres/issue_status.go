@@ -85,11 +85,45 @@ func lockIssueStatusRunFence(ctx context.Context, tx pgx.Tx, input store.IssueSt
 	if err != nil {
 		return store.Run{}, notFound(err)
 	}
-	if run.Status != "RUNNING" || run.IssueID != input.IssueID || run.WorkspaceID != *input.WorkspaceID ||
+	if run.IssueID != input.IssueID || run.WorkspaceID != *input.WorkspaceID ||
 		run.AgentID == nil || *run.AgentID != *input.AgentID {
 		return store.Run{}, store.ErrConflict
 	}
-	return run, nil
+	if run.Status == "RUNNING" {
+		return run, nil
+	}
+	if run.Status == "WAITING_FOR_INPUT" {
+		ready, err := runHasAnsweredInteractiveInput(ctx, tx, run.ProjectID, run.ID)
+		if err != nil {
+			return store.Run{}, err
+		}
+		if ready {
+			return run, nil
+		}
+	}
+	return store.Run{}, store.ErrConflict
+}
+
+func runHasAnsweredInteractiveInput(ctx context.Context, tx pgx.Tx, projectID, runID string) (bool, error) {
+	var ready bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM questions AS q
+			JOIN engine_question_bindings AS binding
+			  ON binding.project_id=q.project_id
+			 AND binding.run_id=q.run_id
+			 AND binding.question_id=q.id
+			WHERE q.project_id=$1 AND q.run_id=$2 AND q.blocking AND q.status='ANSWERED'
+			  AND binding.state='ANSWERED'
+		)
+		AND NOT EXISTS (
+			SELECT 1
+			FROM engine_question_bindings AS pending
+			WHERE pending.project_id=$1 AND pending.run_id=$2 AND pending.state='OPEN'
+		)
+	`, projectID, runID).Scan(&ready)
+	return ready, err
 }
 
 func validateIssueStatusRecoveryFence(ctx context.Context, tx pgx.Tx, input store.IssueStatusMutation, run store.Run) error {
