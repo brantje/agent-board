@@ -21,6 +21,9 @@ func (s *Server) registerIssueTools(server *mcp.Server) {
 	setIssueStatus := mutationTool("set_issue_status", "Set explicit Issue Board status to BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, or DONE. This does not change ownership.", false, true)
 	setIssueStatus.InputSchema = schemas.setIssueStatus
 	mcp.AddTool(server, setIssueStatus, s.setIssueStatus)
+	placeIssue := mutationTool("place_issue_on_board", "Move or reorder an Issue on the Board. status selects the destination column; beforeIssueId places it before another public Issue key, while omitted or null places it at the end.", false, false)
+	placeIssue.InputSchema = schemas.placeIssue
+	mcp.AddTool(server, placeIssue, s.placeIssueOnBoard)
 	setIssueAssignee := mutationTool("set_issue_assignee", "Set or clear Issue ownership using USER or AGENT plus UUID. This does not change Board status or cancel Runs.", false, false)
 	setIssueAssignee.InputSchema = schemas.setIssueAssignee
 	mcp.AddTool(server, setIssueAssignee, s.setIssueAssignee)
@@ -123,6 +126,38 @@ func (s *Server) setIssueStatus(ctx context.Context, _ *mcp.CallToolRequest, inp
 	}
 	status := string(input.Status)
 	value, err := s.services.ProjectAccess.PatchIssue(ctx, actor, store.IssuePatch{ProjectID: input.ProjectID, ID: issueID, Status: &status})
+	if err != nil {
+		return nil, IssueDTO{}, toolError(ctx, err)
+	}
+	return nil, issueDTO(value), nil
+}
+
+func (s *Server) placeIssueOnBoard(ctx context.Context, _ *mcp.CallToolRequest, input PlaceIssueInput) (*mcp.CallToolResult, IssueDTO, error) {
+	if err := requireUUID(input.ProjectID, "projectId"); err != nil {
+		return nil, IssueDTO{}, toolError(ctx, err)
+	}
+	actor, err := actorFromContext(ctx)
+	if err != nil {
+		return nil, IssueDTO{}, toolError(ctx, err)
+	}
+	issueID, err := s.resolveIssue(ctx, actor, input.ProjectID, input.IssueID)
+	if err != nil {
+		return nil, IssueDTO{}, toolError(ctx, err)
+	}
+	var beforeIssueID *string
+	if input.BeforeIssueID != nil {
+		resolved, err := s.resolveIssue(ctx, actor, input.ProjectID, *input.BeforeIssueID)
+		if err != nil {
+			return nil, IssueDTO{}, toolError(ctx, err)
+		}
+		beforeIssueID = &resolved
+	}
+	value, err := s.services.ProjectAccess.PlaceIssue(ctx, actor, store.IssueBoardPlacement{
+		ProjectID:     input.ProjectID,
+		IssueID:       issueID,
+		Status:        string(input.Status),
+		BeforeIssueID: beforeIssueID,
+	})
 	if err != nil {
 		return nil, IssueDTO{}, toolError(ctx, err)
 	}
