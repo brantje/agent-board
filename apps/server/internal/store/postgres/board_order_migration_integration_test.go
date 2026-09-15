@@ -13,6 +13,7 @@ func TestBoardOrderMigrationBackfillsLegacyDataDeterministically(t *testing.T) {
 	if _, err := pool.Exec(ctx, `
 		DROP TRIGGER projects_workflow_defaults ON projects;
 		DROP FUNCTION default_project_workflow_settings();
+		ALTER TABLE projects DROP CONSTRAINT projects_strict_order_type_check;
 		ALTER TABLE issues DROP COLUMN board_position CASCADE;
 	`); err != nil {
 		t.Fatal(err)
