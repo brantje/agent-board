@@ -83,16 +83,6 @@ func (s *protocolStore) ListIssueRelationships(_ context.Context, projectID, iss
 	return []store.IssueRelationship{{ID: mcpTestRelationshipID, ProjectID: projectID, SourceIssueID: mcpTestIssueID, TargetIssueID: mcpTestSecondIssueID, Type: "blocks"}}, nil
 }
 
-func (s *protocolStore) ListIssueAssignees(_ context.Context, projectID string) ([]store.Assignee, error) {
-	if projectID != s.project.ID {
-		return nil, store.ErrNotFound
-	}
-	return []store.Assignee{
-		{Type: "USER", ID: mcpTestUserID, Name: "Admin"},
-		{Type: "AGENT", ID: mcpTestAgentID, Name: "MCP Agent"},
-	}, nil
-}
-
 func (s *protocolStore) GetIssueExecutionState(_ context.Context, projectID, issueID string) (store.IssueExecutionState, error) {
 	if projectID != s.project.ID || issueID != mcpTestIssueID {
 		return store.IssueExecutionState{}, store.ErrNotFound
@@ -126,7 +116,6 @@ func TestMCPReadToolsUseSharedProjectAccessBoundaries(t *testing.T) {
 		{name: "list_runs", args: map[string]any{"projectId": mcpTestProjectID}},
 		{name: "get_run", args: map[string]any{"projectId": mcpTestProjectID, "runId": mcpTestRunID}},
 		{name: "get_agent", args: map[string]any{"projectId": mcpTestProjectID, "agentId": mcpTestAgentID}},
-		{name: "list_issue_assignees", args: map[string]any{"projectId": mcpTestProjectID}},
 	}
 
 	for _, call := range calls {
