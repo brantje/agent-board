@@ -41,6 +41,19 @@ func (s *protocolStore) UpdateIssuePatchMutation(_ context.Context, patch store.
 	return store.IssueMutationResult{Issue: issue}, nil
 }
 
+func (s *protocolStore) PlaceIssue(_ context.Context, input store.IssueBoardPlacement) (store.IssueMutationResult, error) {
+	issue, err := s.GetIssue(context.Background(), input.ProjectID, input.IssueID)
+	if err != nil {
+		return store.IssueMutationResult{}, err
+	}
+	if input.BeforeIssueID != nil {
+		return store.IssueMutationResult{}, store.ErrInvalidArgument
+	}
+	issue.Status = input.Status
+	issue.BoardPosition = 7
+	return store.IssueMutationResult{Issue: issue}, nil
+}
+
 func (s *protocolStore) SetIssueAssignee(_ context.Context, projectID, issueID string, target *store.Assignee, _ json.RawMessage) (store.IssueMutationResult, error) {
 	issue, err := s.GetIssue(context.Background(), projectID, issueID)
 	if err != nil {
@@ -87,6 +100,7 @@ func TestMCPIssueMutationsUseSharedApplicationBoundaries(t *testing.T) {
 		{name: "create_issue", args: map[string]any{"projectId": mcpTestProjectID, "title": "Created through MCP", "description": "Uses the shared Issue service", "priority": 2}},
 		{name: "update_issue", args: map[string]any{"projectId": mcpTestProjectID, "issueId": "MCP-1", "title": "Updated through MCP", "description": "Patched through ProjectAccess", "priority": 3}},
 		{name: "set_issue_status", args: map[string]any{"projectId": mcpTestProjectID, "issueId": "MCP-1", "status": "IN_PROGRESS"}},
+		{name: "place_issue_on_board", args: map[string]any{"projectId": mcpTestProjectID, "issueId": "MCP-1", "status": "TODO", "beforeIssueId": nil}},
 		{name: "set_issue_assignee", args: map[string]any{"projectId": mcpTestProjectID, "issueId": "MCP-1", "assignedTo": map[string]any{"type": "USER", "id": mcpTestUserID}}},
 		{name: "list_issue_assignees", args: map[string]any{"projectId": mcpTestProjectID}},
 	}
