@@ -183,7 +183,7 @@ func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (sto
 		if err != nil {
 			return store.IssueMutationResult{}, err
 		}
-		if _, runEvent, err = enqueueIssueMutation(ctx, tx, issue, "", true, repositoryPath, defaultBranch); err != nil {
+		if _, runEvent, err = s.enqueueIssueMutation(ctx, tx, issue, "", true, repositoryPath, defaultBranch); err != nil {
 			return store.IssueMutationResult{}, err
 		}
 	}

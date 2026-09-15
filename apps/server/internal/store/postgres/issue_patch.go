@@ -43,7 +43,7 @@ func (s *Store) UpdateIssuePatchMutation(ctx context.Context, patch store.IssueP
 		return store.IssueMutationResult{Issue: current}, nil
 	}
 
-	result, err := applyIssueMutationTx(ctx, tx, issueMutationTxInput{
+	result, err := s.applyIssueMutationTx(ctx, tx, issueMutationTxInput{
 		Issue:          updated,
 		Previous:       previous,
 		RepositoryPath: repositoryPath,

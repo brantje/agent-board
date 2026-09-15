@@ -334,16 +334,19 @@ func configuredApplication(database *postgres.Store) (*app.Services, error) {
 		database.SetRunnerCandidates(services.ControlPlane.Runners.Connections.Candidates)
 	}
 	services.ControlPlane.SetProjectRepositoryProvisioner(provisioner)
-	if err := configureExecutionScheduler(services, git); err != nil {
+	if err := configureExecutionScheduler(services, git, database.SetEngineRegistered); err != nil {
 		_ = services.Close()
 		return nil, err
 	}
 	return services, nil
 }
 
-func configureExecutionScheduler(services *app.Services, git workspace.Git) error {
+func configureExecutionScheduler(services *app.Services, git workspace.Git, setEngineRegistered func(func(string) bool)) error {
 	if services == nil || services.ExecutionStore == nil || services.ExecutionContext == nil || services.RuntimeInstances == nil || services.ExecutionSessions == nil || services.Redaction == nil {
 		return fmt.Errorf("execution services are incomplete")
+	}
+	if setEngineRegistered == nil {
+		return fmt.Errorf("Engine registry configuration is unavailable")
 	}
 	baseBlobs, err := evidence.NewFileBlobStore(configuredEvidenceRoot(), defaultEvidenceBlobLimit)
 	if err != nil {
@@ -386,6 +389,7 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git) erro
 	if err != nil {
 		return err
 	}
+	setEngineRegistered(engines.Has)
 	var runnerConnector runexec.RunnerConnector
 	if services.ControlPlane != nil && services.ControlPlane.Runners != nil {
 		runnerConnector = runexec.NewRegistryConnector(services.ControlPlane.Runners.Connections)

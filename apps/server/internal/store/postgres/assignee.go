@@ -137,7 +137,7 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
-	_, runEvent, err := enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch)
+	_, runEvent, err := s.enqueueIssueMutation(ctx, tx, issue, issue.Status, true, repositoryPath, defaultBranch)
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}

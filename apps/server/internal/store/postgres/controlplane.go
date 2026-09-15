@@ -82,7 +82,7 @@ func (s *Store) updateIssueMutation(ctx context.Context, input store.Issue, acto
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
-	result, err := applyIssueMutationTx(ctx, tx, issueMutationTxInput{
+	result, err := s.applyIssueMutationTx(ctx, tx, issueMutationTxInput{
 		Issue:          input,
 		Previous:       previous,
 		RepositoryPath: repositoryPath,

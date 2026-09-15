@@ -30,6 +30,13 @@ func TestRegistry(t *testing.T) {
 	if _, err := r.Get("missing"); err == nil {
 		t.Fatal("expected missing adapter error")
 	}
+	if !r.Has(" scripted ") || r.Has("missing") {
+		t.Fatal("registry membership does not match Get")
+	}
+	var nilRegistry *Registry
+	if nilRegistry.Has("scripted") {
+		t.Fatal("nil registry reported an adapter")
+	}
 }
 
 func TestRegistryRejectsDuplicateAndEmptyAdapters(t *testing.T) {

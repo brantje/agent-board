@@ -43,7 +43,7 @@ func (s *Store) GetIssueExecutionState(ctx context.Context, projectID, issueID s
 	if !errors.Is(err, store.ErrNotFound) {
 		return store.IssueExecutionState{}, err
 	}
-	if err := verifyRunnableAgent(ctx, tx, projectID, *assigneeID); err != nil {
+	if err := s.verifyRunnableAgent(ctx, tx, projectID, *assigneeID); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			return store.IssueExecutionState{State: store.IssueExecutionConfigurationUnavailable}, nil
 		}
@@ -74,7 +74,7 @@ func (s *Store) enqueueCurrentIssue(ctx context.Context, projectID, issueID, exp
 		}
 		return store.Run{}, store.Event{}, nil
 	}
-	run, event, err := enqueueAssignedIssue(ctx, tx, issue, path, branch, strict)
+	run, event, err := s.enqueueAssignedIssue(ctx, tx, issue, path, branch, strict)
 	if err != nil {
 		return store.Run{}, store.Event{}, err
 	}
@@ -127,7 +127,7 @@ func (s *Store) RunnableIssueExecutionScopes(ctx context.Context, filter store.I
 
 	scopes := make([]store.IssueExecutionScope, 0, len(candidates))
 	for _, c := range candidates {
-		err = verifyRunnableAgent(ctx, tx, c.project, c.agent)
+		err = s.verifyRunnableAgent(ctx, tx, c.project, c.agent)
 		if err == nil {
 			scopes = append(scopes, store.IssueExecutionScope{ProjectID: c.project, AgentID: c.agent})
 			continue

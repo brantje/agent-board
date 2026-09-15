@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
-	"github.com/brantje/agent-board/packages/runnerprotocol"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -25,7 +24,7 @@ var activeRunStatuses = []string{
 // The caller holds the Issue row lock through commit: policy, readiness,
 // pair-scoped duplicate suppression, attempt allocation and enqueue are atomic.
 // The returned Event is non-zero only when this call persisted run.created.
-func enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store.Issue, previousStatus string, assignment bool, repositoryPath, defaultBranch string) (store.Run, store.Event, error) {
+func (s *Store) enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store.Issue, previousStatus string, assignment bool, repositoryPath, defaultBranch string) (store.Run, store.Event, error) {
 	kind := ""
 	if issue.AssigneeType != nil {
 		kind = *issue.AssigneeType
@@ -33,12 +32,12 @@ func enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store.Issue, pre
 	if !store.ShouldAutoEnqueueIssue(previousStatus, issue.Status, kind, assignment) || issue.AssigneeID == nil {
 		return store.Run{}, store.Event{}, nil
 	}
-	return enqueueAssignedIssue(ctx, tx, issue, repositoryPath, defaultBranch, false)
+	return s.enqueueAssignedIssue(ctx, tx, issue, repositoryPath, defaultBranch, false)
 }
 
-func enqueueAssignedIssue(ctx context.Context, tx pgx.Tx, issue store.Issue, repositoryPath, defaultBranch string, strict bool) (store.Run, store.Event, error) {
+func (s *Store) enqueueAssignedIssue(ctx context.Context, tx pgx.Tx, issue store.Issue, repositoryPath, defaultBranch string, strict bool) (store.Run, store.Event, error) {
 	projectID, issueID, agentID := issue.ProjectID, issue.ID, *issue.AssigneeID
-	if err := verifyRunnableAgent(ctx, tx, projectID, agentID); err != nil {
+	if err := s.verifyRunnableAgent(ctx, tx, projectID, agentID); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			slog.DebugContext(ctx, "Issue enqueue: Agent configuration unavailable", "issue_id", issueID, "agent_id", agentID)
 			if strict {
@@ -108,7 +107,7 @@ func lockAssignmentIssue(ctx context.Context, tx pgx.Tx, projectID, issueID stri
 	return issue, repositoryPath, defaultBranch, nil
 }
 
-func verifyRunnableAgent(ctx context.Context, tx pgx.Tx, projectID, agentID string) error {
+func (s *Store) verifyRunnableAgent(ctx context.Context, tx pgx.Tx, projectID, agentID string) error {
 	var engineName, agentState, providerHealth string
 	var modelEnabled, providerEnabled bool
 	err := tx.QueryRow(ctx, `
@@ -126,7 +125,8 @@ func verifyRunnableAgent(ctx context.Context, tx pgx.Tx, projectID, agentID stri
 	if err != nil {
 		return notFound(err)
 	}
-	if agentState != "ENABLED" || !modelEnabled || !providerEnabled || providerHealth == "UNHEALTHY" || !runnerprotocol.KnownEngine(strings.TrimSpace(engineName)) {
+	engineName = strings.TrimSpace(engineName)
+	if agentState != "ENABLED" || !modelEnabled || !providerEnabled || providerHealth == "UNHEALTHY" || (s.engineRegistered != nil && !s.engineRegistered(engineName)) {
 		return store.ErrConflict
 	}
 	return nil
