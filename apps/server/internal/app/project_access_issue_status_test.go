@@ -8,19 +8,35 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func (s *projectWorkflowAuthorizationStore) UpdateIssueMutationWithActor(_ context.Context, input store.Issue, actor json.RawMessage) (store.IssueMutationResult, error) {
-	previous, err := s.GetIssue(context.Background(), input.ProjectID, input.ID)
+func (s *projectWorkflowAuthorizationStore) UpdateIssuePatchMutation(_ context.Context, patch store.IssuePatch, actor json.RawMessage) (store.IssueMutationResult, error) {
+	previous, err := s.GetIssue(context.Background(), patch.ProjectID, patch.ID)
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
-	event, err := store.NewIssueUpdatedEventWithActor(input, previous.Status, actor)
+	updated := previous
+	if patch.Title != nil {
+		updated.Title = *patch.Title
+	}
+	if patch.Description != nil {
+		updated.Description = *patch.Description
+	}
+	if patch.Status != nil {
+		updated.Status = *patch.Status
+	}
+	if patch.Priority != nil {
+		updated.Priority = *patch.Priority
+	}
+	if updated.Title == previous.Title && updated.Description == previous.Description && updated.Status == previous.Status && updated.Priority == previous.Priority {
+		return store.IssueMutationResult{Issue: previous}, nil
+	}
+	event, err := store.NewIssueUpdatedEventWithActor(updated, previous.Status, actor)
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
 	s.updateIssueCalls++
-	input.LastEvent = &event
-	s.issues[input.ID] = input
-	return store.IssueMutationResult{Issue: input, Events: []store.Event{event}}, nil
+	updated.LastEvent = &event
+	s.issues[updated.ID] = updated
+	return store.IssueMutationResult{Issue: updated, Events: []store.Event{event}}, nil
 }
 
 func TestProjectAccessIssueStatusUsesAuthenticatedHumanActor(t *testing.T) {
