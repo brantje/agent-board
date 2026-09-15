@@ -50,8 +50,15 @@ func TestIssuePriorityAndRelationships(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 2 || listed[0].Priority != 2 || listed[1].Priority != 1 {
-		t.Fatalf("priorities=%+v", listed)
+	if len(listed) != 2 {
+		t.Fatalf("issues=%+v", listed)
+	}
+	priorities := map[string]int{}
+	for _, issue := range listed {
+		priorities[issue.ID] = issue.Priority
+	}
+	if priorities[source.ID] != 2 || priorities[target.ID] != 1 {
+		t.Fatalf("priorities=%+v", priorities)
 	}
 
 	if _, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "Invalid priority", Status: "TODO", Priority: 5}); !errors.Is(err, store.ErrInvalidArgument) {

@@ -61,6 +61,7 @@ func TestPlaceIssueReordersAndMovesExactlyByAnchors(t *testing.T) {
 	a, _ := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "a", Status: "TODO"})
 	b, _ := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "b", Status: "TODO"})
 	c, _ := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "c", Status: "TODO"})
+	d, _ := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "d", Status: "TODO"})
 	reviewA, _ := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "review-a", Status: "REVIEW"})
 	reviewB, _ := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "review-b", Status: "REVIEW"})
 
@@ -76,7 +77,7 @@ func TestPlaceIssueReordersAndMovesExactlyByAnchors(t *testing.T) {
 	if len(result.Events) != 1 || result.Events[0].Type != "issue.updated" {
 		t.Fatalf("same-state reorder events = %+v, want issue.updated", result.Events)
 	}
-	assertBoardOrder(t, s, ctx, project.ID, "TODO", []string{c.ID, a.ID, b.ID})
+	assertBoardOrder(t, s, ctx, project.ID, "TODO", []string{c.ID, a.ID, b.ID, d.ID})
 
 	destination := "REVIEW"
 	result, err = s.PlaceIssue(ctx, store.IssuePlacement{
@@ -92,7 +93,7 @@ func TestPlaceIssueReordersAndMovesExactlyByAnchors(t *testing.T) {
 	if len(result.Events) == 0 || result.Events[len(result.Events)-1].Type != "issue.status_changed" {
 		t.Fatalf("cross-state events = %+v, want status event", result.Events)
 	}
-	assertBoardOrder(t, s, ctx, project.ID, "TODO", []string{c.ID, b.ID})
+	assertBoardOrder(t, s, ctx, project.ID, "TODO", []string{c.ID, b.ID, d.ID})
 	assertBoardOrder(t, s, ctx, project.ID, "REVIEW", []string{reviewA.ID, a.ID, reviewB.ID})
 
 	_, err = s.PlaceIssue(ctx, store.IssuePlacement{
@@ -104,7 +105,7 @@ func TestPlaceIssueReordersAndMovesExactlyByAnchors(t *testing.T) {
 	if !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("stale/non-bottom anchor error = %v, want ErrConflict", err)
 	}
-	assertBoardOrder(t, s, ctx, project.ID, "TODO", []string{c.ID, b.ID})
+	assertBoardOrder(t, s, ctx, project.ID, "TODO", []string{c.ID, b.ID, d.ID})
 
 	_, err = s.PlaceIssue(ctx, store.IssuePlacement{ProjectID: project.ID, IssueID: c.ID, AfterID: boardIDPtr(c.ID)}, store.EmptyObject)
 	if !errors.Is(err, store.ErrInvalidArgument) {
