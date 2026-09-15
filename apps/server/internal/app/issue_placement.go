@@ -36,10 +36,10 @@ func (s *Service) PlaceIssueWithActor(ctx context.Context, input store.IssuePlac
 }
 
 func (s *Service) placeIssue(ctx context.Context, input store.IssuePlacement, actor json.RawMessage) (store.Issue, error) {
-	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
+	if err := validateIssuePlacement(input); err != nil {
 		return store.Issue{}, err
 	}
-	if err := validateIssuePlacement(input); err != nil {
+	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
 		return store.Issue{}, err
 	}
 	placementStore, ok := s.store.(store.IssuePlacementStore)
