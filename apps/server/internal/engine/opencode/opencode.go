@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"path"
 	"strings"
 	"sync"
 	"time"
@@ -433,7 +432,6 @@ func ensureNativeSession(ctx context.Context, native *client.Client, safe execut
 		}
 	}
 	session, err := native.CreateSession(ctx, client.CreateSessionRequest{
-		Directory: runtimepkg.WorkspaceTarget,
 		Model: client.ModelRef{
 			ID:         safe.Model.Model,
 			ProviderID: settings.ProviderID,
@@ -450,15 +448,10 @@ func pickNativeSession(ctx context.Context, native *client.Client, sessions []cl
 	if len(sessions) == 0 {
 		return client.Session{}, nil
 	}
-	candidates := make([]client.Session, 0, len(sessions))
 	for _, session := range sessions {
-		directory := strings.TrimSpace(session.Directory)
-		if strings.TrimSpace(session.ID) == "" || directory == "" || path.Clean(directory) != runtimepkg.WorkspaceTarget {
+		if strings.TrimSpace(session.ID) == "" {
 			continue
 		}
-		candidates = append(candidates, session)
-	}
-	for _, session := range candidates {
 		active, err := native.SessionActive(ctx, session.ID)
 		if err != nil {
 			return client.Session{}, fmt.Errorf("opencode engine: query native session %s: %w", session.ID, err)
@@ -467,8 +460,10 @@ func pickNativeSession(ctx context.Context, native *client.Client, sessions []cl
 			return session, nil
 		}
 	}
-	if len(candidates) != 0 {
-		return candidates[0], nil
+	for _, session := range sessions {
+		if strings.TrimSpace(session.ID) != "" {
+			return session, nil
+		}
 	}
 	return client.Session{}, nil
 }

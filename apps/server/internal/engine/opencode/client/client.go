@@ -12,8 +12,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 )
 
 const (
@@ -104,9 +102,9 @@ func (c *Client) Health(ctx context.Context) (Health, error) {
 }
 
 func (c *Client) ListSessions(ctx context.Context) ([]Session, error) {
-	raw, err := c.getRawJSON(ctx, workspaceScopedPath("/session"))
+	raw, err := c.getRawJSON(ctx, "/session")
 	if isNotFound(err) {
-		raw, err = c.getRawJSON(ctx, workspaceScopedPath("/api/session"))
+		raw, err = c.getRawJSON(ctx, "/api/session")
 	}
 	if err != nil {
 		return nil, err
@@ -199,7 +197,7 @@ func (c *Client) SessionActive(ctx context.Context, sessionID string) (bool, err
 		Type string `json:"type"`
 	}
 	var statuses map[string]status
-	if err := c.doJSON(ctx, http.MethodGet, workspaceScopedPath("/session/status"), nil, &statuses); err == nil {
+	if err := c.doJSON(ctx, http.MethodGet, "/session/status", nil, &statuses); err == nil {
 		current, ok := statuses[sessionID]
 		if ok {
 			return current.Type != "" && current.Type != "idle", nil
@@ -300,12 +298,6 @@ func (c *Client) RejectQuestion(ctx context.Context, sessionID, requestID string
 func isNotFound(err error) bool {
 	var httpErr *HTTPError
 	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound
-}
-
-func workspaceScopedPath(path string) string {
-	query := url.Values{}
-	query.Set("directory", runtimepkg.WorkspaceTarget)
-	return path + "?" + query.Encode()
 }
 
 func (c *Client) doJSON(ctx context.Context, method, path string, payload, output any) error {

@@ -5,27 +5,25 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 )
 
-func TestClientScopesNativeSessionReadsToWorkspace(t *testing.T) {
+func TestClientDoesNotScopeNativeSessionReadsToHardcodedWorkspace(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /session", func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("directory"); got != runtimepkg.WorkspaceTarget {
-			t.Errorf("session list directory=%q want=%q", got, runtimepkg.WorkspaceTarget)
+		if got := r.URL.Query().Get("directory"); got != "" {
+			t.Errorf("session list directory=%q want omitted so host runner CWD sessions remain visible", got)
 		}
 		writeJSON(t, w, http.StatusOK, []any{map[string]any{
-			"id":        "ses_workspace",
-			"directory": runtimepkg.WorkspaceTarget,
+			"id":        "ses_host",
+			"directory": "/tmp/external-runner-workspaces/session-1",
 		}})
 	})
 	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("directory"); got != runtimepkg.WorkspaceTarget {
-			t.Errorf("session status directory=%q want=%q", got, runtimepkg.WorkspaceTarget)
+		if got := r.URL.Query().Get("directory"); got != "" {
+			t.Errorf("session status directory=%q want omitted so host runner CWD sessions remain visible", got)
 		}
 		writeJSON(t, w, http.StatusOK, map[string]any{
-			"ses_workspace": map[string]any{"type": "busy"},
+			"ses_host": map[string]any{"type": "busy"},
 		})
 	})
 
@@ -37,10 +35,10 @@ func TestClientScopesNativeSessionReadsToWorkspace(t *testing.T) {
 	}
 
 	sessions, err := native.ListSessions(context.Background())
-	if err != nil || len(sessions) != 1 || sessions[0].ID != "ses_workspace" {
+	if err != nil || len(sessions) != 1 || sessions[0].ID != "ses_host" {
 		t.Fatalf("sessions=%+v err=%v", sessions, err)
 	}
-	active, err := native.SessionActive(context.Background(), "ses_workspace")
+	active, err := native.SessionActive(context.Background(), "ses_host")
 	if err != nil || !active {
 		t.Fatalf("active=%v err=%v", active, err)
 	}
