@@ -31,6 +31,13 @@ func (s *QuestionService) List(ctx context.Context, projectID string, filter sto
 	if strings.TrimSpace(projectID) == "" {
 		return nil, NewError("invalid_argument", "projectId is required", store.ErrInvalidArgument)
 	}
+	for _, status := range filter.Statuses {
+		switch status {
+		case "OPEN", "ANSWERED", "CANCELLED":
+		default:
+			return nil, NewError("invalid_argument", "status must be OPEN, ANSWERED or CANCELLED", store.ErrInvalidArgument)
+		}
+	}
 	questions, err := s.store.ListQuestions(ctx, projectID, filter)
 	if err != nil {
 		return nil, translateStoreError(err, "question")

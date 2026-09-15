@@ -83,13 +83,7 @@ func (a *api) listReviews(w http.ResponseWriter, r *http.Request) {
 	}
 	filter.IssueID = issueUUID
 	if status := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("status"))); status != "" {
-		switch status {
-		case "PENDING", "APPROVED", "CHANGES_REQUESTED", "CANCELLED":
-			filter.Statuses = []string{status}
-		default:
-			writeError(w, http.StatusBadRequest, "invalid_request", "status must be PENDING, APPROVED, CHANGES_REQUESTED or CANCELLED")
-			return
-		}
+		filter.Statuses = []string{status}
 	}
 	var values []store.Review
 	var err error

@@ -64,13 +64,7 @@ func (a *api) listQuestions(w http.ResponseWriter, r *http.Request) {
 		filter.RunID = &runID
 	}
 	if status := strings.ToUpper(strings.TrimSpace(r.URL.Query().Get("status"))); status != "" {
-		switch status {
-		case "OPEN", "ANSWERED", "CANCELLED":
-			filter.Statuses = []string{status}
-		default:
-			writeError(w, http.StatusBadRequest, "invalid_request", "status must be OPEN, ANSWERED or CANCELLED")
-			return
-		}
+		filter.Statuses = []string{status}
 	}
 	if _, err := a.service.GetProject(r.Context(), projectID); err != nil {
 		writeAppError(w, err)

@@ -67,6 +67,13 @@ func (s *ReviewService) List(ctx context.Context, projectID string, filter store
 	if strings.TrimSpace(projectID) == "" {
 		return nil, NewError("invalid_argument", "projectId is required", store.ErrInvalidArgument)
 	}
+	for _, status := range filter.Statuses {
+		switch status {
+		case "PENDING", "APPROVED", "CHANGES_REQUESTED", "CANCELLED":
+		default:
+			return nil, NewError("invalid_argument", "status must be PENDING, APPROVED, CHANGES_REQUESTED or CANCELLED", store.ErrInvalidArgument)
+		}
+	}
 	values, err := s.store.ListReviews(ctx, projectID, filter)
 	if err != nil {
 		return nil, translateStoreError(err, "review")

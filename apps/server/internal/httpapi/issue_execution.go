@@ -22,9 +22,20 @@ func (a *api) getIssueExecutionState(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	state, err := a.service.GetIssueExecutionState(r.Context(), projectID, issueID)
+	var state store.IssueExecutionState
+	var err error
+	if a.projectAccess != nil {
+		actor, ok := projectActor(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+			return
+		}
+		state, err = a.projectAccess.GetIssueExecutionState(r.Context(), actor, projectID, issueID)
+	} else {
+		state, err = a.service.GetIssueExecutionState(r.Context(), projectID, issueID)
+	}
 	if err != nil {
-		writeAppError(w, err)
+		writeProjectAccessError(w, err)
 		return
 	}
 	out := IssueExecutionStateDTO{State: state.State, CanStart: state.CanStart}
