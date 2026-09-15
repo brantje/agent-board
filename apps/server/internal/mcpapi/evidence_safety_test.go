@@ -22,16 +22,12 @@ func TestExecutionSessionDTOOmitsSensitiveRuntimeContext(t *testing.T) {
 		UpdatedAt:         now,
 	})
 
-	if value.CWD != "" || value.Command != nil {
-		t.Fatalf("sensitive runtime context leaked into session DTO: %+v", value)
-	}
-
 	raw, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
 	payload := string(raw)
-	for _, forbidden := range []string{"/var/lib/agent-board/workspaces/private-repository", "--token", "super-secret-token"} {
+	for _, forbidden := range []string{"\"cwd\"", "\"command\"", "/var/lib/agent-board/workspaces/private-repository", "--token", "super-secret-token"} {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("serialized session DTO contains %q: %s", forbidden, payload)
 		}
