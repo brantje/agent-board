@@ -80,32 +80,46 @@ func lockIssueStatusRunFence(ctx context.Context, tx pgx.Tx, input store.IssueSt
 		FOR UPDATE
 	`, input.ProjectID, *input.RunID))
 	if err != nil {
-		return store.Run{}, err
+		return store.Run{}, notFound(err)
 	}
-	if run.IssueID != input.IssueID || run.AgentID == nil || run.WorkspaceID == "" ||
-		*run.AgentID != *input.AgentID || run.WorkspaceID != *input.WorkspaceID {
+	if run.Status != "RUNNING" || run.IssueID != input.IssueID || run.WorkspaceID != *input.WorkspaceID ||
+		run.AgentID == nil || *run.AgentID != *input.AgentID {
 		return store.Run{}, store.ErrConflict
 	}
 	return run, nil
 }
 
 func validateIssueStatusRecoveryFence(ctx context.Context, tx pgx.Tx, input store.IssueStatusMutation, run store.Run) error {
-	if run.Status != "RUNNING" && run.Status != "WAITING_FOR_INPUT" {
+	if input.RunID == nil || input.AgentID == nil || input.WorkspaceID == nil || run.StartedAt == nil {
 		return store.ErrConflict
 	}
-	var activeRunID string
-	err := tx.QueryRow(ctx, `
-		SELECT id::text
-		FROM runs
-		WHERE project_id=$1 AND issue_id=$2 AND agent_id=$3 AND status = ANY($4::text[])
-		ORDER BY attempt DESC
-		LIMIT 1
-	`, input.ProjectID, input.IssueID, *input.AgentID, activeRunStatuses).Scan(&activeRunID)
-	if err != nil {
-		return notFound(err)
+
+	// OpenCode durable history does not share a trusted clock or sequence with
+	// Agent Board's Event stream, especially on external runners. Treat canonical
+	// status Events proven to come from this exact Run capability as earlier
+	// same-Run progress, but conservatively fence any other explicit Issue mutation.
+	var superseded bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM events
+			WHERE project_id=$1 AND issue_id=$2
+			  AND type IN ('issue.updated', 'issue.status_changed')
+			  AND created_at >= $3
+			  AND NOT (
+				type='issue.status_changed'
+				AND run_id IS NOT NULL AND run_id=$4
+				AND agent_id IS NOT NULL AND agent_id=$5
+				AND workspace_id IS NOT NULL AND workspace_id=$6
+				AND COALESCE(actor->>'type','')=$7
+				AND COALESCE(actor->>'id','')=$5::text
+			  )
+		)
+	`, input.ProjectID, input.IssueID, *run.StartedAt, *input.RunID, *input.AgentID, *input.WorkspaceID, store.ActorTypeAgent).Scan(&superseded); err != nil {
+		return err
 	}
-	if activeRunID != *input.RunID {
-		return store.ErrConflict
+	if superseded {
+		return store.ErrIssueStatusRecoverySuperseded
 	}
 	return nil
 }
