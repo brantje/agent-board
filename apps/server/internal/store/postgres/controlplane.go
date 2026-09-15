@@ -77,6 +77,9 @@ func (s *Store) updateIssueMutation(ctx context.Context, input store.Issue, acto
 		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockIssueBoardProject(ctx, tx, input.ProjectID); err != nil {
+		return store.IssueMutationResult{}, err
+	}
 
 	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.ID)
 	if err != nil {
