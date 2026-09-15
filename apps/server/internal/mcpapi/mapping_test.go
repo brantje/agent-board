@@ -133,7 +133,7 @@ func TestEvidenceDTOClassifiesEventsAndPreservesSafeData(t *testing.T) {
 	if out.Events[0].IssueID == nil || *out.Events[0].IssueID != "AB-7" || out.Events[0].Actor == nil || out.Events[0].Payload == nil {
 		t.Fatalf("event dto = %+v", out.Events[0])
 	}
-	if out.Sessions[0].RuntimeInstanceID == nil || *out.Sessions[0].RuntimeInstanceID != "runtime-instance" || out.Sessions[0].RunnerID == nil || *out.Sessions[0].RunnerID != "runner" || out.Sessions[0].Command == nil {
+	if out.Sessions[0].RuntimeInstanceID == nil || *out.Sessions[0].RuntimeInstanceID != "runtime-instance" || out.Sessions[0].RunnerID == nil || *out.Sessions[0].RunnerID != "runner" || out.Sessions[0].Status != "RUNNING" {
 		t.Fatalf("session dto = %+v", out.Sessions[0])
 	}
 	if len(out.RawOutput) != 1 || out.RawOutput[0].ID != "chunk" || len(out.Artifacts) != 1 || out.Artifacts[0].SafeMetadata == nil {
