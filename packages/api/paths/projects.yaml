@@ -8,6 +8,7 @@ path1:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
     operationId: createProject
+    description: Project workflowSettings may include newIssuePlacement with value top or bottom; omitted configuration defaults new Issues to the bottom of their initial Board state.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/ProjectCreate
     responses:
@@ -27,6 +28,7 @@ path2:
         $ref: ../components/api-components.yaml#/responses/Error
   patch:
     operationId: updateProject
+    description: Project workflowSettings may include newIssuePlacement with value top or bottom. The setting affects only subsequent Issue creation and does not reorder existing Issues.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/ProjectUpdate
     responses:
