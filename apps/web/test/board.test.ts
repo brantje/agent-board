@@ -1,15 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { boardColumnSurface, boardColumns, formatUpdatedLabel, isFailedIssueRun, isLiveIssueRun, issueCardRunStatus, issuePriority, issueRuns, issueStatuses, issueStatusPresentation, latestRun, statusLabel } from '../app/utils/issues'
+import type { Issue } from '../app/types/api'
+import { boardColumnSurface, boardColumns, formatUpdatedLabel, isFailedIssueRun, isLiveIssueRun, issueCardRunStatus, issuePriority, issueRuns, issueStatuses, issueStatusPresentation, latestRun, orderedBoardIssues, placeIssueOnBoard, statusLabel } from '../app/utils/issues'
 
-const issue = (id: string, status: string) => ({
+const issue = (id: string, status: string, boardPosition = 0): Issue => ({
   id,
-  status,
-  title: id,
   projectId: 'p',
+  number: 1,
+  title: id,
   description: '',
+  status,
+  priority: 0,
+  boardPosition,
   assignedTo: null,
+  createdBy: null,
   createdAt: '',
-  updatedAt: ''
+  updatedAt: '',
+  currentBranch: null,
+  lastEvent: null
 })
 
 describe('durable Issue board projection', () => {
@@ -21,6 +28,34 @@ describe('durable Issue board projection', () => {
     expect(columns.find(column => column.status === 'TODO')?.issues).toEqual([])
     expect(boardColumns([issue('abc-123', 'TODO')], 'ABC-123')[1]?.issues).toHaveLength(1)
     expect(boardColumns([{ ...issue('AB-9', 'TODO'), title: 'Hidden', description: 'WebSocket notification system' }], 'websocket')[1]?.issues).toHaveLength(1)
+  })
+
+  it('orders every column by persisted board position with a deterministic id tie-breaker', () => {
+    const values = [issue('B', 'TODO', 1), issue('C', 'TODO', 0), issue('A', 'TODO', 1)]
+    expect(orderedBoardIssues(values).map(value => value.id)).toEqual(['C', 'A', 'B'])
+    expect(boardColumns(values)[1]?.issues.map(value => value.id)).toEqual(['C', 'A', 'B'])
+  })
+
+  it('reorders within a column and renumbers the canonical positions optimistically', () => {
+    const values = [issue('A', 'TODO', 0), issue('B', 'TODO', 1), issue('C', 'TODO', 2)]
+    const moved = placeIssueOnBoard(values, 'C', 'TODO', 'B')
+    const ordered = boardColumns(moved)[1]?.issues
+    expect(ordered?.map(value => value.id)).toEqual(['A', 'C', 'B'])
+    expect(ordered?.map(value => value.boardPosition)).toEqual([0, 1, 2])
+  })
+
+  it('moves across columns at the exact insertion point and compacts the source column', () => {
+    const values = [issue('A', 'TODO', 0), issue('B', 'TODO', 1), issue('C', 'IN_PROGRESS', 0), issue('D', 'IN_PROGRESS', 1)]
+    const moved = placeIssueOnBoard(values, 'A', 'IN_PROGRESS', 'D')
+    expect(boardColumns(moved)[1]?.issues.map(value => [value.id, value.boardPosition])).toEqual([['B', 0]])
+    expect(boardColumns(moved)[2]?.issues.map(value => [value.id, value.boardPosition])).toEqual([['C', 0], ['A', 1], ['D', 2]])
+  })
+
+  it('keeps the original snapshot when a drop anchor is invalid', () => {
+    const values = [issue('A', 'TODO', 0), issue('B', 'TODO', 1)]
+    expect(placeIssueOnBoard(values, 'A', 'TODO', 'missing')).toBe(values)
+    expect(placeIssueOnBoard(values, 'A', 'TODO', 'A')).toBe(values)
+    expect(placeIssueOnBoard(values, 'missing', 'TODO')).toBe(values)
   })
 
   it('maps each Board column to a named surface token without relying on color alone', () => {

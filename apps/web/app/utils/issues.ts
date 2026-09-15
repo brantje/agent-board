@@ -47,13 +47,40 @@ export function issueStatusPresentation(status: string) {
   }
 }
 
+export function orderedBoardIssues(issues: Issue[]) {
+  return [...issues].sort((left, right) => left.boardPosition - right.boardPosition || left.id.localeCompare(right.id))
+}
+
 export function boardColumns(issues: Issue[], search = '') {
   const query = search.trim().toLowerCase()
   return issueStatuses.map(status => ({
     status,
     ...issueStatusPresentation(status),
-    issues: issues.filter(issue => issue.status === status && `${issue.title} ${issue.id} ${issue.description}`.toLowerCase().includes(query))
+    issues: orderedBoardIssues(issues.filter(issue => issue.status === status && `${issue.title} ${issue.id} ${issue.description}`.toLowerCase().includes(query)))
   }))
+}
+
+export function placeIssueOnBoard(issues: Issue[], issueId: string, status: string, beforeIssueId?: string | null) {
+  const moving = issues.find(issue => issue.id === issueId)
+  if (!moving || beforeIssueId === issueId) return issues
+
+  const destination = orderedBoardIssues(issues.filter(issue => issue.status === status && issue.id !== issueId))
+  let destinationIndex = destination.length
+  if (beforeIssueId) {
+    destinationIndex = destination.findIndex(issue => issue.id === beforeIssueId)
+    if (destinationIndex < 0) return issues
+  }
+  destination.splice(destinationIndex, 0, { ...moving, status })
+
+  const updates = new Map<string, Issue>()
+  destination.forEach((issue, index) => updates.set(issue.id, { ...issue, status, boardPosition: index }))
+
+  if (moving.status !== status) {
+    orderedBoardIssues(issues.filter(issue => issue.status === moving.status && issue.id !== issueId))
+      .forEach((issue, index) => updates.set(issue.id, { ...issue, boardPosition: index }))
+  }
+
+  return issues.map(issue => updates.get(issue.id) ?? issue)
 }
 
 export function issueRuns(runs: Run[], issueId: string) {
