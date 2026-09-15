@@ -10,10 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const (
-	schedulerConfigurationWaitReason = "configuration_unavailable"
-	schedulerDependencyWaitReason    = "dependency_blocked"
-)
+const schedulerConfigurationWaitReason = "configuration_unavailable"
 
 var errSchedulerConfigurationUnavailable = errors.New("scheduler configuration unavailable")
 
@@ -102,26 +99,6 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 	}
 	if err != nil {
 		return nil, err
-	}
-
-	strictOrder, err := strictBoardOrderEnabled(ctx, tx, run.ProjectID)
-	if err != nil {
-		return nil, err
-	}
-	if strictOrder {
-		blocked, err := issueDependenciesBlocked(ctx, tx, run.ProjectID, run.IssueID)
-		if err != nil {
-			return nil, err
-		}
-		if blocked {
-			if err := deferQueuedJob(ctx, tx, job, schedulerDependencyWaitReason, backoffMicros); err != nil {
-				return nil, err
-			}
-			if err := tx.Commit(ctx); err != nil {
-				return nil, err
-			}
-			return nil, nil
-		}
 	}
 
 	occupied, err := workspaceAdmissionOccupied(ctx, tx, run)
@@ -261,6 +238,16 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 			COALESCE((project.workflow_settings->>'strictOrder')::boolean, false) = false
 			OR (
 			  NOT EXISTS (
+				SELECT 1
+				FROM issue_relationships AS rel
+				JOIN issues AS dependency
+				  ON dependency.project_id=rel.project_id
+				 AND dependency.id=CASE WHEN rel.type='depends_on' THEN rel.target_issue_id ELSE rel.source_issue_id END
+				WHERE rel.project_id=issue.project_id
+				  AND ((rel.type='depends_on' AND rel.source_issue_id=issue.id) OR (rel.type='blocks' AND rel.target_issue_id=issue.id))
+				  AND dependency.status<>'DONE'
+			  )
+			  AND NOT EXISTS (
 				SELECT 1 FROM runs AS peer
 				WHERE peer.project_id=run.project_id AND peer.issue_id=run.issue_id AND peer.id<>run.id
 				  AND peer.status IN ('STARTING','RUNNING','WAITING_FOR_INPUT','PAUSED','READY_FOR_REVIEW')
@@ -272,6 +259,16 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 				JOIN issues AS prior_issue ON prior_issue.project_id=prior_run.project_id AND prior_issue.id=prior_run.issue_id
 				WHERE prior_job.project_id=job.project_id
 				  AND prior_job.state='QUEUED' AND prior_run.status='QUEUED'
+				  AND NOT EXISTS (
+					SELECT 1
+					FROM issue_relationships AS prior_rel
+					JOIN issues AS prior_dependency
+					  ON prior_dependency.project_id=prior_rel.project_id
+					 AND prior_dependency.id=CASE WHEN prior_rel.type='depends_on' THEN prior_rel.target_issue_id ELSE prior_rel.source_issue_id END
+					WHERE prior_rel.project_id=prior_issue.project_id
+					  AND ((prior_rel.type='depends_on' AND prior_rel.source_issue_id=prior_issue.id) OR (prior_rel.type='blocks' AND prior_rel.target_issue_id=prior_issue.id))
+					  AND prior_dependency.status<>'DONE'
+				  )
 				  AND NOT EXISTS (
 					SELECT 1 FROM runs AS prior_peer
 					WHERE prior_peer.project_id=prior_run.project_id AND prior_peer.issue_id=prior_run.issue_id AND prior_peer.id<>prior_run.id
@@ -302,37 +299,6 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 		return job, run, "", "", errSchedulerConfigurationUnavailable
 	}
 	return job, run, *agentID, *modelProfileID, nil
-}
-
-func strictBoardOrderEnabled(ctx context.Context, tx pgx.Tx, projectID string) (bool, error) {
-	var enabled bool
-	if err := tx.QueryRow(ctx, `
-		SELECT COALESCE((workflow_settings->>'strictOrder')::boolean, false)
-		FROM projects
-		WHERE id=$1
-	`, projectID).Scan(&enabled); err != nil {
-		return false, notFound(err)
-	}
-	return enabled, nil
-}
-
-func issueDependenciesBlocked(ctx context.Context, tx pgx.Tx, projectID, issueID string) (bool, error) {
-	var blocked bool
-	if err := tx.QueryRow(ctx, `
-		SELECT EXISTS (
-			SELECT 1
-			FROM issue_relationships AS rel
-			JOIN issues AS dependency
-			  ON dependency.project_id=rel.project_id
-			 AND dependency.id=CASE WHEN rel.type='depends_on' THEN rel.target_issue_id ELSE rel.source_issue_id END
-			WHERE rel.project_id=$1
-			  AND ((rel.type='depends_on' AND rel.source_issue_id=$2) OR (rel.type='blocks' AND rel.target_issue_id=$2))
-			  AND dependency.status<>'DONE'
-		)
-	`, projectID, issueID).Scan(&blocked); err != nil {
-		return false, err
-	}
-	return blocked, nil
 }
 
 // workspaceAdmissionOccupied serializes admission for Runs that share the
