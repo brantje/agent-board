@@ -59,6 +59,7 @@ export interface Issue {
   description: string
   status: string
   priority: number
+  boardPosition: number
   assignedTo: Assignee | null
   createdBy: IssueCreator | null
   createdAt: string
