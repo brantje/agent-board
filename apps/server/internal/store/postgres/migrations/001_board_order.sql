@@ -6,13 +6,16 @@ DO $migration$
 DECLARE
     legacy_schema boolean;
 BEGIN
-    SELECT NOT EXISTS (
-        SELECT 1
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = 'issues'
-          AND column_name = 'board_position'
-    ) INTO legacy_schema;
+    SELECT
+        to_regclass('public.issues') IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'issues'
+              AND column_name = 'board_position'
+        )
+    INTO legacy_schema;
 
     IF NOT legacy_schema THEN
         RETURN;
