@@ -19,10 +19,6 @@ func (a *api) placeIssue(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if !store.ValidIssueStatus(req.Status) {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "status is invalid")
-		return
-	}
 	var beforeUUID *string
 	if req.BeforeIssueID != nil {
 		resolved, ok := bodyIssueKey(w, r, projectID, *req.BeforeIssueID, "beforeIssueId", a.service.ResolveIssueUUID)
