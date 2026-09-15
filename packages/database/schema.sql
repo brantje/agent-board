@@ -73,7 +73,7 @@ CREATE TABLE groups (
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX groups_name_uq ON groups (lower(name));
+CREATE UNIQUE INDEX groups_name_uq ON groups (name);
 
 CREATE TABLE group_members (
     group_id uuid NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
