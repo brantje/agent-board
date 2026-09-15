@@ -303,8 +303,11 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 		LEFT JOIN model_profiles AS model
 		  ON model.id=agent.model_profile_id
 		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
-		WHERE NOT candidate.strict_order OR candidate.strict_rank=1
-		ORDER BY job.available_at, job.created_at, job.id
+		ORDER BY
+			CASE WHEN candidate.strict_order THEN candidate.strict_rank ELSE 1 END,
+			job.available_at,
+			job.created_at,
+			job.id
 		FOR UPDATE OF job, run SKIP LOCKED
 		LIMIT 1
 	`).Scan(
