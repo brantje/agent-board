@@ -28,6 +28,17 @@ type IssueMutationResult struct {
 	Events []Event
 }
 
+// IssuePatch preserves which editable Issue fields were supplied by a partial
+// mutation. Nil fields remain unchanged against the transactionally locked row.
+type IssuePatch struct {
+	ProjectID   string
+	ID          string
+	Title       *string
+	Description *string
+	Status      *string
+	Priority    *int
+}
+
 // IssueMutationStore exposes the transaction-aware Issue mutation result when
 // the durable store can persist the causal Issue Event with the state change.
 type IssueMutationStore interface {
@@ -39,6 +50,13 @@ type IssueMutationStore interface {
 // attributing its durable Event to the authenticated actor that requested it.
 type IssueMutationActorStore interface {
 	UpdateIssueMutationWithActor(context.Context, Issue, json.RawMessage) (IssueMutationResult, error)
+}
+
+// IssuePatchMutationStore applies only supplied editable fields while the
+// current Issue row is locked, so stale metadata snapshots cannot overwrite a
+// concurrent explicit Board-status decision.
+type IssuePatchMutationStore interface {
+	UpdateIssuePatchMutation(context.Context, IssuePatch, json.RawMessage) (IssueMutationResult, error)
 }
 
 type IssueAssignmentStore interface {

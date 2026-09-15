@@ -34,7 +34,6 @@ func applyIssueMutationTx(ctx context.Context, tx pgx.Tx, input issueMutationTxI
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
-	updated.PreviousStatus = input.Previous.Status
 	issueEvent, err := store.NewIssueUpdatedEventWithActor(updated, input.Previous.Status, input.Actor)
 	if err != nil {
 		return store.IssueMutationResult{}, err

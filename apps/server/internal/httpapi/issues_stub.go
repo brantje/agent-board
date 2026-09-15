@@ -116,30 +116,21 @@ func (a *api) updateIssue(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	current, err := a.service.GetIssue(r.Context(), projectID, issueUUID)
-	if err != nil {
-		writeAppError(w, err)
-		return
-	}
 	var req UpdateIssueRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if req.Title != nil {
-		current.Title = *req.Title
+	if req.Priority != nil && !validIssuePriority(*req.Priority) {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
+		return
 	}
-	if req.Description != nil {
-		current.Description = *req.Description
-	}
-	if req.Status != nil {
-		current.Status = *req.Status
-	}
-	if req.Priority != nil {
-		if !validIssuePriority(*req.Priority) {
-			writeError(w, http.StatusBadRequest, "invalid_argument", "priority must be between 0 and 4")
-			return
-		}
-		current.Priority = *req.Priority
+	patch := store.IssuePatch{
+		ProjectID:   projectID,
+		ID:          issueUUID,
+		Title:       req.Title,
+		Description: req.Description,
+		Status:      req.Status,
+		Priority:    req.Priority,
 	}
 	if a.projectAccess != nil {
 		actor, ok := projectActor(r)
@@ -147,7 +138,7 @@ func (a *api) updateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
 			return
 		}
-		value, err := a.projectAccess.UpdateIssue(r.Context(), actor, current)
+		value, err := a.projectAccess.PatchIssue(r.Context(), actor, patch)
 		if err != nil {
 			writeProjectAccessError(w, err)
 			return
@@ -155,7 +146,7 @@ func (a *api) updateIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, issueDTO(value))
 		return
 	}
-	value, err := a.service.UpdateIssue(r.Context(), current)
+	value, err := a.service.PatchIssue(r.Context(), patch)
 	if err != nil {
 		writeAppError(w, err)
 		return
