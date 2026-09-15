@@ -70,12 +70,16 @@ func TestAgentIssueStatusMutationWaitsForAllInteractiveInputButNotResumeBookkeep
 	if _, err := s.pool.Exec(ctx, `
 		UPDATE questions
 		SET status='ANSWERED', answered_at=clock_timestamp()
-		WHERE project_id=$1 AND id=$2;
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, openID); err != nil {
+		t.Fatalf("answer remaining Question: %v", err)
+	}
+	if _, err := s.pool.Exec(ctx, `
 		UPDATE engine_question_bindings
 		SET state='ANSWERED', updated_at=clock_timestamp()
-		WHERE project_id=$1 AND question_id=$2;
+		WHERE project_id=$1 AND question_id=$2
 	`, f.project.ID, openID); err != nil {
-		t.Fatalf("answer remaining interactive input: %v", err)
+		t.Fatalf("answer remaining interactive binding: %v", err)
 	}
 
 	if _, err := s.SetIssueStatus(ctx, mutation); err != nil {
