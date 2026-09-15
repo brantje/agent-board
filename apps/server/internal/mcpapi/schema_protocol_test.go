@@ -46,6 +46,9 @@ func TestMCPToolsListAdvertisesLockedInputSchemas(t *testing.T) {
 	assertSchemaEnum(t, tools["set_issue_status"], []string{"status"}, []string{"BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "REVIEW", "DONE"})
 	assertSchemaEnum(t, tools["set_issue_assignee"], []string{"assignedTo", "type"}, []string{"USER", "AGENT"})
 	assertSchemaEnum(t, tools["create_issue_relationship"], []string{"type"}, []string{"blocks", "depends_on", "related_to", "duplicates"})
+	assertSchemaItemsEnum(t, tools["list_questions"], "statuses", []string{"OPEN", "ANSWERED", "CANCELLED"})
+	assertSchemaEnum(t, tools["answer_question"], []string{"kind"}, []string{"TEXT", "SINGLE_CHOICE", "MULTI_CHOICE"})
+	assertSchemaItemsEnum(t, tools["list_reviews"], "statuses", []string{"PENDING", "APPROVED", "CHANGES_REQUESTED", "CANCELLED"})
 
 	for _, toolName := range []string{"create_issue", "update_issue"} {
 		priority := schemaProperty(t, tools[toolName], "priority")
@@ -91,9 +94,24 @@ func assertSchemaEnum(t *testing.T, root map[string]any, path []string, want []s
 	for _, name := range path {
 		current = schemaPropertyResolved(t, root, current, name)
 	}
-	values, ok := current["enum"].([]any)
+	assertEnumValues(t, current, path, want)
+}
+
+func assertSchemaItemsEnum(t *testing.T, root map[string]any, property string, want []string) {
+	t.Helper()
+	field := schemaProperty(t, root, property)
+	items, ok := field["items"].(map[string]any)
 	if !ok {
-		t.Fatalf("schema path %v has no enum: %#v", path, current)
+		t.Fatalf("schema property %q has no object items: %#v", property, field)
+	}
+	assertEnumValues(t, resolveSchema(root, items), []string{property, "items"}, want)
+}
+
+func assertEnumValues(t *testing.T, schema map[string]any, path []string, want []string) {
+	t.Helper()
+	values, ok := schema["enum"].([]any)
+	if !ok {
+		t.Fatalf("schema path %v has no enum: %#v", path, schema)
 	}
 	got := make([]string, 0, len(values))
 	for _, value := range values {

@@ -8,7 +8,10 @@ import (
 )
 
 func (s *Server) registerReviewTools(server *mcp.Server) {
-	mcp.AddTool(server, readOnlyTool("list_reviews", "List Reviews with optional public Issue key and Review status filters."), objectListHandler(s.listReviews))
+	schemas := lockedReviewToolInputSchemas()
+	listReviews := readOnlyTool("list_reviews", "List Reviews with optional public Issue key and Review status filters.")
+	listReviews.InputSchema = schemas.listReviews
+	mcp.AddTool(server, listReviews, objectListHandler(s.listReviews))
 	mcp.AddTool(server, readOnlyTool("get_review", "Inspect one Review including Decision, test status, and safe Run evidence."), s.getReview)
 	mcp.AddTool(server, mutationTool("approve_review", "Approve a Review as the authenticated human User through the existing delivery and Review gates.", false, false), s.approveReview)
 	mcp.AddTool(server, mutationTool("request_review_changes", "Request Review changes with persisted feedback and the existing continuation behavior.", false, false), s.requestReviewChanges)
