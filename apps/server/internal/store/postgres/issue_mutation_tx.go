@@ -27,6 +27,9 @@ func (s *Store) applyIssueMutationTx(ctx context.Context, tx pgx.Tx, input issue
 			return store.IssueMutationResult{}, err
 		}
 		input.Issue.BoardPosition = position
+		if err := normalizeBoardStatus(ctx, tx, input.Issue.ProjectID, input.Previous.Status, input.Issue.ID); err != nil {
+			return store.IssueMutationResult{}, err
+		}
 	}
 	updated, err := scanIssueJoined(tx.QueryRow(ctx, `
 		UPDATE issues AS i SET title=$3, description=$4, status=$5, priority=$6, board_position=$7, updated_at=now()
