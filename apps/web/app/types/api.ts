@@ -128,7 +128,8 @@ export interface Agent {
 }
 
 export interface SquadMember {
-  agentId: string
+  type: 'AGENT' | 'USER'
+  id: string
   role?: string | null
 }
 
