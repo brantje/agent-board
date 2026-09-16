@@ -125,12 +125,31 @@ type IssueStatusUpdater interface {
 	SetStatus(context.Context, string) error
 }
 
+type DelegationRequest struct {
+	TargetAgentID string
+	Task          string
+	RequestKey    string
+}
+
+type Delegation struct {
+	ID    string
+	RunID string
+}
+
+// DelegationRequester is the narrow server-owned capability for a trusted
+// Engine adapter to request bounded work from another Agent. Project, Issue,
+// parent Run and parent Agent identities are always derived server-side.
+type DelegationRequester interface {
+	Delegate(context.Context, DelegationRequest) (Delegation, error)
+}
+
 type Request struct {
 	Context              executioncontext.SafeContext
 	Launcher             ProcessLauncher
 	Questions            Questioner
 	InteractiveQuestions InteractiveQuestioner
 	IssueStatus          IssueStatusUpdater
+	Delegation           DelegationRequester
 	Continuation         *Continuation
 }
 

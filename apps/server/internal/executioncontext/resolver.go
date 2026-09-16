@@ -80,6 +80,10 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 	if agent.State != "ENABLED" || !scopeAllows(agent.ProjectID, projectID) {
 		return Resolved{}, fail("execution_agent_unavailable", "Agent is not available for execution", nil)
 	}
+	delegation, err := r.resolveDelegation(ctx, projectID, run, issue, agent)
+	if err != nil {
+		return Resolved{}, err
+	}
 	model, err := r.store.GetModelProfile(ctx, scope, agent.ModelProfileID)
 	if err != nil {
 		return Resolved{}, fail("execution_model_unavailable", "Model Profile configuration is unavailable", err)
@@ -106,19 +110,48 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 			RepositoryPath: project.RepositoryPath, DefaultBranch: project.DefaultBranch,
 			WorkflowSettings: cloneJSON(project.WorkflowSettings),
 		},
-		Issue:          IssueContext{ID: issue.ID, Key: issue.Key, Title: issue.Title, Description: issue.Description, Status: issue.Status},
-		Run:            RunContext{ID: run.ID, Attempt: run.Attempt},
-		Agent:          AgentContext{ID: agent.ID, Name: agent.Name, RoleInstructions: agent.RoleInstructions, Engine: agent.Engine, EngineSettings: cloneJSON(agent.EngineSettings)},
+		Issue: IssueContext{ID: issue.ID, Key: issue.Key, Title: issue.Title, Description: issue.Description, Status: issue.Status},
+		Run:   RunContext{ID: run.ID, Attempt: run.Attempt},
+		Agent: AgentContext{
+			ID: agent.ID, Name: agent.Name, RoleInstructions: agent.RoleInstructions, Engine: agent.Engine,
+			EngineSettings: cloneJSON(agent.EngineSettings), AllowDelegation: agent.AllowDelegation,
+		},
 		Model:          ModelContext{ID: model.ID, Name: model.Name, Model: model.Model, Temperature: cloneFloat64(model.Temperature), MaxTokens: cloneInt(model.MaxTokens), GenerationSettings: cloneJSON(model.GenerationSettings)},
 		Provider:       ProviderContext{ID: provider.ID, Name: provider.Name, Kind: provider.Kind, BaseURL: cloneString(provider.BaseURL), SafeMetadata: cloneJSON(provider.SafeMetadata)},
 		Workspace:      WorkspaceContext{ID: workspace.ID, Path: workspace.Path, RepositoryPath: cloneString(workspace.RepositoryPath), BaseBranch: cloneString(workspace.BaseBranch), BaseRevision: cloneString(workspace.BaseRevision), WorkingBranch: workspace.WorkingBranch, BootstrapStatus: workspace.BootstrapStatus},
 		ReviewFeedback: reviewFeedback,
+		Delegation:     delegation,
 	}
 	r.attachSelectedRunner(ctx, projectID, runID, &safe)
 
 	return Resolved{
 		Safe:                  safe,
 		ProviderCredentialRef: cloneString(provider.CredentialRef),
+	}, nil
+}
+
+type delegationRecordLookup interface {
+	GetDelegationByRun(context.Context, string, string) (store.Delegation, error)
+}
+
+func (r *Resolver) resolveDelegation(ctx context.Context, projectID string, run store.Run, issue store.Issue, agent store.Agent) (*DelegationContext, error) {
+	lookup, ok := any(r.store).(delegationRecordLookup)
+	if !ok {
+		return nil, nil
+	}
+	value, err := lookup.GetDelegationByRun(ctx, projectID, run.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fail("execution_delegation_unavailable", "Delegation lineage is unavailable", err)
+	}
+	if value.ProjectID != projectID || value.IssueID != issue.ID || value.DelegatedRunID != run.ID || value.TargetAgentID != agent.ID || value.ParentRunID == "" || value.ParentAgentID == "" || strings.TrimSpace(value.Task) == "" {
+		return nil, fail("execution_configuration_invalid", "Delegation lineage is inconsistent with Run execution configuration", nil)
+	}
+	return &DelegationContext{
+		ID: value.ID, ParentRunID: value.ParentRunID, ParentAgentID: value.ParentAgentID,
+		TargetAgentID: value.TargetAgentID, Task: value.Task, RequestKey: value.RequestKey,
 	}, nil
 }
 
