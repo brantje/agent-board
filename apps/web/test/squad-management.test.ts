@@ -165,15 +165,59 @@ describe('Squad management', () => {
     }])
   })
 
-  it('preserves typed mixed membership when opening an existing Squad for editing', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (path: string) => responseFor(path)))
+  it('round-trips typed mixed membership when updating an existing Squad', async () => {
+    const requests: Array<{ path: string; method: string; body?: unknown }> = []
+    const persisted = {
+      ...squad,
+      members: [
+        { type: 'USER' as const, id: member.id, role: 'Reviewer' },
+        { type: 'AGENT' as const, id: human.id, role: 'Observer' }
+      ]
+    }
+    let squadReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+      if (path.endsWith('/squads') && (!init?.method || init.method === 'GET')) {
+        squadReads += 1
+        return new Response(JSON.stringify([squadReads === 1 ? squad : persisted]))
+      }
+      if (path.endsWith('/agents')) return new Response(JSON.stringify([leader, member, { ...member, id: human.id, name: 'Directory Agent Collision' }]))
+      if (path.endsWith('/assignees')) return new Response(JSON.stringify([
+        ...assignees,
+        { type: 'USER', id: member.id, name: 'Directory User Collision' },
+        { type: 'AGENT', id: human.id, name: 'Directory Agent Collision' }
+      ]))
+      if (init?.method === 'PUT') {
+        requests.push({ path, method: init.method, body: init.body ? JSON.parse(String(init.body)) : undefined })
+        return new Response(JSON.stringify(persisted))
+      }
+      return new Response('{}', { status: 404 })
+    }))
+
     const wrapper = mount(SquadManager, { props: { projectId: 'project-a' }, global })
     await flushPromises()
     await wrapper.findAll('button').find(button => button.text() === 'Edit')!.trigger('click')
 
     expect((wrapper.find('[data-field="member-0-identity"] select').element as HTMLSelectElement).value).toBe(`AGENT:${member.id}`)
     expect((wrapper.find('[data-field="member-1-identity"] select').element as HTMLSelectElement).value).toBe(`USER:${human.id}`)
-    expect((wrapper.find('[data-field="member-1-role"] input').element as HTMLInputElement).value).toBe('Product')
+    await wrapper.find('[data-field="member-0-role"] input').setValue('API')
+    await wrapper.findAll('button').find(button => button.text() === 'Remove')!.trigger('click')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(requests).toEqual([{
+      path: '/api/projects/project-a/squads/squad-a',
+      method: 'PUT',
+      body: {
+        name: 'Platform Squad',
+        leaderAgentId: leader.id,
+        members: [{ type: 'USER', id: human.id, role: 'Product' }]
+      }
+    }])
+    expect(squadReads).toBe(2)
+    expect(wrapper.text()).toContain('Directory User Collision · User')
+    expect(wrapper.text()).toContain('Directory Agent Collision · Agent')
+    expect(wrapper.findAll('[data-kind="user"]').some(node => node.text() === 'Directory User Collision')).toBe(true)
+    expect(wrapper.findAll('[data-kind="agent"]').some(node => node.text() === 'Directory Agent Collision')).toBe(true)
   })
 
   it('blocks incomplete drafts before they reach the API and surfaces backend validation failures', async () => {
