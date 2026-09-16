@@ -1,26 +1,52 @@
-# Future architecture: Agent collaboration, Squads and worker pools
+# Agent collaboration, Squads and worker pools
 
-This document records post-v0.1 collaboration direction. None of it should delay the first complete real coding-agent flow.
+This document separates the implemented Squad foundation from later Agent collaboration work. Future collaboration must continue to reuse Agent Board's canonical Issue, Run, scheduler, Workspace and Git lifecycle rather than creating a second execution system.
 
 ## Principle
 
 Agent Board remains authoritative for Issues, Runs, scheduling, Workspaces, capacity, cancellation, provenance and Review. Coding Engines may request collaboration, but they do not create a second scheduler or shadow lifecycle.
 
+## Implemented Squad foundation
+
+Squads are durable, reusable Project-scoped Agent team configuration.
+
+```text
+Squad
+├── leader Agent
+└── member Agents
+    └── optional descriptive role
+```
+
+A Squad can be created, edited and deleted through Project configuration. It has exactly one leader and zero or more additional members. Human Groups remain a separate deployment-global access concept and are never interchangeable with Agent Squads.
+
+A Squad is assignable to an Issue. The Issue persists the Squad ID as canonical ownership. Execution resolves the Squad's current leader through the same backend execution-target path used by normal Agent execution:
+
+```text
+Owner: Squad X
+Executing Agent: Leader Y
+```
+
+Changing the leader does not rewrite Issue ownership and does not create a Squad-specific Run, scheduler or Workspace. Existing Runs retain their historical executing Agent; eligible future/recovered execution resolves the current leader through the normal Run/scheduler path.
+
+The web UI reads ownership and execution context from shared backend read models. Squad updates publish durable Project events so open Issue views re-read backend truth after leader changes.
+
+Current Squad behavior does **not** fan work out to members and does not grant delegation. Member roles are descriptive configuration only until canonical delegation is implemented.
+
 ## Delegation
 
-Delegation is a subtask inside the current Issue/Run context.
+Delegation is future work and is a subtask inside the current Issue/Run context. It is not implied by assigning an Issue to a Squad.
 
-An Agent has an explicit configuration option:
+An Agent may later have an explicit configuration option:
 
 ```text
 [ ] Allow delegation
 ```
 
-When disabled, Agent Board does not grant an effective delegation capability. When enabled, the assigned parent Agent may delegate explicit work to another usable Agent.
+When disabled, Agent Board does not grant an effective delegation capability. When enabled, the assigned/executing parent Agent may delegate explicit work to another usable Agent.
 
 The parent Agent remains authoritative for the Issue and decides whether to use, reject, combine or follow up on delegated results. Delegates cannot independently move the Issue to Review or Done.
 
-Delegation uses normal durable Runs/execution records and the normal scheduler. Agent concurrency and Model Profile capacity still apply.
+Delegation must use normal durable Runs/execution records and the normal scheduler. Agent concurrency and Model Profile capacity still apply.
 
 ## Workspace inheritance
 
@@ -64,22 +90,7 @@ Parent cancellation/failure must not leave orphan delegated executions or perman
 
 Run/Issue inspection should show delegated Agent, task, state, result and Workspace access mode.
 
-## Squads
-
-Squad is reusable team configuration layered on delegation.
-
-```text
-Squad
-├── leader Agent
-└── member Agents
-    └── optional descriptive role
-```
-
-A Squad is assignable to an Issue. The assignment preserves Squad identity while the leader becomes the authoritative executing Agent.
-
-The leader receives Squad member/role context and may delegate through the normal delegation capability. It need not use every member.
-
-Do not create Squad Runs, Squad schedulers or a separate Squad lifecycle.
+Once delegation exists, a Squad leader may use the normal delegation capability with suitable Squad members. It need not use every member. That behavior must extend the existing Squad identity/ownership model rather than changing it.
 
 ## Agent-created follow-up work
 
@@ -128,15 +139,17 @@ Additional recursion/delegation-depth and rate/budget policies may be added when
 
 ## Ordering
 
+The reusable Squad/ownership foundation is already implemented independently of delegation. Remaining collaboration work can build on it without coupling basic Squad management to delegation.
+
 ```text
 complete v0.1 coding flow
  -> planning/automation where useful
  -> delegation
- -> Squads
+ -> Squad-aware delegation/member collaboration where useful
  -> broader messaging/wake policy if needed
  -> worker registry/pools
  -> warm/spot optimizations
- -> users/groups/permissions and broader administration as designed
+ -> broader identity/administration extensions as designed
  -> Plugins last
 ```
 
