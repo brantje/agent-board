@@ -96,6 +96,9 @@ func TestSquadProjectAccessPreservesProjectIsolation(t *testing.T) {
 	actor := activeProjectActor("viewer", store.DeploymentRoleMember)
 
 	if _, err := service.ListSquads(t.Context(), actor, squadOtherProjectID); !isAppCode(err, "project_not_found") {
-		t.Fatalf("inaccessible project error = %v", err)
+		t.Fatalf("inaccessible project list error = %v", err)
+	}
+	if _, err := service.GetSquad(t.Context(), actor, squadOtherProjectID, squadID); !isAppCode(err, "project_not_found") {
+		t.Fatalf("inaccessible project get error = %v", err)
 	}
 }
