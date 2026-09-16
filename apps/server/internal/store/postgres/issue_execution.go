@@ -32,15 +32,30 @@ func resolvedIssueExecutionCandidates(ctx context.Context, q issueExecutionCandi
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-
-	candidates := make([]issueExecutionCandidate, 0)
+	type ownerCandidate struct {
+		projectID string
+		issueID   string
+		ownerType string
+		ownerID   string
+	}
+	owners := make([]ownerCandidate, 0)
 	for rows.Next() {
-		var projectID, issueID, ownerType, ownerID string
-		if err := rows.Scan(&projectID, &issueID, &ownerType, &ownerID); err != nil {
+		var owner ownerCandidate
+		if err := rows.Scan(&owner.projectID, &owner.issueID, &owner.ownerType, &owner.ownerID); err != nil {
+			rows.Close()
 			return nil, err
 		}
-		issue := store.Issue{ProjectID: projectID, ID: issueID, AssigneeType: &ownerType, AssigneeID: &ownerID}
+		owners = append(owners, owner)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	candidates := make([]issueExecutionCandidate, 0, len(owners))
+	for _, owner := range owners {
+		issue := store.Issue{ProjectID: owner.projectID, ID: owner.issueID, AssigneeType: &owner.ownerType, AssigneeID: &owner.ownerID}
 		agentID, executable, err := resolveIssueExecutionAgent(ctx, q, issue)
 		if err != nil {
 			return nil, err
@@ -48,16 +63,13 @@ func resolvedIssueExecutionCandidates(ctx context.Context, q issueExecutionCandi
 		if !executable || (filter.AgentID != "" && agentID != filter.AgentID) {
 			continue
 		}
-		matches, err := executionAgentMatchesFilter(ctx, q, projectID, agentID, filter)
+		matches, err := executionAgentMatchesFilter(ctx, q, owner.projectID, agentID, filter)
 		if err != nil {
 			return nil, err
 		}
 		if matches {
-			candidates = append(candidates, issueExecutionCandidate{projectID: projectID, issueID: issueID, agentID: agentID})
+			candidates = append(candidates, issueExecutionCandidate{projectID: owner.projectID, issueID: owner.issueID, agentID: agentID})
 		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
 	}
 	return candidates, nil
 }
