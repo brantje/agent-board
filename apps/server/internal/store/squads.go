@@ -5,8 +5,14 @@ import (
 	"time"
 )
 
-// Squad is durable Project-scoped Agent team configuration. LeaderAgentID is
-// the canonical leadership reference; Members contains only additional Agents.
+const (
+	SquadMemberTypeAgent = "AGENT"
+	SquadMemberTypeUser  = "USER"
+)
+
+// Squad is durable Project-scoped collaboration configuration. LeaderAgentID is
+// the canonical leadership and execution reference; Members contains additional
+// Agent or User identities with optional descriptive roles.
 type Squad struct {
 	ID            string
 	ProjectID     string
@@ -18,8 +24,9 @@ type Squad struct {
 }
 
 type SquadMember struct {
-	AgentID string
-	Role    *string
+	Type string
+	ID   string
+	Role *string
 }
 
 type SquadUpdateResult struct {
