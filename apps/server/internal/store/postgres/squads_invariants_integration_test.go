@@ -14,11 +14,7 @@ func TestSquadLeaderAndMembershipSerializeOnSquadRow(t *testing.T) {
 		ctx := context.Background()
 
 		project, agents := createSquadProjectWithAgents(t, s, "squad-leader-lock-first", 2)
-		squad, err := s.CreateSquad(ctx, store.Squad{
-			ProjectID:     project.ID,
-			Name:          "Locked leader",
-			LeaderAgentID: agents[0].ID,
-		})
+		squad, err := s.CreateSquad(ctx, store.Squad{ProjectID: project.ID, Name: "Locked leader", LeaderAgentID: agents[0].ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -59,11 +55,7 @@ func TestSquadLeaderAndMembershipSerializeOnSquadRow(t *testing.T) {
 		ctx := context.Background()
 
 		project, agents := createSquadProjectWithAgents(t, s, "squad-member-lock-first", 2)
-		squad, err := s.CreateSquad(ctx, store.Squad{
-			ProjectID:     project.ID,
-			Name:          "Locked member",
-			LeaderAgentID: agents[0].ID,
-		})
+		squad, err := s.CreateSquad(ctx, store.Squad{ProjectID: project.ID, Name: "Locked member", LeaderAgentID: agents[0].ID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,6 +91,42 @@ func TestSquadLeaderAndMembershipSerializeOnSquadRow(t *testing.T) {
 	})
 }
 
+func TestSquadMemberTypedIdentityConstraints(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	project, agents := createSquadProjectWithAgents(t, s, "squad-typed-constraints", 2)
+	squad, err := s.CreateSquad(t.Context(), store.Squad{ProjectID: project.ID, Name: "Typed", LeaderAgentID: agents[0].ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := s.CreateUser(t.Context(), authUser("squad-typed-user", "squad-typed-user@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = pool.Exec(t.Context(), `INSERT INTO squad_members (squad_id) VALUES ($1)`, squad.ID)
+	assertSquadPostgresCode(t, err, "23514")
+	_, err = pool.Exec(t.Context(), `INSERT INTO squad_members (squad_id,agent_id,user_id) VALUES ($1,$2,$3)`, squad.ID, agents[1].ID, user.ID)
+	assertSquadPostgresCode(t, err, "23514")
+
+	if _, err := pool.Exec(t.Context(), `INSERT INTO squad_members (squad_id,agent_id) VALUES ($1,$2)`, squad.ID, agents[1].ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Exec(t.Context(), `INSERT INTO squad_members (squad_id,agent_id) VALUES ($1,$2)`, squad.ID, agents[1].ID)
+	assertSquadPostgresCode(t, err, "23505")
+
+	if _, err := pool.Exec(t.Context(), `INSERT INTO squad_members (squad_id,user_id) VALUES ($1,$2)`, squad.ID, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	_, err = pool.Exec(t.Context(), `INSERT INTO squad_members (squad_id,user_id) VALUES ($1,$2)`, squad.ID, user.ID)
+	assertSquadPostgresCode(t, err, "23505")
+
+	_, err = pool.Exec(t.Context(), `INSERT INTO squad_members (squad_id,user_id) VALUES ($1,'99999999-9999-4999-8999-999999999999')`, squad.ID)
+	assertSquadPostgresCode(t, err, "23503")
+	_, err = pool.Exec(t.Context(), `INSERT INTO squad_members (squad_id,agent_id) VALUES ($1,$2)`, squad.ID, agents[0].ID)
+	assertSquadPostgresCode(t, err, "23514")
+}
+
 func TestSquadProjectCannotBeReassigned(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
@@ -108,10 +136,8 @@ func TestSquadProjectCannotBeReassigned(t *testing.T) {
 	projectB, _ := createSquadProjectWithAgents(t, s, "squad-project-immutable-b", 1)
 	leader := createGlobalSquadInvariantAgent(t, s, "squad-project-immutable")
 	squad, err := s.CreateSquad(ctx, store.Squad{
-		ProjectID:     projectA.ID,
-		Name:          "Immutable project",
-		LeaderAgentID: leader.ID,
-		Members:       []store.SquadMember{{AgentID: members[0].ID}},
+		ProjectID: projectA.ID, Name: "Immutable project", LeaderAgentID: leader.ID,
+		Members: []store.SquadMember{{Type: store.SquadMemberTypeAgent, ID: members[0].ID}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +153,7 @@ func TestSquadProjectCannotBeReassigned(t *testing.T) {
 	if got.ProjectID != projectA.ID {
 		t.Fatalf("project id = %q, want %q", got.ProjectID, projectA.ID)
 	}
-	assertSquadMember(t, got.Members, members[0].ID, nil)
+	assertSquadMember(t, got.Members, store.SquadMemberTypeAgent, members[0].ID, nil)
 }
 
 func createGlobalSquadInvariantAgent(t *testing.T, s *Store, name string) store.Agent {
@@ -137,23 +163,11 @@ func createGlobalSquadInvariantAgent(t *testing.T, s *Store, name string) store.
 	if err != nil {
 		t.Fatalf("create global provider: %v", err)
 	}
-	model, err := s.CreateModelProfile(ctx, store.ModelProfile{
-		ProviderID: provider.ID,
-		Name:       name + "-model",
-		Model:      "test",
-		Enabled:    true,
-	})
+	model, err := s.CreateModelProfile(ctx, store.ModelProfile{ProviderID: provider.ID, Name: name + "-model", Model: "test", Enabled: true})
 	if err != nil {
 		t.Fatalf("create global model profile: %v", err)
 	}
-	agent, err := s.CreateAgent(ctx, store.Agent{
-		Name:             name + "-agent",
-		Engine:           "test",
-		ModelProfileID:   model.ID,
-		EngineSettings:   store.EmptyObject,
-		ConcurrencyLimit: 1,
-		State:            "ENABLED",
-	})
+	agent, err := s.CreateAgent(ctx, store.Agent{Name: name + "-agent", Engine: "test", ModelProfileID: model.ID, EngineSettings: store.EmptyObject, ConcurrencyLimit: 1, State: "ENABLED"})
 	if err != nil {
 		t.Fatalf("create global agent: %v", err)
 	}

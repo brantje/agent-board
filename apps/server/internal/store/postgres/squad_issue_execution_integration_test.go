@@ -9,11 +9,7 @@ import (
 func createSquadExecutionMember(t *testing.T, s *Store, f runFixture, name string) store.Agent {
 	t.Helper()
 	agent, err := s.CreateAgent(t.Context(), store.Agent{
-		ProjectID:      &f.project.ID,
-		Name:           name,
-		Engine:         "scripted",
-		ModelProfileID: f.model.ID,
-		EngineSettings: store.EmptyObject,
+		ProjectID: &f.project.ID, Name: name, Engine: "scripted", ModelProfileID: f.model.ID, EngineSettings: store.EmptyObject,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -25,17 +21,20 @@ func TestSquadIssueAutoEnqueueUsesLeaderAndNormalScheduler(t *testing.T) {
 	s := New(testPool(t))
 	f := seedRunFixture(t, s, "squad-auto")
 	member := createSquadExecutionMember(t, s, f, "squad-auto-member")
+	human := createSquadWorkflowUser(t, s, f.project.ID, "squad-auto-human", store.ProjectRoleAdmin, store.DeploymentRoleMember, store.UserStatusActive)
 	squad, err := s.CreateSquad(t.Context(), store.Squad{
 		ProjectID: f.project.ID, Name: "Backend", LeaderAgentID: f.agent.ID,
-		Members: []store.SquadMember{{AgentID: member.ID}},
+		Members: []store.SquadMember{
+			{Type: store.SquadMemberTypeAgent, ID: member.ID},
+			{Type: store.SquadMemberTypeUser, ID: human.ID},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	ownerType := "SQUAD"
 	issue, err := s.CreateIssue(t.Context(), store.Issue{
-		ProjectID: f.project.ID, Title: "Squad TODO", Status: "TODO",
-		AssigneeType: &ownerType, AssigneeID: &squad.ID,
+		ProjectID: f.project.ID, Title: "Squad TODO", Status: "TODO", AssigneeType: &ownerType, AssigneeID: &squad.ID,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -57,12 +56,15 @@ func TestSquadIssueAutoEnqueueUsesLeaderAndNormalScheduler(t *testing.T) {
 	}
 	var memberRuns int
 	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM runs WHERE issue_id=$1 AND agent_id=$2`, issue.ID, member.ID).Scan(&memberRuns); err != nil || memberRuns != 0 {
-		t.Fatalf("member runs=%d err=%v", memberRuns, err)
+		t.Fatalf("Agent member runs=%d err=%v", memberRuns, err)
+	}
+	var humanRuns int
+	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM runs WHERE issue_id=$1 AND agent_id::text=$2`, issue.ID, human.ID).Scan(&humanRuns); err != nil || humanRuns != 0 {
+		t.Fatalf("human member runs=%d err=%v", humanRuns, err)
 	}
 
 	backlog, err := s.CreateIssue(t.Context(), store.Issue{
-		ProjectID: f.project.ID, Title: "Squad backlog", Status: "BACKLOG",
-		AssigneeType: &ownerType, AssigneeID: &squad.ID,
+		ProjectID: f.project.ID, Title: "Squad backlog", Status: "BACKLOG", AssigneeType: &ownerType, AssigneeID: &squad.ID,
 	})
 	if err != nil {
 		t.Fatal(err)

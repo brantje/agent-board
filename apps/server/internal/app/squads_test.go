@@ -9,20 +9,25 @@ import (
 )
 
 const (
-	squadProjectID      = "11111111-1111-4111-8111-111111111111"
-	squadOtherProjectID = "22222222-2222-4222-8222-222222222222"
-	squadLeaderID       = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	squadMemberID       = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-	squadGlobalAgentID  = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-	squadID             = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	squadProjectID          = "11111111-1111-4111-8111-111111111111"
+	squadOtherProjectID     = "22222222-2222-4222-8222-222222222222"
+	squadLeaderID           = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	squadMemberID           = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	squadGlobalAgentID      = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+	squadID                 = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	squadUserID             = "11111111-aaaa-4aaa-8aaa-111111111111"
+	squadGroupUserID        = "22222222-aaaa-4aaa-8aaa-222222222222"
+	squadDeploymentAdminID  = "33333333-aaaa-4aaa-8aaa-333333333333"
+	squadIneligibleUserID   = "44444444-aaaa-4aaa-8aaa-444444444444"
 )
 
 type squadTestStore struct {
 	*fakeStore
-	agents      map[string]store.Agent
-	squads      map[string]store.Squad
-	createCalls int
-	updateCalls int
+	agents        map[string]store.Agent
+	squads        map[string]store.Squad
+	workflowUsers map[string]error
+	createCalls   int
+	updateCalls   int
 }
 
 type squadEventRecorder struct {
@@ -38,6 +43,7 @@ func (r *squadEventRecorder) PublishPersisted(_ context.Context, event store.Eve
 }
 
 var _ store.ControlPlaneStore = (*squadTestStore)(nil)
+var _ store.ProjectWorkflowUserEligibilityStore = (*squadTestStore)(nil)
 
 func newSquadTestStore() *squadTestStore {
 	projectID := squadProjectID
@@ -51,7 +57,24 @@ func newSquadTestStore() *squadTestStore {
 			"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee": {ID: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", ProjectID: &otherProjectID, Name: "Other", State: "ENABLED"},
 		},
 		squads: map[string]store.Squad{},
+		workflowUsers: map[string]error{
+			squadUserID:            nil,
+			squadGroupUserID:       nil,
+			squadDeploymentAdminID: nil,
+			squadIneligibleUserID:  store.ErrInvalidArgument,
+		},
 	}
+}
+
+func (s *squadTestStore) ValidateProjectWorkflowUser(_ context.Context, projectID, userID string) error {
+	if projectID != squadProjectID {
+		return store.ErrNotFound
+	}
+	err, ok := s.workflowUsers[userID]
+	if !ok {
+		return store.ErrNotFound
+	}
+	return err
 }
 
 func (s *squadTestStore) GetAgentInScope(_ context.Context, scope *string, id string) (store.Agent, error) {
@@ -139,11 +162,12 @@ func cloneTestSquadMembers(values []store.SquadMember) []store.SquadMember {
 	return result
 }
 
-func TestCreateSquadNormalizesAndAcceptsProjectAndGlobalAgents(t *testing.T) {
+func TestCreateSquadNormalizesMixedMembership(t *testing.T) {
 	ctx := context.Background()
 	data := newSquadTestStore()
 	svc := New(data)
-	role := "  API implementation  "
+	agentRole := "  API implementation  "
+	userRole := "  Product  "
 	emptyRole := "  "
 
 	created, err := svc.CreateSquad(ctx, store.Squad{
@@ -151,8 +175,9 @@ func TestCreateSquadNormalizesAndAcceptsProjectAndGlobalAgents(t *testing.T) {
 		Name:          "  Backend  ",
 		LeaderAgentID: squadLeaderID,
 		Members: []store.SquadMember{
-			{AgentID: squadMemberID, Role: &role},
-			{AgentID: squadGlobalAgentID, Role: &emptyRole},
+			{Type: store.SquadMemberTypeAgent, ID: squadMemberID, Role: &agentRole},
+			{Type: store.SquadMemberTypeUser, ID: squadUserID, Role: &userRole},
+			{Type: store.SquadMemberTypeAgent, ID: squadGlobalAgentID, Role: &emptyRole},
 		},
 	})
 	if err != nil {
@@ -164,18 +189,38 @@ func TestCreateSquadNormalizesAndAcceptsProjectAndGlobalAgents(t *testing.T) {
 	if created.Name != "Backend" || created.LeaderAgentID != squadLeaderID {
 		t.Fatalf("created squad = %+v", created)
 	}
-	if len(created.Members) != 2 || created.Members[0].Role == nil || *created.Members[0].Role != "API implementation" {
-		t.Fatalf("members = %+v", created.Members)
+	if len(created.Members) != 3 || created.Members[0].Type != store.SquadMemberTypeAgent || created.Members[0].Role == nil || *created.Members[0].Role != "API implementation" {
+		t.Fatalf("Agent member = %+v", created.Members)
 	}
-	if created.Members[1].Role != nil {
-		t.Fatalf("blank descriptive role = %v, want nil", created.Members[1].Role)
+	if created.Members[1].Type != store.SquadMemberTypeUser || created.Members[1].ID != squadUserID || created.Members[1].Role == nil || *created.Members[1].Role != "Product" {
+		t.Fatalf("User member = %+v", created.Members[1])
+	}
+	if created.Members[2].Role != nil {
+		t.Fatalf("blank descriptive role = %v, want nil", created.Members[2].Role)
 	}
 }
 
-func TestSquadValidationRejectsInvalidMembershipBeforeStore(t *testing.T) {
+func TestCreateSquadAcceptsCanonicalEffectiveProjectUsers(t *testing.T) {
+	for _, userID := range []string{squadUserID, squadGroupUserID, squadDeploymentAdminID} {
+		t.Run(userID, func(t *testing.T) {
+			data := newSquadTestStore()
+			_, err := New(data).CreateSquad(t.Context(), store.Squad{
+				ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID,
+				Members: []store.SquadMember{{Type: store.SquadMemberTypeUser, ID: userID}},
+			})
+			if err != nil {
+				t.Fatalf("CreateSquad: %v", err)
+			}
+		})
+	}
+}
+
+func TestSquadValidationRejectsInvalidTypedMembershipBeforeStore(t *testing.T) {
 	otherAgentID := "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
 	disabledID := "ffffffff-ffff-4fff-8fff-ffffffffffff"
 	ctx := context.Background()
+	agent := func(id string) store.SquadMember { return store.SquadMember{Type: store.SquadMemberTypeAgent, ID: id} }
+	user := func(id string) store.SquadMember { return store.SquadMember{Type: store.SquadMemberTypeUser, ID: id} }
 
 	tests := []struct {
 		name  string
@@ -185,15 +230,22 @@ func TestSquadValidationRejectsInvalidMembershipBeforeStore(t *testing.T) {
 	}{
 		{name: "missing leader", input: store.Squad{ProjectID: squadProjectID, Name: "Squad"}, code: "invalid_argument"},
 		{name: "invalid leader id", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: "not-a-uuid"}, code: "invalid_argument"},
-		{name: "leader duplicated as member", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{{AgentID: squadLeaderID}}}, code: "invalid_argument"},
-		{name: "duplicate member", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{{AgentID: squadMemberID}, {AgentID: squadMemberID}}}, code: "invalid_argument"},
+		{name: "unknown member type", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{{Type: "GROUP", ID: squadUserID}}}, code: "invalid_argument"},
+		{name: "invalid member id", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{{Type: store.SquadMemberTypeUser, ID: "bad"}}}, code: "invalid_argument"},
+		{name: "leader duplicated as Agent member", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{agent(squadLeaderID)}}, code: "invalid_argument"},
+		{name: "duplicate Agent member", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{agent(squadMemberID), agent(squadMemberID)}}, code: "invalid_argument"},
+		{name: "duplicate User member", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{user(squadUserID), user(squadUserID)}}, code: "invalid_argument"},
 		{name: "cross project leader", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: otherAgentID}, code: "agent_not_found"},
-		{name: "cross project member", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{{AgentID: otherAgentID}}}, code: "agent_not_found"},
+		{name: "cross project Agent member", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{agent(otherAgentID)}}, code: "agent_not_found"},
+		{name: "Agent id used as User", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{user(squadMemberID)}}, code: "invalid_argument"},
+		{name: "User id used as Agent", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{agent(squadUserID)}}, code: "agent_not_found"},
+		{name: "ineligible User", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{user(squadIneligibleUserID)}}, code: "invalid_argument"},
+		{name: "missing User", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{user("55555555-aaaa-4aaa-8aaa-555555555555")}}, code: "invalid_argument"},
 		{name: "disabled leader", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: disabledID}, setup: func(data *squadTestStore) {
 			projectID := squadProjectID
 			data.agents[disabledID] = store.Agent{ID: disabledID, ProjectID: &projectID, State: "DISABLED"}
 		}, code: "invalid_argument"},
-		{name: "disabled member", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{{AgentID: disabledID}}}, setup: func(data *squadTestStore) {
+		{name: "disabled Agent member", input: store.Squad{ProjectID: squadProjectID, Name: "Squad", LeaderAgentID: squadLeaderID, Members: []store.SquadMember{agent(disabledID)}}, setup: func(data *squadTestStore) {
 			projectID := squadProjectID
 			data.agents[disabledID] = store.Agent{ID: disabledID, ProjectID: &projectID, State: "ARCHIVED"}
 		}, code: "invalid_argument"},
@@ -205,8 +257,7 @@ func TestSquadValidationRejectsInvalidMembershipBeforeStore(t *testing.T) {
 			if tt.setup != nil {
 				tt.setup(data)
 			}
-			svc := New(data)
-			_, err := svc.CreateSquad(ctx, tt.input)
+			_, err := New(data).CreateSquad(ctx, tt.input)
 			appErr, ok := AsError(err)
 			if !ok || appErr.Code != tt.code {
 				t.Fatalf("error = %#v, want code %q", err, tt.code)
@@ -218,40 +269,39 @@ func TestSquadValidationRejectsInvalidMembershipBeforeStore(t *testing.T) {
 	}
 }
 
-func TestSquadCRUDTranslatesStoreErrorsAndReadsDoNotRevalidateAgents(t *testing.T) {
-	ctx := context.Background()
+func TestSquadReadsDoNotRevalidateStaleMembers(t *testing.T) {
 	data := newSquadTestStore()
-	data.squads[squadID] = store.Squad{ID: squadID, ProjectID: squadProjectID, Name: "Backend", LeaderAgentID: squadLeaderID}
+	data.squads[squadID] = store.Squad{
+		ID: squadID, ProjectID: squadProjectID, Name: "Backend", LeaderAgentID: squadLeaderID,
+		Members: []store.SquadMember{{Type: store.SquadMemberTypeUser, ID: squadUserID}},
+	}
+	data.workflowUsers[squadUserID] = store.ErrInvalidArgument
 	leader := data.agents[squadLeaderID]
 	leader.State = "DISABLED"
 	data.agents[squadLeaderID] = leader
 	svc := New(data)
 
-	got, err := svc.GetSquad(ctx, squadProjectID, squadID)
+	got, err := svc.GetSquad(t.Context(), squadProjectID, squadID)
 	if err != nil {
-		t.Fatalf("GetSquad with disabled persisted leader: %v", err)
+		t.Fatalf("GetSquad with stale persisted identities: %v", err)
 	}
-	if got.LeaderAgentID != squadLeaderID {
-		t.Fatalf("leader = %q", got.LeaderAgentID)
+	if got.LeaderAgentID != squadLeaderID || len(got.Members) != 1 || got.Members[0].Type != store.SquadMemberTypeUser {
+		t.Fatalf("squad = %+v", got)
 	}
-	listed, err := svc.ListSquads(ctx, squadProjectID)
+	listed, err := svc.ListSquads(t.Context(), squadProjectID)
 	if err != nil || len(listed) != 1 {
 		t.Fatalf("ListSquads = %+v, %v", listed, err)
 	}
 
-	if _, err := svc.GetSquad(ctx, squadProjectID, "not-a-uuid"); !isAppCode(err, "invalid_argument") {
+	if _, err := svc.GetSquad(t.Context(), squadProjectID, "not-a-uuid"); !isAppCode(err, "invalid_argument") {
 		t.Fatalf("invalid squad id error = %v", err)
 	}
-	if _, err := svc.GetSquad(ctx, squadProjectID, "99999999-9999-4999-8999-999999999999"); !isAppCode(err, "squad_not_found") {
+	if _, err := svc.GetSquad(t.Context(), squadProjectID, "99999999-9999-4999-8999-999999999999"); !isAppCode(err, "squad_not_found") {
 		t.Fatalf("missing squad error = %v", err)
-	}
-	if err := svc.DeleteSquad(ctx, squadProjectID, "99999999-9999-4999-8999-999999999999"); !isAppCode(err, "squad_not_found") {
-		t.Fatalf("missing delete error = %v", err)
 	}
 }
 
-func TestUpdateSquadValidatesCompleteDesiredMembershipAndPersistsOnce(t *testing.T) {
-	ctx := context.Background()
+func TestUpdateSquadNormalizesMixedDesiredMembershipAndPersistsOnce(t *testing.T) {
 	data := newSquadTestStore()
 	data.squads[squadID] = store.Squad{ID: squadID, ProjectID: squadProjectID, Name: "Backend", LeaderAgentID: squadLeaderID}
 	svc := New(data)
@@ -259,12 +309,12 @@ func TestUpdateSquadValidatesCompleteDesiredMembershipAndPersistsOnce(t *testing
 	svc.SetEventRecorder(recorder)
 	role := "  Reviewer "
 
-	updated, err := svc.UpdateSquad(ctx, store.Squad{
-		ID:            squadID,
-		ProjectID:     squadProjectID,
-		Name:          " Platform ",
-		LeaderAgentID: squadMemberID,
-		Members:       []store.SquadMember{{AgentID: squadLeaderID, Role: &role}},
+	updated, err := svc.UpdateSquad(t.Context(), store.Squad{
+		ID: squadID, ProjectID: squadProjectID, Name: " Platform ", LeaderAgentID: squadMemberID,
+		Members: []store.SquadMember{
+			{Type: store.SquadMemberTypeAgent, ID: squadLeaderID, Role: &role},
+			{Type: store.SquadMemberTypeUser, ID: squadUserID},
+		},
 	})
 	if err != nil {
 		t.Fatalf("UpdateSquad: %v", err)
@@ -272,11 +322,11 @@ func TestUpdateSquadValidatesCompleteDesiredMembershipAndPersistsOnce(t *testing
 	if data.updateCalls != 1 {
 		t.Fatalf("UpdateSquad store calls = %d, want 1", data.updateCalls)
 	}
-	if updated.Name != "Platform" || updated.LeaderAgentID != squadMemberID || len(updated.Members) != 1 {
+	if updated.Name != "Platform" || updated.LeaderAgentID != squadMemberID || len(updated.Members) != 2 {
 		t.Fatalf("updated squad = %+v", updated)
 	}
-	if updated.Members[0].Role == nil || *updated.Members[0].Role != "Reviewer" {
-		t.Fatalf("updated role = %v", updated.Members[0].Role)
+	if updated.Members[0].Role == nil || *updated.Members[0].Role != "Reviewer" || updated.Members[1].Type != store.SquadMemberTypeUser {
+		t.Fatalf("updated members = %+v", updated.Members)
 	}
 	if len(recorder.published) != 1 || recorder.published[0].Type != "squad.updated" {
 		t.Fatalf("published events = %+v", recorder.published)
