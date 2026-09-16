@@ -627,7 +627,7 @@ CREATE TABLE artifacts (
     created_at timestamptz NOT NULL DEFAULT now(),
     deleted_at timestamptz,
     CONSTRAINT artifacts_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
-    CONSTRAINT artifacts_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT artifacts_run_fk FOREIGN KEY (project_id, issue_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
     UNIQUE (project_id, id)
 );
 
@@ -682,7 +682,10 @@ BEGIN
         IF TG_OP = 'UPDATE' AND NEW.project_id IS DISTINCT FROM OLD.project_id THEN
             RAISE EXCEPTION 'Squad Project is immutable' USING ERRCODE = '55000';
         END IF;
-        SELECT project_id INTO agent_project_id FROM agents WHERE id = NEW.leader_agent_id;
+        SELECT project_id INTO agent_project_id
+        FROM agents
+        WHERE id = NEW.leader_agent_id
+        FOR UPDATE;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'invalid Squad leader Agent' USING ERRCODE = '23514';
         END IF;
@@ -707,7 +710,10 @@ BEGIN
         IF NEW.agent_id = squad_leader_agent_id THEN
             RAISE EXCEPTION 'Squad leader cannot also be an additional member' USING ERRCODE = '23514';
         END IF;
-        SELECT project_id INTO agent_project_id FROM agents WHERE id = NEW.agent_id;
+        SELECT project_id INTO agent_project_id
+        FROM agents
+        WHERE id = NEW.agent_id
+        FOR UPDATE;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'invalid Squad member Agent' USING ERRCODE = '23514';
         END IF;
