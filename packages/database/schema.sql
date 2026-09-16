@@ -267,6 +267,28 @@ CREATE UNIQUE INDEX agents_global_name_uq ON agents (lower(name)) WHERE project_
 CREATE UNIQUE INDEX agents_project_name_uq ON agents (project_id, lower(name)) WHERE project_id IS NOT NULL;
 CREATE INDEX agents_model_profile_idx ON agents (model_profile_id);
 
+CREATE TABLE squads (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name text NOT NULL CHECK (btrim(name) <> ''),
+    leader_agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, id)
+);
+
+CREATE UNIQUE INDEX squads_project_name_uq ON squads (project_id, lower(name));
+CREATE INDEX squads_leader_agent_idx ON squads (leader_agent_id);
+
+CREATE TABLE squad_members (
+    squad_id uuid NOT NULL REFERENCES squads(id) ON DELETE CASCADE,
+    agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    role text CHECK (role IS NULL OR btrim(role) <> ''),
+    PRIMARY KEY (squad_id, agent_id)
+);
+
+CREATE INDEX squad_members_agent_idx ON squad_members (agent_id, squad_id);
+
 CREATE TABLE issues (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -658,6 +680,29 @@ BEGIN
         IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
             RAISE EXCEPTION 'agent cannot reference model profile from another project' USING ERRCODE = '23514';
         END IF;
+    ELSIF TG_TABLE_NAME = 'squads' THEN
+        SELECT project_id INTO referenced_project_id FROM agents WHERE id = NEW.leader_agent_id;
+        IF NOT FOUND THEN RAISE EXCEPTION 'invalid squad leader agent' USING ERRCODE = '23514'; END IF;
+        IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
+            RAISE EXCEPTION 'squad cannot reference leader agent from another project' USING ERRCODE = '23514';
+        END IF;
+        IF EXISTS (
+            SELECT 1
+            FROM squad_members sm
+            WHERE sm.squad_id = NEW.id AND sm.agent_id = NEW.leader_agent_id
+        ) THEN
+            RAISE EXCEPTION 'squad leader cannot also be a member row' USING ERRCODE = '23514';
+        END IF;
+        IF EXISTS (
+            SELECT 1
+            FROM squad_members sm
+            JOIN agents a ON a.id = sm.agent_id
+            WHERE sm.squad_id = NEW.id
+              AND a.project_id IS NOT NULL
+              AND a.project_id IS DISTINCT FROM NEW.project_id
+        ) THEN
+            RAISE EXCEPTION 'squad project change would cross member agent scope' USING ERRCODE = '23514';
+        END IF;
     ELSIF TG_TABLE_NAME = 'issues' THEN
         IF NEW.assignee_type = 'AGENT' THEN
             SELECT project_id INTO referenced_project_id FROM agents WHERE id = NEW.assignee_id;
@@ -681,6 +726,34 @@ BEGIN
         IF referenced_project_id IS NOT NULL AND referenced_project_id IS DISTINCT FROM NEW.project_id THEN
             RAISE EXCEPTION 'runtime instance cannot reference runtime from another project' USING ERRCODE = '23514';
         END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION enforce_squad_member_scope() RETURNS trigger AS $$
+DECLARE
+    squad_project_id uuid;
+    squad_leader_agent_id uuid;
+    member_project_id uuid;
+BEGIN
+    SELECT project_id, leader_agent_id
+    INTO squad_project_id, squad_leader_agent_id
+    FROM squads
+    WHERE id = NEW.squad_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'invalid squad member squad' USING ERRCODE = '23514';
+    END IF;
+    IF NEW.agent_id = squad_leader_agent_id THEN
+        RAISE EXCEPTION 'squad leader cannot also be a member row' USING ERRCODE = '23514';
+    END IF;
+
+    SELECT project_id INTO member_project_id FROM agents WHERE id = NEW.agent_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'invalid squad member agent' USING ERRCODE = '23514';
+    END IF;
+    IF member_project_id IS NOT NULL AND member_project_id IS DISTINCT FROM squad_project_id THEN
+        RAISE EXCEPTION 'squad cannot reference member agent from another project' USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
 END;
@@ -715,6 +788,8 @@ CREATE TRIGGER model_profiles_owner_change_check BEFORE UPDATE OF project_id ON 
 CREATE TRIGGER runtimes_owner_change_check BEFORE UPDATE OF project_id ON runtimes FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 
 CREATE TRIGGER agents_scope_check BEFORE INSERT OR UPDATE OF project_id, model_profile_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
+CREATE TRIGGER squads_scope_check BEFORE INSERT OR UPDATE OF project_id, leader_agent_id ON squads FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
+CREATE TRIGGER squad_members_scope_check BEFORE INSERT OR UPDATE OF squad_id, agent_id ON squad_members FOR EACH ROW EXECUTE FUNCTION enforce_squad_member_scope();
 CREATE TRIGGER issues_scope_check BEFORE INSERT OR UPDATE OF project_id, assignee_type, assignee_id ON issues FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER runs_scope_check BEFORE INSERT OR UPDATE OF project_id, agent_id ON runs FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER runtime_instances_scope_check BEFORE INSERT OR UPDATE OF project_id, runtime_id ON runtime_instances FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
