@@ -11,7 +11,7 @@ import (
 func (s *Service) SetIssueAssignee(ctx context.Context, projectID, issueID string, target *store.Assignee, actor json.RawMessage) (store.Issue, error) {
 	if target != nil {
 		var id pgtype.UUID
-		if err := id.Scan(target.ID); err != nil || (target.Type != "USER" && target.Type != "AGENT") {
+		if err := id.Scan(target.ID); err != nil || (target.Type != "USER" && target.Type != "AGENT" && target.Type != "SQUAD") {
 			return store.Issue{}, NewError("invalid_argument", "assignee must have a valid type and UUID", store.ErrInvalidArgument)
 		}
 	}

@@ -37,6 +37,7 @@ const issueSelectColumns = `
 	CASE
 		WHEN i.assignee_type='USER' THEN (SELECT display_name FROM users WHERE id=i.assignee_id)
 		WHEN i.assignee_type='AGENT' THEN (SELECT name FROM agents WHERE id=i.assignee_id)
+		WHEN i.assignee_type='SQUAD' THEN (SELECT name FROM squads WHERE id=i.assignee_id)
 	END,
 	i.number,
 	p.issue_prefix,

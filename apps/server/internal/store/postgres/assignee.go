@@ -47,6 +47,24 @@ func resolveAssignee(ctx context.Context, q assigneeQuerier, projectID string, t
 		if status != store.UserStatusActive || !eligible {
 			return nil, store.ErrInvalidArgument
 		}
+	case "SQUAD":
+		var state string
+		var inProject bool
+		err := q.QueryRow(ctx, `
+			SELECT sq.id::text, sq.name, a.state, sq.project_id=$1
+			FROM squads AS sq
+			JOIN agents AS a ON a.id=sq.leader_agent_id
+			WHERE sq.id=$2
+		`, projectID, target.ID).Scan(&value.ID, &value.Name, &state, &inProject)
+		if err != nil {
+			return nil, notFound(err)
+		}
+		if !inProject {
+			return nil, store.ErrNotFound
+		}
+		if state != "ENABLED" {
+			return nil, store.ErrInvalidArgument
+		}
 	default:
 		return nil, store.ErrInvalidArgument
 	}
@@ -67,6 +85,11 @@ func (s *Store) ListIssueAssignees(ctx context.Context, projectID string) ([]sto
 			SELECT 'AGENT'::text,a.id::text,a.name
 			FROM agents AS a
 			WHERE `+eligibleAgentAssigneePredicate+`
+			UNION ALL
+			SELECT 'SQUAD'::text,sq.id::text,sq.name
+			FROM squads AS sq
+			JOIN agents AS a ON a.id=sq.leader_agent_id
+			WHERE sq.project_id=$1 AND a.state='ENABLED' AND (a.project_id IS NULL OR a.project_id=$1)
 		) assignees
 		ORDER BY name,type,id
 	`, projectID)
@@ -154,6 +177,6 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
 }
 
 func lockAssigneeEligibility(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `LOCK TABLE users, project_user_access, project_group_access, group_members, agents IN SHARE MODE`)
+	_, err := tx.Exec(ctx, `LOCK TABLE users, project_user_access, project_group_access, group_members, agents, squads IN SHARE MODE`)
 	return err
 }

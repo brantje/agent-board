@@ -121,14 +121,28 @@ func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad
 }
 
 func (s *Store) DeleteSquad(ctx context.Context, projectID, squadID string) error {
-	result, err := s.pool.Exec(ctx, `DELETE FROM squads WHERE project_id = $1 AND id = $2`, projectID, squadID)
+	result, err := s.pool.Exec(ctx, `
+		DELETE FROM squads AS sq
+		WHERE sq.project_id=$1 AND sq.id=$2
+		  AND NOT EXISTS (
+			SELECT 1 FROM issues AS i
+			WHERE i.project_id=$1 AND i.assignee_type='SQUAD' AND i.assignee_id=$2
+		  )
+	`, projectID, squadID)
 	if err != nil {
-		return notFound(err)
+		return err
 	}
-	if result.RowsAffected() == 0 {
-		return store.ErrNotFound
+	if result.RowsAffected() != 0 {
+		return nil
 	}
-	return nil
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM squads WHERE project_id=$1 AND id=$2)`, projectID, squadID).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return store.ErrConflict
+	}
+	return store.ErrNotFound
 }
 
 func lockSquadAgents(ctx context.Context, tx pgx.Tx, value store.Squad) error {

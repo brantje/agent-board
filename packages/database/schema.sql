@@ -299,7 +299,7 @@ CREATE TABLE issues (
     board_position bigint NOT NULL DEFAULT 0 CHECK (board_position >= 0),
     assignee_type text,
     assignee_id uuid,
-    CONSTRAINT issues_assignee_pair CHECK ((assignee_type IS NULL AND assignee_id IS NULL) OR (assignee_type IS NOT NULL AND assignee_type IN ('USER','AGENT') AND assignee_id IS NOT NULL)),
+    CONSTRAINT issues_assignee_pair CHECK ((assignee_type IS NULL AND assignee_id IS NULL) OR (assignee_type IS NOT NULL AND assignee_type IN ('USER','AGENT','SQUAD') AND assignee_id IS NOT NULL)),
     created_by_type text CHECK (created_by_type IS NULL OR created_by_type IN ('HUMAN', 'AGENT')),
     created_by_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
