@@ -141,6 +141,10 @@ func decodeSquadInput(w http.ResponseWriter, r *http.Request) (squadInput, bool)
 	if !decodeJSON(w, r, &input) {
 		return squadInput{}, false
 	}
+	if input.Members == nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", "members is required")
+		return squadInput{}, false
+	}
 	if !validUUID(input.LeaderAgentID) {
 		writeError(w, http.StatusBadRequest, "invalid_id", "leaderAgentId must be a UUID")
 		return squadInput{}, false
