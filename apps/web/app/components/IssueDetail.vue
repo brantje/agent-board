@@ -33,6 +33,10 @@ const choices = computed(() => [
     value: `${assignee.type}:${assignee.id}`
   }))
 ])
+const currentOwnerValue = computed(() => issue.value?.assignedTo
+  ? `${issue.value.assignedTo.type}:${issue.value.assignedTo.id}`
+  : unassignedChoice)
+const ownerChanged = computed(() => Boolean(selected.value && selected.value !== currentOwnerValue.value))
 const assignedName = computed(() => issue.value?.assignedTo?.name)
 const assignedKind = computed(() => issue.value?.assignedTo ? assigneeIdentityKind(issue.value.assignedTo.type) : 'user')
 const assignedTypeLabel = computed(() => issue.value?.assignedTo ? assigneeTypeLabel(issue.value.assignedTo.type) : '')
@@ -106,7 +110,7 @@ useProjectEvents(() => props.projectId, async event => {
 })
 
 async function assign() {
-  if (!props.canMutate || !selected.value || assigning.value) return
+  if (!props.canMutate || !ownerChanged.value || assigning.value) return
 
   const selectedAssignee = selected.value === unassignedChoice
     ? null
@@ -299,7 +303,7 @@ async function saved(savedIssue: Issue) {
                   <USelect v-model="selected" :items="choices" :disabled="assigning" class="w-full" />
                 </UFormField>
                 <p class="text-sm text-muted">Assignment changes ownership only; it does not change the board status. Agent or Squad ownership may enqueue execution according to backend policy.</p>
-                <UButton label="Update owner" type="submit" :loading="assigning" :disabled="!selected" />
+                <UButton label="Update owner" type="submit" :loading="assigning" :disabled="!ownerChanged" />
               </UForm>
             </AsyncState>
           </UCard>
