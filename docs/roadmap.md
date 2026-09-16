@@ -63,6 +63,18 @@ After the local-repository v0.1 flow is proven:
 
 These reuse normal Issues/Runs/scheduling and the same durable Workspace model.
 
+### Established collaboration foundation
+
+Reusable Project-scoped Squads are already implemented independently of delegation:
+
+- one durable Squad identity with one leader Agent and optional additional members/roles
+- Issue ownership can persist a Squad ID without rewriting ownership to an Agent
+- execution resolves the current leader through the normal shared Agent execution path
+- leader changes reconcile eligible Squad-owned work through the existing Run/scheduler/Workspace lifecycle
+- Project configuration and Issue/Run UX distinguish Squad ownership from the executing Agent
+
+This foundation does not include delegation or member fan-out.
+
 ## Phase 2 — delivery automation and Agent collaboration
 
 - explicit Project delivery policy
@@ -71,12 +83,12 @@ These reuse normal Issues/Runs/scheduling and the same durable Workspace model.
 - Agent delegation with per-Agent `Allow delegation`
 - durable delegated results/inspection
 - safe Workspace inheritance and write leases
-- Squads with one leader + reusable members
+- Squad-aware delegation/member collaboration built on the existing Squad ownership model
 - broader Agent messaging/wake semantics where useful
 
 The default delivery policy remains human-gated. Creating/updating a PR/MR does not imply auto-merge or deployment; those require separate explicit policy.
 
-Do not create a Squad scheduler or parallel Run lifecycle.
+Do not create a Squad scheduler or parallel Run lifecycle. Delegation must extend the normal Issue/Run/scheduler/Workspace model and must not rewrite canonical Squad ownership.
 
 ## Phase 3 — execution topology and scale
 

@@ -31,7 +31,7 @@ path2:
         $ref: ../components/api-components.yaml#/responses/Error
   patch:
     operationId: updateIssue
-    description: Updates only the supplied Issue fields without cancelling Runs. Board status is explicit; a status change without placement anchors puts the Issue at the top of the destination state. An already Agent-assigned Issue leaving BACKLOG for TODO, IN_PROGRESS, BLOCKED or REVIEW automatically queues a Run when execution configuration is valid. Other status changes do not enqueue. Scheduler availability is evaluated after Run creation.
+    description: Updates only the supplied Issue fields without cancelling Runs. Board status is explicit; a status change without placement anchors puts the Issue at the top of the destination state. An already Agent- or Squad-owned Issue leaving BACKLOG for TODO, IN_PROGRESS, BLOCKED or REVIEW automatically queues a Run when execution configuration is valid. Other status changes do not enqueue. Scheduler availability is evaluated after Run creation.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/IssueUpdate
     responses:
@@ -89,7 +89,7 @@ path3:
   - $ref: ../components/api-components.yaml#/parameters/IssueID
   post:
     operationId: assignIssue
-    description: Changes ownership and atomically records its Event while preserving Board status and existing Runs. Changed Agent ownership outside BACKLOG queues a Run when execution configuration is valid, suppressing duplicate active Runs for the same Issue and Agent. Invalid execution configuration does not invalidate ownership. User ownership, unassignment and unchanged ownership never enqueue. Scheduler availability is evaluated after Run creation.
+    description: Changes ownership and atomically records its Event while preserving Board status and existing Runs. Changed Agent or Squad ownership outside BACKLOG queues a Run when execution configuration is valid, suppressing duplicate active Runs for the same Issue and resolved execution Agent. Invalid execution configuration does not invalidate ownership. User ownership, unassignment and unchanged ownership never enqueue. Scheduler availability is evaluated after Run creation.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/Assignment
     responses:
@@ -157,7 +157,7 @@ assignees:
   - $ref: ../components/api-components.yaml#/parameters/ProjectID
   get:
     operationId: listIssueAssignees
-    description: Active effective Project members/admins and enabled visible Agents, independent of execution configuration and scheduler availability.
+    description: Eligible active Project Users, enabled visible Agents, and Project Squads. Ownership eligibility is independent of scheduler availability; Squad execution resolves the current leader through the shared backend execution path.
     responses:
       '200':
         description: Eligible Issue owners
@@ -175,7 +175,7 @@ executionState:
   - $ref: ../components/api-components.yaml#/parameters/IssueID
   get:
     operationId: getIssueExecutionState
-    description: Derived execution eligibility for the current Issue ownership. This does not persist pending execution state.
+    description: Derived execution eligibility for the current Issue ownership. For Squad ownership, executionAgent is the currently resolved leader. This does not rewrite ownership or persist pending execution state.
     responses:
       '200':
         description: Current execution eligibility
@@ -183,12 +183,22 @@ executionState:
           application/json:
             schema:
               type: object
-              required: [state, canStart, activeRun]
+              required: [state, canStart, executionAgent, activeRun]
               properties:
                 state:
                   type: string
                   enum: [BACKLOG, NOT_AGENT_OWNED, CONFIGURATION_UNAVAILABLE, ACTIVE, READY]
                 canStart: {type: boolean}
+                executionAgent:
+                  description: Current Agent resolved from Issue ownership, or null when ownership is not executable.
+                  oneOf:
+                  - type: object
+                    additionalProperties: false
+                    required: [id, name]
+                    properties:
+                      id: {type: string, format: uuid}
+                      name: {type: string}
+                  - type: 'null'
                 activeRun:
                   anyOf:
                   - $ref: ../schemas/control-plane.yaml#/Run

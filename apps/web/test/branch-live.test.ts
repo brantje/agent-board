@@ -152,4 +152,43 @@ describe('workspace branch presentation', () => {
     expect(wrapper.text()).toContain('feat/foo')
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes('/issues/AB-12')).length).toBe(initialIssueCalls)
   })
+
+  it('refreshes Squad execution context from backend truth after squad.updated', async () => {
+    const squadIssue = {
+      ...issue,
+      assignedTo: { type: 'SQUAD' as const, id: 'squad-1', name: 'Backend' }
+    }
+    let executionAgent = { id: 'leader-a', name: 'Leader A' }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/issues/AB-12/execution')) {
+        return new Response(JSON.stringify({ state: 'READY', canStart: true, executionAgent, activeRun: null }), { status: 200 })
+      }
+      if (url.includes('/issues/AB-12')) return new Response(JSON.stringify(squadIssue), { status: 200 })
+      if (url.endsWith('/assignees')) return new Response(JSON.stringify([squadIssue.assignedTo]), { status: 200 })
+      if (url.includes('/runs')) return new Response(JSON.stringify([]), { status: 200 })
+      return new Response('[]', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('EventSource', MockEventSource)
+
+    const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: 'AB-12' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Backend · Squad')
+    expect(wrapper.text()).toContain('Leader A')
+    const initialExecutionCalls = fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/issues/AB-12/execution')).length
+
+    executionAgent = { id: 'leader-b', name: 'Leader B' }
+    MockEventSource.instances[0]?.emit(event({
+      id: 'squad-update-1',
+      type: 'squad.updated',
+      payload: { squadId: 'squad-1' }
+    }))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Backend · Squad')
+    expect(wrapper.text()).toContain('Leader B')
+    expect(wrapper.text()).not.toContain('Leader A')
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/issues/AB-12/execution')).length).toBeGreaterThan(initialExecutionCalls)
+  })
 })

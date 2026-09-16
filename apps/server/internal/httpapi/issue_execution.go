@@ -7,10 +7,16 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
+type IssueExecutionAgentDTO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type IssueExecutionStateDTO struct {
-	State     string  `json:"state"`
-	CanStart  bool    `json:"canStart"`
-	ActiveRun *RunDTO `json:"activeRun"`
+	State          string                  `json:"state"`
+	CanStart       bool                    `json:"canStart"`
+	ExecutionAgent *IssueExecutionAgentDTO `json:"executionAgent"`
+	ActiveRun      *RunDTO                 `json:"activeRun"`
 }
 
 func (a *api) getIssueExecutionState(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +45,9 @@ func (a *api) getIssueExecutionState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := IssueExecutionStateDTO{State: state.State, CanStart: state.CanStart}
+	if state.ExecutionAgent != nil {
+		out.ExecutionAgent = &IssueExecutionAgentDTO{ID: state.ExecutionAgent.ID, Name: state.ExecutionAgent.Name}
+	}
 	if state.ActiveRun != nil {
 		run := runDTO(*state.ActiveRun, issueKeysFromPath(issueID, chi.URLParam(r, "issueID")))
 		out.ActiveRun = &run

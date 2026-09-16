@@ -8,7 +8,7 @@ const agent = computed(() => runAgentInfo(props.provenance))
 
 <template>
   <UCard data-run-agent>
-    <h2 class="section-label mb-3">Agent</h2>
+    <h2 class="section-label mb-3">Executing Agent</h2>
     <div v-if="agent" class="space-y-4 text-sm">
       <div class="flex min-w-0 items-center gap-2">
         <IdentityAvatar v-if="agent.name" kind="agent" :name="agent.name" size="xs" />

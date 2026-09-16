@@ -78,10 +78,10 @@ func (s *Store) ListSquads(ctx context.Context, projectID string) ([]store.Squad
 	return values, nil
 }
 
-func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad, bool, error) {
+func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.SquadUpdateResult, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return store.Squad{}, false, err
+		return store.SquadUpdateResult{}, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
@@ -92,13 +92,13 @@ func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad
 		WHERE project_id = $1 AND id = $2
 		FOR UPDATE
 	`, input.ProjectID, input.ID).Scan(&squadID, &previousLeaderAgentID); err != nil {
-		return store.Squad{}, false, notFound(err)
+		return store.SquadUpdateResult{}, notFound(err)
 	}
 	if err := lockSquadAgents(ctx, tx, input); err != nil {
-		return store.Squad{}, false, err
+		return store.SquadUpdateResult{}, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM squad_members WHERE squad_id = $1`, squadID); err != nil {
-		return store.Squad{}, false, err
+		return store.SquadUpdateResult{}, err
 	}
 
 	value, err := scanSquad(tx.QueryRow(ctx, `
@@ -108,16 +108,35 @@ func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad
 		RETURNING `+squadSelectColumns+`
 	`, input.ProjectID, input.ID, input.Name, input.LeaderAgentID))
 	if err != nil {
-		return store.Squad{}, false, err
+		return store.SquadUpdateResult{}, err
 	}
 	if err := insertSquadMembers(ctx, tx, value.ID, input.Members); err != nil {
-		return store.Squad{}, false, err
+		return store.SquadUpdateResult{}, err
+	}
+	payload, err := json.Marshal(struct {
+		SquadID string `json:"squadId"`
+	}{SquadID: value.ID})
+	if err != nil {
+		return store.SquadUpdateResult{}, err
+	}
+	event, err := appendEventTx(ctx, tx, store.Event{
+		Type:      "squad.updated",
+		ProjectID: value.ProjectID,
+		Actor:     store.EmptyObject,
+		Payload:   payload,
+	})
+	if err != nil {
+		return store.SquadUpdateResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return store.Squad{}, false, err
+		return store.SquadUpdateResult{}, err
 	}
 	value.Members = cloneSquadMembers(input.Members)
-	return value, previousLeaderAgentID != value.LeaderAgentID, nil
+	return store.SquadUpdateResult{
+		Squad:         value,
+		LeaderChanged: previousLeaderAgentID != value.LeaderAgentID,
+		Events:        []store.Event{event},
+	}, nil
 }
 
 func (s *Store) DeleteSquad(ctx context.Context, projectID, squadID string) error {

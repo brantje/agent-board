@@ -79,7 +79,7 @@ The API key is encrypted server-side and never shown again after save.
 2. Create and enable an **Agent**, selecting an Engine and Model Profile.
 3. Ensure an eligible Runner is connected; the server-managed internal Runner is the fallback when allowed by policy.
 4. Create a **Project** and configure its repository/default branch.
-5. Create an Issue and assign the Agent.
+5. Create an Issue and assign an Agent, or assign a configured Squad to preserve Squad ownership while its current leader executes.
 6. Agent Board creates/reuses the Issue Workspace and schedules a Run onto an eligible Runner.
 7. Inspect the Run, answer Questions if needed, then Review the result.
 
@@ -121,6 +121,7 @@ scheduler -> Runner -> Workspace materialization -> Execution Session -> Engine
 | **Project / Board** | Top-level work and repository boundary. |
 | **Issue** | Durable unit of work. |
 | **Agent** | Durable worker identity/configuration, including Engine and Model Profile. |
+| **Squad** | Reusable Project-scoped Agent team with one leader; Squad-owned Issues keep Squad ownership while execution resolves the current leader. |
 | **Run** | One execution attempt for an Issue by an Agent. |
 | **Provider** | Configured model connection and credentials. |
 | **Model Profile** | Reusable model selection/settings and optional capacity. |
@@ -238,7 +239,7 @@ After the complete local-repository v0.1 coding flow:
 - authenticated GitHub/GitLab/Bitbucket/Forgejo Source Connections
 - explicit Project delivery policy, including optional autonomous PR/MR creation
 - Agent delegation
-- Squads
+- Squad-aware delegation/member collaboration; basic Squad management, ownership and leader execution are already implemented
 - worker pools / warm / spot execution
 - users, groups, roles/permissions and broader administration
 - additional integrations and account-level capabilities
@@ -296,7 +297,7 @@ Read `AGENTS.md`, [`docs/testing.md`](./docs/testing.md), [`docs/frontend-implem
 - [`docs/frontend-theme.md`](./docs/frontend-theme.md) — component and theme rules
 - [`docs/automations.md`](./docs/automations.md) — scheduled work and Agent-created Issues
 - [`docs/planning.md`](./docs/planning.md) — planning strategy and Plan artifacts
-- [`docs/future-agent-collaboration.md`](./docs/future-agent-collaboration.md) — delegation, Squads and worker topology
+- [`docs/future-agent-collaboration.md`](./docs/future-agent-collaboration.md) — implemented Squad foundation plus future delegation and worker topology
 - [`docs/event-protocol.md`](./docs/event-protocol.md) — Event contract
 - [`docs/plugins.md`](./docs/plugins.md) — deliberately late roadmap Plugin architecture
 

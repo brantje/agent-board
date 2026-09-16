@@ -42,11 +42,18 @@ describe('Squad Issue ownership presentation', () => {
     expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(false)
   })
 
-  it('labels Squad assignment and ownership without describing it as a direct Agent assignment', async () => {
+  it('keeps the persisted Squad as Owner while showing its resolved leader as Executing Agent', async () => {
     const fetch = vi.fn(async (path: string) => {
       if (path.endsWith('/assignees')) return new Response(JSON.stringify([squadIssue.assignedTo]))
       if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
-      if (path.endsWith('/execution')) return new Response(JSON.stringify({ state: 'READY', canStart: true, activeRun: null }))
+      if (path.endsWith('/execution')) {
+        return new Response(JSON.stringify({
+          state: 'READY',
+          canStart: true,
+          executionAgent: { id: 'leader-1', name: 'Lead Agent' },
+          activeRun: null
+        }))
+      }
       return new Response(JSON.stringify(squadIssue))
     })
     vi.stubGlobal('fetch', fetch)
@@ -54,8 +61,13 @@ describe('Squad Issue ownership presentation', () => {
     const wrapper = mount(IssueDetail, { props: { projectId: 'p', issueId: squadIssue.id }, global })
     await flushPromises()
 
-    expect(wrapper.get('[data-field=assignee]').text()).toContain('Backend · Squad')
+    const ownerField = wrapper.get('[data-field=assignee]')
+    expect(ownerField.text()).toContain('Backend · Squad')
+    expect((ownerField.get('select').element as HTMLSelectElement).value).toBe('SQUAD:squad-1')
+    expect(wrapper.text()).toContain('Owner')
     expect(wrapper.text()).toContain('Backend · Squad')
+    expect(wrapper.text()).toContain('Executing Agent')
+    expect(wrapper.text()).toContain('Lead Agent')
     expect(wrapper.text()).toContain('User, Agent, or Squad')
     expect(wrapper.text()).toContain('Agent or Squad ownership may enqueue execution')
     expect(wrapper.text()).not.toContain('current Agent assignment')

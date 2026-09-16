@@ -25,6 +25,18 @@ type squadTestStore struct {
 	updateCalls int
 }
 
+type squadEventRecorder struct {
+	published []store.Event
+}
+
+func (r *squadEventRecorder) Record(_ context.Context, event store.Event) (store.Event, error) {
+	return event, nil
+}
+
+func (r *squadEventRecorder) PublishPersisted(_ context.Context, event store.Event) {
+	r.published = append(r.published, event)
+}
+
 var _ store.ControlPlaneStore = (*squadTestStore)(nil)
 
 func newSquadTestStore() *squadTestStore {
@@ -85,16 +97,20 @@ func (s *squadTestStore) ListSquads(_ context.Context, projectID string) ([]stor
 	return values, nil
 }
 
-func (s *squadTestStore) UpdateSquad(_ context.Context, value store.Squad) (store.Squad, bool, error) {
+func (s *squadTestStore) UpdateSquad(_ context.Context, value store.Squad) (store.SquadUpdateResult, error) {
 	s.updateCalls++
 	existing, ok := s.squads[value.ID]
 	if !ok || existing.ProjectID != value.ProjectID {
-		return store.Squad{}, false, store.ErrNotFound
+		return store.SquadUpdateResult{}, store.ErrNotFound
 	}
 	leaderChanged := existing.LeaderAgentID != value.LeaderAgentID
 	value.Members = cloneTestSquadMembers(value.Members)
 	s.squads[value.ID] = value
-	return cloneTestSquad(value), leaderChanged, nil
+	return store.SquadUpdateResult{
+		Squad:         cloneTestSquad(value),
+		LeaderChanged: leaderChanged,
+		Events:        []store.Event{{ID: "event-1", Type: "squad.updated", ProjectID: value.ProjectID}},
+	}, nil
 }
 
 func (s *squadTestStore) DeleteSquad(_ context.Context, projectID, id string) error {
@@ -239,6 +255,8 @@ func TestUpdateSquadValidatesCompleteDesiredMembershipAndPersistsOnce(t *testing
 	data := newSquadTestStore()
 	data.squads[squadID] = store.Squad{ID: squadID, ProjectID: squadProjectID, Name: "Backend", LeaderAgentID: squadLeaderID}
 	svc := New(data)
+	recorder := &squadEventRecorder{}
+	svc.SetEventRecorder(recorder)
 	role := "  Reviewer "
 
 	updated, err := svc.UpdateSquad(ctx, store.Squad{
@@ -259,6 +277,9 @@ func TestUpdateSquadValidatesCompleteDesiredMembershipAndPersistsOnce(t *testing
 	}
 	if updated.Members[0].Role == nil || *updated.Members[0].Role != "Reviewer" {
 		t.Fatalf("updated role = %v", updated.Members[0].Role)
+	}
+	if len(recorder.published) != 1 || recorder.published[0].Type != "squad.updated" {
+		t.Fatalf("published events = %+v", recorder.published)
 	}
 }
 

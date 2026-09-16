@@ -155,10 +155,16 @@ type MutationAck struct {
 	Success bool `json:"success"`
 }
 
+type IssueExecutionAgentDTO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type IssueExecutionStateDTO struct {
-	State     string  `json:"state"`
-	CanStart  bool    `json:"canStart"`
-	ActiveRun *RunDTO `json:"activeRun"`
+	State          string                  `json:"state"`
+	CanStart       bool                    `json:"canStart"`
+	ExecutionAgent *IssueExecutionAgentDTO `json:"executionAgent"`
+	ActiveRun      *RunDTO                 `json:"activeRun"`
 }
 
 type RunDTO struct {

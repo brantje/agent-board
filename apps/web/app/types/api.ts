@@ -103,9 +103,15 @@ export interface AssignmentResponse {
   issue: Issue
 }
 
+export interface IssueExecutionAgent {
+  id: string
+  name: string
+}
+
 export interface IssueExecutionState {
   state: 'BACKLOG' | 'NOT_AGENT_OWNED' | 'CONFIGURATION_UNAVAILABLE' | 'ACTIVE' | 'READY'
   canStart: boolean
+  executionAgent: IssueExecutionAgent | null
   activeRun: Run | null
 }
 
@@ -119,6 +125,21 @@ export interface Agent {
   engineSettings: Record<string, unknown>
   concurrencyLimit: number
   state: string
+}
+
+export interface SquadMember {
+  agentId: string
+  role?: string | null
+}
+
+export interface Squad {
+  id: string
+  projectId: string
+  name: string
+  leaderAgentId: string
+  members: SquadMember[]
+  createdAt: string
+  updatedAt: string
 }
 
 export interface QuestionOption {

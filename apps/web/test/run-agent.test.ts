@@ -58,12 +58,13 @@ describe('runAgentInfo', () => {
 })
 
 describe('RunAgentCard', () => {
-  it('renders human-readable agent identity above usage consumers', () => {
+  it('renders the immutable executing Agent identity above usage consumers', () => {
     const wrapper = mount(RunAgentCard, {
       props: { provenance: evidence().provenance },
       global: { stubs: uiStubs }
     })
 
+    expect(wrapper.get('[data-run-agent]').text()).toContain('Executing Agent')
     expect(wrapper.get('[data-run-agent]').text()).toContain('Coder')
     expect(wrapper.text()).toContain('Engine')
     expect(wrapper.text()).toContain('opencode')

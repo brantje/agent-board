@@ -38,10 +38,16 @@ const (
 	IssueExecutionReady                    = "READY"
 )
 
+type IssueExecutionAgent struct {
+	ID   string
+	Name string
+}
+
 type IssueExecutionState struct {
-	State     string
-	CanStart  bool
-	ActiveRun *Run
+	State          string
+	CanStart       bool
+	ExecutionAgent *IssueExecutionAgent
+	ActiveRun      *Run
 }
 
 type IssueExecutionStateStore interface {

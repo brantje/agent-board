@@ -29,7 +29,7 @@ func (s *Server) registerIssueTools(server *mcp.Server) {
 	createRelationship.InputSchema = schemas.createRelationship
 	mcp.AddTool(server, createRelationship, s.createIssueRelationship)
 	mcp.AddTool(server, mutationTool("delete_issue_relationship", "Delete one Issue relationship through canonical validation.", true, false), s.deleteIssueRelationship)
-	mcp.AddTool(server, readOnlyTool("get_issue_execution_state", "Read the canonical derived Issue execution state including canStart and activeRun."), s.getIssueExecutionState)
+	mcp.AddTool(server, readOnlyTool("get_issue_execution_state", "Read the canonical derived Issue execution state including executionAgent, canStart and activeRun."), s.getIssueExecutionState)
 	mcp.AddTool(server, mutationTool("start_issue_run", "Explicitly start or run again using the Issue's current AGENT owner or current SQUAD leader. Status and ownership stay unchanged.", false, false), s.startIssueRun)
 }
 
@@ -242,12 +242,7 @@ func (s *Server) getIssueExecutionState(ctx context.Context, _ *mcp.CallToolRequ
 	if err != nil {
 		return nil, IssueExecutionStateDTO{}, toolError(ctx, err)
 	}
-	out := IssueExecutionStateDTO{State: value.State, CanStart: value.CanStart}
-	if value.ActiveRun != nil {
-		run := runDTO(*value.ActiveRun, map[string]string{issueID: input.IssueID})
-		out.ActiveRun = &run
-	}
-	return nil, out, nil
+	return nil, issueExecutionStateDTO(value, map[string]string{issueID: input.IssueID}), nil
 }
 
 func (s *Server) startIssueRun(ctx context.Context, _ *mcp.CallToolRequest, input IssueInput) (*mcp.CallToolResult, RunDTO, error) {

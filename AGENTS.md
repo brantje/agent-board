@@ -18,6 +18,7 @@ For implementation work, read the relevant canonical docs:
 - `docs/runtime-contract.md` — legacy/internal managed Runtime boundary/security
 - `docs/runtime-execution.md` — Runner execution plus legacy Runtime compatibility
 - `docs/agent-runner.md` — Runner identity, protocol-v2 session contract and Workspace transfer
+- `docs/future-agent-collaboration.md` — implemented Squad foundation and future delegation/worker topology
 - `docs/event-protocol.md` — Event contract
 - `docs/testing.md` — mandatory TDD workflow
 - `docs/frontend-implementation.md` — clean-room Nuxt/Nuxt UI implementation rules
@@ -82,6 +83,8 @@ After the answers, finalize the plan and proceed. Avoid extended question trees 
 - UI role checks are presentation only; the shared Go authorization boundary is authoritative.
 - Issue is the durable unit of work.
 - Agent is durable configuration, not a process/container.
+- Squad is durable Project-scoped Agent team configuration; human Group and Agent Squad are distinct concepts.
+- Squad-owned Issues persist the Squad ID as ownership while execution resolves the current leader Agent through the shared backend execution path; delegation/member fan-out is not implicit.
 - Run is a durable execution attempt, not a Runtime Instance, Runner or Execution Session.
 - Workspace survives Runner transport loss and any legacy Runtime Instance lifetime; it is reused per Issue.
 - Runtime/Runtime Instance remain legacy internal managed-compute concepts and are not Agent configuration.
@@ -317,9 +320,19 @@ The fixed local multi-user foundation from #74–#79 is implemented. Do not trea
 
 Read `docs/authorization.md` before changing authentication, Users, Groups, Project access, session invalidation or authorization behavior. External identity providers, MFA, custom roles/permissions, organizations/tenants and a generalized audit-log/policy engine remain future work and must not be introduced implicitly.
 
+## Implemented Squad foundation
+
+- Squads are durable Project-scoped Agent team configuration with exactly one leader and optional additional members/descriptive roles.
+- Human Groups and Agent Squads are distinct: Groups grant human Project access; Squads model reusable Agent ownership/execution configuration.
+- Issue ownership may persist a Squad ID. The shared backend execution path resolves the current Squad leader as the executing Agent without rewriting ownership.
+- Leader changes reuse normal reconciliation, Runs, scheduling and Workspaces. Do not add Squad-specific schedulers or Run lifecycles.
+- Current Squad behavior does not include delegation or member fan-out. Build those only through the canonical collaboration design when implemented.
+
+Read `docs/future-agent-collaboration.md` before changing Squad ownership, leader execution or future delegation behavior.
+
 ## Planned features
 
-Planning strategy, Automations, Agent-created Issues, Source Connections, delivery automation, delegation, Squads and worker pools reuse the canonical Issue/Run/scheduler/Workspace model.
+Planning strategy, Automations, Agent-created Issues, Source Connections, delivery automation, delegation and worker pools reuse the canonical Issue/Run/scheduler/Workspace model. Squad-aware collaboration must build on the implemented Squad foundation rather than replacing it.
 
 Future Worker Pools supply/place Runner capacity but do not replace Agent, Runner or Execution Session identities. Legacy Runtime Instance identity remains separate wherever that compatibility path still exists.
 
