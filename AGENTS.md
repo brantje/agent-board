@@ -83,7 +83,7 @@ After the answers, finalize the plan and proceed. Avoid extended question trees 
 - UI role checks are presentation only; the shared Go authorization boundary is authoritative.
 - Issue is the durable unit of work.
 - Agent is durable configuration, not a process/container.
-- Squad is durable Project-scoped collaboration configuration with exactly one leader Agent and optional typed Agent/User members; human Groups and Squads are distinct concepts, and Squad membership is not a Project ACL.
+- Squad is durable Project-scoped collaboration configuration with exactly one enabled leader Agent usable in the Project/global Agent scope and optional typed Agent/User members; human Groups and Squads are distinct concepts, and Squad membership is not a Project ACL.
 - Squad-owned Issues persist the Squad ID as ownership while execution resolves only the current leader Agent through the shared backend execution path; delegation/member fan-out is not implicit.
 - Run is a durable execution attempt, not a Runtime Instance, Runner or Execution Session.
 - Workspace survives Runner transport loss and any legacy Runtime Instance lifetime; it is reused per Issue.
@@ -322,7 +322,7 @@ Read `docs/authorization.md` before changing authentication, Users, Groups, Proj
 
 ## Implemented Squad foundation
 
-- Squads are durable Project-scoped collaboration configuration with exactly one leader Agent and optional additional typed Agent/User members with descriptive roles.
+- Squads are durable Project-scoped collaboration configuration with exactly one enabled leader Agent usable in the Project/global Agent scope and optional additional typed Agent/User members with descriptive roles.
 - Human Groups and Squads are distinct: Groups grant human Project access; Squad membership never grants or preserves Project permissions.
 - User members use the canonical active effective Project member/admin workflow eligibility rule on create/update; later loss of eligibility leaves deterministic stale roster context but no access.
 - Issue ownership may persist a Squad ID. The shared backend execution path resolves only the current Squad leader as the executing Agent without rewriting ownership.
