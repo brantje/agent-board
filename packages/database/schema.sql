@@ -256,6 +256,7 @@ CREATE TABLE agents (
     model_profile_id uuid NOT NULL REFERENCES model_profiles(id) ON DELETE RESTRICT,
     engine_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(engine_settings) = 'object'),
     concurrency_limit integer NOT NULL DEFAULT 1 CHECK (concurrency_limit >= 1),
+    allow_delegation boolean NOT NULL DEFAULT false,
     state text NOT NULL DEFAULT 'ENABLED' CHECK (state IN ('DRAFT', 'ENABLED', 'DISABLED', 'ARCHIVED')),
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
@@ -375,12 +376,37 @@ CREATE TABLE runs (
     CONSTRAINT runs_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
     CONSTRAINT runs_workspace_fk FOREIGN KEY (project_id, issue_id, workspace_id) REFERENCES workspaces(project_id, issue_id, id) ON DELETE RESTRICT,
     UNIQUE (issue_id, attempt),
-    UNIQUE (project_id, id)
+    UNIQUE (project_id, id),
+    UNIQUE (project_id, issue_id, id)
 );
 
 CREATE INDEX runs_project_status_idx ON runs (project_id, status, created_at);
 CREATE INDEX runs_issue_created_idx ON runs (issue_id, created_at DESC);
 CREATE INDEX runs_agent_active_idx ON runs (agent_id, status) WHERE agent_id IS NOT NULL AND status IN ('STARTING', 'RUNNING');
+
+CREATE TABLE delegations (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid NOT NULL,
+    issue_id uuid NOT NULL,
+    parent_run_id uuid NOT NULL,
+    parent_agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    target_agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    task text NOT NULL CHECK (btrim(task) <> ''),
+    delegated_run_id uuid NOT NULL,
+    request_key text NOT NULL CHECK (btrim(request_key) <> ''),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT delegations_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT delegations_parent_run_fk FOREIGN KEY (project_id, issue_id, parent_run_id) REFERENCES runs(project_id, issue_id, id) ON DELETE CASCADE,
+    CONSTRAINT delegations_delegated_run_fk FOREIGN KEY (project_id, issue_id, delegated_run_id) REFERENCES runs(project_id, issue_id, id) ON DELETE CASCADE,
+    CHECK (parent_agent_id <> target_agent_id),
+    UNIQUE (parent_run_id, request_key),
+    UNIQUE (delegated_run_id),
+    UNIQUE (project_id, id)
+);
+
+CREATE INDEX delegations_parent_run_idx ON delegations (project_id, parent_run_id, created_at, id);
+CREATE INDEX delegations_target_agent_idx ON delegations (project_id, target_agent_id, created_at, id);
 
 CREATE TABLE scheduler_jobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

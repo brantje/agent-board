@@ -57,21 +57,22 @@ func (s *Store) CreateAgent(ctx context.Context, input store.Agent) (store.Agent
 		state = "ENABLED"
 	}
 	return scanAgent(s.pool.QueryRow(ctx, `
-		INSERT INTO agents (project_id, name, role_instructions, engine, model_profile_id, engine_settings, concurrency_limit, state)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, engine_settings, concurrency_limit, state, created_at, updated_at
-	`, input.ProjectID, input.Name, input.RoleInstructions, input.Engine, input.ModelProfileID, objectJSON(input.EngineSettings), limit, state))
+		INSERT INTO agents (project_id, name, role_instructions, engine, model_profile_id, engine_settings, concurrency_limit, allow_delegation, state)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING `+agentSelectColumns+`
+	`, input.ProjectID, input.Name, input.RoleInstructions, input.Engine, input.ModelProfileID, objectJSON(input.EngineSettings), limit, input.AllowDelegation, state))
 }
 
 func (s *Store) GetAgent(ctx context.Context, projectID, agentID string) (store.Agent, error) {
 	return scanAgent(s.pool.QueryRow(ctx, `
-		SELECT id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, engine_settings, concurrency_limit, state, created_at, updated_at
+		SELECT `+agentSelectColumns+`
 		FROM agents
 		WHERE id = $2 AND (project_id IS NULL OR project_id = $1)
 	`, projectID, agentID))
 }
 
 const providerSelectColumns = `id::text, project_id::text, name, kind, base_url, credential_ref, enabled, health_status, filtered_model_count, total_model_count, safe_metadata, created_at, updated_at`
+const agentSelectColumns = `id::text, project_id::text, name, role_instructions, engine, model_profile_id::text, engine_settings, concurrency_limit, allow_delegation, state, created_at, updated_at`
 
 func scanProvider(row pgx.Row) (store.Provider, error) {
 	var value store.Provider
@@ -99,7 +100,7 @@ func scanRuntime(row pgx.Row) (store.Runtime, error) {
 
 func scanAgent(row pgx.Row) (store.Agent, error) {
 	var value store.Agent
-	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.RoleInstructions, &value.Engine, &value.ModelProfileID, &value.EngineSettings, &value.ConcurrencyLimit, &value.State, &value.CreatedAt, &value.UpdatedAt); err != nil {
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.RoleInstructions, &value.Engine, &value.ModelProfileID, &value.EngineSettings, &value.ConcurrencyLimit, &value.AllowDelegation, &value.State, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Agent{}, notFound(err)
 	}
 	return value, nil

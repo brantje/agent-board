@@ -90,8 +90,8 @@ type ModelProfile struct {
 	MaxConcurrent      *int
 	GenerationSettings json.RawMessage
 	Enabled            bool
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type Runtime struct {
@@ -123,6 +123,7 @@ type Agent struct {
 	ModelProfileID   string
 	EngineSettings   json.RawMessage
 	ConcurrencyLimit int
+	AllowDelegation  bool
 	State            string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
