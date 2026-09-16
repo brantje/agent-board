@@ -39,6 +39,9 @@ func (s *assigneeCommandStore) ListIssueAssignees(context.Context, string) ([]st
 	s.calls++
 	return []store.Assignee{}, s.fail
 }
+func (s *assigneeCommandStore) ValidateProjectWorkflowUser(context.Context, string, string) error {
+	return s.fail
+}
 
 type assigneePublisher struct{ published []store.Event }
 
