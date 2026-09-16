@@ -8,8 +8,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func (s *Service) squadStore() (store.SquadStore, error) {
-	squads, ok := s.store.(store.SquadStore)
+func squadStore(candidate any) (store.SquadStore, error) {
+	squads, ok := candidate.(store.SquadStore)
 	if !ok {
 		return nil, NewError("squad_management_unavailable", "squad management is unavailable", store.ErrInvalidArgument)
 	}
@@ -17,10 +17,14 @@ func (s *Service) squadStore() (store.SquadStore, error) {
 }
 
 func (s *Service) ListSquads(ctx context.Context, projectID string) ([]store.Squad, error) {
+	return s.listSquadsUsing(ctx, s.store, projectID)
+}
+
+func (s *Service) listSquadsUsing(ctx context.Context, candidate any, projectID string) ([]store.Squad, error) {
 	if _, err := s.GetProject(ctx, projectID); err != nil {
 		return nil, err
 	}
-	squads, err := s.squadStore()
+	squads, err := squadStore(candidate)
 	if err != nil {
 		return nil, err
 	}
@@ -29,13 +33,17 @@ func (s *Service) ListSquads(ctx context.Context, projectID string) ([]store.Squ
 }
 
 func (s *Service) GetSquad(ctx context.Context, projectID, squadID string) (store.Squad, error) {
+	return s.getSquadUsing(ctx, s.store, projectID, squadID)
+}
+
+func (s *Service) getSquadUsing(ctx context.Context, candidate any, projectID, squadID string) (store.Squad, error) {
 	if _, err := s.GetProject(ctx, projectID); err != nil {
 		return store.Squad{}, err
 	}
 	if !validSquadUUID(squadID) {
 		return store.Squad{}, invalid("squad id must be a UUID")
 	}
-	squads, err := s.squadStore()
+	squads, err := squadStore(candidate)
 	if err != nil {
 		return store.Squad{}, err
 	}
@@ -44,6 +52,10 @@ func (s *Service) GetSquad(ctx context.Context, projectID, squadID string) (stor
 }
 
 func (s *Service) CreateSquad(ctx context.Context, input store.Squad) (store.Squad, error) {
+	return s.createSquadUsing(ctx, s.store, input)
+}
+
+func (s *Service) createSquadUsing(ctx context.Context, candidate any, input store.Squad) (store.Squad, error) {
 	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
 		return store.Squad{}, err
 	}
@@ -51,7 +63,7 @@ func (s *Service) CreateSquad(ctx context.Context, input store.Squad) (store.Squ
 	if err != nil {
 		return store.Squad{}, err
 	}
-	squads, err := s.squadStore()
+	squads, err := squadStore(candidate)
 	if err != nil {
 		return store.Squad{}, err
 	}
@@ -60,6 +72,10 @@ func (s *Service) CreateSquad(ctx context.Context, input store.Squad) (store.Squ
 }
 
 func (s *Service) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad, error) {
+	return s.updateSquadUsing(ctx, s.store, input)
+}
+
+func (s *Service) updateSquadUsing(ctx context.Context, candidate any, input store.Squad) (store.Squad, error) {
 	if _, err := s.GetProject(ctx, input.ProjectID); err != nil {
 		return store.Squad{}, err
 	}
@@ -70,7 +86,7 @@ func (s *Service) UpdateSquad(ctx context.Context, input store.Squad) (store.Squ
 	if err != nil {
 		return store.Squad{}, err
 	}
-	squads, err := s.squadStore()
+	squads, err := squadStore(candidate)
 	if err != nil {
 		return store.Squad{}, err
 	}
@@ -79,13 +95,17 @@ func (s *Service) UpdateSquad(ctx context.Context, input store.Squad) (store.Squ
 }
 
 func (s *Service) DeleteSquad(ctx context.Context, projectID, squadID string) error {
+	return s.deleteSquadUsing(ctx, s.store, projectID, squadID)
+}
+
+func (s *Service) deleteSquadUsing(ctx context.Context, candidate any, projectID, squadID string) error {
 	if _, err := s.GetProject(ctx, projectID); err != nil {
 		return err
 	}
 	if !validSquadUUID(squadID) {
 		return invalid("squad id must be a UUID")
 	}
-	squads, err := s.squadStore()
+	squads, err := squadStore(candidate)
 	if err != nil {
 		return err
 	}
