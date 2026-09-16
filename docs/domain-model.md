@@ -102,7 +102,7 @@ An Agent selects Engine and Model Profile directly and may define operational po
 
 ### Squad
 
-Durable Project-scoped collaboration and Issue-ownership configuration with exactly one leader Agent and zero or more typed additional members.
+Durable Project-scoped collaboration and Issue-ownership configuration with exactly one enabled leader Agent usable in the Project/global Agent scope and zero or more typed additional members.
 
 The public member identity is `{type: AGENT | USER, id, role?}`. The leader Agent is stored separately as the authoritative execution identity and is never duplicated as an `AGENT` member. Additional Agent members must be enabled and usable in the Project/global Agent scope. Additional User members must be active effective Project members/admins at create/update time, using the same direct, Group-inherited and deployment-admin workflow eligibility rule as Issue assignment. A descriptive member role is optional and grants no permission.
 
