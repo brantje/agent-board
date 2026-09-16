@@ -2,6 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import type { Project, RepositorySettings } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
+import { projectNewIssuePlacement } from '../utils/project-settings'
 
 const props = defineProps<{ project?: Project }>()
 const emit = defineEmits<{ saved: [project: Project]; cancel: [] }>()
@@ -10,6 +11,11 @@ const sourceOptions = [
   { label: 'Local', value: 'local' },
   { label: 'Git repository', value: 'git' }
 ]
+const newIssuePlacementOptions = [
+  { label: 'Bottom', value: 'bottom' },
+  { label: 'Top', value: 'top' }
+]
+let initialNewIssuePlacement = projectNewIssuePlacement(props.project?.workflowSettings)
 
 const state = reactive({
   name: props.project?.name ?? '',
@@ -18,7 +24,8 @@ const state = reactive({
   cloneUrl: props.project?.cloneUrl ?? '',
   sourceRef: props.project?.sourceRef ?? '',
   repositoryPath: props.project?.repositoryPath ?? '',
-  defaultBranch: props.project?.defaultBranch || 'main'
+  defaultBranch: props.project?.defaultBranch || 'main',
+  newIssuePlacement: initialNewIssuePlacement
 })
 const saving = ref(false)
 const error = ref<Error>()
@@ -56,6 +63,12 @@ function payload() {
   }
   if (props.project) body.allowInternalRunner = props.project.allowInternalRunner
   if (!props.project) body.issuePrefix = state.issuePrefix.trim().toUpperCase()
+  if (state.newIssuePlacement !== initialNewIssuePlacement) {
+    body.workflowSettings = {
+      ...(props.project?.workflowSettings ?? {}),
+      newIssuePlacement: state.newIssuePlacement
+    }
+  }
   return body
 }
 
@@ -68,6 +81,7 @@ async function save() {
       method: props.project ? 'PATCH' : 'POST',
       body: payload()
     })
+    initialNewIssuePlacement = projectNewIssuePlacement(saved.workflowSettings)
     emit('saved', saved)
   } catch (failure) {
     error.value = failure as Error
@@ -100,6 +114,9 @@ onMounted(async () => {
       :required="!project"
     >
       <UInput v-model="state.issuePrefix" class="w-full font-mono" :disabled="saving || !!project" />
+    </UFormField>
+    <UFormField label="New issue placement" name="newIssuePlacement" description="Choose where newly created issues enter their initial board state.">
+      <USelect v-model="state.newIssuePlacement" :items="newIssuePlacementOptions" :disabled="saving" class="w-full" />
     </UFormField>
     <UFormField label="Source" name="sourceType" required>
       <URadioGroup v-model="state.sourceType" :items="sourceOptions" :disabled="saving" />

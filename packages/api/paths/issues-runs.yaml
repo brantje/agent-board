@@ -10,7 +10,7 @@ path1:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
     operationId: createIssue
-    description: Creates an unassigned Issue. Ownership is changed separately through the assignment endpoint, so HTTP Issue creation itself does not automatically queue a Run.
+    description: Creates an unassigned Issue. Ownership is changed separately through the assignment endpoint, so HTTP Issue creation itself does not automatically queue a Run. New Issues use workflowSettings.newIssuePlacement when configured on the Project; the default is bottom.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/IssueCreate
     responses:
@@ -31,12 +31,56 @@ path2:
         $ref: ../components/api-components.yaml#/responses/Error
   patch:
     operationId: updateIssue
-    description: Updates only the supplied Issue fields without cancelling Runs. Board status is explicit. An already Agent-assigned Issue leaving BACKLOG for TODO, IN_PROGRESS, BLOCKED or REVIEW automatically queues a Run when execution configuration is valid. Other status changes do not enqueue. Scheduler availability is evaluated after Run creation.
+    description: Updates only the supplied Issue fields without cancelling Runs. Board status is explicit; a status change without placement anchors puts the Issue at the top of the destination state. An already Agent-assigned Issue leaving BACKLOG for TODO, IN_PROGRESS, BLOCKED or REVIEW automatically queues a Run when execution configuration is valid. Other status changes do not enqueue. Scheduler availability is evaluated after Run creation.
     requestBody:
       $ref: ../components/api-components.yaml#/requestBodies/IssueUpdate
     responses:
       '200':
         $ref: ../components/api-components.yaml#/responses/Issue
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+placement:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  post:
+    operationId: placeIssue
+    description: >-
+      Reorders an Issue within its current Board state or moves it to another state at an exact
+      neighboring slot. beforeId and afterId are public Issue keys describing the destination gap
+      after removing the moved Issue; both fields are required and nullable. For an empty destination
+      both are null. A cross-state placement reuses the authoritative Issue status mutation path.
+      Stale, self-referential, cross-state, or otherwise inconsistent anchors are rejected rather than
+      silently approximated. This operation changes Board order only and does not change Issue priority
+      or scheduler priority.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: false
+            required: [beforeId, afterId]
+            properties:
+              status:
+                type: string
+                enum: [BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, DONE]
+                description: Destination Board state. Omit for same-state reorder.
+              beforeId:
+                description: Issue key immediately before the moved Issue in the destination state, or null at the top.
+                oneOf:
+                - $ref: ../schemas/control-plane.yaml#/IssueKey
+                - type: 'null'
+              afterId:
+                description: Issue key immediately after the moved Issue in the destination state, or null at the bottom.
+                oneOf:
+                - $ref: ../schemas/control-plane.yaml#/IssueKey
+                - type: 'null'
+    responses:
+      '200':
+        $ref: ../components/api-components.yaml#/responses/Issue
+      '409':
+        $ref: ../components/api-components.yaml#/responses/Error
       default:
         $ref: ../components/api-components.yaml#/responses/Error
 path3:
