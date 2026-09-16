@@ -35,15 +35,15 @@ Repeating the current ownership is a no-op. It does not append another assignmen
 
 Eligible Users are active effective Project members/admins, including inherited Group grants and implicit deployment-admin access. Eligible Agents are enabled and visible in the Project. Agent execution configuration is deliberately not part of ownership eligibility: an Issue may remain owned by an Agent whose model/provider configuration cannot currently create a Run.
 
-## Automatic execution after Agent assignment
+## Automatic execution after Agent or Squad assignment
 
-Changed Agent ownership is an execution trigger in every current Board status except `BACKLOG`.
+Changed Agent or Squad ownership is an execution trigger in every current Board status except `BACKLOG`. Squad ownership remains persisted as the Squad ID; Run creation resolves the Squad's current leader Agent.
 
-- `BACKLOG` parks the Agent-owned Issue without creating a Run.
-- `TODO`, `IN_PROGRESS`, `BLOCKED`, `REVIEW` and `DONE` attempt normal Run creation.
+- `BACKLOG` parks the Agent- or Squad-owned Issue without creating a Run.
+- `TODO`, `IN_PROGRESS`, `BLOCKED`, `REVIEW` and `DONE` attempt normal Run creation for the direct Agent owner or resolved Squad leader.
 - User ownership and unassignment never auto-enqueue.
 
-Run creation still requires valid execution configuration for the current Agent. When that configuration is invalid or unavailable, the ownership mutation succeeds and no Run is created. Configuration reconciliation later retries eligible Agent-owned work through the same execution path.
+Run creation still requires valid execution configuration for the resolved execution Agent. When that configuration is invalid or unavailable, the ownership mutation succeeds and no Run is created. Configuration reconciliation later retries eligible Agent- and Squad-owned work through the same execution path.
 
 Scheduler availability is a separate boundary. Runner connectivity, repository-source availability and concurrency/capacity admission do not invalidate ownership and do not suppress creation of an otherwise valid Run. A successful enqueue persists a normal `QUEUED` Run, `run.created` Event and durable `START` scheduler job; the scheduler may then leave that Run queued until admission becomes possible.
 
@@ -51,7 +51,7 @@ Scheduler availability is a separate boundary. Runner connectivity, repository-s
 
 Status changes do not reuse “any non-BACKLOG assignment” semantics.
 
-For an already Agent-owned Issue, automatic enqueue occurs only when the Issue leaves `BACKLOG` for one of:
+For an already Agent- or Squad-owned Issue, automatic enqueue occurs only when the Issue leaves `BACKLOG` for one of:
 
 - `TODO`
 - `IN_PROGRESS`
@@ -64,8 +64,8 @@ For an already Agent-owned Issue, automatic enqueue occurs only when the Issue l
 
 Ownership changes never rewrite execution history.
 
-- Agent A -> Agent B preserves A's existing Runs and may create a new Run for B when the assignment trigger and execution configuration allow it.
-- assigning the same Agent while that Issue/Agent already has an active Run does not create a duplicate active Run;
+- Agent A -> Agent B preserves A's existing Runs and may create a new Run for B when the assignment trigger and execution configuration allow it. Squad A -> Squad B likewise preserves prior Runs and resolves Squad B's current leader for any new Run.
+- assigning the same owner is a no-op; active Run suppression remains scoped to Issue + resolved Agent.
 - switching to a User or clearing ownership preserves any active Agent Run and prevents future ownership-based reconciliation for that Issue;
 - assignment never synthesizes `run.cancelled`.
 
@@ -77,9 +77,9 @@ Explicit execution is a separate command from ownership:
 
 - `POST /api/projects/{projectID}/issues/{issueID}/runs`
 
-It uses only the Issue's current Agent assignee. `BACKLOG`, User-assigned and unassigned Issues are rejected; all other current Board statuses, including `DONE`, are eligible when execution configuration is valid.
+It uses only the Issue's current executable owner: a direct Agent owner, or a Squad owner resolved to its current leader Agent. `BACKLOG`, User-assigned and unassigned Issues are rejected; all other current Board statuses, including `DONE`, are eligible when execution configuration is valid.
 
-Explicit Start Run preserves Issue ownership and Board status. Scheduler availability does not block creation of the `QUEUED` Run and `START` job, and an already-active Run for the same Issue/Agent is not duplicated.
+Explicit Start Run preserves Issue ownership and Board status, including persisted Squad ownership. Scheduler availability does not block creation of the `QUEUED` Run and `START` job, and an already-active Run for the same Issue/resolved-Agent pair is not duplicated.
 
 ## Durable evidence
 

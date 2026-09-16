@@ -30,7 +30,7 @@ func (s *Server) registerIssueTools(server *mcp.Server) {
 	mcp.AddTool(server, createRelationship, s.createIssueRelationship)
 	mcp.AddTool(server, mutationTool("delete_issue_relationship", "Delete one Issue relationship through canonical validation.", true, false), s.deleteIssueRelationship)
 	mcp.AddTool(server, readOnlyTool("get_issue_execution_state", "Read the canonical derived Issue execution state including canStart and activeRun."), s.getIssueExecutionState)
-	mcp.AddTool(server, mutationTool("start_issue_run", "Explicitly start or run again using the Issue's current AGENT assignee. Status and ownership stay unchanged.", false, false), s.startIssueRun)
+	mcp.AddTool(server, mutationTool("start_issue_run", "Explicitly start or run again using the Issue's current AGENT owner or current SQUAD leader. Status and ownership stay unchanged.", false, false), s.startIssueRun)
 }
 
 func (s *Server) listIssues(ctx context.Context, _ *mcp.CallToolRequest, input ProjectInput) (*mcp.CallToolResult, []IssueDTO, error) {

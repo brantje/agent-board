@@ -28,6 +28,7 @@ func resolvedIssueExecutionCandidates(ctx context.Context, q issueExecutionCandi
 		  AND ($2='' OR (assignee_type='SQUAD' AND assignee_id::text=$2))
 		  AND assignee_type IN ('AGENT','SQUAD')
 		  AND assignee_id IS NOT NULL
+		  AND status <> 'BACKLOG'
 		ORDER BY project_id, id
 	`, filter.ProjectID, filter.SquadID)
 	if err != nil {
