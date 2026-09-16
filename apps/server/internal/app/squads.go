@@ -85,16 +85,20 @@ func (s *Service) prepareSquad(ctx context.Context, input store.Squad) (store.Sq
 		return store.Squad{}, invalid("squad leader agent id must be a UUID")
 	}
 
-	seen := map[string]struct{}{input.LeaderAgentID: {}}
+	seen := map[string]struct{}{typedSquadMemberKey(store.SquadMemberTypeAgent, input.LeaderAgentID): {}}
 	members := make([]store.SquadMember, 0, len(input.Members))
 	for _, member := range input.Members {
-		if !validSquadUUID(member.AgentID) {
-			return store.Squad{}, invalid("squad member agent id must be a UUID")
+		if member.Type != store.SquadMemberTypeAgent && member.Type != store.SquadMemberTypeUser {
+			return store.Squad{}, invalid("squad member type must be AGENT or USER")
 		}
-		if _, exists := seen[member.AgentID]; exists {
-			return store.Squad{}, invalid("squad Agents must have one canonical membership representation")
+		if !validSquadUUID(member.ID) {
+			return store.Squad{}, invalid("squad member id must be a UUID")
 		}
-		seen[member.AgentID] = struct{}{}
+		key := typedSquadMemberKey(member.Type, member.ID)
+		if _, exists := seen[key]; exists {
+			return store.Squad{}, invalid("squad members must have one canonical typed identity representation")
+		}
+		seen[key] = struct{}{}
 
 		var role *string
 		if member.Role != nil {
@@ -103,7 +107,7 @@ func (s *Service) prepareSquad(ctx context.Context, input store.Squad) (store.Sq
 				role = &normalized
 			}
 		}
-		members = append(members, store.SquadMember{AgentID: member.AgentID, Role: role})
+		members = append(members, store.SquadMember{Type: member.Type, ID: member.ID, Role: role})
 	}
 	input.Members = members
 
@@ -111,11 +115,22 @@ func (s *Service) prepareSquad(ctx context.Context, input store.Squad) (store.Sq
 		return store.Squad{}, err
 	}
 	for _, member := range input.Members {
-		if err := s.requireUsableSquadAgent(ctx, input.ProjectID, member.AgentID); err != nil {
-			return store.Squad{}, err
+		switch member.Type {
+		case store.SquadMemberTypeAgent:
+			if err := s.requireUsableSquadAgent(ctx, input.ProjectID, member.ID); err != nil {
+				return store.Squad{}, err
+			}
+		case store.SquadMemberTypeUser:
+			if err := s.requireUsableSquadUser(ctx, input.ProjectID, member.ID); err != nil {
+				return store.Squad{}, err
+			}
 		}
 	}
 	return input, nil
+}
+
+func typedSquadMemberKey(memberType, id string) string {
+	return memberType + ":" + id
 }
 
 func (s *Service) requireUsableSquadAgent(ctx context.Context, projectID, agentID string) error {
@@ -124,7 +139,25 @@ func (s *Service) requireUsableSquadAgent(ctx context.Context, projectID, agentI
 		return err
 	}
 	if agent.State != "ENABLED" {
-		return invalid("squad leader and members must be enabled Agents")
+		return invalid("squad leader and Agent members must be enabled Agents")
+	}
+	return nil
+}
+
+func (s *Service) requireUsableSquadUser(ctx context.Context, projectID, userID string) error {
+	var eligibility store.ProjectWorkflowUserEligibilityStore
+	if candidate, ok := s.store.(store.ProjectWorkflowUserEligibilityStore); ok {
+		eligibility = candidate
+	} else if candidate, ok := s.assignmentStore.(store.ProjectWorkflowUserEligibilityStore); ok {
+		// Runtime services intentionally keep the evidence/redaction store narrow;
+		// assignmentStore is already rebound to the authoritative base store.
+		eligibility = candidate
+	}
+	if eligibility == nil {
+		return invalid("squad User membership validation is unavailable")
+	}
+	if err := eligibility.ValidateProjectWorkflowUser(ctx, projectID, userID); err != nil {
+		return invalid("squad User members must be active Project members or administrators")
 	}
 	return nil
 }
