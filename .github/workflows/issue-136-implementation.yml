@@ -50,4 +50,12 @@ jobs:
       - name: Implement, test, commit, and push issue 136
         run: |
           sed -i 's/"main\.\.HEAD"/"origin\/main..HEAD"/' scripts/issue136_implement.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/issue136_implement.py')
+          text = p.read_text()
+          text = text.replace("old = '`\"type\": \"USER\" | \"AGENT\"`'", "old = '\"type\": \"USER\" | \"AGENT\"'")
+          text = text.replace("p.write_text(text.replace(old, '`\"type\": \"USER\" | \"AGENT\" | \"SQUAD\"`', 1))", "p.write_text(text.replace(old, '\"type\": \"USER\" | \"AGENT\" | \"SQUAD\"', 1))")
+          p.write_text(text)
+          PY
           python3 scripts/issue136_implement.py
