@@ -2,9 +2,15 @@ SquadMember:
   type: object
   additionalProperties: false
   required:
-  - agentId
+  - type
+  - id
   properties:
-    agentId:
+    type:
+      type: string
+      enum:
+      - AGENT
+      - USER
+    id:
       type: string
       format: uuid
     role:
