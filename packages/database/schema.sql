@@ -627,7 +627,7 @@ CREATE TABLE artifacts (
     created_at timestamptz NOT NULL DEFAULT now(),
     deleted_at timestamptz,
     CONSTRAINT artifacts_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
-    CONSTRAINT artifacts_run_fk FOREIGN KEY (project_id, issue_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT artifacts_run_fk FOREIGN KEY (project_id, run_id) REFERENCES runs(project_id, id) ON DELETE CASCADE,
     UNIQUE (project_id, id)
 );
 
