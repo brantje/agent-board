@@ -121,6 +121,21 @@ export interface Agent {
   state: string
 }
 
+export interface SquadMember {
+  agentId: string
+  role?: string | null
+}
+
+export interface Squad {
+  id: string
+  projectId: string
+  name: string
+  leaderAgentId: string
+  members: SquadMember[]
+  createdAt: string
+  updatedAt: string
+}
+
 export interface QuestionOption {
   id: string
   label: string

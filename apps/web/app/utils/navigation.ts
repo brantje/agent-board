@@ -14,7 +14,7 @@ export function navigation(projectId?: string, authorization: NavigationAuthoriz
     ? [{ label: 'Settings', to: '/settings', icon: 'i-lucide-settings' }]
     : []
   const project = projectId
-    ? ['Board', 'Agents', 'Runs', ...(authorization.projectAdmin ? ['Settings'] : [])].map(label => ({
+    ? ['Board', 'Agents', 'Squads', 'Runs', ...(authorization.projectAdmin ? ['Settings'] : [])].map(label => ({
         label,
         to: `/projects/${encodeURIComponent(projectId)}/${label.toLowerCase()}`
       }))
