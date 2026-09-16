@@ -146,18 +146,10 @@ func (s *Service) requireUsableSquadAgent(ctx context.Context, projectID, agentI
 }
 
 func (s *Service) requireUsableSquadUser(ctx context.Context, projectID, userID string) error {
-	var eligibility store.ProjectWorkflowUserEligibilityStore
-	if candidate, ok := s.store.(store.ProjectWorkflowUserEligibilityStore); ok {
-		eligibility = candidate
-	} else if candidate, ok := s.assignmentStore.(store.ProjectWorkflowUserEligibilityStore); ok {
-		// Runtime services intentionally keep the evidence/redaction store narrow;
-		// assignmentStore is already rebound to the authoritative base store.
-		eligibility = candidate
-	}
-	if eligibility == nil {
+	if s.projectWorkflowUserEligibility == nil {
 		return invalid("squad User membership validation is unavailable")
 	}
-	if err := eligibility.ValidateProjectWorkflowUser(ctx, projectID, userID); err != nil {
+	if err := s.projectWorkflowUserEligibility.ValidateProjectWorkflowUser(ctx, projectID, userID); err != nil {
 		if errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, store.ErrNotFound) {
 			return invalid("squad User members must be active Project members or administrators")
 		}
