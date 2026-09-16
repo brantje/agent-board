@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import type { Issue } from '../types/api'
 import { formatUpdatedLabel, isFailedIssueRun, isLiveIssueRun, issueCardRunStatus, issuePriority } from '../utils/issues'
+import { assigneeIdentityKind, assigneeTypeLabel } from '../utils/identity'
 
 const props = defineProps<{
   issue: Issue
@@ -10,6 +11,8 @@ const props = defineProps<{
 
 const priority = computed(() => issuePriority(props.issue.priority))
 const assignedLabel = computed(() => props.issue.assignedTo?.name || (props.issue.assignedTo ? 'Assignee unavailable' : ''))
+const assignedKind = computed(() => props.issue.assignedTo ? assigneeIdentityKind(props.issue.assignedTo.type) : 'user')
+const assignedTypeLabel = computed(() => props.issue.assignedTo ? assigneeTypeLabel(props.issue.assignedTo.type) : '')
 const runStatusLabel = computed(() => issueCardRunStatus(props.runStatus))
 const updatedLabel = computed(() => formatUpdatedLabel(props.issue.updatedAt))
 const liveRun = computed(() => isLiveIssueRun(props.runStatus))
@@ -68,8 +71,8 @@ const failedRun = computed(() => isFailedIssueRun(props.runStatus))
 
       <div class="mt-3 flex items-center justify-between gap-2">
         <div v-if="assignedLabel" class="flex min-w-0 items-center gap-2">
-          <IdentityAvatar :kind="issue.assignedTo?.type === 'USER' ? 'user' : 'agent'" :name="assignedLabel" />
-          <span class="truncate text-xs text-highlighted">{{ assignedLabel }}</span>
+          <IdentityAvatar :kind="assignedKind" :name="assignedLabel" />
+          <span class="truncate text-xs text-highlighted">{{ assignedLabel }} · {{ assignedTypeLabel }}</span>
         </div>
         <span v-if="updatedLabel" class="ml-auto shrink-0 text-xs text-muted">{{ updatedLabel }}</span>
       </div>

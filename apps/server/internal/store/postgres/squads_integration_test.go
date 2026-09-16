@@ -55,7 +55,7 @@ func TestSquadStoreCRUDAndProjectIsolation(t *testing.T) {
 	}
 
 	updatedRole := "Architecture"
-	updated, err := s.UpdateSquad(ctx, store.Squad{
+	updated, leaderChanged, err := s.UpdateSquad(ctx, store.Squad{
 		ID:            created.ID,
 		ProjectID:     projectA.ID,
 		Name:          "Platform",
@@ -66,6 +66,9 @@ func TestSquadStoreCRUDAndProjectIsolation(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("update squad: %v", err)
+	}
+	if !leaderChanged {
+		t.Fatal("leader change was not reported")
 	}
 	if updated.Name != "Platform" || updated.LeaderAgentID != agentsA[1].ID {
 		t.Fatalf("unexpected updated squad: %+v", updated)
@@ -129,7 +132,7 @@ func TestSquadStoreFailedUpdateRollsBackAndAgentReferenceIsStable(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if _, err := s.UpdateSquad(ctx, store.Squad{
+	if _, _, err := s.UpdateSquad(ctx, store.Squad{
 		ID: created.ID, ProjectID: projectA.ID, Name: "Should roll back", LeaderAgentID: agentsA[1].ID,
 		Members: []store.SquadMember{{AgentID: agentsB[0].ID}},
 	}); !errors.Is(err, store.ErrInvalidArgument) {

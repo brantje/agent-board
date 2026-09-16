@@ -144,11 +144,12 @@ New automatic Runs atomically persist `run.created` with Run, Agent and Workspac
 
 ## Execution configuration recovery and Start Run
 
-Configuration recovery derives work from current Agent ownership, Board status,
-active Issue/Agent Runs and the existing Agent/Model Profile/Provider validity
-checks. It persists no pending-execution flag or recovery history. Startup runs
-this reconciliation before starting the scheduler; configuration updates and
-Provider recovery invoke the same reconciliation for affected assignments.
+Configuration recovery derives work from current executable ownership (direct
+Agent ownership or Squad ownership resolved to its current leader Agent), Board
+status, active Issue/Agent Runs and the existing Agent/Model Profile/Provider
+validity checks. It persists no pending-execution flag or recovery history.
+Startup runs this reconciliation before starting the scheduler; configuration
+updates and Provider recovery invoke the same reconciliation for affected ownership.
 
 Recovery and explicit Start Run reuse the assignment eligibility policy: BACKLOG
 stays parked; TODO, IN_PROGRESS, BLOCKED, REVIEW and DONE are eligible. Candidate

@@ -85,15 +85,16 @@ func (s *squadTestStore) ListSquads(_ context.Context, projectID string) ([]stor
 	return values, nil
 }
 
-func (s *squadTestStore) UpdateSquad(_ context.Context, value store.Squad) (store.Squad, error) {
+func (s *squadTestStore) UpdateSquad(_ context.Context, value store.Squad) (store.Squad, bool, error) {
 	s.updateCalls++
 	existing, ok := s.squads[value.ID]
 	if !ok || existing.ProjectID != value.ProjectID {
-		return store.Squad{}, store.ErrNotFound
+		return store.Squad{}, false, store.ErrNotFound
 	}
+	leaderChanged := existing.LeaderAgentID != value.LeaderAgentID
 	value.Members = cloneTestSquadMembers(value.Members)
 	s.squads[value.ID] = value
-	return cloneTestSquad(value), nil
+	return cloneTestSquad(value), leaderChanged, nil
 }
 
 func (s *squadTestStore) DeleteSquad(_ context.Context, projectID, id string) error {

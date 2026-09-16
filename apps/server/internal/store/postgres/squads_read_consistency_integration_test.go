@@ -40,7 +40,7 @@ func TestSquadReadsRemainCoherentDuringConcurrentUpdates(t *testing.T) {
 				leader, member = agents[1], agents[0]
 				role = "member-a"
 			}
-			if _, err := s.UpdateSquad(ctx, store.Squad{
+			if _, _, err := s.UpdateSquad(ctx, store.Squad{
 				ID:            created.ID,
 				ProjectID:     project.ID,
 				Name:          "Coherent",

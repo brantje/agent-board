@@ -25,10 +25,11 @@ func resolvedIssueExecutionCandidates(ctx context.Context, q issueExecutionCandi
 		SELECT project_id::text, id::text, assignee_type, assignee_id::text
 		FROM issues
 		WHERE ($1='' OR project_id::text=$1)
+		  AND ($2='' OR (assignee_type='SQUAD' AND assignee_id::text=$2))
 		  AND assignee_type IN ('AGENT','SQUAD')
 		  AND assignee_id IS NOT NULL
 		ORDER BY project_id, id
-	`, filter.ProjectID)
+	`, filter.ProjectID, filter.SquadID)
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,7 @@ const props = withDefaults(defineProps<{
 })
 
 const label = computed(() => identityDisplayName(props.name))
-const color = computed(() => props.kind === 'agent' ? 'neutral' : userIdentityColor(props.name))
+const color = computed(() => props.kind === 'user' ? userIdentityColor(props.name) : 'neutral')
 </script>
 
 <template>
@@ -21,6 +21,15 @@ const color = computed(() => props.kind === 'agent' ? 'neutral' : userIdentityCo
     :alt="label"
     :aria-label="label"
     icon="i-lucide-bot"
+    :color="color"
+    :size="size"
+    class="issue-identity"
+  />
+  <UAvatar
+    v-else-if="kind === 'squad'"
+    :alt="label"
+    :aria-label="label"
+    icon="i-lucide-users"
     :color="color"
     :size="size"
     class="issue-identity"

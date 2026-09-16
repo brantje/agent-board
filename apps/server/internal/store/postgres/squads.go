@@ -78,27 +78,27 @@ func (s *Store) ListSquads(ctx context.Context, projectID string) ([]store.Squad
 	return values, nil
 }
 
-func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad, error) {
+func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad, bool, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return store.Squad{}, err
+		return store.Squad{}, false, err
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	var squadID string
+	var squadID, previousLeaderAgentID string
 	if err := tx.QueryRow(ctx, `
-		SELECT id::text
+		SELECT id::text, leader_agent_id::text
 		FROM squads
 		WHERE project_id = $1 AND id = $2
 		FOR UPDATE
-	`, input.ProjectID, input.ID).Scan(&squadID); err != nil {
-		return store.Squad{}, notFound(err)
+	`, input.ProjectID, input.ID).Scan(&squadID, &previousLeaderAgentID); err != nil {
+		return store.Squad{}, false, notFound(err)
 	}
 	if err := lockSquadAgents(ctx, tx, input); err != nil {
-		return store.Squad{}, err
+		return store.Squad{}, false, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM squad_members WHERE squad_id = $1`, squadID); err != nil {
-		return store.Squad{}, err
+		return store.Squad{}, false, err
 	}
 
 	value, err := scanSquad(tx.QueryRow(ctx, `
@@ -108,16 +108,16 @@ func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad
 		RETURNING `+squadSelectColumns+`
 	`, input.ProjectID, input.ID, input.Name, input.LeaderAgentID))
 	if err != nil {
-		return store.Squad{}, err
+		return store.Squad{}, false, err
 	}
 	if err := insertSquadMembers(ctx, tx, value.ID, input.Members); err != nil {
-		return store.Squad{}, err
+		return store.Squad{}, false, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return store.Squad{}, err
+		return store.Squad{}, false, err
 	}
 	value.Members = cloneSquadMembers(input.Members)
-	return value, nil
+	return value, previousLeaderAgentID != value.LeaderAgentID, nil
 }
 
 func (s *Store) DeleteSquad(ctx context.Context, projectID, squadID string) error {

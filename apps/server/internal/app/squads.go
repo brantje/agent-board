@@ -50,9 +50,13 @@ func (s *Service) UpdateSquad(ctx context.Context, input store.Squad) (store.Squ
 	if err != nil {
 		return store.Squad{}, err
 	}
-	value, err := s.store.UpdateSquad(ctx, prepared)
-	if err == nil {
-		s.reconcileExecutionConfiguration(ctx, store.IssueExecutionFilter{ProjectID: value.ProjectID, AgentID: value.LeaderAgentID})
+	value, leaderChanged, err := s.store.UpdateSquad(ctx, prepared)
+	if err == nil && leaderChanged {
+		s.reconcileExecutionConfiguration(ctx, store.IssueExecutionFilter{
+			ProjectID: value.ProjectID,
+			AgentID:   value.LeaderAgentID,
+			SquadID:   value.ID,
+		})
 	}
 	return value, translateStoreError(err, "squad")
 }
