@@ -8,7 +8,7 @@ Agent Board remains authoritative for Issues, Runs, scheduling, Workspaces, capa
 
 ## Implemented Squad foundation
 
-Squads are durable, reusable Project-scoped collaboration configuration with one authoritative leader Agent and optional Agent/User members.
+Squads are durable, reusable Project-scoped collaboration configuration with one authoritative leader Agent that is enabled and usable in the Project/global Agent scope, plus optional Agent/User members.
 
 ```text
 Squad
@@ -19,7 +19,7 @@ Squad
         └── optional descriptive role
 ```
 
-A Squad can be created, edited and deleted through Project configuration. It has exactly one leader Agent and zero or more additional members. Additional members may be usable Agents or active human Users with effective Project member/admin workflow access. Human Groups remain a separate deployment-global access concept: Groups grant Project access, while Squad membership is collaboration context and grants no Project permission by itself.
+A Squad can be created, edited and deleted through Project configuration. It has exactly one enabled leader Agent usable in the Project/global Agent scope and zero or more additional members. Additional members may be usable Agents or active human Users with effective Project member/admin workflow access. Human Groups remain a separate deployment-global access concept: Groups grant Project access, while Squad membership is collaboration context and grants no Project permission by itself.
 
 A Squad is assignable to an Issue. The Issue persists the Squad ID as canonical ownership. Execution resolves the Squad's current leader through the same backend execution-target path used by normal Agent execution:
 
