@@ -100,6 +100,16 @@ Durable worker identity/configuration, not a process or container.
 
 An Agent selects Engine and Model Profile directly and may define operational policy such as concurrency. Runner placement is scheduler-owned at Run time.
 
+### Squad
+
+Durable Project-scoped collaboration and Issue-ownership configuration with exactly one leader Agent and zero or more typed additional members.
+
+The public member identity is `{type: AGENT | USER, id, role?}`. The leader Agent is stored separately as the authoritative execution identity and is never duplicated as an `AGENT` member. Additional Agent members must be enabled and usable in the Project/global Agent scope. Additional User members must be active effective Project members/admins at create/update time, using the same direct, Group-inherited and deployment-admin workflow eligibility rule as Issue assignment. A descriptive member role is optional and grants no permission.
+
+Squad membership is not an ACL. It never grants or preserves Project access. If a User later loses effective Project access or becomes disabled, the persisted Squad roster remains stable collaboration context while normal Project authorization immediately excludes that User. Reads do not mutate or silently clean stale membership.
+
+A Squad-owned Issue persists the Squad ID as ownership. Execution resolves only the current leader Agent through the normal Run/scheduler path. Additional Agent/User members do not implicitly receive Runs, fan out work, alter ownership or create a second execution lifecycle.
+
 ### Provider
 
 Configured model/inference connection and credential boundary. Shared (instance-wide) or Project-owned; shared Providers are visible and read-only inside a Project.
@@ -264,7 +274,7 @@ See `authorization.md` for the complete fixed human authentication and authoriza
 
 Planning, Automations, Agent-created Issues, delegation, Squads and worker topology reuse the same Issue/Run/scheduler/Workspace/Git-branch model rather than creating parallel execution systems.
 
-Delegation is a subtask within the current Issue; Agent-created follow-up work creates a real new Issue. Squads layer reusable leader/member configuration on delegation. Human Groups remain a separate deployment-global access concept.
+Delegation is a subtask within the current Issue; Agent-created follow-up work creates a real new Issue. Squads provide reusable mixed Agent/User collaboration context around one authoritative leader Agent; Squad membership does not itself delegate, execute or grant access. Human Groups remain a separate deployment-global access concept.
 
 The fixed local Users/Groups/Project authorization foundation is documented in `authorization.md`. External identity providers, custom permissions and broader administration are later extensions; they must not silently change the fixed roles or shared authorization boundary.
 
