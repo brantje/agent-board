@@ -51,6 +51,9 @@ func (s *Service) UpdateSquad(ctx context.Context, input store.Squad) (store.Squ
 		return store.Squad{}, err
 	}
 	value, err := s.store.UpdateSquad(ctx, prepared)
+	if err == nil {
+		s.reconcileExecutionConfiguration(ctx, store.IssueExecutionFilter{ProjectID: value.ProjectID, AgentID: value.LeaderAgentID})
+	}
 	return value, translateStoreError(err, "squad")
 }
 
