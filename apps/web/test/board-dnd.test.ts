@@ -8,23 +8,14 @@ import { boardDragId, boardDropZoneId } from '../app/utils/board-order'
 import { event, MockEventSource } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
-const pointerSensorOptions = vi.hoisted(() => ({
-  current: undefined as { preventActivation?: () => boolean } | undefined
-}))
-
 vi.mock('@dnd-kit/vue', async () => {
   const actual = await vi.importActual<typeof import('@dnd-kit/vue')>('@dnd-kit/vue')
   const vue = await vi.importActual<typeof import('vue')>('vue')
   return {
     ...actual,
-    PointerSensor: class {
-      static configure(options: { preventActivation?: () => boolean }) {
-        pointerSensorOptions.current = options
-        return { type: 'board-pointer-sensor' }
-      }
-    },
     DragDropProvider: vue.defineComponent({
       name: 'DragDropProvider',
+      props: ['sensors'],
       emits: ['dragEnd'],
       setup(_props, { slots }) {
         return () => vue.h('div', { 'data-dnd-provider': '' }, slots.default?.())
@@ -88,8 +79,18 @@ afterEach(() => {
 })
 
 describe('ProjectBoard drag ordering', () => {
-  it('allows pointer activation from the linked card surface', () => {
-    expect(pointerSensorOptions.current?.preventActivation?.()).toBe(false)
+  it('allows pointer activation from the linked card surface', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/issues')) return new Response(JSON.stringify([issue('AB-1')]))
+      if (path.endsWith('/runs')) return new Response(JSON.stringify([]))
+      return new Response(JSON.stringify({ id: 'p', name: 'Project' }))
+    }))
+    const wrapper = mount(ProjectBoard, { props: { projectId: 'p' }, global })
+    await flushPromises()
+
+    const sensors = wrapper.getComponent(DragDropProvider).props('sensors') as Array<{ options?: { preventActivation?: () => boolean } }>
+    expect(sensors[0]?.options?.preventActivation?.()).toBe(false)
+    wrapper.unmount()
   })
 
   it('optimistically reorders and persists exact neighboring issue keys', async () => {
