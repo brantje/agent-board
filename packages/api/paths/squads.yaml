@@ -1,0 +1,65 @@
+squadIDParameter:
+  name: squadID
+  in: path
+  required: true
+  schema: {type: string, format: uuid}
+
+squadInput:
+  required: true
+  content:
+    application/json:
+      schema: {$ref: ../schemas/squads.yaml#/SquadInput}
+
+squadResponse:
+  description: Project-scoped reusable Agent Squad.
+  content:
+    application/json:
+      schema: {$ref: ../schemas/squads.yaml#/Squad}
+
+collection:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listProjectSquads
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Squads visible in the Project.
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: ../schemas/squads.yaml#/Squad}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  post:
+    operationId: createProjectSquad
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/squadInput'}
+    responses:
+      '201': {$ref: '#/squadResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+
+resource:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: '#/squadIDParameter'
+  get:
+    operationId: getProjectSquad
+    security: [{BearerAuth: []}]
+    responses:
+      '200': {$ref: '#/squadResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  put:
+    operationId: updateProjectSquad
+    description: Replaces the Squad name, leader, and complete member set atomically.
+    security: [{BearerAuth: []}]
+    requestBody: {$ref: '#/squadInput'}
+    responses:
+      '200': {$ref: '#/squadResponse'}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  delete:
+    operationId: deleteProjectSquad
+    security: [{BearerAuth: []}]
+    responses:
+      '204': {description: Squad deleted.}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
