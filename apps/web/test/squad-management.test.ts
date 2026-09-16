@@ -91,6 +91,74 @@ describe('Squad management', () => {
     }])
   })
 
+  it('blocks invalid Squad drafts before they reach the API', async () => {
+    const cases = [
+      {
+        name: 'blank name',
+        error: 'Squad name is required.',
+        prepare: async () => undefined
+      },
+      {
+        name: 'missing leader',
+        error: 'Choose one leader Agent.',
+        prepare: async (wrapper: ReturnType<typeof mount>) => {
+          await wrapper.find('[data-field="name"] input').setValue('Platform Squad')
+        }
+      },
+      {
+        name: 'incomplete member row',
+        error: 'Choose an Agent for every member row.',
+        prepare: async (wrapper: ReturnType<typeof mount>) => {
+          await wrapper.find('[data-field="name"] input').setValue('Platform Squad')
+          await wrapper.find('[data-field="leaderAgentId"] select').setValue(leader.id)
+          await wrapper.findAll('button').find(button => button.text() === 'Add member')!.trigger('click')
+        }
+      },
+      {
+        name: 'leader repeated as member',
+        error: 'The leader is already represented by the leader selection.',
+        prepare: async (wrapper: ReturnType<typeof mount>) => {
+          await wrapper.find('[data-field="name"] input').setValue('Platform Squad')
+          await wrapper.findAll('button').find(button => button.text() === 'Add member')!.trigger('click')
+          await wrapper.find('[data-field="member-0-agent"] select').setValue(leader.id)
+          await wrapper.find('[data-field="leaderAgentId"] select').setValue(leader.id)
+        }
+      },
+      {
+        name: 'duplicate members',
+        error: 'Each member Agent may only appear once.',
+        prepare: async (wrapper: ReturnType<typeof mount>) => {
+          await wrapper.find('[data-field="name"] input').setValue('Platform Squad')
+          await wrapper.find('[data-field="leaderAgentId"] select').setValue(leader.id)
+          const addMember = () => wrapper.findAll('button').find(button => button.text() === 'Add member')!.trigger('click')
+          await addMember()
+          await addMember()
+          await wrapper.find('[data-field="member-0-agent"] select').setValue(member.id)
+          await wrapper.find('[data-field="member-1-agent"] select').setValue(member.id)
+        }
+      }
+    ]
+
+    for (const testCase of cases) {
+      const postRequests: string[] = []
+      vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+        if (init?.method === 'POST') postRequests.push(path)
+        return responseFor(path)
+      }))
+      const wrapper = mount(SquadManager, { props: { projectId: 'project-a' }, global })
+      await flushPromises()
+      await wrapper.findAll('button').find(button => button.text() === 'New squad')!.trigger('click')
+      await testCase.prepare(wrapper)
+      await wrapper.find('form').trigger('submit')
+      await flushPromises()
+
+      expect(wrapper.text(), testCase.name).toContain(testCase.error)
+      expect(postRequests, testCase.name).toHaveLength(0)
+      wrapper.unmount()
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('deletes Squads through the empty-response API path and refreshes persisted state', async () => {
     const requests: Array<{ path: string; method: string }> = []
     let listCalls = 0
