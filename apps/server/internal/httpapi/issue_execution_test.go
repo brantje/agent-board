@@ -35,19 +35,20 @@ func TestIssueExecutionStateHTTPContract(t *testing.T) {
 	f := &startRunHTTPStore{fakeControlPlaneStore: &fakeControlPlaneStore{}}
 	router := NewRouter(app.New(f))
 	path := "/api/projects/" + projectID + "/issues/" + issueKey + "/execution"
+	executionAgent := &store.IssueExecutionAgent{ID: agentID, Name: "Squad leader"}
 
-	f.state = store.IssueExecutionState{State: store.IssueExecutionConfigurationUnavailable}
+	f.state = store.IssueExecutionState{State: store.IssueExecutionConfigurationUnavailable, ExecutionAgent: executionAgent}
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"CONFIGURATION_UNAVAILABLE"`) || !strings.Contains(w.Body.String(), `"canStart":false`) {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"CONFIGURATION_UNAVAILABLE"`) || !strings.Contains(w.Body.String(), `"canStart":false`) || !strings.Contains(w.Body.String(), `"executionAgent":{"id":"`+agentID+`","name":"Squad leader"}`) {
 		t.Fatalf("configuration unavailable response: %d %s", w.Code, w.Body.String())
 	}
 
 	active := store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 2, Status: "RUNNING"}
-	f.state = store.IssueExecutionState{State: store.IssueExecutionActive, ActiveRun: &active}
+	f.state = store.IssueExecutionState{State: store.IssueExecutionActive, ExecutionAgent: executionAgent, ActiveRun: &active}
 	w = httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest("GET", path, nil))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"ACTIVE"`) || !strings.Contains(w.Body.String(), runID) || !strings.Contains(w.Body.String(), issueKey) {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"ACTIVE"`) || !strings.Contains(w.Body.String(), runID) || !strings.Contains(w.Body.String(), issueKey) || !strings.Contains(w.Body.String(), `"executionAgent":{"id":"`+agentID+`"`) {
 		t.Fatalf("active response: %d %s", w.Code, w.Body.String())
 	}
 

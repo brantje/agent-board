@@ -104,6 +104,22 @@ func executionAgentMatchesFilter(ctx context.Context, q assigneeQuerier, project
 	return true, nil
 }
 
+func issueExecutionAgentIdentity(ctx context.Context, q assigneeQuerier, projectID, agentID string) (*store.IssueExecutionAgent, error) {
+	var agent store.IssueExecutionAgent
+	err := q.QueryRow(ctx, `
+		SELECT id::text, name
+		FROM agents
+		WHERE id=$2 AND (project_id IS NULL OR project_id=$1)
+	`, projectID, agentID).Scan(&agent.ID, &agent.Name)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &agent, nil
+}
+
 func (s *Store) StartIssueRun(ctx context.Context, projectID, issueID string) (store.Run, store.Event, error) {
 	return s.enqueueCurrentIssue(ctx, projectID, issueID, "", true)
 }
@@ -135,21 +151,31 @@ func (s *Store) GetIssueExecutionState(ctx context.Context, projectID, issueID s
 	if !executable {
 		return store.IssueExecutionState{State: store.IssueExecutionNotAgentOwned}, nil
 	}
+	executionAgent, err := issueExecutionAgentIdentity(ctx, tx, projectID, agentID)
+	if err != nil {
+		return store.IssueExecutionState{}, err
+	}
+	state := store.IssueExecutionState{ExecutionAgent: executionAgent}
 
 	active, err := activeRunForAgent(ctx, tx, projectID, issueID, agentID)
 	if err == nil {
-		return store.IssueExecutionState{State: store.IssueExecutionActive, ActiveRun: &active}, nil
+		state.State = store.IssueExecutionActive
+		state.ActiveRun = &active
+		return state, nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
 		return store.IssueExecutionState{}, err
 	}
 	if err := s.verifyRunnableAgent(ctx, tx, projectID, agentID); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
-			return store.IssueExecutionState{State: store.IssueExecutionConfigurationUnavailable}, nil
+			state.State = store.IssueExecutionConfigurationUnavailable
+			return state, nil
 		}
 		return store.IssueExecutionState{}, err
 	}
-	return store.IssueExecutionState{State: store.IssueExecutionReady, CanStart: true}, nil
+	state.State = store.IssueExecutionReady
+	state.CanStart = true
+	return state, nil
 }
 
 // Candidate identity is only a hint. Re-read ownership and resolve the current

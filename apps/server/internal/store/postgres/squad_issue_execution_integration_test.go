@@ -103,7 +103,7 @@ func TestSquadIssueExecutionRecoveryAndExplicitStartUseCurrentLeader(t *testing.
 		t.Fatalf("unready runs=%d err=%v", count, err)
 	}
 	state, err := s.GetIssueExecutionState(t.Context(), f.project.ID, issue.ID)
-	if err != nil || state.State != store.IssueExecutionConfigurationUnavailable {
+	if err != nil || state.State != store.IssueExecutionConfigurationUnavailable || state.ExecutionAgent == nil || state.ExecutionAgent.ID != f.agent.ID || state.ExecutionAgent.Name != f.agent.Name {
 		t.Fatalf("state=%+v err=%v", state, err)
 	}
 	if _, err := s.pool.Exec(t.Context(), `UPDATE model_profiles SET enabled=true WHERE id=$1`, f.model.ID); err != nil {
