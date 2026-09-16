@@ -13,12 +13,13 @@ import (
 )
 
 type Service struct {
-	store               store.ControlPlaneStore
-	assignmentStore     store.IssueAssignmentStore
-	projectRepositories repository.ProjectRepositoryProvisioner
-	events              issueEventRecorder
-	Runners             *RunnerService
-	providerHealth      *ProviderHealthWorker
+	store                          store.ControlPlaneStore
+	assignmentStore                store.IssueAssignmentStore
+	projectWorkflowUserEligibility store.ProjectWorkflowUserEligibilityStore
+	projectRepositories            repository.ProjectRepositoryProvisioner
+	events                         issueEventRecorder
+	Runners                        *RunnerService
+	providerHealth                 *ProviderHealthWorker
 }
 
 type issueEventRecorder interface {
@@ -28,6 +29,7 @@ type issueEventRecorder interface {
 func New(controlPlaneStore store.ControlPlaneStore) *Service {
 	s := &Service{store: controlPlaneStore}
 	s.assignmentStore, _ = controlPlaneStore.(store.IssueAssignmentStore)
+	s.projectWorkflowUserEligibility, _ = controlPlaneStore.(store.ProjectWorkflowUserEligibilityStore)
 	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
 		s.Runners = NewRunnerService(runners)
 	}
