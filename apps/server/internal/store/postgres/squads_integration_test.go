@@ -55,7 +55,7 @@ func TestSquadStoreCRUDAndProjectIsolation(t *testing.T) {
 	}
 
 	updatedRole := "Architecture"
-	updated, leaderChanged, err := s.UpdateSquad(ctx, store.Squad{
+	result, err := s.UpdateSquad(ctx, store.Squad{
 		ID:            created.ID,
 		ProjectID:     projectA.ID,
 		Name:          "Platform",
@@ -67,13 +67,24 @@ func TestSquadStoreCRUDAndProjectIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update squad: %v", err)
 	}
-	if !leaderChanged {
+	if !result.LeaderChanged {
 		t.Fatal("leader change was not reported")
 	}
+	updated := result.Squad
 	if updated.Name != "Platform" || updated.LeaderAgentID != agentsA[1].ID {
 		t.Fatalf("unexpected updated squad: %+v", updated)
 	}
 	assertSquadMember(t, updated.Members, agentsA[0].ID, &updatedRole)
+	if len(result.Events) != 1 || result.Events[0].Type != "squad.updated" || result.Events[0].ProjectID != projectA.ID {
+		t.Fatalf("update events = %+v", result.Events)
+	}
+	var persistedEvents int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE project_id=$1 AND type='squad.updated' AND payload->>'squadId'=$2`, projectA.ID, created.ID).Scan(&persistedEvents); err != nil {
+		t.Fatalf("count squad.updated events: %v", err)
+	}
+	if persistedEvents != 1 {
+		t.Fatalf("persisted squad.updated events = %d, want 1", persistedEvents)
+	}
 
 	if err := s.DeleteSquad(ctx, projectA.ID, created.ID); err != nil {
 		t.Fatalf("delete squad: %v", err)
@@ -132,7 +143,7 @@ func TestSquadStoreFailedUpdateRollsBackAndAgentReferenceIsStable(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	if _, _, err := s.UpdateSquad(ctx, store.Squad{
+	if _, err := s.UpdateSquad(ctx, store.Squad{
 		ID: created.ID, ProjectID: projectA.ID, Name: "Should roll back", LeaderAgentID: agentsA[1].ID,
 		Members: []store.SquadMember{{AgentID: agentsB[0].ID}},
 	}); !errors.Is(err, store.ErrInvalidArgument) {

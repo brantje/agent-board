@@ -50,15 +50,20 @@ func (s *Service) UpdateSquad(ctx context.Context, input store.Squad) (store.Squ
 	if err != nil {
 		return store.Squad{}, err
 	}
-	value, leaderChanged, err := s.store.UpdateSquad(ctx, prepared)
-	if err == nil && leaderChanged {
+	result, err := s.store.UpdateSquad(ctx, prepared)
+	if err != nil {
+		return store.Squad{}, translateStoreError(err, "squad")
+	}
+	publisher, _ := s.events.(persistedEventPublisher)
+	publishPersistedEvents(ctx, publisher, result.Events)
+	if result.LeaderChanged {
 		s.reconcileExecutionConfiguration(ctx, store.IssueExecutionFilter{
-			ProjectID: value.ProjectID,
-			AgentID:   value.LeaderAgentID,
-			SquadID:   value.ID,
+			ProjectID: result.Squad.ProjectID,
+			AgentID:   result.Squad.LeaderAgentID,
+			SquadID:   result.Squad.ID,
 		})
 	}
-	return value, translateStoreError(err, "squad")
+	return result.Squad, nil
 }
 
 func (s *Service) DeleteSquad(ctx context.Context, projectID, squadID string) error {
