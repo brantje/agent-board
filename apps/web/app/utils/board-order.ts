@@ -49,9 +49,16 @@ export function previewBoardPlacement(issues: Issue[], issueId: string, destinat
   const remaining = issues.filter(issue => issue.id !== issueId)
   const destination = remaining.filter(issue => issue.status === destinationStatus)
   insertionIndex = Math.max(0, Math.min(insertionIndex, destination.length))
-  const beforeId = insertionIndex > 0 ? destination[insertionIndex - 1]!.id : null
-  const afterId = insertionIndex < destination.length ? destination[insertionIndex]!.id : null
+
   const moved = { ...dragged, status: destinationStatus }
+  const nextDestination = [...destination]
+  nextDestination.splice(insertionIndex, 0, moved)
+
+  const movedIndex = nextDestination.findIndex(issue => issue.id === issueId)
+  if (movedIndex < 0) return null
+  const beforeId = movedIndex > 0 ? nextDestination[movedIndex - 1]!.id : null
+  const afterId = movedIndex + 1 < nextDestination.length ? nextDestination[movedIndex + 1]!.id : null
+  if (beforeId === issueId || afterId === issueId) return null
 
   let next = [...remaining]
   if (afterId) {
