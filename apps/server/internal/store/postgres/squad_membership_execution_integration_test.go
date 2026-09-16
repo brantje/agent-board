@@ -70,7 +70,7 @@ func TestStaleSquadUserDoesNotPreserveAccessOrAffectLeaderExecution(t *testing.T
 	s := New(testPool(t))
 	f := seedRunFixture(t, s, "squad-stale-user-execution")
 	ctx := t.Context()
-	human := createSquadWorkflowUser(t, s, f.project.ID, "squad-stale-user", store.ProjectRoleAdmin, store.DeploymentRoleMember, store.UserStatusActive)
+	human := createSquadWorkflowUser(t, s, f.project.ID, "squad-stale-user", store.ProjectRoleMember, store.DeploymentRoleMember, store.UserStatusActive)
 	role := "Product"
 
 	squad, err := s.CreateSquad(ctx, store.Squad{
