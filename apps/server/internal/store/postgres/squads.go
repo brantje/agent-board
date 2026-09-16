@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"sort"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,9 @@ func (s *Store) CreateSquad(ctx context.Context, input store.Squad) (store.Squad
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	if err := lockSquadAgents(ctx, tx, input); err != nil {
+		return store.Squad{}, err
+	}
 	value, err := scanSquad(tx.QueryRow(ctx, `
 		INSERT INTO squads (project_id, name, leader_agent_id)
 		VALUES ($1, $2, $3)
@@ -102,6 +106,9 @@ func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad
 	`, input.ProjectID, input.ID).Scan(&squadID); err != nil {
 		return store.Squad{}, notFound(err)
 	}
+	if err := lockSquadAgents(ctx, tx, input); err != nil {
+		return store.Squad{}, err
+	}
 	if _, err := tx.Exec(ctx, `DELETE FROM squad_members WHERE squad_id = $1`, squadID); err != nil {
 		return store.Squad{}, err
 	}
@@ -164,6 +171,28 @@ func listSquadMembers(ctx context.Context, q squadQueryer, squadID string) ([]st
 		return nil, err
 	}
 	return members, nil
+}
+
+func lockSquadAgents(ctx context.Context, tx pgx.Tx, value store.Squad) error {
+	agentIDs := make([]string, 0, len(value.Members)+1)
+	agentIDs = append(agentIDs, value.LeaderAgentID)
+	for _, member := range value.Members {
+		agentIDs = append(agentIDs, member.AgentID)
+	}
+	sort.Strings(agentIDs)
+
+	previous := ""
+	for _, agentID := range agentIDs {
+		if agentID == previous {
+			continue
+		}
+		previous = agentID
+		var lockedID string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM agents WHERE id = $1 FOR UPDATE`, agentID).Scan(&lockedID); err != nil {
+			return notFound(err)
+		}
+	}
+	return nil
 }
 
 func insertSquadMembers(ctx context.Context, tx pgx.Tx, squadID string, members []store.SquadMember) error {
