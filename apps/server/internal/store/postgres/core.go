@@ -191,7 +191,7 @@ func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (sto
 	}
 
 	var runEvent store.Event
-	if assignee != nil && assignee.Type == "AGENT" {
+	if assignee != nil && store.ShouldAutoEnqueueIssue("", issue.Status, assignee.Type, true) {
 		_, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, issue.ProjectID, issue.ID)
 		if err != nil {
 			return store.IssueMutationResult{}, err

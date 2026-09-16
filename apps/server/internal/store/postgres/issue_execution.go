@@ -9,6 +9,87 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+type issueExecutionCandidate struct {
+	projectID string
+	issueID   string
+	agentID   string
+}
+
+type issueExecutionCandidateQuerier interface {
+	assigneeQuerier
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func resolvedIssueExecutionCandidates(ctx context.Context, q issueExecutionCandidateQuerier, filter store.IssueExecutionFilter) ([]issueExecutionCandidate, error) {
+	rows, err := q.Query(ctx, `
+		SELECT project_id::text, id::text, assignee_type, assignee_id::text
+		FROM issues
+		WHERE ($1='' OR project_id::text=$1)
+		  AND assignee_type IN ('AGENT','SQUAD')
+		  AND assignee_id IS NOT NULL
+		ORDER BY project_id, id
+	`, filter.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	candidates := make([]issueExecutionCandidate, 0)
+	for rows.Next() {
+		var projectID, issueID, ownerType, ownerID string
+		if err := rows.Scan(&projectID, &issueID, &ownerType, &ownerID); err != nil {
+			return nil, err
+		}
+		issue := store.Issue{ProjectID: projectID, ID: issueID, AssigneeType: &ownerType, AssigneeID: &ownerID}
+		agentID, executable, err := resolveIssueExecutionAgent(ctx, q, issue)
+		if err != nil {
+			return nil, err
+		}
+		if !executable || (filter.AgentID != "" && agentID != filter.AgentID) {
+			continue
+		}
+		matches, err := executionAgentMatchesFilter(ctx, q, projectID, agentID, filter)
+		if err != nil {
+			return nil, err
+		}
+		if matches {
+			candidates = append(candidates, issueExecutionCandidate{projectID: projectID, issueID: issueID, agentID: agentID})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return candidates, nil
+}
+
+func executionAgentMatchesFilter(ctx context.Context, q assigneeQuerier, projectID, agentID string, filter store.IssueExecutionFilter) (bool, error) {
+	if filter.ModelProfileID == "" && filter.ProviderID == "" {
+		return true, nil
+	}
+	var modelProfileID, providerID string
+	err := q.QueryRow(ctx, `
+		SELECT a.model_profile_id::text, m.provider_id::text
+		FROM agents AS a
+		JOIN model_profiles AS m ON m.id=a.model_profile_id
+		WHERE a.id=$2
+		  AND (a.project_id IS NULL OR a.project_id=$1)
+		  AND (m.project_id IS NULL OR m.project_id=$1)
+	`, projectID, agentID).Scan(&modelProfileID, &providerID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if filter.ModelProfileID != "" && modelProfileID != filter.ModelProfileID {
+		return false, nil
+	}
+	if filter.ProviderID != "" && providerID != filter.ProviderID {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (s *Store) StartIssueRun(ctx context.Context, projectID, issueID string) (store.Run, store.Event, error) {
 	return s.enqueueCurrentIssue(ctx, projectID, issueID, "", true)
 }
@@ -32,18 +113,23 @@ func (s *Store) GetIssueExecutionState(ctx context.Context, projectID, issueID s
 	if status == "BACKLOG" {
 		return store.IssueExecutionState{State: store.IssueExecutionBacklog}, nil
 	}
-	if assigneeType == nil || *assigneeType != "AGENT" || assigneeID == nil {
+	issue := store.Issue{ProjectID: projectID, ID: issueID, Status: status, AssigneeType: assigneeType, AssigneeID: assigneeID}
+	agentID, executable, err := resolveIssueExecutionAgent(ctx, tx, issue)
+	if err != nil {
+		return store.IssueExecutionState{}, err
+	}
+	if !executable {
 		return store.IssueExecutionState{State: store.IssueExecutionNotAgentOwned}, nil
 	}
 
-	active, err := activeRunForAgent(ctx, tx, projectID, issueID, *assigneeID)
+	active, err := activeRunForAgent(ctx, tx, projectID, issueID, agentID)
 	if err == nil {
 		return store.IssueExecutionState{State: store.IssueExecutionActive, ActiveRun: &active}, nil
 	}
 	if !errors.Is(err, store.ErrNotFound) {
 		return store.IssueExecutionState{}, err
 	}
-	if err := s.verifyRunnableAgent(ctx, tx, projectID, *assigneeID); err != nil {
+	if err := s.verifyRunnableAgent(ctx, tx, projectID, agentID); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			return store.IssueExecutionState{State: store.IssueExecutionConfigurationUnavailable}, nil
 		}
@@ -52,8 +138,9 @@ func (s *Store) GetIssueExecutionState(ctx context.Context, projectID, issueID s
 	return store.IssueExecutionState{State: store.IssueExecutionReady, CanStart: true}, nil
 }
 
-// Candidate identity is only a hint. Re-read ownership and policy under the same
-// Issue lock used by assignment/status mutations before creating anything.
+// Candidate identity is only a hint. Re-read ownership and resolve the current
+// execution target under the same Issue lock used by assignment/status mutations
+// before creating anything.
 func (s *Store) enqueueCurrentIssue(ctx context.Context, projectID, issueID, expectedAgentID string, strict bool) (store.Run, store.Event, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -68,13 +155,23 @@ func (s *Store) enqueueCurrentIssue(ctx context.Context, projectID, issueID, exp
 	if issue.AssigneeType != nil {
 		kind = *issue.AssigneeType
 	}
-	if !store.ShouldAutoEnqueueIssue(issue.Status, issue.Status, kind, true) || issue.AssigneeID == nil || (expectedAgentID != "" && *issue.AssigneeID != expectedAgentID) {
+	if !store.ShouldAutoEnqueueIssue(issue.Status, issue.Status, kind, true) || issue.AssigneeID == nil {
 		if strict {
 			return store.Run{}, store.Event{}, store.ErrConflict
 		}
 		return store.Run{}, store.Event{}, nil
 	}
-	run, event, err := s.enqueueAssignedIssue(ctx, tx, issue, path, branch, strict)
+	agentID, executable, err := resolveIssueExecutionAgent(ctx, tx, issue)
+	if err != nil {
+		return store.Run{}, store.Event{}, err
+	}
+	if !executable || (expectedAgentID != "" && agentID != expectedAgentID) {
+		if strict {
+			return store.Run{}, store.Event{}, store.ErrConflict
+		}
+		return store.Run{}, store.Event{}, nil
+	}
+	run, event, err := s.enqueueAssignedIssue(ctx, tx, issue, agentID, path, branch, strict)
 	if err != nil {
 		return store.Run{}, store.Event{}, err
 	}
@@ -84,9 +181,9 @@ func (s *Store) enqueueCurrentIssue(ctx context.Context, projectID, issueID, exp
 	return run, event, nil
 }
 
-// RunnableIssueExecutionScopes evaluates affected Agent/project pairs using the
-// exact verifyRunnableAgent predicate used by enqueueAssignedIssue. It is a
-// readiness snapshot only; Issue status and active-Run policy remain in the
+// RunnableIssueExecutionScopes evaluates affected Project/resolved-Agent pairs
+// using the exact verifyRunnableAgent predicate used by enqueueAssignedIssue. It
+// is a readiness snapshot only; Issue status and active-Run policy remain in the
 // reconciliation/enqueue path.
 func (s *Store) RunnableIssueExecutionScopes(ctx context.Context, filter store.IssueExecutionFilter) ([]store.IssueExecutionScope, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
@@ -95,41 +192,19 @@ func (s *Store) RunnableIssueExecutionScopes(ctx context.Context, filter store.I
 	}
 	defer tx.Rollback(ctx)
 
-	rows, err := tx.Query(ctx, `
-        SELECT DISTINCT i.project_id::text, a.id::text
-        FROM issues i
-        JOIN agents a ON i.assignee_type='AGENT' AND i.assignee_id=a.id
-        JOIN model_profiles m ON m.id=a.model_profile_id
-        WHERE ($1='' OR i.project_id::text=$1)
-          AND ($2='' OR a.id::text=$2)
-          AND ($3='' OR m.id::text=$3)
-          AND ($4='' OR m.provider_id::text=$4)
-        ORDER BY 1, 2
-    `, filter.ProjectID, filter.AgentID, filter.ModelProfileID, filter.ProviderID)
+	candidates, err := resolvedIssueExecutionCandidates(ctx, tx, filter)
 	if err != nil {
 		return nil, err
 	}
-	type candidate struct{ project, agent string }
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err = rows.Scan(&c.project, &c.agent); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		candidates = append(candidates, c)
+	unique := make(map[store.IssueExecutionScope]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		unique[store.IssueExecutionScope{ProjectID: candidate.projectID, AgentID: candidate.agentID}] = struct{}{}
 	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-
-	scopes := make([]store.IssueExecutionScope, 0, len(candidates))
-	for _, c := range candidates {
-		err = s.verifyRunnableAgent(ctx, tx, c.project, c.agent)
+	scopes := make([]store.IssueExecutionScope, 0, len(unique))
+	for scope := range unique {
+		err = s.verifyRunnableAgent(ctx, tx, scope.ProjectID, scope.AgentID)
 		if err == nil {
-			scopes = append(scopes, store.IssueExecutionScope{ProjectID: c.project, AgentID: c.agent})
+			scopes = append(scopes, scope)
 			continue
 		}
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
@@ -141,39 +216,19 @@ func (s *Store) RunnableIssueExecutionScopes(ctx context.Context, filter store.I
 }
 
 func (s *Store) ReconcileIssueExecution(ctx context.Context, filter store.IssueExecutionFilter) ([]store.Event, error) {
-	rows, err := s.pool.Query(ctx, `SELECT i.project_id::text,i.id::text,a.id::text
- FROM issues i JOIN agents a ON i.assignee_type='AGENT' AND i.assignee_id=a.id
- JOIN model_profiles m ON m.id=a.model_profile_id
- WHERE ($1='' OR i.project_id::text=$1) AND ($2='' OR a.id::text=$2) AND ($3='' OR m.id::text=$3) AND ($4='' OR m.provider_id::text=$4)
- AND NOT EXISTS (SELECT 1 FROM runs r WHERE r.issue_id=i.id AND r.agent_id=a.id AND r.status=ANY($5::text[]))
- ORDER BY i.id`, filter.ProjectID, filter.AgentID, filter.ModelProfileID, filter.ProviderID, activeRunStatuses)
-	if err != nil {
-		return nil, err
-	}
-	type candidate struct{ project, issue, agent string }
-	var candidates []candidate
-	for rows.Next() {
-		var c candidate
-		if err = rows.Scan(&c.project, &c.issue, &c.agent); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		candidates = append(candidates, c)
-	}
-	err = rows.Err()
-	rows.Close()
+	candidates, err := resolvedIssueExecutionCandidates(ctx, s.pool, filter)
 	if err != nil {
 		return nil, err
 	}
 	var events []store.Event
 	var failures []error
-	for _, c := range candidates {
-		_, event, err := s.enqueueCurrentIssue(ctx, c.project, c.issue, c.agent, false)
+	for _, candidate := range candidates {
+		_, event, err := s.enqueueCurrentIssue(ctx, candidate.projectID, candidate.issueID, candidate.agentID, false)
 		if errors.Is(err, store.ErrNotFound) {
 			continue
 		}
 		if err != nil {
-			slog.ErrorContext(ctx, "reconcile Issue execution", "issue_id", c.issue, "agent_id", c.agent, "error", err)
+			slog.ErrorContext(ctx, "reconcile Issue execution", "issue_id", candidate.issueID, "agent_id", candidate.agentID, "error", err)
 			failures = append(failures, err)
 			continue
 		}

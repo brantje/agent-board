@@ -8,7 +8,7 @@ package store
 // admission (Runner/source/capacity availability) is deliberately not part of
 // this predicate or Run-creation eligibility.
 func ShouldAutoEnqueueIssue(previousStatus, status, assigneeType string, assignment bool) bool {
-	if assigneeType != "AGENT" {
+	if assigneeType != "AGENT" && assigneeType != "SQUAD" {
 		return false
 	}
 	if assignment {
