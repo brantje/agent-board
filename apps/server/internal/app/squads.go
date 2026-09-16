@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -157,7 +158,10 @@ func (s *Service) requireUsableSquadUser(ctx context.Context, projectID, userID 
 		return invalid("squad User membership validation is unavailable")
 	}
 	if err := eligibility.ValidateProjectWorkflowUser(ctx, projectID, userID); err != nil {
-		return invalid("squad User members must be active Project members or administrators")
+		if errors.Is(err, store.ErrInvalidArgument) || errors.Is(err, store.ErrNotFound) {
+			return invalid("squad User members must be active Project members or administrators")
+		}
+		return err
 	}
 	return nil
 }
