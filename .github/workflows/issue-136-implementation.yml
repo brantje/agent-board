@@ -49,6 +49,80 @@ jobs:
         run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
       - name: Implement, test, commit, and push issue 136
         run: |
+          set -euo pipefail
+          git config user.name "agent-board implementation"
+          git config user.email "agent-board-implementation@users.noreply.github.com"
+
+          if ! git log --format=%s origin/main..HEAD | grep -Fxq 'fix(#136): close execution candidate rows before lookup'; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('apps/server/internal/store/postgres/issue_execution.go')
+          text = p.read_text()
+          start = text.index('func resolvedIssueExecutionCandidates(')
+          end = text.index('\nfunc executionAgentMatchesFilter', start)
+          replacement = r'''func resolvedIssueExecutionCandidates(ctx context.Context, q issueExecutionCandidateQuerier, filter store.IssueExecutionFilter) ([]issueExecutionCandidate, error) {
+	rows, err := q.Query(ctx, `
+		SELECT project_id::text, id::text, assignee_type, assignee_id::text
+		FROM issues
+		WHERE ($1='' OR project_id::text=$1)
+		  AND assignee_type IN ('AGENT','SQUAD')
+		  AND assignee_id IS NOT NULL
+		ORDER BY project_id, id
+	`, filter.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	type ownerCandidate struct {
+		projectID string
+		issueID   string
+		ownerType string
+		ownerID   string
+	}
+	owners := make([]ownerCandidate, 0)
+	for rows.Next() {
+		var owner ownerCandidate
+		if err := rows.Scan(&owner.projectID, &owner.issueID, &owner.ownerType, &owner.ownerID); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		owners = append(owners, owner)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	candidates := make([]issueExecutionCandidate, 0, len(owners))
+	for _, owner := range owners {
+		issue := store.Issue{ProjectID: owner.projectID, ID: owner.issueID, AssigneeType: &owner.ownerType, AssigneeID: &owner.ownerID}
+		agentID, executable, err := resolveIssueExecutionAgent(ctx, q, issue)
+		if err != nil {
+			return nil, err
+		}
+		if !executable || (filter.AgentID != "" && agentID != filter.AgentID) {
+			continue
+		}
+		matches, err := executionAgentMatchesFilter(ctx, q, owner.projectID, agentID, filter)
+		if err != nil {
+			return nil, err
+		}
+		if matches {
+			candidates = append(candidates, issueExecutionCandidate{projectID: owner.projectID, issueID: owner.issueID, agentID: agentID})
+		}
+	}
+	return candidates, nil
+}
+'''
+          p.write_text(text[:start] + replacement + text[end:])
+          PY
+            gofmt -w apps/server/internal/store/postgres/issue_execution.go
+            (cd apps/server && go test ./internal/store/postgres -run '^TestExecutionConfigurationChangeReconcilesOnlyAffectedAssignments$')
+            git add apps/server/internal/store/postgres/issue_execution.go
+            git commit -m 'fix(#136): close execution candidate rows before lookup'
+            git push origin HEAD:feat/136-squad-issue-ownership
+          fi
+
           sed -i 's/"main\.\.HEAD"/"origin\/main..HEAD"/' scripts/issue136_implement.py
           python3 - <<'PY'
           from pathlib import Path
