@@ -124,6 +124,14 @@ func (s *RedactingStore) UpdateIssueMutationWithActor(ctx context.Context, input
 	return base.UpdateIssueMutationWithActor(ctx, input, actor)
 }
 
+func (s *RedactingStore) PlaceIssue(ctx context.Context, input store.IssuePlacement, actor json.RawMessage) (store.IssueMutationResult, error) {
+	base, ok := s.ControlPlaneStore.(store.IssuePlacementStore)
+	if !ok {
+		return store.IssueMutationResult{}, fmt.Errorf("redacting store base does not support Issue placement")
+	}
+	return base.PlaceIssue(ctx, input, actor)
+}
+
 func (s *RedactingStore) UpdateRuntimeInstanceRunnerStatusIfStatus(ctx context.Context, projectID, instanceID, status, expectedStatus string) (store.RuntimeInstance, error) {
 	base, ok := s.ControlPlaneStore.(runtimeRunnerStatusStore)
 	if !ok {
@@ -206,4 +214,5 @@ func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner
 
 var _ store.IssueStatusMutationStore = (*RedactingStore)(nil)
 var _ store.IssueMutationActorStore = (*RedactingStore)(nil)
+var _ store.IssuePlacementStore = (*RedactingStore)(nil)
 var _ store.WorkspaceRevisionStore = (*RedactingStore)(nil)
