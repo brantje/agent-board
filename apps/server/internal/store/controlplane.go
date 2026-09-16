@@ -10,6 +10,7 @@ type ControlPlaneStore interface {
 	SchedulerStore
 	EvidenceStore
 	RuntimeAcquisitionStore
+	SquadStore
 
 	ListProjects(context.Context) ([]Project, error)
 	UpdateProject(context.Context, Project) (Project, error)

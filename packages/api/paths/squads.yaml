@@ -1,0 +1,78 @@
+collection:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listProjectSquads
+    responses:
+      '200':
+        description: Project Squads.
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: ../schemas/squads.yaml#/Squad
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createProjectSquad
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../schemas/squads.yaml#/SquadInput
+    responses:
+      '201':
+        description: Created Squad.
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/squads.yaml#/Squad
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+resource:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - name: squadID
+    in: path
+    required: true
+    schema:
+      type: string
+      format: uuid
+  get:
+    operationId: getProjectSquad
+    responses:
+      '200':
+        description: Squad.
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/squads.yaml#/Squad
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  put:
+    operationId: updateProjectSquad
+    description: Replaces the Squad name, leader and complete additional-member set atomically.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: ../schemas/squads.yaml#/SquadInput
+    responses:
+      '200':
+        description: Updated Squad.
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/squads.yaml#/Squad
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  delete:
+    operationId: deleteProjectSquad
+    responses:
+      '204':
+        description: Squad deleted.
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

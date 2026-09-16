@@ -247,7 +247,6 @@ CREATE TABLE runtimes (
 
 CREATE UNIQUE INDEX runtimes_global_name_uq ON runtimes (lower(name)) WHERE project_id IS NULL;
 CREATE UNIQUE INDEX runtimes_project_name_uq ON runtimes (project_id, lower(name)) WHERE project_id IS NOT NULL;
-
 CREATE TABLE agents (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
@@ -266,6 +265,28 @@ CREATE TABLE agents (
 CREATE UNIQUE INDEX agents_global_name_uq ON agents (lower(name)) WHERE project_id IS NULL;
 CREATE UNIQUE INDEX agents_project_name_uq ON agents (project_id, lower(name)) WHERE project_id IS NOT NULL;
 CREATE INDEX agents_model_profile_idx ON agents (model_profile_id);
+
+CREATE TABLE squads (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name text NOT NULL CHECK (btrim(name) <> ''),
+    leader_agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, id)
+);
+
+CREATE UNIQUE INDEX squads_project_name_uq ON squads (project_id, lower(name));
+CREATE INDEX squads_leader_idx ON squads (leader_agent_id);
+
+CREATE TABLE squad_members (
+    squad_id uuid NOT NULL REFERENCES squads(id) ON DELETE CASCADE,
+    agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    role text CHECK (role IS NULL OR btrim(role) <> ''),
+    PRIMARY KEY (squad_id, agent_id)
+);
+
+CREATE INDEX squad_members_agent_idx ON squad_members (agent_id, squad_id);
 
 CREATE TABLE issues (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -648,6 +669,69 @@ CREATE TRIGGER users_login_namespace_check
     BEFORE INSERT OR UPDATE OF username, email ON users
     FOR EACH ROW EXECUTE FUNCTION enforce_user_login_namespace();
 
+-- Squad leadership is stored once on squads. Members are additional Agents only.
+-- Global Agents are visible to every Project; Project-owned Agents are only valid
+-- for Squads in that same Project.
+CREATE FUNCTION enforce_squad_agent_scope() RETURNS trigger AS $$
+DECLARE
+    squad_project_id uuid;
+    squad_leader_agent_id uuid;
+    agent_project_id uuid;
+BEGIN
+    IF TG_TABLE_NAME = 'squads' THEN
+        IF TG_OP = 'UPDATE' AND NEW.project_id IS DISTINCT FROM OLD.project_id THEN
+            RAISE EXCEPTION 'Squad Project is immutable' USING ERRCODE = '55000';
+        END IF;
+        SELECT project_id INTO agent_project_id
+        FROM agents
+        WHERE id = NEW.leader_agent_id
+        FOR UPDATE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'invalid Squad leader Agent' USING ERRCODE = '23514';
+        END IF;
+        IF agent_project_id IS NOT NULL AND agent_project_id IS DISTINCT FROM NEW.project_id THEN
+            RAISE EXCEPTION 'Squad leader Agent is outside Project scope' USING ERRCODE = '23514';
+        END IF;
+        IF EXISTS (
+            SELECT 1 FROM squad_members
+            WHERE squad_id = NEW.id AND agent_id = NEW.leader_agent_id
+        ) THEN
+            RAISE EXCEPTION 'Squad leader cannot also be an additional member' USING ERRCODE = '23514';
+        END IF;
+    ELSE
+        SELECT project_id, leader_agent_id
+        INTO squad_project_id, squad_leader_agent_id
+        FROM squads
+        WHERE id = NEW.squad_id
+        FOR UPDATE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'invalid Squad membership' USING ERRCODE = '23514';
+        END IF;
+        IF NEW.agent_id = squad_leader_agent_id THEN
+            RAISE EXCEPTION 'Squad leader cannot also be an additional member' USING ERRCODE = '23514';
+        END IF;
+        SELECT project_id INTO agent_project_id
+        FROM agents
+        WHERE id = NEW.agent_id
+        FOR UPDATE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'invalid Squad member Agent' USING ERRCODE = '23514';
+        END IF;
+        IF agent_project_id IS NOT NULL AND agent_project_id IS DISTINCT FROM squad_project_id THEN
+            RAISE EXCEPTION 'Squad member Agent is outside Project scope' USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER squads_agent_scope_check
+    BEFORE INSERT OR UPDATE OF project_id, leader_agent_id ON squads
+    FOR EACH ROW EXECUTE FUNCTION enforce_squad_agent_scope();
+CREATE TRIGGER squad_members_agent_scope_check
+    BEFORE INSERT OR UPDATE OF squad_id, agent_id ON squad_members
+    FOR EACH ROW EXECUTE FUNCTION enforce_squad_agent_scope();
+
 -- Global configuration can be consumed by any Project; Project-owned configuration
 -- may only reference other global configuration or configuration owned by that Project.
 CREATE FUNCTION enforce_configuration_scope() RETURNS trigger AS $$
@@ -707,6 +791,18 @@ BEGIN
         ) THEN
             RAISE EXCEPTION 'runtime ownership change would cross project scope' USING ERRCODE = '23514';
         END IF;
+    ELSIF TG_TABLE_NAME = 'agents' THEN
+        IF EXISTS (
+            SELECT 1 FROM squads
+            WHERE leader_agent_id = NEW.id AND project_id IS DISTINCT FROM NEW.project_id
+        ) OR EXISTS (
+            SELECT 1
+            FROM squad_members sm
+            JOIN squads s ON s.id = sm.squad_id
+            WHERE sm.agent_id = NEW.id AND s.project_id IS DISTINCT FROM NEW.project_id
+        ) THEN
+            RAISE EXCEPTION 'agent ownership change would cross Squad project scope' USING ERRCODE = '23514';
+        END IF;
     END IF;
     RETURN NEW;
 END;
@@ -714,6 +810,7 @@ $$ LANGUAGE plpgsql;
 
 CREATE TRIGGER model_profiles_owner_change_check BEFORE UPDATE OF project_id ON model_profiles FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 CREATE TRIGGER runtimes_owner_change_check BEFORE UPDATE OF project_id ON runtimes FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
+CREATE TRIGGER agents_owner_change_check BEFORE UPDATE OF project_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_owner_change();
 
 CREATE TRIGGER agents_scope_check BEFORE INSERT OR UPDATE OF project_id, model_profile_id ON agents FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();
 CREATE TRIGGER issues_scope_check BEFORE INSERT OR UPDATE OF project_id, assignee_type, assignee_id ON issues FOR EACH ROW EXECUTE FUNCTION enforce_configuration_scope();

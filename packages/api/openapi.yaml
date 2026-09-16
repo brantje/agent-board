@@ -140,6 +140,10 @@ paths:
     $ref: ./paths/agents.yaml#/path3
   /api/projects/{projectID}/agents/{resourceID}:
     $ref: ./paths/agents.yaml#/path4
+  /api/projects/{projectID}/squads:
+    $ref: ./paths/squads.yaml#/collection
+  /api/projects/{projectID}/squads/{squadID}:
+    $ref: ./paths/squads.yaml#/resource
   /api/projects/{projectID}/events:
     $ref: ./paths/project-events.yaml#/path1
   /api/projects/{projectID}/issues:
