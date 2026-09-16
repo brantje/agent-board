@@ -136,6 +136,9 @@ func TestProductionServicesPreserveAssignmentCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = services.Close() })
+	if services.ControlPlane.projectWorkflowUserEligibility != fake {
+		t.Fatal("workflow User eligibility was not bound to the authoritative control-plane store")
+	}
 	if _, err = services.ControlPlane.SetIssueAssignee(t.Context(), "project", "issue", nil, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}
