@@ -35,6 +35,8 @@ const memberIdentityOptions = computed(() => (assignees.data.value || [])
     value: memberIdentity(assignee.type, assignee.id)
   })))
 const readOnly = computed(() => !props.canMutate)
+const memberDirectoryUnavailable = computed(() => Boolean(assignees.error.value))
+const memberDirectoryLoading = computed(() => assignees.pending.value)
 
 function memberIdentity(type: MemberType, id: string) {
   return `${type}:${id}`
@@ -90,7 +92,7 @@ function edit(squad?: Squad) {
 }
 
 function addMember() {
-  if (readOnly.value) return
+  if (readOnly.value || memberDirectoryUnavailable.value || memberDirectoryLoading.value) return
   members.value.push({ identity: '', role: '' })
 }
 
@@ -111,7 +113,11 @@ function validationError() {
 }
 
 async function retry() {
-  await Promise.all([squads.refresh(), agents.refresh(), assignees.refresh()])
+  await Promise.all([squads.refresh(), agents.refresh()])
+}
+
+async function retryMemberDirectory() {
+  await assignees.refresh()
 }
 
 async function save() {
@@ -174,8 +180,8 @@ async function remove(squad: Squad) {
     <UAlert v-if="deleteError" title="Unable to delete Squad" :description="deleteError.message" color="error" class="mb-4" />
 
     <AsyncState
-      :pending="squads.pending.value || agents.pending.value || assignees.pending.value"
-      :error="squads.error.value || agents.error.value || assignees.error.value"
+      :pending="squads.pending.value || agents.pending.value"
+      :error="squads.error.value || agents.error.value"
       :empty="!squads.data.value?.length"
       empty-title="No Squads yet"
       empty-description="Create a reusable Squad with one Agent leader and optional Agent or User members."
@@ -244,12 +250,37 @@ async function remove(squad: Squad) {
                 <h3 class="font-medium">Members</h3>
                 <p class="text-sm text-muted">Optional Agent or User collaborators and descriptive roles. Membership and roles do not grant Project permissions or choose an executor.</p>
               </div>
-              <UButton v-if="!readOnly" label="Add member" icon="i-lucide-plus" color="neutral" variant="outline" @click="addMember" />
+              <UButton
+                v-if="!readOnly"
+                label="Add member"
+                icon="i-lucide-plus"
+                color="neutral"
+                variant="outline"
+                :disabled="saving || memberDirectoryLoading || memberDirectoryUnavailable"
+                @click="addMember"
+              />
             </div>
+
+            <UAlert
+              v-if="!readOnly && memberDirectoryUnavailable"
+              title="Member directory unavailable"
+              description="Existing Squad membership remains readable. Retry the member directory before selecting new identities."
+              color="warning"
+            >
+              <template #actions>
+                <UButton label="Retry member directory" color="neutral" variant="outline" @click="retryMemberDirectory" />
+              </template>
+            </UAlert>
 
             <div v-for="(member, index) in members" :key="index" class="grid gap-2 rounded-md border border-default p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
               <UFormField label="Agent or User" :name="`member-${index}-identity`">
-                <USelectMenu v-model="member.identity" :items="memberOptionsFor(index)" value-key="value" class="w-full" :disabled="readOnly || saving" />
+                <USelectMenu
+                  v-model="member.identity"
+                  :items="memberOptionsFor(index)"
+                  value-key="value"
+                  class="w-full"
+                  :disabled="readOnly || saving || memberDirectoryLoading || memberDirectoryUnavailable"
+                />
               </UFormField>
               <UFormField label="Role" :name="`member-${index}-role`" description="Descriptive only">
                 <UInput v-model="member.role" class="w-full" :disabled="readOnly || saving" />

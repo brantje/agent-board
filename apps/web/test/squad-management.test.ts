@@ -57,6 +57,27 @@ describe('Squad management', () => {
     expect(wrapper.find('[data-kind="user"]').exists()).toBe(true)
   })
 
+  it('keeps persisted roster readable when the member directory fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/assignees')) return new Response(JSON.stringify({ error: { code: 'internal' } }), { status: 500 })
+      return responseFor(path)
+    }))
+    const wrapper = mount(SquadManager, { props: { projectId: 'project-a' }, global })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Platform Squad')
+    expect(wrapper.text()).toContain('Lead · Agent')
+    expect(wrapper.text()).toContain('Builder · Agent')
+    expect(wrapper.text()).toContain('User unavailable · User')
+    expect(wrapper.text()).toContain('Product')
+
+    await wrapper.findAll('button').find(button => button.text() === 'Edit')!.trigger('click')
+    expect(wrapper.text()).toContain('Member directory unavailable')
+    expect(wrapper.text()).toContain('Existing Squad membership remains readable')
+    expect(wrapper.find('[data-field="member-0-identity"] select').attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button').find(button => button.text() === 'Add member')!.attributes('disabled')).toBeDefined()
+  })
+
   it('keeps Squad configuration readable but not mutable for non-admins', async () => {
     vi.stubGlobal('fetch', vi.fn(async (path: string) => responseFor(path)))
     const wrapper = mount(SquadManager, { props: { projectId: 'project-a', canMutate: false }, global })
