@@ -8,11 +8,21 @@ import { boardDragId, boardDropZoneId } from '../app/utils/board-order'
 import { event, MockEventSource } from './execution-fixtures'
 import { uiStubs } from './ui-stubs'
 
+const pointerSensorOptions = vi.hoisted(() => ({
+  current: undefined as { preventActivation?: () => boolean } | undefined
+}))
+
 vi.mock('@dnd-kit/vue', async () => {
   const actual = await vi.importActual<typeof import('@dnd-kit/vue')>('@dnd-kit/vue')
   const vue = await vi.importActual<typeof import('vue')>('vue')
   return {
     ...actual,
+    PointerSensor: class {
+      static configure(options: { preventActivation?: () => boolean }) {
+        pointerSensorOptions.current = options
+        return { type: 'board-pointer-sensor' }
+      }
+    },
     DragDropProvider: vue.defineComponent({
       name: 'DragDropProvider',
       emits: ['dragEnd'],
@@ -78,6 +88,10 @@ afterEach(() => {
 })
 
 describe('ProjectBoard drag ordering', () => {
+  it('allows pointer activation from the linked card surface', () => {
+    expect(pointerSensorOptions.current?.preventActivation?.()).toBe(false)
+  })
+
   it('optimistically reorders and persists exact neighboring issue keys', async () => {
     const initial = [issue('AB-1'), issue('AB-2'), issue('AB-3')]
     let resolvePlacement: ((response: Response) => void) | undefined
