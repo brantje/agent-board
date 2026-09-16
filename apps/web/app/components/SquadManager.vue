@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { Agent, Squad, SquadMember } from '../types/api'
-import { apiPath, apiRequest } from '../utils/api'
+import { apiEmpty, apiPath, apiRequest } from '../utils/api'
 import { useResource } from '../composables/useResource'
 
 const props = withDefaults(defineProps<{ projectId: string; canMutate?: boolean }>(), { canMutate: true })
@@ -98,7 +98,7 @@ async function remove(squad: Squad) {
   deleting.value = squad.id
   deleteError.value = undefined
   try {
-    await apiRequest<void>(apiPath('squads', props.projectId, squad.id), { method: 'DELETE' })
+    await apiEmpty(apiPath('squads', props.projectId, squad.id), { method: 'DELETE' })
     await squads.refresh()
   } catch (failure) {
     deleteError.value = failure as Error

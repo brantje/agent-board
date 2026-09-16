@@ -91,6 +91,32 @@ describe('Squad management', () => {
     }])
   })
 
+  it('deletes Squads through the empty-response API path and refreshes persisted state', async () => {
+    const requests: Array<{ path: string; method: string }> = []
+    let listCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+      if (path.endsWith('/squads') && (!init?.method || init.method === 'GET')) {
+        listCalls += 1
+        return new Response(JSON.stringify(listCalls === 1 ? [squad] : []))
+      }
+      if (path.endsWith('/agents')) return new Response(JSON.stringify([leader, member]))
+      if (init?.method === 'DELETE') {
+        requests.push({ path, method: init.method })
+        return new Response(null, { status: 204 })
+      }
+      return new Response('{}', { status: 404 })
+    }))
+
+    const wrapper = mount(SquadManager, { props: { projectId: 'project-a' }, global })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
+    await flushPromises()
+
+    expect(requests).toEqual([{ path: '/api/projects/project-a/squads/squad-a', method: 'DELETE' }])
+    expect(wrapper.text()).not.toContain('Unable to delete Squad')
+    expect(listCalls).toBe(2)
+  })
+
   it('surfaces backend validation failures without inventing frontend authority', async () => {
     vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
       if (!init?.method || init.method === 'GET') return responseFor(path)
