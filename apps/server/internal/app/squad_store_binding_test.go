@@ -6,14 +6,16 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-type squadStoreHidingDecorator struct {
+type squadStoreDecorator struct {
 	store.ControlPlaneStore
 }
 
-func TestSquadProjectAccessUsesBaseStoreBehindControlPlaneDecorator(t *testing.T) {
+var _ store.ControlPlaneStore = (*squadStoreDecorator)(nil)
+
+func TestSquadProjectAccessPreservesRequiredControlPlaneStoreCapability(t *testing.T) {
 	base := newSquadAccessTestStore()
 	base.roles[squadProjectID+":admin"] = store.ProjectRoleAdmin
-	decorated := &squadStoreHidingDecorator{ControlPlaneStore: base}
+	decorated := &squadStoreDecorator{ControlPlaneStore: base}
 	controlPlane := New(decorated)
 	access, err := NewProjectAccessService(controlPlane, base)
 	if err != nil {

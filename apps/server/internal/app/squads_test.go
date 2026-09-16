@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"testing"
 
@@ -25,6 +24,8 @@ type squadTestStore struct {
 	createCalls int
 	updateCalls int
 }
+
+var _ store.ControlPlaneStore = (*squadTestStore)(nil)
 
 func newSquadTestStore() *squadTestStore {
 	projectID := squadProjectID
@@ -257,14 +258,6 @@ func TestUpdateSquadValidatesCompleteDesiredMembershipAndPersistsOnce(t *testing
 	}
 	if updated.Members[0].Role == nil || *updated.Members[0].Role != "Reviewer" {
 		t.Fatalf("updated role = %v", updated.Members[0].Role)
-	}
-}
-
-func TestSquadManagementRequiresStoreCapability(t *testing.T) {
-	svc := New(&fakeStore{project: store.Project{ID: squadProjectID}})
-	_, err := svc.ListSquads(context.Background(), squadProjectID)
-	if !isAppCode(err, "squad_management_unavailable") || !errors.Is(err, store.ErrInvalidArgument) {
-		t.Fatalf("error = %#v", err)
 	}
 }
 
