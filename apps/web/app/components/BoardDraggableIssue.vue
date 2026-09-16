@@ -24,6 +24,6 @@ const { isDragging } = useDraggable({
       isDragging ? 'opacity-45' : ''
     ]"
   >
-    <IssueCard :issue="issue" :run-status="runStatus" />
+    <IssueCard :issue="issue" :run-status="runStatus" :class="{ 'pointer-events-none': isDragging }" />
   </div>
 </template>
