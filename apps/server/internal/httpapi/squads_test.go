@@ -259,7 +259,7 @@ func TestSquadHTTPAuthorizationAndTypedValidation(t *testing.T) {
 	unknownType := squadHTTPRequest(t, admin, http.MethodPost, "/projects/"+squadHTTPProjectID+"/squads", map[string]any{
 		"name": "Bad", "leaderAgentId": squadHTTPLeaderID, "members": []map[string]any{{"type": "GROUP", "id": squadHTTPUserID}},
 	})
-	if unknownType.Code != http.StatusUnprocessableEntity {
+	if unknownType.Code != http.StatusBadRequest {
 		t.Fatalf("unknown type status=%d body=%s", unknownType.Code, unknownType.Body.String())
 	}
 
@@ -267,7 +267,7 @@ func TestSquadHTTPAuthorizationAndTypedValidation(t *testing.T) {
 	ineligible := squadHTTPRequest(t, admin, http.MethodPost, "/projects/"+squadHTTPProjectID+"/squads", map[string]any{
 		"name": "Bad", "leaderAgentId": squadHTTPLeaderID, "members": []map[string]any{{"type": "USER", "id": ineligibleUser}},
 	})
-	if ineligible.Code != http.StatusUnprocessableEntity {
+	if ineligible.Code != http.StatusBadRequest {
 		t.Fatalf("ineligible User status=%d body=%s", ineligible.Code, ineligible.Body.String())
 	}
 
