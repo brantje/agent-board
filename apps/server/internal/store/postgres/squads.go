@@ -191,6 +191,12 @@ func cloneSquadMembers(members []store.SquadMember) []store.SquadMember {
 		return []store.SquadMember{}
 	}
 	result := make([]store.SquadMember, len(members))
-	copy(result, members)
+	for i, member := range members {
+		result[i] = member
+		if member.Role != nil {
+			role := *member.Role
+			result[i].Role = &role
+		}
+	}
 	return result
 }
