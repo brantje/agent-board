@@ -14,8 +14,6 @@ type assigneeQuerier interface {
 
 const eligibleAgentAssigneePredicate = `a.state='ENABLED' AND (a.project_id IS NULL OR a.project_id=$1)`
 
-const eligibleUserAssigneePredicate = `u.status='active' AND COALESCE((` + effectiveProjectRoleExpression + `),'') IN ('member','admin')`
-
 // Resolve both directory entries and mutation targets through the same eligibility
 // check. Execution readiness is deliberately outside ownership validation.
 func resolveAssignee(ctx context.Context, q assigneeQuerier, projectID string, target *store.Assignee) (*store.Assignee, error) {
@@ -38,15 +36,11 @@ func resolveAssignee(ctx context.Context, q assigneeQuerier, projectID string, t
 			return nil, store.ErrInvalidArgument
 		}
 	case "USER":
-		var status string
-		var eligible bool
-		err := q.QueryRow(ctx, `SELECT u.id::text,u.display_name,u.status,(`+eligibleUserAssigneePredicate+`) FROM users AS u WHERE u.id=$2`, projectID, target.ID).Scan(&value.ID, &value.Name, &status, &eligible)
+		name, err := resolveProjectWorkflowUser(ctx, q, projectID, target.ID)
 		if err != nil {
-			return nil, notFound(err)
+			return nil, err
 		}
-		if status != store.UserStatusActive || !eligible {
-			return nil, store.ErrInvalidArgument
-		}
+		value.Name = name
 	case "SQUAD":
 		var state string
 		var inProject bool
@@ -80,7 +74,7 @@ func (s *Store) ListIssueAssignees(ctx context.Context, projectID string) ([]sto
 		FROM (
 			SELECT 'USER'::text AS type,u.id::text AS id,u.display_name AS name
 			FROM users AS u
-			WHERE `+eligibleUserAssigneePredicate+`
+			WHERE `+eligibleProjectWorkflowUserPredicate+`
 			UNION ALL
 			SELECT 'AGENT'::text,a.id::text,a.name
 			FROM agents AS a
@@ -177,6 +171,9 @@ func (s *Store) SetIssueAssignee(ctx context.Context, projectID, issueID string,
 }
 
 func lockAssigneeEligibility(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `LOCK TABLE users, project_user_access, project_group_access, group_members, agents, squads IN SHARE MODE`)
+	if err := lockProjectWorkflowUserEligibility(ctx, tx); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `LOCK TABLE agents, squads IN SHARE MODE`)
 	return err
 }

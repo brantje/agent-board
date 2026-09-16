@@ -72,6 +72,7 @@ func TestSquadNonLeaderUpdateDoesNotReconcileExecution(t *testing.T) {
 	f := seedRunFixture(t, s, "squad-non-leader-update")
 	ctx := t.Context()
 	member := createSquadExecutionMember(t, s, f, "squad-non-leader-member")
+	human := createSquadWorkflowUser(t, s, f.project.ID, "squad-non-leader-human", store.ProjectRoleAdmin, store.DeploymentRoleMember, store.UserStatusActive)
 	squad, err := s.CreateSquad(ctx, store.Squad{ProjectID: f.project.ID, Name: "Backend", LeaderAgentID: f.agent.ID})
 	if err != nil {
 		t.Fatal(err)
@@ -91,12 +92,20 @@ func TestSquadNonLeaderUpdateDoesNotReconcileExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	role := "Product"
 	squad.Name = "Renamed Backend"
-	squad.Members = []store.SquadMember{{AgentID: member.ID}}
+	squad.Members = []store.SquadMember{
+		{Type: store.SquadMemberTypeAgent, ID: member.ID},
+		{Type: store.SquadMemberTypeUser, ID: human.ID, Role: &role},
+	}
 	if _, err := app.New(s).UpdateSquad(ctx, squad); err != nil {
 		t.Fatal(err)
 	}
 	assertIssueRunCount(t, s, issue.ID, 0)
+	persisted, err := s.GetIssue(ctx, f.project.ID, issue.ID)
+	if err != nil || persisted.AssignedTo() == nil || persisted.AssignedTo().Type != "SQUAD" || persisted.AssignedTo().ID != squad.ID {
+		t.Fatalf("ownership after member-only update=%+v err=%v", persisted.AssignedTo(), err)
+	}
 }
 
 func TestSquadLeaderChangeKeepsOldRunsAndSuppressesExistingNewLeaderPair(t *testing.T) {

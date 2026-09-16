@@ -85,6 +85,9 @@ func newServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	// Issue ownership is a control-plane command; the evidence decorator does
 	// not expose this optional capability. Keep its transactional policy intact.
 	services.ControlPlane.assignmentStore, _ = controlPlaneStore.(store.IssueAssignmentStore)
+	// Workflow User eligibility is also control-plane policy and must remain
+	// bound to the authoritative base store rather than the evidence decorator.
+	services.ControlPlane.projectWorkflowUserEligibility, _ = controlPlaneStore.(store.ProjectWorkflowUserEligibilityStore)
 	// Authentication and Project access persistence are control-plane security
 	// state, not execution evidence. Bind both to the authoritative base store
 	// instead of teaching the evidence redaction decorator unrelated methods.

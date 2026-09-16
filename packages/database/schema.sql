@@ -281,12 +281,19 @@ CREATE INDEX squads_leader_idx ON squads (leader_agent_id);
 
 CREATE TABLE squad_members (
     squad_id uuid NOT NULL REFERENCES squads(id) ON DELETE CASCADE,
-    agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    agent_id uuid REFERENCES agents(id) ON DELETE RESTRICT,
+    user_id uuid REFERENCES users(id) ON DELETE RESTRICT,
     role text CHECK (role IS NULL OR btrim(role) <> ''),
-    PRIMARY KEY (squad_id, agent_id)
+    CONSTRAINT squad_members_typed_identity CHECK (
+        (agent_id IS NOT NULL AND user_id IS NULL)
+        OR (agent_id IS NULL AND user_id IS NOT NULL)
+    )
 );
 
-CREATE INDEX squad_members_agent_idx ON squad_members (agent_id, squad_id);
+CREATE UNIQUE INDEX squad_members_agent_uq ON squad_members (squad_id, agent_id) WHERE agent_id IS NOT NULL;
+CREATE UNIQUE INDEX squad_members_user_uq ON squad_members (squad_id, user_id) WHERE user_id IS NOT NULL;
+CREATE INDEX squad_members_agent_idx ON squad_members (agent_id, squad_id) WHERE agent_id IS NOT NULL;
+CREATE INDEX squad_members_user_idx ON squad_members (user_id, squad_id) WHERE user_id IS NOT NULL;
 
 CREATE TABLE issues (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -669,9 +676,9 @@ CREATE TRIGGER users_login_namespace_check
     BEFORE INSERT OR UPDATE OF username, email ON users
     FOR EACH ROW EXECUTE FUNCTION enforce_user_login_namespace();
 
--- Squad leadership is stored once on squads. Members are additional Agents only.
--- Global Agents are visible to every Project; Project-owned Agents are only valid
--- for Squads in that same Project.
+-- Squad leadership is stored once on squads. Agent member scope is enforced here;
+-- User member workflow eligibility is dynamic Project access and is validated by
+-- the shared application/store write path instead of being persisted as an ACL.
 CREATE FUNCTION enforce_squad_agent_scope() RETURNS trigger AS $$
 DECLARE
     squad_project_id uuid;
@@ -707,6 +714,9 @@ BEGIN
         IF NOT FOUND THEN
             RAISE EXCEPTION 'invalid Squad membership' USING ERRCODE = '23514';
         END IF;
+        IF NEW.agent_id IS NULL THEN
+            RETURN NEW;
+        END IF;
         IF NEW.agent_id = squad_leader_agent_id THEN
             RAISE EXCEPTION 'Squad leader cannot also be an additional member' USING ERRCODE = '23514';
         END IF;
@@ -729,7 +739,7 @@ CREATE TRIGGER squads_agent_scope_check
     BEFORE INSERT OR UPDATE OF project_id, leader_agent_id ON squads
     FOR EACH ROW EXECUTE FUNCTION enforce_squad_agent_scope();
 CREATE TRIGGER squad_members_agent_scope_check
-    BEFORE INSERT OR UPDATE OF squad_id, agent_id ON squad_members
+    BEFORE INSERT OR UPDATE OF squad_id, agent_id, user_id ON squad_members
     FOR EACH ROW EXECUTE FUNCTION enforce_squad_agent_scope();
 
 -- Global configuration can be consumed by any Project; Project-owned configuration

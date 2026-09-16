@@ -8,16 +8,18 @@ Agent Board remains authoritative for Issues, Runs, scheduling, Workspaces, capa
 
 ## Implemented Squad foundation
 
-Squads are durable, reusable Project-scoped Agent team configuration.
+Squads are durable, reusable Project-scoped collaboration configuration with one authoritative leader Agent that is enabled and usable in the Project/global Agent scope, plus optional Agent/User members.
 
 ```text
 Squad
 ├── leader Agent
-└── member Agents
-    └── optional descriptive role
+└── members
+    ├── Agent
+    └── User
+        └── optional descriptive role
 ```
 
-A Squad can be created, edited and deleted through Project configuration. It has exactly one leader and zero or more additional members. Human Groups remain a separate deployment-global access concept and are never interchangeable with Agent Squads.
+A Squad can be created, edited and deleted through Project configuration. It has exactly one enabled leader Agent usable in the Project/global Agent scope and zero or more additional members. Additional members may be usable Agents or active human Users with effective Project member/admin workflow access. Human Groups remain a separate deployment-global access concept: Groups grant Project access, while Squad membership is collaboration context and grants no Project permission by itself.
 
 A Squad is assignable to an Issue. The Issue persists the Squad ID as canonical ownership. Execution resolves the Squad's current leader through the same backend execution-target path used by normal Agent execution:
 
@@ -26,11 +28,13 @@ Owner: Squad X
 Executing Agent: Leader Y
 ```
 
+Additional Squad members never become implicit Run targets. Adding, removing or re-roleing either an Agent member or a human User member does not fan out execution or create a Run. If a human member later loses effective Project access or becomes disabled, the persisted roster entry remains collaboration history/context but confers no access and does not affect leader execution.
+
 Changing the leader does not rewrite Issue ownership and does not create a Squad-specific Run, scheduler or Workspace. Existing Runs retain their historical executing Agent; eligible future/recovered execution resolves the current leader through the normal Run/scheduler path.
 
 The web UI reads ownership and execution context from shared backend read models. Squad updates publish durable Project events so open Issue views re-read backend truth after leader changes.
 
-Current Squad behavior does **not** fan work out to members and does not grant delegation. Member roles are descriptive configuration only until canonical delegation is implemented.
+Current Squad behavior does **not** fan work out to members and does not grant delegation. Member roles are descriptive configuration only until canonical delegation or other explicit collaboration behavior is implemented.
 
 ## Delegation
 
@@ -90,7 +94,7 @@ Parent cancellation/failure must not leave orphan delegated executions or perman
 
 Run/Issue inspection should show delegated Agent, task, state, result and Workspace access mode.
 
-Once delegation exists, a Squad leader may use the normal delegation capability with suitable Squad members. It need not use every member. That behavior must extend the existing Squad identity/ownership model rather than changing it.
+Once delegation exists, a Squad leader may use the normal delegation capability with suitable Agent members. Human User members remain collaboration identities unless a separate future human-handoff/notification feature explicitly defines behavior for them. The delegation design must extend the existing Squad identity/ownership model rather than changing it.
 
 ## Agent-created follow-up work
 
@@ -128,6 +132,7 @@ Collaboration must preserve:
 
 - Project boundaries
 - explicit Agent usability/authorization
+- human Project authorization independently of Squad membership
 - scheduler capacity
 - bounded/recoverable Workspace writes
 - auditable delegation lineage
@@ -139,7 +144,7 @@ Additional recursion/delegation-depth and rate/budget policies may be added when
 
 ## Ordering
 
-The reusable Squad/ownership foundation is already implemented independently of delegation. Remaining collaboration work can build on it without coupling basic Squad management to delegation.
+The reusable mixed-membership Squad/ownership foundation is already implemented independently of delegation. Remaining collaboration work can build on it without coupling basic Squad management to delegation.
 
 ```text
 complete v0.1 coding flow

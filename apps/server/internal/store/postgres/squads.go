@@ -11,7 +11,14 @@ import (
 
 const squadSelectColumns = `id::text, project_id::text, name, leader_agent_id::text, created_at, updated_at`
 const squadMembersAggregate = `COALESCE((
-	SELECT jsonb_agg(jsonb_build_object('AgentID', sm.agent_id::text, 'Role', sm.role) ORDER BY sm.agent_id)
+	SELECT jsonb_agg(
+		jsonb_build_object(
+			'Type', CASE WHEN sm.agent_id IS NOT NULL THEN 'AGENT' ELSE 'USER' END,
+			'ID', COALESCE(sm.agent_id, sm.user_id)::text,
+			'Role', sm.role
+		)
+		ORDER BY CASE WHEN sm.agent_id IS NOT NULL THEN 'AGENT' ELSE 'USER' END, COALESCE(sm.agent_id, sm.user_id)
+	)
 	FROM squad_members sm
 	WHERE sm.squad_id = squads.id
 ), '[]'::jsonb)`
@@ -23,7 +30,7 @@ func (s *Store) CreateSquad(ctx context.Context, input store.Squad) (store.Squad
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	if err := lockSquadAgents(ctx, tx, input); err != nil {
+	if err := lockSquadIdentities(ctx, tx, input); err != nil {
 		return store.Squad{}, err
 	}
 	value, err := scanSquad(tx.QueryRow(ctx, `
@@ -94,7 +101,7 @@ func (s *Store) UpdateSquad(ctx context.Context, input store.Squad) (store.Squad
 	`, input.ProjectID, input.ID).Scan(&squadID, &previousLeaderAgentID); err != nil {
 		return store.SquadUpdateResult{}, notFound(err)
 	}
-	if err := lockSquadAgents(ctx, tx, input); err != nil {
+	if err := lockSquadIdentities(ctx, tx, input); err != nil {
 		return store.SquadUpdateResult{}, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM squad_members WHERE squad_id = $1`, squadID); err != nil {
@@ -164,14 +171,28 @@ func (s *Store) DeleteSquad(ctx context.Context, projectID, squadID string) erro
 	return store.ErrNotFound
 }
 
-func lockSquadAgents(ctx context.Context, tx pgx.Tx, value store.Squad) error {
+func lockSquadIdentities(ctx context.Context, tx pgx.Tx, value store.Squad) error {
 	agentIDs := make([]string, 0, len(value.Members)+1)
+	userIDs := make([]string, 0, len(value.Members))
 	agentIDs = append(agentIDs, value.LeaderAgentID)
 	for _, member := range value.Members {
-		agentIDs = append(agentIDs, member.AgentID)
+		switch member.Type {
+		case store.SquadMemberTypeAgent:
+			agentIDs = append(agentIDs, member.ID)
+		case store.SquadMemberTypeUser:
+			userIDs = append(userIDs, member.ID)
+		default:
+			return store.ErrInvalidArgument
+		}
 	}
-	sort.Strings(agentIDs)
 
+	if len(userIDs) > 0 {
+		if err := lockProjectWorkflowUserEligibility(ctx, tx); err != nil {
+			return err
+		}
+	}
+
+	sort.Strings(agentIDs)
 	previous := ""
 	for _, agentID := range agentIDs {
 		if agentID == previous {
@@ -195,15 +216,39 @@ func lockSquadAgents(ctx context.Context, tx pgx.Tx, value store.Squad) error {
 			return store.ErrInvalidArgument
 		}
 	}
+
+	sort.Strings(userIDs)
+	previous = ""
+	for _, userID := range userIDs {
+		if userID == previous {
+			continue
+		}
+		previous = userID
+		if _, err := resolveProjectWorkflowUser(ctx, tx, value.ProjectID, userID); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
 func insertSquadMembers(ctx context.Context, tx pgx.Tx, squadID string, members []store.SquadMember) error {
 	for _, member := range members {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO squad_members (squad_id, agent_id, role)
-			VALUES ($1, $2, $3)
-		`, squadID, member.AgentID, member.Role); err != nil {
+		var err error
+		switch member.Type {
+		case store.SquadMemberTypeAgent:
+			_, err = tx.Exec(ctx, `
+				INSERT INTO squad_members (squad_id, agent_id, role)
+				VALUES ($1, $2, $3)
+			`, squadID, member.ID, member.Role)
+		case store.SquadMemberTypeUser:
+			_, err = tx.Exec(ctx, `
+				INSERT INTO squad_members (squad_id, user_id, role)
+				VALUES ($1, $2, $3)
+			`, squadID, member.ID, member.Role)
+		default:
+			return store.ErrInvalidArgument
+		}
+		if err != nil {
 			return notFound(err)
 		}
 	}

@@ -39,6 +39,9 @@ func (s *assigneeCommandStore) ListIssueAssignees(context.Context, string) ([]st
 	s.calls++
 	return []store.Assignee{}, s.fail
 }
+func (s *assigneeCommandStore) ValidateProjectWorkflowUser(context.Context, string, string) error {
+	return s.fail
+}
 
 type assigneePublisher struct{ published []store.Event }
 
@@ -136,6 +139,9 @@ func TestProductionServicesPreserveAssignmentCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = services.Close() })
+	if services.ControlPlane.projectWorkflowUserEligibility != fake {
+		t.Fatal("workflow User eligibility was not bound to the authoritative control-plane store")
+	}
 	if _, err = services.ControlPlane.SetIssueAssignee(t.Context(), "project", "issue", nil, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}

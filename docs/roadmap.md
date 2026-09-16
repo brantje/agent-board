@@ -67,13 +67,14 @@ These reuse normal Issues/Runs/scheduling and the same durable Workspace model.
 
 Reusable Project-scoped Squads are already implemented independently of delegation:
 
-- one durable Squad identity with one leader Agent and optional additional members/roles
+- one durable Squad identity with one leader Agent and optional additional Agent/User members with descriptive roles
+- eligible human members reuse effective Project workflow access; Squad membership itself grants no Project access
 - Issue ownership can persist a Squad ID without rewriting ownership to an Agent
-- execution resolves the current leader through the normal shared Agent execution path
+- execution resolves only the current leader Agent through the normal shared Agent execution path; additional members are never implicit Run targets
 - leader changes reconcile eligible Squad-owned work through the existing Run/scheduler/Workspace lifecycle
-- Project configuration and Issue/Run UX distinguish Squad ownership from the executing Agent
+- Project configuration and Issue/Run UX distinguish Squad ownership, mixed collaboration membership and the executing leader Agent
 
-This foundation does not include delegation or member fan-out.
+This foundation does not include delegation, member fan-out, human handoff or notifications.
 
 ## Phase 2 — delivery automation and Agent collaboration
 

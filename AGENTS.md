@@ -83,8 +83,8 @@ After the answers, finalize the plan and proceed. Avoid extended question trees 
 - UI role checks are presentation only; the shared Go authorization boundary is authoritative.
 - Issue is the durable unit of work.
 - Agent is durable configuration, not a process/container.
-- Squad is durable Project-scoped Agent team configuration; human Group and Agent Squad are distinct concepts.
-- Squad-owned Issues persist the Squad ID as ownership while execution resolves the current leader Agent through the shared backend execution path; delegation/member fan-out is not implicit.
+- Squad is durable Project-scoped collaboration configuration with exactly one enabled leader Agent usable in the Project/global Agent scope and optional typed Agent/User members; human Groups and Squads are distinct concepts, and Squad membership is not a Project ACL.
+- Squad-owned Issues persist the Squad ID as ownership while execution resolves only the current leader Agent through the shared backend execution path; delegation/member fan-out is not implicit.
 - Run is a durable execution attempt, not a Runtime Instance, Runner or Execution Session.
 - Workspace survives Runner transport loss and any legacy Runtime Instance lifetime; it is reused per Issue.
 - Runtime/Runtime Instance remain legacy internal managed-compute concepts and are not Agent configuration.
@@ -322,10 +322,11 @@ Read `docs/authorization.md` before changing authentication, Users, Groups, Proj
 
 ## Implemented Squad foundation
 
-- Squads are durable Project-scoped Agent team configuration with exactly one leader and optional additional members/descriptive roles.
-- Human Groups and Agent Squads are distinct: Groups grant human Project access; Squads model reusable Agent ownership/execution configuration.
-- Issue ownership may persist a Squad ID. The shared backend execution path resolves the current Squad leader as the executing Agent without rewriting ownership.
-- Leader changes reuse normal reconciliation, Runs, scheduling and Workspaces. Do not add Squad-specific schedulers or Run lifecycles.
+- Squads are durable Project-scoped collaboration configuration with exactly one enabled leader Agent usable in the Project/global Agent scope and optional additional typed Agent/User members with descriptive roles.
+- Human Groups and Squads are distinct: Groups grant human Project access; Squad membership never grants or preserves Project permissions.
+- User members use the canonical active effective Project member/admin workflow eligibility rule on create/update; later loss of eligibility leaves deterministic stale roster context but no access.
+- Issue ownership may persist a Squad ID. The shared backend execution path resolves only the current Squad leader as the executing Agent without rewriting ownership.
+- Leader changes reuse normal reconciliation, Runs, scheduling and Workspaces. Additional members do not implicitly create Runs or alter ownership.
 - Current Squad behavior does not include delegation or member fan-out. Build those only through the canonical collaboration design when implemented.
 
 Read `docs/future-agent-collaboration.md` before changing Squad ownership, leader execution or future delegation behavior.

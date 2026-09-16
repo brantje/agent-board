@@ -84,3 +84,10 @@ type ProjectAccessStore interface {
 	ListProjectAccessUsers(context.Context) ([]User, error)
 	ListProjectAccessGroups(context.Context) ([]Group, error)
 }
+
+// ProjectWorkflowUserEligibilityStore exposes the one concrete human workflow
+// eligibility rule shared by Issue assignment and Squad membership. It does not
+// grant access; it only validates current effective Project participation.
+type ProjectWorkflowUserEligibilityStore interface {
+	ValidateProjectWorkflowUser(context.Context, string, string) error
+}

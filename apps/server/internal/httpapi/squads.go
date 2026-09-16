@@ -9,8 +9,9 @@ import (
 )
 
 type squadMemberDTO struct {
-	AgentID string  `json:"agentId"`
-	Role    *string `json:"role,omitempty"`
+	Type string  `json:"type"`
+	ID   string  `json:"id"`
+	Role *string `json:"role,omitempty"`
 }
 
 type squadDTO struct {
@@ -150,8 +151,8 @@ func decodeSquadInput(w http.ResponseWriter, r *http.Request) (squadInput, bool)
 		return squadInput{}, false
 	}
 	for _, member := range input.Members {
-		if !validUUID(member.AgentID) {
-			writeError(w, http.StatusBadRequest, "invalid_id", "members[].agentId must be a UUID")
+		if !validUUID(member.ID) {
+			writeError(w, http.StatusBadRequest, "invalid_id", "members[].id must be a UUID")
 			return squadInput{}, false
 		}
 	}
@@ -161,7 +162,7 @@ func decodeSquadInput(w http.ResponseWriter, r *http.Request) (squadInput, bool)
 func squadMembers(values []squadMemberDTO) []store.SquadMember {
 	members := make([]store.SquadMember, 0, len(values))
 	for _, value := range values {
-		members = append(members, store.SquadMember{AgentID: value.AgentID, Role: value.Role})
+		members = append(members, store.SquadMember{Type: value.Type, ID: value.ID, Role: value.Role})
 	}
 	return members
 }
@@ -169,7 +170,7 @@ func squadMembers(values []squadMemberDTO) []store.SquadMember {
 func squadResponse(value store.Squad) squadDTO {
 	members := make([]squadMemberDTO, 0, len(value.Members))
 	for _, member := range value.Members {
-		members = append(members, squadMemberDTO{AgentID: member.AgentID, Role: member.Role})
+		members = append(members, squadMemberDTO{Type: member.Type, ID: member.ID, Role: member.Role})
 	}
 	return squadDTO{
 		ID:            value.ID,

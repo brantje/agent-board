@@ -38,7 +38,7 @@ func TestSquadStoreSerializesWithAgentOwnershipChanges(t *testing.T) {
 			ProjectID:     projectA.ID,
 			Name:          "Blocked create",
 			LeaderAgentID: agentsA[0].ID,
-			Members:       []store.SquadMember{{AgentID: agentsA[1].ID}},
+			Members:       []store.SquadMember{{Type: store.SquadMemberTypeAgent, ID: agentsA[1].ID}},
 		})
 		if err == nil || (!errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled)) {
 			t.Fatalf("blocked CreateSquad error = %v, want context timeout", err)
@@ -51,7 +51,7 @@ func TestSquadStoreSerializesWithAgentOwnershipChanges(t *testing.T) {
 			ProjectID:     projectA.ID,
 			Name:          "Rejected create",
 			LeaderAgentID: agentsA[0].ID,
-			Members:       []store.SquadMember{{AgentID: agentsA[1].ID}},
+			Members:       []store.SquadMember{{Type: store.SquadMemberTypeAgent, ID: agentsA[1].ID}},
 		})
 		if !errors.Is(err, store.ErrInvalidArgument) {
 			t.Fatalf("cross-Project CreateSquad error = %v, want ErrInvalidArgument", err)
@@ -69,7 +69,7 @@ func TestSquadStoreSerializesWithAgentOwnershipChanges(t *testing.T) {
 			ProjectID:     projectA.ID,
 			Name:          "Held reference",
 			LeaderAgentID: agentsA[0].ID,
-			Members:       []store.SquadMember{{AgentID: agentsA[1].ID}},
+			Members:       []store.SquadMember{{Type: store.SquadMemberTypeAgent, ID: agentsA[1].ID}},
 		}
 
 		refTx, err := pool.Begin(ctx)
@@ -77,8 +77,8 @@ func TestSquadStoreSerializesWithAgentOwnershipChanges(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer refTx.Rollback(ctx) //nolint:errcheck
-		if err := lockSquadAgents(ctx, refTx, input); err != nil {
-			t.Fatalf("lock Squad Agents: %v", err)
+		if err := lockSquadIdentities(ctx, refTx, input); err != nil {
+			t.Fatalf("lock Squad identities: %v", err)
 		}
 		var squadID string
 		if err := refTx.QueryRow(ctx, `
@@ -267,7 +267,7 @@ func TestSquadStoreRechecksEnabledAgentAfterLockWait(t *testing.T) {
 			ProjectID:     project.ID,
 			Name:          "Disabled race",
 			LeaderAgentID: agents[0].ID,
-			Members:       []store.SquadMember{{AgentID: agents[1].ID}},
+			Members:       []store.SquadMember{{Type: store.SquadMemberTypeAgent, ID: agents[1].ID}},
 		})
 		result <- err
 	}()

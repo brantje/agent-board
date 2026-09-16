@@ -32,8 +32,9 @@ func TestSquadHTTPAcceptsExplicitNullMemberRole(t *testing.T) {
 		"name":          "Core",
 		"leaderAgentId": squadHTTPLeaderID,
 		"members": []map[string]any{{
-			"agentId": squadHTTPMemberID,
-			"role":    nil,
+			"type": "AGENT",
+			"id":   squadHTTPMemberID,
+			"role": nil,
 		}},
 	})
 	if res.Code != http.StatusCreated {

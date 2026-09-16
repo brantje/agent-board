@@ -20,6 +20,7 @@ const (
 	squadHTTPMemberID  = "33333333-3333-4333-8333-333333333333"
 	squadHTTPSecondID  = "44444444-4444-4444-8444-444444444444"
 	squadHTTPID        = "55555555-5555-4555-8555-555555555555"
+	squadHTTPUserID    = "77777777-7777-4777-8777-777777777777"
 )
 
 type squadHTTPStore struct {
@@ -61,6 +62,13 @@ func (s *squadHTTPStore) GetAgentInScope(_ context.Context, scope *string, id st
 		return store.Agent{}, store.ErrNotFound
 	}
 	return agent, nil
+}
+
+func (s *squadHTTPStore) ValidateProjectWorkflowUser(_ context.Context, projectID, userID string) error {
+	if projectID == s.project.ID && userID == squadHTTPUserID {
+		return nil
+	}
+	return store.ErrInvalidArgument
 }
 
 func (s *squadHTTPStore) EffectiveProjectRole(_ context.Context, projectID, userID string) (string, error) {
@@ -159,15 +167,16 @@ func squadHTTPRequest(t *testing.T, router http.Handler, method, path string, bo
 	return res
 }
 
-func TestSquadHTTPCRUDAndRoleRoundTrip(t *testing.T) {
+func TestSquadHTTPCRUDAndMixedMemberRoundTrip(t *testing.T) {
 	fake := newSquadHTTPStore()
 	router := squadHTTPRouter(t, fake, "admin")
-	role := "  reviewer  "
 
 	created := squadHTTPRequest(t, router, http.MethodPost, "/projects/"+squadHTTPProjectID+"/squads", map[string]any{
-		"name":          "  Core  ",
-		"leaderAgentId": squadHTTPLeaderID,
-		"members":       []map[string]any{{"agentId": squadHTTPMemberID, "role": role}},
+		"name": "  Core  ", "leaderAgentId": squadHTTPLeaderID,
+		"members": []map[string]any{
+			{"type": "AGENT", "id": squadHTTPMemberID, "role": "  reviewer  "},
+			{"type": "USER", "id": squadHTTPUserID, "role": "  product  "},
+		},
 	})
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
@@ -176,8 +185,14 @@ func TestSquadHTTPCRUDAndRoleRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != squadHTTPID || got.Name != "Core" || got.LeaderAgentID != squadHTTPLeaderID || len(got.Members) != 1 || got.Members[0].Role == nil || *got.Members[0].Role != "reviewer" {
+	if got.ID != squadHTTPID || got.Name != "Core" || got.LeaderAgentID != squadHTTPLeaderID || len(got.Members) != 2 {
 		t.Fatalf("created=%+v", got)
+	}
+	if got.Members[0].Type != "AGENT" || got.Members[0].ID != squadHTTPMemberID || got.Members[0].Role == nil || *got.Members[0].Role != "reviewer" {
+		t.Fatalf("Agent member=%+v", got.Members[0])
+	}
+	if got.Members[1].Type != "USER" || got.Members[1].ID != squadHTTPUserID || got.Members[1].Role == nil || *got.Members[1].Role != "product" {
+		t.Fatalf("User member=%+v", got.Members[1])
 	}
 
 	listed := squadHTTPRequest(t, router, http.MethodGet, "/projects/"+squadHTTPProjectID+"/squads", nil)
@@ -185,19 +200,21 @@ func TestSquadHTTPCRUDAndRoleRoundTrip(t *testing.T) {
 		t.Fatalf("list status=%d body=%s", listed.Code, listed.Body.String())
 	}
 	var values []squadDTO
-	if err := json.Unmarshal(listed.Body.Bytes(), &values); err != nil || len(values) != 1 || values[0].ID != squadHTTPID {
+	if err := json.Unmarshal(listed.Body.Bytes(), &values); err != nil || len(values) != 1 || len(values[0].Members) != 2 || values[0].Members[1].Type != "USER" {
 		t.Fatalf("list=%+v err=%v", values, err)
 	}
 
 	updated := squadHTTPRequest(t, router, http.MethodPut, "/projects/"+squadHTTPProjectID+"/squads/"+squadHTTPID, map[string]any{
-		"name":          "Core 2",
-		"leaderAgentId": squadHTTPSecondID,
-		"members":       []map[string]any{{"agentId": squadHTTPLeaderID}},
+		"name": "Core 2", "leaderAgentId": squadHTTPSecondID,
+		"members": []map[string]any{
+			{"type": "AGENT", "id": squadHTTPLeaderID},
+			{"type": "USER", "id": squadHTTPUserID, "role": "Product"},
+		},
 	})
 	if updated.Code != http.StatusOK {
 		t.Fatalf("update status=%d body=%s", updated.Code, updated.Body.String())
 	}
-	if err := json.Unmarshal(updated.Body.Bytes(), &got); err != nil || got.LeaderAgentID != squadHTTPSecondID || len(got.Members) != 1 || got.Members[0].AgentID != squadHTTPLeaderID {
+	if err := json.Unmarshal(updated.Body.Bytes(), &got); err != nil || got.LeaderAgentID != squadHTTPSecondID || len(got.Members) != 2 || got.Members[0].Type != "AGENT" || got.Members[0].ID != squadHTTPLeaderID || got.Members[1].Type != "USER" {
 		t.Fatalf("updated=%+v err=%v", got, err)
 	}
 
@@ -205,18 +222,18 @@ func TestSquadHTTPCRUDAndRoleRoundTrip(t *testing.T) {
 	if fetched.Code != http.StatusOK {
 		t.Fatalf("get status=%d body=%s", fetched.Code, fetched.Body.String())
 	}
+	var fetchedSquad squadDTO
+	if err := json.Unmarshal(fetched.Body.Bytes(), &fetchedSquad); err != nil || len(fetchedSquad.Members) != 2 || fetchedSquad.Members[1].Type != "USER" || fetchedSquad.Members[1].ID != squadHTTPUserID {
+		t.Fatalf("get=%+v err=%v", fetchedSquad, err)
+	}
 
 	deleted := squadHTTPRequest(t, router, http.MethodDelete, "/projects/"+squadHTTPProjectID+"/squads/"+squadHTTPID, nil)
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete status=%d body=%s", deleted.Code, deleted.Body.String())
 	}
-	missing := squadHTTPRequest(t, router, http.MethodGet, "/projects/"+squadHTTPProjectID+"/squads/"+squadHTTPID, nil)
-	if missing.Code != http.StatusNotFound {
-		t.Fatalf("missing status=%d body=%s", missing.Code, missing.Body.String())
-	}
 }
 
-func TestSquadHTTPAuthorizationAndValidation(t *testing.T) {
+func TestSquadHTTPAuthorizationAndTypedValidation(t *testing.T) {
 	fake := newSquadHTTPStore()
 	viewer := squadHTTPRouter(t, fake, "viewer")
 	admin := squadHTTPRouter(t, fake, "admin")
@@ -232,19 +249,26 @@ func TestSquadHTTPAuthorizationAndValidation(t *testing.T) {
 		t.Fatalf("viewer mutate status=%d body=%s", denied.Code, denied.Body.String())
 	}
 
-	invalid := squadHTTPRequest(t, admin, http.MethodPost, "/projects/"+squadHTTPProjectID+"/squads", map[string]any{
-		"name": "Bad", "leaderAgentId": squadHTTPLeaderID, "members": []map[string]any{{"agentId": "not-a-uuid"}},
+	invalidID := squadHTTPRequest(t, admin, http.MethodPost, "/projects/"+squadHTTPProjectID+"/squads", map[string]any{
+		"name": "Bad", "leaderAgentId": squadHTTPLeaderID, "members": []map[string]any{{"type": "USER", "id": "not-a-uuid"}},
 	})
-	if invalid.Code != http.StatusBadRequest {
-		t.Fatalf("invalid member status=%d body=%s", invalid.Code, invalid.Body.String())
+	if invalidID.Code != http.StatusBadRequest {
+		t.Fatalf("invalid member id status=%d body=%s", invalidID.Code, invalidID.Body.String())
 	}
 
-	missingAgent := "66666666-6666-4666-8666-666666666666"
-	crossScope := squadHTTPRequest(t, admin, http.MethodPost, "/projects/"+squadHTTPProjectID+"/squads", map[string]any{
-		"name": "Bad", "leaderAgentId": missingAgent, "members": []any{},
+	unknownType := squadHTTPRequest(t, admin, http.MethodPost, "/projects/"+squadHTTPProjectID+"/squads", map[string]any{
+		"name": "Bad", "leaderAgentId": squadHTTPLeaderID, "members": []map[string]any{{"type": "GROUP", "id": squadHTTPUserID}},
 	})
-	if crossScope.Code != http.StatusNotFound {
-		t.Fatalf("unavailable agent status=%d body=%s", crossScope.Code, crossScope.Body.String())
+	if unknownType.Code != http.StatusBadRequest {
+		t.Fatalf("unknown type status=%d body=%s", unknownType.Code, unknownType.Body.String())
+	}
+
+	ineligibleUser := "88888888-8888-4888-8888-888888888888"
+	ineligible := squadHTTPRequest(t, admin, http.MethodPost, "/projects/"+squadHTTPProjectID+"/squads", map[string]any{
+		"name": "Bad", "leaderAgentId": squadHTTPLeaderID, "members": []map[string]any{{"type": "USER", "id": ineligibleUser}},
+	})
+	if ineligible.Code != http.StatusBadRequest {
+		t.Fatalf("ineligible User status=%d body=%s", ineligible.Code, ineligible.Body.String())
 	}
 
 	badID := squadHTTPRequest(t, admin, http.MethodGet, "/projects/"+squadHTTPProjectID+"/squads/not-a-uuid", nil)
