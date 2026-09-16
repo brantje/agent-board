@@ -125,6 +125,55 @@ func TestSquadStoreSerializesWithAgentOwnershipChanges(t *testing.T) {
 	})
 }
 
+func TestSquadStoreRechecksEnabledAgentAfterLockWait(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	project, agents := createSquadProjectWithAgents(t, s, "squad-lock-disabled", 2)
+	if agents[1].State != "ENABLED" {
+		t.Fatalf("fixture Agent state = %q, want ENABLED", agents[1].State)
+	}
+
+	disableTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer disableTx.Rollback(ctx) //nolint:errcheck
+	if _, err := disableTx.Exec(ctx, `UPDATE agents SET state = 'DISABLED' WHERE id = $1`, agents[1].ID); err != nil {
+		t.Fatalf("stage Agent disable: %v", err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := s.CreateSquad(ctx, store.Squad{
+			ProjectID:     project.ID,
+			Name:          "Disabled race",
+			LeaderAgentID: agents[0].ID,
+			Members:       []store.SquadMember{{AgentID: agents[1].ID}},
+		})
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		t.Fatalf("CreateSquad returned before disable committed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := disableTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if !errors.Is(err, store.ErrInvalidArgument) {
+			t.Fatalf("CreateSquad error = %v, want ErrInvalidArgument", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("CreateSquad did not finish after Agent disable committed")
+	}
+}
+
 func assertSquadPostgresCode(t *testing.T, err error, code string) {
 	t.Helper()
 	if err == nil {

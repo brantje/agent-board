@@ -187,9 +187,21 @@ func lockSquadAgents(ctx context.Context, tx pgx.Tx, value store.Squad) error {
 			continue
 		}
 		previous = agentID
-		var lockedID string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM agents WHERE id = $1 FOR UPDATE`, agentID).Scan(&lockedID); err != nil {
+
+		var (
+			state   string
+			inScope bool
+		)
+		if err := tx.QueryRow(ctx, `
+			SELECT state, project_id IS NULL OR project_id = $2
+			FROM agents
+			WHERE id = $1
+			FOR UPDATE
+		`, agentID, value.ProjectID).Scan(&state, &inScope); err != nil {
 			return notFound(err)
+		}
+		if state != "ENABLED" || !inScope {
+			return store.ErrInvalidArgument
 		}
 	}
 	return nil
