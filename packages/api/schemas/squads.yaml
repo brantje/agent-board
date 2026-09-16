@@ -1,0 +1,65 @@
+SquadMember:
+  type: object
+  additionalProperties: false
+  required:
+  - agentId
+  properties:
+    agentId:
+      type: string
+      format: uuid
+    role:
+      type:
+      - string
+      - 'null'
+SquadMemberInput:
+  $ref: '#/SquadMember'
+Squad:
+  type: object
+  additionalProperties: false
+  required:
+  - id
+  - projectId
+  - name
+  - leaderAgentId
+  - members
+  - createdAt
+  - updatedAt
+  properties:
+    id:
+      type: string
+      format: uuid
+    projectId:
+      type: string
+      format: uuid
+    name:
+      type: string
+    leaderAgentId:
+      type: string
+      format: uuid
+    members:
+      type: array
+      items:
+        $ref: '#/SquadMember'
+    createdAt:
+      type: string
+      format: date-time
+    updatedAt:
+      type: string
+      format: date-time
+SquadInput:
+  type: object
+  additionalProperties: false
+  required:
+  - name
+  - leaderAgentId
+  - members
+  properties:
+    name:
+      type: string
+    leaderAgentId:
+      type: string
+      format: uuid
+    members:
+      type: array
+      items:
+        $ref: '#/SquadMemberInput'
