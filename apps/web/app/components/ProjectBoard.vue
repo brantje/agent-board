@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { DragDropProvider } from '@dnd-kit/vue'
+import { DragDropProvider, KeyboardSensor, PointerSensor } from '@dnd-kit/vue'
 import { computed, ref } from 'vue'
 import type { Issue, Project, Run } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
@@ -20,6 +20,10 @@ const open = ref(false)
 const placing = ref(false)
 const placementError = ref<Error>()
 
+const boardSensors = [
+  PointerSensor.configure({ preventActivation: () => false }),
+  KeyboardSensor
+]
 const title = computed(() => project.data.value ? `${project.data.value.name} / Board` : 'Project Board')
 const columns = computed(() => boardColumns(issues.data.value || [], search.value))
 const pending = computed(() => project.pending.value || issues.pending.value)
@@ -126,7 +130,7 @@ useProjectEvents(() => props.projectId, async event => {
         variant="subtle"
         class="mb-3"
       />
-      <DragDropProvider @drag-end="onDragEnd">
+      <DragDropProvider :sensors="boardSensors" @drag-end="onDragEnd">
         <div class="flex min-h-[calc(100dvh-10rem)] gap-3 overflow-x-auto pb-3" role="region" aria-label="Issue board" tabindex="0">
           <section
             v-for="column in columns"
