@@ -41,7 +41,7 @@ func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue
 		`+issueWorkspaceJoin+`
 		`+lastEventLateralJoin+`
 		WHERE i.project_id=$1
-		ORDER BY i.created_at, i.id
+		ORDER BY i.status, i.board_position, i.created_at, i.id
 	`, projectID)
 	if err != nil {
 		return nil, err
@@ -77,10 +77,18 @@ func (s *Store) updateIssueMutation(ctx context.Context, input store.Issue, acto
 		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockIssueBoardOrder(ctx, tx, input.ProjectID); err != nil {
+		return store.IssueMutationResult{}, err
+	}
 
 	previous, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.ID)
 	if err != nil {
 		return store.IssueMutationResult{}, err
+	}
+	if input.Status != previous.Status {
+		if err := moveIssueToStatusTopTx(ctx, tx, input.ProjectID, input.ID, previous.Status, input.Status); err != nil {
+			return store.IssueMutationResult{}, err
+		}
 	}
 	result, err := s.applyIssueMutationTx(ctx, tx, issueMutationTxInput{
 		Issue:          input,

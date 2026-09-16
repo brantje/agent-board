@@ -133,6 +133,9 @@ func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (sto
 		return store.IssueMutationResult{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockIssueBoardOrder(ctx, tx, input.ProjectID); err != nil {
+		return store.IssueMutationResult{}, err
+	}
 
 	if (input.AssigneeType == nil) != (input.AssigneeID == nil) {
 		return store.IssueMutationResult{}, store.ErrInvalidArgument
@@ -154,20 +157,29 @@ func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (sto
 
 	var prefix string
 	var number int
+	var workflowSettings json.RawMessage
 	if err := tx.QueryRow(ctx, `
 		UPDATE projects
 		SET next_issue_number = next_issue_number + 1, updated_at = now()
 		WHERE id = $1
-		RETURNING issue_prefix, next_issue_number - 1
-	`, input.ProjectID).Scan(&prefix, &number); err != nil {
+		RETURNING issue_prefix, next_issue_number - 1, workflow_settings
+	`, input.ProjectID).Scan(&prefix, &number, &workflowSettings); err != nil {
 		return store.IssueMutationResult{}, notFound(err)
+	}
+	placement, err := store.ProjectNewIssuePlacement(workflowSettings)
+	if err != nil {
+		return store.IssueMutationResult{}, err
+	}
+	boardPosition, err := newIssueBoardPosition(ctx, tx, input.ProjectID, status, placement)
+	if err != nil {
+		return store.IssueMutationResult{}, err
 	}
 
 	issue, err := scanIssueWithPriority(tx.QueryRow(ctx, `
-		INSERT INTO issues (project_id, number, title, description, status, priority, assignee_type, assignee_id, created_by_type, created_by_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO issues (project_id, number, title, description, status, priority, board_position, assignee_type, assignee_id, created_by_type, created_by_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id::text, project_id::text, title, description, status, priority, assignee_type, assignee_id::text, NULL::text, number, created_by_type, created_by_id::text, created_at, updated_at
-	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, input.AssigneeType, input.AssigneeID, input.CreatedByType, input.CreatedByID))
+	`, input.ProjectID, number, input.Title, input.Description, status, input.Priority, boardPosition, input.AssigneeType, input.AssigneeID, input.CreatedByType, input.CreatedByID))
 	if err != nil {
 		return store.IssueMutationResult{}, err
 	}
