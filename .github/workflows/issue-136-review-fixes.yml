@@ -1,0 +1,79 @@
+name: Issue 136 review fixes
+
+on:
+  push:
+    branches:
+      - feat/136-squad-issue-ownership
+    paths:
+      - .github/workflows/issue-136-review-fixes.yml
+      - scripts/issue136_review_fixes.py
+
+permissions:
+  contents: write
+
+jobs:
+  fix-and-verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_DB: agent_board_test
+          POSTGRES_USER: agent_board
+          POSTGRES_PASSWORD: agent_board
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U agent_board -d agent_board_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      AGENT_BOARD_TEST_DATABASE_RESET: "1"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: feat/136-squad-issue-ownership
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          package-manager-cache: false
+      - name: Configure database
+        run: echo "AGENT_BOARD_TEST_DATABASE_URL=postgres://agent_board:agent_board@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/agent_board_test?sslmode=disable" >> "$GITHUB_ENV"
+      - name: Apply review fixes
+        run: python3 scripts/issue136_review_fixes.py
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Backend tests
+        working-directory: apps/server
+        run: go test ./internal/app ./internal/store ./internal/store/postgres ./internal/httpapi ./internal/mcpapi
+      - name: Backend vet
+        working-directory: apps/server
+        run: go vet ./internal/app ./internal/store/... ./internal/httpapi ./internal/mcpapi
+      - name: Squad lifecycle race coverage
+        working-directory: apps/server
+        run: go test -race ./internal/store/postgres -run 'TestSquad(LeaderChange|NonLeader|Assignee)'
+      - name: Frontend typecheck
+        run: pnpm typecheck
+      - name: Frontend tests
+        run: pnpm test
+      - name: Commit verified review fixes
+        run: |
+          git config user.name "agent-board implementation"
+          git config user.email "agent-board-implementation@users.noreply.github.com"
+          git add apps/server apps/web docs/scheduler.md
+          git commit -m "fix(#136): scope Squad leader reconciliation"
+          git push origin HEAD:feat/136-squad-issue-ownership
+      - name: Remove temporary review harness
+        run: |
+          git rm .github/workflows/issue-136-review-fixes.yml scripts/issue136_review_fixes.py
+          git commit -m "chore(#136): remove review-fix harness"
+          git push origin HEAD:feat/136-squad-issue-ownership
