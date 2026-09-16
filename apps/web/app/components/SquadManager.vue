@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { Agent, Squad, SquadMember } from '../types/api'
-import { apiEmpty, apiPath, apiRequest } from '../utils/api'
+import type { Agent, Squad } from '../types/api'
+import { apiPath, apiRequest } from '../utils/api'
 import { useResource } from '../composables/useResource'
+
+type SquadMemberDraft = {
+  agentId: string
+  role: string
+}
 
 const props = withDefaults(defineProps<{ projectId: string; canMutate?: boolean }>(), { canMutate: true })
 const squads = useResource<Squad[]>(() => apiPath('squads', props.projectId))
@@ -11,7 +16,7 @@ const open = ref(false)
 const selected = ref<Squad>()
 const name = ref('')
 const leaderAgentId = ref('')
-const members = ref<SquadMember[]>([])
+const members = ref<SquadMemberDraft[]>([])
 const saving = ref(false)
 const deleting = ref<string>()
 const saveError = ref<Error>()
@@ -31,7 +36,7 @@ function edit(squad?: Squad) {
   selected.value = squad
   name.value = squad?.name || ''
   leaderAgentId.value = squad?.leaderAgentId || ''
-  members.value = (squad?.members || []).map(member => ({ ...member }))
+  members.value = (squad?.members || []).map(member => ({ agentId: member.agentId, role: member.role || '' }))
   saveError.value = undefined
   deleteError.value = undefined
   saved.value = false
@@ -40,7 +45,7 @@ function edit(squad?: Squad) {
 
 function addMember() {
   if (readOnly.value) return
-  members.value.push({ agentId: '', role: null })
+  members.value.push({ agentId: '', role: '' })
 }
 
 function removeMember(index: number) {
@@ -79,7 +84,7 @@ async function save() {
         leaderAgentId: leaderAgentId.value,
         members: members.value.map(member => ({
           agentId: member.agentId,
-          role: member.role?.trim() || null
+          role: member.role.trim() || null
         }))
       }
     })
@@ -98,7 +103,7 @@ async function remove(squad: Squad) {
   deleting.value = squad.id
   deleteError.value = undefined
   try {
-    await apiEmpty(apiPath('squads', props.projectId, squad.id), { method: 'DELETE' })
+    await apiRequest<void>(apiPath('squads', props.projectId, squad.id), { method: 'DELETE' })
     await squads.refresh()
   } catch (failure) {
     deleteError.value = failure as Error
