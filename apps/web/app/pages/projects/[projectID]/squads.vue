@@ -8,5 +8,11 @@ const { canAdmin } = useProjectPermissions(projectId)
 </script>
 
 <template>
-  <SquadManager :key="projectId" :project-id="projectId" :can-mutate="canAdmin" />
+  <SquadManager
+    :key="projectId"
+    :project-id="projectId"
+    :can-mutate="canAdmin"
+    data-kind="squads"
+    :data-project="projectId"
+  />
 </template>
