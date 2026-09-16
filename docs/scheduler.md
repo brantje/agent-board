@@ -131,7 +131,7 @@ Issue ownership and Board status mutations never cancel Runs. Stopping execution
 
 The shared `store.ShouldAutoEnqueueIssue` policy is applied inside the Issue mutation transaction:
 
-- assigning/reassigning an Agent (including initial ownership on creation) enqueues in every status except `BACKLOG`;
+- assigning/reassigning an Agent or Squad (including initial ownership on creation) enqueues in every status except `BACKLOG`; a Squad resolves its current leader Agent before normal Run creation;
 - an already Agent-assigned Issue leaving `BACKLOG` enqueues for `TODO`, `IN_PROGRESS`, `BLOCKED` or `REVIEW`, but not `DONE`;
 - all other status changes, User assignment and unassignment do not enqueue;
 - unchanged ownership is an idempotent no-op, including after a prior Run has finished.

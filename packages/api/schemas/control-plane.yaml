@@ -357,7 +357,7 @@ Assignee:
   additionalProperties: false
   required: [type, id, name]
   properties:
-    type: {type: string, enum: [USER, AGENT]}
+    type: {type: string, enum: [USER, AGENT, SQUAD]}
     id: {type: string, format: uuid}
     name: {type: string}
 AssignmentInput:
@@ -371,7 +371,7 @@ AssignmentInput:
         additionalProperties: false
         required: [type, id]
         properties:
-          type: {type: string, enum: [USER, AGENT]}
+          type: {type: string, enum: [USER, AGENT, SQUAD]}
           id: {type: string, format: uuid}
       - {type: 'null'}
 AssignmentResponse:

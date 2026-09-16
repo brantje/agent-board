@@ -102,7 +102,7 @@ issue.assigned
 issue.status_changed
 ```
 
-`issue.assigned` records `{ "assignedTo": { "type": "USER" | "AGENT", "id": "uuid", "name": "display name" } }`, or `{ "assignedTo": null }` when clearing ownership. Human callers are attributed through the existing `actor` envelope (`type: HUMAN`, durable User `id`). The ownership mutation and Event commit atomically; live publication follows commit. Repeating the current assignment emits no new Event. Validation failures produce no product Event.
+`issue.assigned` records `{ "assignedTo": { "type": "USER" | "AGENT" | "SQUAD", "id": "uuid", "name": "display name" } }`, or `{ "assignedTo": null }` when clearing ownership. Human callers are attributed through the existing `actor` envelope (`type: HUMAN`, durable User `id`). The ownership mutation and Event commit atomically; live publication follows commit. Repeating the current assignment emits no new Event. Validation failures produce no product Event.
 
 This pre-release contract replaces the old Agent-only payload. Existing historical `agentId` payloads remain immutable and readable through the generic Event fallback; new ownership Events use `assignedTo`.
 

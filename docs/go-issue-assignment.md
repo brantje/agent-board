@@ -17,7 +17,7 @@ The canonical ownership endpoint is:
 }
 ```
 
-`type` may be `USER` or `AGENT`. Use `{ "assignedTo": null }` to clear ownership.
+`type` may be `USER`, `AGENT`, or `SQUAD`. Use `{ "assignedTo": null }` to clear ownership. A Squad remains the persisted owner; its current leader Agent is resolved only when execution is created or reconciled.
 
 ## Ownership command
 

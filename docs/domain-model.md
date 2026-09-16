@@ -51,7 +51,7 @@ agent-board/<issue-key>
 
 It may have multiple execution attempts (Runs), all continuing that branch unless the lifecycle explicitly fails closed.
 
-Core Issue fields include title, description, durable Board status, priority and one optional current assignee (`USER | AGENT | null`). Persistence uses the paired `assignee_type` / `assignee_id` fields; both are null or both are set. There are no parallel User/Agent ownership columns.
+Core Issue fields include title, description, durable Board status, priority and one optional current assignee (`USER | AGENT | SQUAD | null`). Persistence uses the paired `assignee_type` / `assignee_id` fields; both are null or both are set. For `SQUAD`, `assignee_id` is the durable Squad ID; execution resolves the Squad's current leader Agent without rewriting ownership. There are no parallel User/Agent ownership columns.
 
 The public `assignedTo` value is `{type, id, name}` or null. Eligible Users are active effective Project members/admins, including inherited Group grants and implicit deployment-admin access. Eligible Agents are enabled and visible in the Project; execution configuration and scheduler availability are separate. Changing eligibility later does not automatically change existing ownership.
 

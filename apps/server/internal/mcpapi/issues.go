@@ -21,7 +21,7 @@ func (s *Server) registerIssueTools(server *mcp.Server) {
 	setIssueStatus := mutationTool("set_issue_status", "Set explicit Issue Board status to BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, or DONE. This does not change ownership.", false, true)
 	setIssueStatus.InputSchema = schemas.setIssueStatus
 	mcp.AddTool(server, setIssueStatus, s.setIssueStatus)
-	setIssueAssignee := mutationTool("set_issue_assignee", "Set or clear Issue ownership using USER or AGENT plus UUID. This does not change Board status or cancel Runs.", false, false)
+	setIssueAssignee := mutationTool("set_issue_assignee", "Set or clear Issue ownership using USER, AGENT, or SQUAD plus UUID. This does not change Board status or cancel Runs.", false, false)
 	setIssueAssignee.InputSchema = schemas.setIssueAssignee
 	mcp.AddTool(server, setIssueAssignee, s.setIssueAssignee)
 	mcp.AddTool(server, readOnlyTool("list_issue_relationships", "List canonical relationships for an Issue by public Issue key."), objectListHandler(s.listIssueRelationships))

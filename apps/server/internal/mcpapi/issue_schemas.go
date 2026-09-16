@@ -23,7 +23,7 @@ func lockedIssueToolInputSchemas() issueToolInputSchemas {
 		},
 	}
 	assigneeTypes := map[reflect.Type]*jsonschema.Schema{
-		reflect.TypeFor[AssigneeType](): {Type: "string", Enum: []any{"USER", "AGENT"}},
+		reflect.TypeFor[AssigneeType](): {Type: "string", Enum: []any{"USER", "AGENT", "SQUAD"}},
 	}
 	relationshipTypes := map[reflect.Type]*jsonschema.Schema{
 		reflect.TypeFor[RelationshipType](): {Type: "string", Enum: []any{"blocks", "depends_on", "related_to", "duplicates"}},

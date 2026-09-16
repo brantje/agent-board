@@ -18,7 +18,7 @@ func TestMCPToolsListAdvertisesLockedInputSchemas(t *testing.T) {
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "agent-board-test", Version: "v0.1.0"}, nil)
 	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{
-		Endpoint: httpServer.URL,
+		Endpoint:   httpServer.URL,
 		HTTPClient: &http.Client{Transport: bearerRoundTripper{token: token}},
 	}, nil)
 	if err != nil {
@@ -44,7 +44,7 @@ func TestMCPToolsListAdvertisesLockedInputSchemas(t *testing.T) {
 	}
 
 	assertSchemaEnum(t, tools["set_issue_status"], []string{"status"}, []string{"BACKLOG", "TODO", "IN_PROGRESS", "BLOCKED", "REVIEW", "DONE"})
-	assertSchemaEnum(t, tools["set_issue_assignee"], []string{"assignedTo", "type"}, []string{"USER", "AGENT"})
+	assertSchemaEnum(t, tools["set_issue_assignee"], []string{"assignedTo", "type"}, []string{"USER", "AGENT", "SQUAD"})
 	assertSchemaEnum(t, tools["create_issue_relationship"], []string{"type"}, []string{"blocks", "depends_on", "related_to", "duplicates"})
 	assertSchemaItemsEnum(t, tools["list_questions"], "statuses", []string{"OPEN", "ANSWERED", "CANCELLED"})
 	assertSchemaEnum(t, tools["answer_question"], []string{"kind"}, []string{"TEXT", "SINGLE_CHOICE", "MULTI_CHOICE"})
