@@ -125,6 +125,123 @@ func TestSquadStoreSerializesWithAgentOwnershipChanges(t *testing.T) {
 	})
 }
 
+func TestSquadDatabaseSerializesDirectReferencesWithAgentOwnershipChanges(t *testing.T) {
+	t.Run("member waits for Project ownership change", func(t *testing.T) {
+		pool := testPool(t)
+		s := New(pool)
+		ctx := context.Background()
+
+		projectA, agentsA := createSquadProjectWithAgents(t, s, "squad-db-lock-member-a", 2)
+		projectB, agentsB := createSquadProjectWithAgents(t, s, "squad-db-lock-member-b", 1)
+		squad, err := s.CreateSquad(ctx, store.Squad{
+			ProjectID:     projectA.ID,
+			Name:          "Direct member lock",
+			LeaderAgentID: agentsA[0].ID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		ownerTx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ownerTx.Rollback(ctx) //nolint:errcheck
+		if _, err := ownerTx.Exec(ctx, `
+			UPDATE agents
+			SET project_id = $1, model_profile_id = $2
+			WHERE id = $3
+		`, projectB.ID, agentsB[0].ModelProfileID, agentsA[1].ID); err != nil {
+			t.Fatalf("stage Agent ownership change: %v", err)
+		}
+
+		memberTx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer memberTx.Rollback(ctx) //nolint:errcheck
+		if _, err := memberTx.Exec(ctx, `SET LOCAL lock_timeout = '100ms'`); err != nil {
+			t.Fatal(err)
+		}
+		_, err = memberTx.Exec(ctx, `
+			INSERT INTO squad_members (squad_id, agent_id)
+			VALUES ($1, $2)
+		`, squad.ID, agentsA[1].ID)
+		assertSquadPostgresCode(t, err, "55P03")
+		if err := memberTx.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := ownerTx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		_, err = pool.Exec(ctx, `
+			INSERT INTO squad_members (squad_id, agent_id)
+			VALUES ($1, $2)
+		`, squad.ID, agentsA[1].ID)
+		assertSquadPostgresCode(t, err, "23514")
+	})
+
+	t.Run("global leader blocks Project ownership change", func(t *testing.T) {
+		pool := testPool(t)
+		s := New(pool)
+		ctx := context.Background()
+
+		projectA, agentsA := createSquadProjectWithAgents(t, s, "squad-db-lock-leader-a", 1)
+		projectB, _ := createSquadProjectWithAgents(t, s, "squad-db-lock-leader-b", 1)
+		globalAgent := createGlobalSquadInvariantAgent(t, s, "squad-db-lock-global")
+		squad, err := s.CreateSquad(ctx, store.Squad{
+			ProjectID:     projectA.ID,
+			Name:          "Direct leader lock",
+			LeaderAgentID: agentsA[0].ID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		refTx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer refTx.Rollback(ctx) //nolint:errcheck
+		if _, err := refTx.Exec(ctx, `
+			UPDATE squads
+			SET leader_agent_id = $1
+			WHERE id = $2
+		`, globalAgent.ID, squad.ID); err != nil {
+			t.Fatalf("stage global Squad leader: %v", err)
+		}
+
+		ownerTx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ownerTx.Rollback(ctx) //nolint:errcheck
+		if _, err := ownerTx.Exec(ctx, `SET LOCAL lock_timeout = '100ms'`); err != nil {
+			t.Fatal(err)
+		}
+		_, err = ownerTx.Exec(ctx, `
+			UPDATE agents
+			SET project_id = $1
+			WHERE id = $2
+		`, projectB.ID, globalAgent.ID)
+		assertSquadPostgresCode(t, err, "55P03")
+		if err := ownerTx.Rollback(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := refTx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+		_, err = pool.Exec(ctx, `
+			UPDATE agents
+			SET project_id = $1
+			WHERE id = $2
+		`, projectB.ID, globalAgent.ID)
+		assertSquadPostgresCode(t, err, "23514")
+	})
+}
+
 func TestSquadStoreRechecksEnabledAgentAfterLockWait(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)
