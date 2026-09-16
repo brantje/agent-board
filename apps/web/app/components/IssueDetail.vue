@@ -303,7 +303,7 @@ async function saved(savedIssue: Issue) {
                   <USelect v-model="selected" :items="choices" :disabled="assigning" class="w-full" />
                 </UFormField>
                 <p class="text-sm text-muted">Assignment changes ownership only; it does not change the board status. Agent or Squad ownership may enqueue execution according to backend policy.</p>
-                <UButton label="Update owner" type="submit" :loading="assigning" :disabled="!ownerChanged" />
+                <UButton label="Update assignee" type="submit" :loading="assigning" :disabled="!ownerChanged" />
               </UForm>
             </AsyncState>
           </UCard>
