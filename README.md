@@ -79,7 +79,7 @@ The API key is encrypted server-side and never shown again after save.
 2. Create and enable an **Agent**, selecting an Engine and Model Profile.
 3. Ensure an eligible Runner is connected; the server-managed internal Runner is the fallback when allowed by policy.
 4. Create a **Project** and configure its repository/default branch.
-5. Create an Issue and assign an Agent, or assign a configured Squad to preserve Squad ownership while its current leader executes.
+5. Create an Issue and assign an Agent, or assign a configured Squad to preserve Squad ownership while its current leader Agent executes; additional Squad members may be Agents or eligible human Users and do not become Run targets.
 6. Agent Board creates/reuses the Issue Workspace and schedules a Run onto an eligible Runner.
 7. Inspect the Run, answer Questions if needed, then Review the result.
 
@@ -121,7 +121,7 @@ scheduler -> Runner -> Workspace materialization -> Execution Session -> Engine
 | **Project / Board** | Top-level work and repository boundary. |
 | **Issue** | Durable unit of work. |
 | **Agent** | Durable worker identity/configuration, including Engine and Model Profile. |
-| **Squad** | Reusable Project-scoped Agent team with one leader; Squad-owned Issues keep Squad ownership while execution resolves the current leader. |
+| **Squad** | Reusable Project-scoped collaboration configuration with one leader Agent and optional Agent/User members; Squad-owned Issues keep Squad ownership while execution resolves only the current leader Agent. Squad membership is not a Project ACL. |
 | **Run** | One execution attempt for an Issue by an Agent. |
 | **Provider** | Configured model connection and credentials. |
 | **Model Profile** | Reusable model selection/settings and optional capacity. |
@@ -239,7 +239,7 @@ After the complete local-repository v0.1 coding flow:
 - authenticated GitHub/GitLab/Bitbucket/Forgejo Source Connections
 - explicit Project delivery policy, including optional autonomous PR/MR creation
 - Agent delegation
-- Squad-aware delegation/member collaboration; basic Squad management, ownership and leader execution are already implemented
+- Squad-aware delegation/member collaboration; basic mixed Agent/User Squad management, ownership and leader-only execution are already implemented
 - worker pools / warm / spot execution
 - users, groups, roles/permissions and broader administration
 - additional integrations and account-level capabilities
