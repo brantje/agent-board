@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"sort"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -9,6 +10,11 @@ import (
 )
 
 const squadSelectColumns = `id::text, project_id::text, name, leader_agent_id::text, created_at, updated_at`
+const squadMembersAggregate = `COALESCE((
+	SELECT jsonb_agg(jsonb_build_object('AgentID', sm.agent_id::text, 'Role', sm.role) ORDER BY sm.agent_id)
+	FROM squad_members sm
+	WHERE sm.squad_id = squads.id
+), '[]'::jsonb)`
 
 func (s *Store) CreateSquad(ctx context.Context, input store.Squad) (store.Squad, error) {
 	tx, err := s.pool.Begin(ctx)
@@ -39,25 +45,16 @@ func (s *Store) CreateSquad(ctx context.Context, input store.Squad) (store.Squad
 }
 
 func (s *Store) GetSquad(ctx context.Context, projectID, squadID string) (store.Squad, error) {
-	value, err := scanSquad(s.pool.QueryRow(ctx, `
-		SELECT `+squadSelectColumns+`
+	return scanSquadAggregate(s.pool.QueryRow(ctx, `
+		SELECT `+squadSelectColumns+`, `+squadMembersAggregate+`
 		FROM squads
 		WHERE project_id = $1 AND id = $2
 	`, projectID, squadID))
-	if err != nil {
-		return store.Squad{}, err
-	}
-	members, err := listSquadMembers(ctx, s.pool, squadID)
-	if err != nil {
-		return store.Squad{}, err
-	}
-	value.Members = members
-	return value, nil
 }
 
 func (s *Store) ListSquads(ctx context.Context, projectID string) ([]store.Squad, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT `+squadSelectColumns+`
+		SELECT `+squadSelectColumns+`, `+squadMembersAggregate+`
 		FROM squads
 		WHERE project_id = $1
 		ORDER BY lower(name), id
@@ -69,7 +66,7 @@ func (s *Store) ListSquads(ctx context.Context, projectID string) ([]store.Squad
 
 	values := make([]store.Squad, 0)
 	for rows.Next() {
-		value, err := scanSquad(rows)
+		value, err := scanSquadAggregate(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -77,15 +74,6 @@ func (s *Store) ListSquads(ctx context.Context, projectID string) ([]store.Squad
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
-	}
-	rows.Close()
-
-	for i := range values {
-		members, err := listSquadMembers(ctx, s.pool, values[i].ID)
-		if err != nil {
-			return nil, err
-		}
-		values[i].Members = members
 	}
 	return values, nil
 }
@@ -143,36 +131,6 @@ func (s *Store) DeleteSquad(ctx context.Context, projectID, squadID string) erro
 	return nil
 }
 
-type squadQueryer interface {
-	Query(context.Context, string, ...any) (pgx.Rows, error)
-}
-
-func listSquadMembers(ctx context.Context, q squadQueryer, squadID string) ([]store.SquadMember, error) {
-	rows, err := q.Query(ctx, `
-		SELECT agent_id::text, role
-		FROM squad_members
-		WHERE squad_id = $1
-		ORDER BY agent_id
-	`, squadID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	members := make([]store.SquadMember, 0)
-	for rows.Next() {
-		var member store.SquadMember
-		if err := rows.Scan(&member.AgentID, &member.Role); err != nil {
-			return nil, err
-		}
-		members = append(members, member)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return members, nil
-}
-
 func lockSquadAgents(ctx context.Context, tx pgx.Tx, value store.Squad) error {
 	agentIDs := make([]string, 0, len(value.Members)+1)
 	agentIDs = append(agentIDs, value.LeaderAgentID)
@@ -223,6 +181,20 @@ func scanSquad(row pgx.Row) (store.Squad, error) {
 	var value store.Squad
 	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.LeaderAgentID, &value.CreatedAt, &value.UpdatedAt); err != nil {
 		return store.Squad{}, notFound(err)
+	}
+	return value, nil
+}
+
+func scanSquadAggregate(row pgx.Row) (store.Squad, error) {
+	var (
+		value       store.Squad
+		membersJSON []byte
+	)
+	if err := row.Scan(&value.ID, &value.ProjectID, &value.Name, &value.LeaderAgentID, &value.CreatedAt, &value.UpdatedAt, &membersJSON); err != nil {
+		return store.Squad{}, notFound(err)
+	}
+	if err := json.Unmarshal(membersJSON, &value.Members); err != nil {
+		return store.Squad{}, err
 	}
 	return value, nil
 }
