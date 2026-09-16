@@ -90,6 +90,10 @@ async function reload() {
 }
 
 useProjectEvents(() => props.projectId, async event => {
+  if (event.type === 'squad.updated') {
+    await reload()
+    return
+  }
   if (event.type === 'git.branch_checked_out' && issue.value) {
     const patched = applyCurrentBranchToIssue(issue.value, event)
     if (patched) {
