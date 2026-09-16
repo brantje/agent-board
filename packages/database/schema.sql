@@ -679,6 +679,9 @@ DECLARE
     agent_project_id uuid;
 BEGIN
     IF TG_TABLE_NAME = 'squads' THEN
+        IF TG_OP = 'UPDATE' AND NEW.project_id IS DISTINCT FROM OLD.project_id THEN
+            RAISE EXCEPTION 'Squad Project is immutable' USING ERRCODE = '55000';
+        END IF;
         SELECT project_id INTO agent_project_id FROM agents WHERE id = NEW.leader_agent_id;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'invalid Squad leader Agent' USING ERRCODE = '23514';
@@ -696,7 +699,8 @@ BEGIN
         SELECT project_id, leader_agent_id
         INTO squad_project_id, squad_leader_agent_id
         FROM squads
-        WHERE id = NEW.squad_id;
+        WHERE id = NEW.squad_id
+        FOR UPDATE;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'invalid Squad membership' USING ERRCODE = '23514';
         END IF;
