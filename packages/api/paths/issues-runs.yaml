@@ -203,9 +203,10 @@ startRun:
   post:
     operationId: startIssueRun
     description: >-
-      Requires Project member authority. Starts work using only the current Agent
-      assignee, preserving Issue ownership and Board status. BACKLOG, unassigned,
-      User-assigned and invalid execution configuration return conflict. All other
+      Requires Project member authority. Starts work using the current execution
+      Agent: the Agent owner directly, or the current leader for a Squad owner. Issue
+      ownership and Board status are preserved. BACKLOG, unassigned, User-assigned
+      and invalid execution configuration return conflict. All other
       Board statuses are eligible. Runner/source/capacity availability belongs to
       the scheduler; a queued Run is a successful result. Returns the existing
       active Run for this Issue/Agent on a duplicate request while configuration

@@ -299,7 +299,7 @@ CREATE TABLE issues (
     board_position bigint NOT NULL DEFAULT 0 CHECK (board_position >= 0),
     assignee_type text,
     assignee_id uuid,
-    CONSTRAINT issues_assignee_pair CHECK ((assignee_type IS NULL AND assignee_id IS NULL) OR (assignee_type IS NOT NULL AND assignee_type IN ('USER','AGENT') AND assignee_id IS NOT NULL)),
+    CONSTRAINT issues_assignee_pair CHECK ((assignee_type IS NULL AND assignee_id IS NULL) OR (assignee_type IS NOT NULL AND assignee_type IN ('USER','AGENT','SQUAD') AND assignee_id IS NOT NULL)),
     created_by_type text CHECK (created_by_type IS NULL OR created_by_type IN ('HUMAN', 'AGENT')),
     created_by_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -753,6 +753,12 @@ BEGIN
         ELSIF NEW.assignee_type = 'USER' THEN
             PERFORM 1 FROM users WHERE id = NEW.assignee_id;
             IF NOT FOUND THEN RAISE EXCEPTION 'invalid user assignee' USING ERRCODE = '23514'; END IF;
+        ELSIF NEW.assignee_type = 'SQUAD' THEN
+            SELECT project_id INTO referenced_project_id FROM squads WHERE id = NEW.assignee_id;
+            IF NOT FOUND THEN RAISE EXCEPTION 'invalid Squad assignee' USING ERRCODE = '23514'; END IF;
+            IF referenced_project_id IS DISTINCT FROM NEW.project_id THEN
+                RAISE EXCEPTION 'issue cannot reference Squad from another project' USING ERRCODE = '23514';
+            END IF;
         END IF;
     ELSIF TG_TABLE_NAME = 'runs' THEN
         IF NEW.agent_id IS NOT NULL THEN

@@ -17,6 +17,17 @@ describe('IdentityAvatar', () => {
     expect(wrapper.find('[aria-label="Frontend Engineer"]').exists()).toBe(true)
   })
 
+  it('renders a Squad icon without presenting the Squad as an Agent', () => {
+    const wrapper = mount(IdentityAvatar, {
+      props: { kind: 'squad', name: 'Backend' },
+      global
+    })
+
+    expect(wrapper.find('[data-icon="i-lucide-users"]').exists()).toBe(true)
+    expect(wrapper.find('[data-icon="i-lucide-bot"]').exists()).toBe(false)
+    expect(wrapper.find('[aria-label="Backend"]').exists()).toBe(true)
+  })
+
   it('renders the first letter for users without a bot icon', () => {
     const wrapper = mount(IdentityAvatar, {
       props: { kind: 'user', name: 'Frontend Engineer' },

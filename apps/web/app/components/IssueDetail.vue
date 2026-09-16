@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import type { Assignee, AssignmentResponse, Issue, IssueExecutionState, Run } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { issueRuns, statusLabel } from '../utils/issues'
+import { assigneeIdentityKind, assigneeTypeLabel } from '../utils/identity'
 import { isBoardActivityEvent, applyCurrentBranchToIssue } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
@@ -28,11 +29,13 @@ const latest = computed(() => issueRunHistory.value[0])
 const choices = computed(() => [
   { label: 'Unassigned', value: unassignedChoice },
   ...(assignees.data.value || []).map(assignee => ({
-    label: `${assignee.name} · ${assignee.type === 'USER' ? 'User' : 'Agent'}`,
+    label: `${assignee.name} · ${assigneeTypeLabel(assignee.type)}`,
     value: `${assignee.type}:${assignee.id}`
   }))
 ])
 const assignedName = computed(() => issue.value?.assignedTo?.name)
+const assignedKind = computed(() => issue.value?.assignedTo ? assigneeIdentityKind(issue.value.assignedTo.type) : 'user')
+const assignedTypeLabel = computed(() => issue.value?.assignedTo ? assigneeTypeLabel(issue.value.assignedTo.type) : '')
 const canStartRun = computed(() => Boolean(props.canMutate && execution.data.value?.canStart))
 const runActionLabel = computed(() => issueRunHistory.value.length ? 'Run again' : 'Start Run')
 const executionFeedback = computed(() => {
@@ -42,13 +45,13 @@ const executionFeedback = computed(() => {
     return { title: 'Execution parked', description: 'This Issue is in Backlog. Move it out of Backlog before starting a Run.' }
   }
   if (state.state === 'CONFIGURATION_UNAVAILABLE') {
-    return { title: 'Execution unavailable', description: 'The current Agent assignment is valid, but its execution configuration prevents a new Run from being created.' }
+    return { title: 'Execution unavailable', description: 'The current ownership is valid, but its execution configuration prevents a new Run from being created.' }
   }
   if (state.state === 'READY') {
-    return { title: 'Execution available', description: 'No active Run exists for the current Agent. You can start a Run.' }
+    return { title: 'Execution available', description: 'No active Run exists for the current execution Agent. You can start a Run.' }
   }
   const run = state.activeRun
-  if (!run) return { title: 'Execution active', description: 'The current Agent already has an active Run for this Issue.' }
+  if (!run) return { title: 'Execution active', description: 'The current execution Agent already has an active Run for this Issue.' }
   if (run.status === 'QUEUED') {
     const wait = run.queueReason ? ` Queue reason: ${run.queueReason}.` : ''
     return { title: 'Execution queued', description: `Attempt ${run.attempt} is waiting for scheduler admission.${wait}` }
@@ -233,8 +236,8 @@ async function saved(savedIssue: Issue) {
                 <dt class="text-muted">Assignee</dt>
                 <dd class="flex items-center gap-2">
                   <template v-if="assignedName">
-                    <IdentityAvatar :kind="issue.assignedTo?.type === 'USER' ? 'user' : 'agent'" :name="assignedName" size="xs" />
-                    <span>{{ assignedName }}</span>
+                    <IdentityAvatar :kind="assignedKind" :name="assignedName" size="xs" />
+                    <span>{{ assignedName }} · {{ assignedTypeLabel }}</span>
                   </template>
                   <span v-else-if="issue.assignedTo?.id">Assignee unavailable</span>
                   <span v-else>Unassigned</span>
@@ -274,10 +277,10 @@ async function saved(savedIssue: Issue) {
               <UForm :state="{ selected }" class="space-y-3" @submit="assign">
                 <UAlert v-if="assignmentError" title="Unable to update assignee" :description="assignmentError.message" color="error" />
                 <UAlert v-if="assignmentResult" title="Assignment accepted" :description="assignmentDescription" color="success" />
-                <UFormField label="Assignee" name="assignee" description="Choose an eligible User or Agent, or leave the Issue unassigned.">
+                <UFormField label="Assignee" name="assignee" description="Choose an eligible User, Agent, or Squad, or leave the Issue unassigned.">
                   <USelect v-model="selected" :items="choices" :disabled="assigning" class="w-full" />
                 </UFormField>
-                <p class="text-sm text-muted">Assignment changes ownership only; it does not change the board status. Agent assignment may enqueue execution according to backend policy.</p>
+                <p class="text-sm text-muted">Assignment changes ownership only; it does not change the board status. Agent or Squad ownership may enqueue execution according to backend policy.</p>
                 <UButton label="Update assignee" type="submit" :loading="assigning" :disabled="!selected" />
               </UForm>
             </AsyncState>

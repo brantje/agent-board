@@ -37,6 +37,7 @@ const issueSelectColumns = `
 	CASE
 		WHEN i.assignee_type='USER' THEN (SELECT display_name FROM users WHERE id=i.assignee_id)
 		WHEN i.assignee_type='AGENT' THEN (SELECT name FROM agents WHERE id=i.assignee_id)
+		WHEN i.assignee_type='SQUAD' THEN (SELECT name FROM squads WHERE id=i.assignee_id)
 	END,
 	i.number,
 	p.issue_prefix,
@@ -190,7 +191,7 @@ func (s *Store) CreateIssueMutation(ctx context.Context, input store.Issue) (sto
 	}
 
 	var runEvent store.Event
-	if assignee != nil && assignee.Type == "AGENT" {
+	if assignee != nil && store.ShouldAutoEnqueueIssue("", issue.Status, assignee.Type, true) {
 		_, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, issue.ProjectID, issue.ID)
 		if err != nil {
 			return store.IssueMutationResult{}, err

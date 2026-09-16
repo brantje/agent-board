@@ -21,7 +21,7 @@ func (s *Server) registerIssueTools(server *mcp.Server) {
 	setIssueStatus := mutationTool("set_issue_status", "Set explicit Issue Board status to BACKLOG, TODO, IN_PROGRESS, BLOCKED, REVIEW, or DONE. This does not change ownership.", false, true)
 	setIssueStatus.InputSchema = schemas.setIssueStatus
 	mcp.AddTool(server, setIssueStatus, s.setIssueStatus)
-	setIssueAssignee := mutationTool("set_issue_assignee", "Set or clear Issue ownership using USER or AGENT plus UUID. This does not change Board status or cancel Runs.", false, false)
+	setIssueAssignee := mutationTool("set_issue_assignee", "Set or clear Issue ownership using USER, AGENT, or SQUAD plus UUID. This does not change Board status or cancel Runs.", false, false)
 	setIssueAssignee.InputSchema = schemas.setIssueAssignee
 	mcp.AddTool(server, setIssueAssignee, s.setIssueAssignee)
 	mcp.AddTool(server, readOnlyTool("list_issue_relationships", "List canonical relationships for an Issue by public Issue key."), objectListHandler(s.listIssueRelationships))
@@ -30,7 +30,7 @@ func (s *Server) registerIssueTools(server *mcp.Server) {
 	mcp.AddTool(server, createRelationship, s.createIssueRelationship)
 	mcp.AddTool(server, mutationTool("delete_issue_relationship", "Delete one Issue relationship through canonical validation.", true, false), s.deleteIssueRelationship)
 	mcp.AddTool(server, readOnlyTool("get_issue_execution_state", "Read the canonical derived Issue execution state including canStart and activeRun."), s.getIssueExecutionState)
-	mcp.AddTool(server, mutationTool("start_issue_run", "Explicitly start or run again using the Issue's current AGENT assignee. Status and ownership stay unchanged.", false, false), s.startIssueRun)
+	mcp.AddTool(server, mutationTool("start_issue_run", "Explicitly start or run again using the Issue's current AGENT owner or current SQUAD leader. Status and ownership stay unchanged.", false, false), s.startIssueRun)
 }
 
 func (s *Server) listIssues(ctx context.Context, _ *mcp.CallToolRequest, input ProjectInput) (*mcp.CallToolResult, []IssueDTO, error) {

@@ -26,6 +26,6 @@ type SquadStore interface {
 	CreateSquad(context.Context, Squad) (Squad, error)
 	GetSquad(context.Context, string, string) (Squad, error)
 	ListSquads(context.Context, string) ([]Squad, error)
-	UpdateSquad(context.Context, Squad) (Squad, error)
+	UpdateSquad(context.Context, Squad) (Squad, bool, error)
 	DeleteSquad(context.Context, string, string) error
 }

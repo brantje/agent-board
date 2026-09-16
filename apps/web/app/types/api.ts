@@ -94,7 +94,7 @@ export interface Run {
 }
 
 export interface Assignee {
-  type: 'USER' | 'AGENT'
+  type: 'USER' | 'AGENT' | 'SQUAD'
   id: string
   name: string
 }

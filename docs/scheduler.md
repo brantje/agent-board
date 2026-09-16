@@ -131,12 +131,12 @@ Issue ownership and Board status mutations never cancel Runs. Stopping execution
 
 The shared `store.ShouldAutoEnqueueIssue` policy is applied inside the Issue mutation transaction:
 
-- assigning/reassigning an Agent (including initial ownership on creation) enqueues in every status except `BACKLOG`;
-- an already Agent-assigned Issue leaving `BACKLOG` enqueues for `TODO`, `IN_PROGRESS`, `BLOCKED` or `REVIEW`, but not `DONE`;
+- assigning/reassigning an Agent or Squad (including initial ownership on creation) enqueues in every status except `BACKLOG`; a Squad resolves its current leader Agent before normal Run creation;
+- an already Agent- or Squad-owned Issue leaving `BACKLOG` enqueues for `TODO`, `IN_PROGRESS`, `BLOCKED` or `REVIEW`, but not `DONE`; Squad execution resolves its current leader Agent while ownership remains the Squad;
 - all other status changes, User assignment and unassignment do not enqueue;
 - unchanged ownership is an idempotent no-op, including after a prior Run has finished.
 
-Assignment preserves Board status. An ownership-eligible Agent remains assigned even when its execution configuration cannot currently create a Run; the mutation succeeds without a pending-execution flag. Execution-configuration reconciliation uses the same enqueue path (see below).
+Assignment preserves Board status. Agent or Squad ownership remains unchanged when the resolved execution Agent's configuration cannot currently create a Run; the mutation succeeds without a pending-execution flag. Execution-configuration reconciliation uses the same enqueue path (see below).
 
 The Issue row lock serializes automatic enqueue, pair-scoped active-Run suppression and Issue-wide attempt numbering. Different Agents can have active Runs on one Issue; automatic enqueue never creates a second active Run for the same Issue/Agent. All attempts reuse the authoritative Issue Workspace and existing scheduler jobs. Workspace execution ownership still serializes access to its checkout.
 
@@ -144,11 +144,12 @@ New automatic Runs atomically persist `run.created` with Run, Agent and Workspac
 
 ## Execution configuration recovery and Start Run
 
-Configuration recovery derives work from current Agent ownership, Board status,
-active Issue/Agent Runs and the existing Agent/Model Profile/Provider validity
-checks. It persists no pending-execution flag or recovery history. Startup runs
-this reconciliation before starting the scheduler; configuration updates and
-Provider recovery invoke the same reconciliation for affected assignments.
+Configuration recovery derives work from current executable ownership (direct
+Agent ownership or Squad ownership resolved to its current leader Agent), Board
+status, active Issue/Agent Runs and the existing Agent/Model Profile/Provider
+validity checks. It persists no pending-execution flag or recovery history.
+Startup runs this reconciliation before starting the scheduler; configuration
+updates and Provider recovery invoke the same reconciliation for affected ownership.
 
 Recovery and explicit Start Run reuse the assignment eligibility policy: BACKLOG
 stays parked; TODO, IN_PROGRESS, BLOCKED, REVIEW and DONE are eligible. Candidate

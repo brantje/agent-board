@@ -2,11 +2,13 @@ package store
 
 import "context"
 
-// Empty filters select all current Agent assignments during startup recovery.
-// Configuration changes narrow the scan to the affected dependency.
+// Empty filters select all current executable Issue ownership during startup recovery.
+// Configuration changes narrow the scan to the affected dependency; SquadID
+// narrows reconciliation to one canonical Squad owner.
 type IssueExecutionFilter struct {
 	ProjectID      string
 	AgentID        string
+	SquadID        string
 	ModelProfileID string
 	ProviderID     string
 }

@@ -21,9 +21,33 @@ var activeRunStatuses = []string{
 	"READY_FOR_REVIEW",
 }
 
-// The caller holds the Issue row lock through commit: policy, readiness,
-// pair-scoped duplicate suppression, attempt allocation and enqueue are atomic.
-// The returned Event is non-zero only when this call persisted run.created.
+// resolveIssueExecutionAgent maps canonical Issue ownership to its current execution Agent.
+func resolveIssueExecutionAgent(ctx context.Context, q assigneeQuerier, issue store.Issue) (string, bool, error) {
+	if issue.AssigneeType == nil || issue.AssigneeID == nil {
+		return "", false, nil
+	}
+	switch *issue.AssigneeType {
+	case "AGENT":
+		return *issue.AssigneeID, true, nil
+	case "SQUAD":
+		var agentID string
+		if err := q.QueryRow(ctx, `
+			SELECT leader_agent_id::text
+			FROM squads
+			WHERE project_id=$1 AND id=$2
+		`, issue.ProjectID, *issue.AssigneeID).Scan(&agentID); err != nil {
+			return "", true, notFound(err)
+		}
+		return agentID, true, nil
+	default:
+		return "", false, nil
+	}
+}
+
+// The caller holds the Issue row lock through commit: policy, execution-target
+// resolution, readiness, pair-scoped duplicate suppression, attempt allocation
+// and enqueue are atomic. The returned Event is non-zero only when this call
+// persisted run.created.
 func (s *Store) enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store.Issue, previousStatus string, assignment bool, repositoryPath, defaultBranch string) (store.Run, store.Event, error) {
 	kind := ""
 	if issue.AssigneeType != nil {
@@ -32,11 +56,18 @@ func (s *Store) enqueueIssueMutation(ctx context.Context, tx pgx.Tx, issue store
 	if !store.ShouldAutoEnqueueIssue(previousStatus, issue.Status, kind, assignment) || issue.AssigneeID == nil {
 		return store.Run{}, store.Event{}, nil
 	}
-	return s.enqueueAssignedIssue(ctx, tx, issue, repositoryPath, defaultBranch, false)
+	agentID, executable, err := resolveIssueExecutionAgent(ctx, tx, issue)
+	if err != nil {
+		return store.Run{}, store.Event{}, err
+	}
+	if !executable {
+		return store.Run{}, store.Event{}, nil
+	}
+	return s.enqueueAssignedIssue(ctx, tx, issue, agentID, repositoryPath, defaultBranch, false)
 }
 
-func (s *Store) enqueueAssignedIssue(ctx context.Context, tx pgx.Tx, issue store.Issue, repositoryPath, defaultBranch string, strict bool) (store.Run, store.Event, error) {
-	projectID, issueID, agentID := issue.ProjectID, issue.ID, *issue.AssigneeID
+func (s *Store) enqueueAssignedIssue(ctx context.Context, tx pgx.Tx, issue store.Issue, agentID, repositoryPath, defaultBranch string, strict bool) (store.Run, store.Event, error) {
+	projectID, issueID := issue.ProjectID, issue.ID
 	if err := s.verifyRunnableAgent(ctx, tx, projectID, agentID); err != nil {
 		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
 			slog.DebugContext(ctx, "Issue enqueue: Agent configuration unavailable", "issue_id", issueID, "agent_id", agentID)

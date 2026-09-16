@@ -92,10 +92,10 @@ type IssueDTO struct {
 }
 
 type CreateIssueInput struct {
-	ProjectID  string `json:"projectId" jsonschema:"Agent Board Project UUID"`
-	Title      string `json:"title" jsonschema:"Issue title"`
+	ProjectID   string `json:"projectId" jsonschema:"Agent Board Project UUID"`
+	Title       string `json:"title" jsonschema:"Issue title"`
 	Description string `json:"description,omitempty" jsonschema:"Issue description"`
-	Priority   *int   `json:"priority,omitempty" jsonschema:"priority from 0 through 4"`
+	Priority    *int   `json:"priority,omitempty" jsonschema:"priority from 0 through 4"`
 }
 
 type UpdateIssueInput struct {
@@ -118,13 +118,13 @@ type AssigneeType string
 
 type AssigneeTarget struct {
 	Type AssigneeType `json:"type" jsonschema:"ownership target type"`
-	ID   string       `json:"id" jsonschema:"User or Agent UUID"`
+	ID   string       `json:"id" jsonschema:"User, Agent, or Squad UUID"`
 }
 
 type SetIssueAssigneeInput struct {
 	ProjectID  string          `json:"projectId" jsonschema:"Agent Board Project UUID"`
 	IssueID    string          `json:"issueId" jsonschema:"public Issue key, for example AB-123"`
-	AssignedTo *AssigneeTarget `json:"assignedTo" jsonschema:"USER or AGENT target; null clears ownership"`
+	AssignedTo *AssigneeTarget `json:"assignedTo" jsonschema:"USER, AGENT, or SQUAD target; null clears ownership"`
 }
 
 type RelationshipType string
@@ -247,8 +247,8 @@ type RunEvidenceDTO struct {
 	Tests            []EventDTO            `json:"tests"`
 	FileChanges      []EventDTO            `json:"fileChanges"`
 	Usage            any                   `json:"usage,omitempty"`
-	RawOutput        []RawOutputChunkDTO    `json:"rawOutput"`
-	Artifacts        []ArtifactDTO          `json:"artifacts"`
+	RawOutput        []RawOutputChunkDTO   `json:"rawOutput"`
+	Artifacts        []ArtifactDTO         `json:"artifacts"`
 }
 
 type ReadRunOutputInput struct {
