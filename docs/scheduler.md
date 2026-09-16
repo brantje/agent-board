@@ -132,11 +132,11 @@ Issue ownership and Board status mutations never cancel Runs. Stopping execution
 The shared `store.ShouldAutoEnqueueIssue` policy is applied inside the Issue mutation transaction:
 
 - assigning/reassigning an Agent or Squad (including initial ownership on creation) enqueues in every status except `BACKLOG`; a Squad resolves its current leader Agent before normal Run creation;
-- an already Agent-assigned Issue leaving `BACKLOG` enqueues for `TODO`, `IN_PROGRESS`, `BLOCKED` or `REVIEW`, but not `DONE`;
+- an already Agent- or Squad-owned Issue leaving `BACKLOG` enqueues for `TODO`, `IN_PROGRESS`, `BLOCKED` or `REVIEW`, but not `DONE`; Squad execution resolves its current leader Agent while ownership remains the Squad;
 - all other status changes, User assignment and unassignment do not enqueue;
 - unchanged ownership is an idempotent no-op, including after a prior Run has finished.
 
-Assignment preserves Board status. An ownership-eligible Agent remains assigned even when its execution configuration cannot currently create a Run; the mutation succeeds without a pending-execution flag. Execution-configuration reconciliation uses the same enqueue path (see below).
+Assignment preserves Board status. Agent or Squad ownership remains unchanged when the resolved execution Agent's configuration cannot currently create a Run; the mutation succeeds without a pending-execution flag. Execution-configuration reconciliation uses the same enqueue path (see below).
 
 The Issue row lock serializes automatic enqueue, pair-scoped active-Run suppression and Issue-wide attempt numbering. Different Agents can have active Runs on one Issue; automatic enqueue never creates a second active Run for the same Issue/Agent. All attempts reuse the authoritative Issue Workspace and existing scheduler jobs. Workspace execution ownership still serializes access to its checkout.
 

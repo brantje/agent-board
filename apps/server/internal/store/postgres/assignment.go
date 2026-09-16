@@ -21,9 +21,7 @@ var activeRunStatuses = []string{
 	"READY_FOR_REVIEW",
 }
 
-// The caller holds the Issue row lock through commit: policy, readiness,
-// pair-scoped duplicate suppression, attempt allocation and enqueue are atomic.
-// The returned Event is non-zero only when this call persisted run.created.
+// resolveIssueExecutionAgent maps canonical Issue ownership to its current execution Agent.
 func resolveIssueExecutionAgent(ctx context.Context, q assigneeQuerier, issue store.Issue) (string, bool, error) {
 	if issue.AssigneeType == nil || issue.AssigneeID == nil {
 		return "", false, nil
