@@ -753,6 +753,12 @@ BEGIN
         ELSIF NEW.assignee_type = 'USER' THEN
             PERFORM 1 FROM users WHERE id = NEW.assignee_id;
             IF NOT FOUND THEN RAISE EXCEPTION 'invalid user assignee' USING ERRCODE = '23514'; END IF;
+        ELSIF NEW.assignee_type = 'SQUAD' THEN
+            SELECT project_id INTO referenced_project_id FROM squads WHERE id = NEW.assignee_id;
+            IF NOT FOUND THEN RAISE EXCEPTION 'invalid Squad assignee' USING ERRCODE = '23514'; END IF;
+            IF referenced_project_id IS DISTINCT FROM NEW.project_id THEN
+                RAISE EXCEPTION 'issue cannot reference Squad from another project' USING ERRCODE = '23514';
+            END IF;
         END IF;
     ELSIF TG_TABLE_NAME = 'runs' THEN
         IF NEW.agent_id IS NOT NULL THEN
