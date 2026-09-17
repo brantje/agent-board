@@ -203,7 +203,7 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 		}
 	}()
 
-	router := httpapi.NewRouterWithApplication(services)
+	router := httpapi.NewRouter(services.ControlPlane)
 	prefix := fmt.Sprintf("D%08X", uint32(time.Now().UnixNano()))
 	var project httpapi.ProjectDTO
 	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects", fmt.Sprintf(`{"name":"Delegation execution E2E","issuePrefix":"%s","repositoryPath":%q,"defaultBranch":"main","workflowSettings":{}}`, prefix, repositoryPath), http.StatusCreated, &project)
