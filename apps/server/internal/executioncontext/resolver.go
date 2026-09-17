@@ -18,6 +18,7 @@ type Store interface {
 	GetAgentInScope(context.Context, *string, string) (store.Agent, error)
 	GetModelProfile(context.Context, *string, string) (store.ModelProfile, error)
 	GetProvider(context.Context, *string, string) (store.Provider, error)
+	GetDelegationByRun(context.Context, string, string) (store.Delegation, error)
 }
 
 type Error struct {
@@ -130,16 +131,8 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 	}, nil
 }
 
-type delegationRecordLookup interface {
-	GetDelegationByRun(context.Context, string, string) (store.Delegation, error)
-}
-
 func (r *Resolver) resolveDelegation(ctx context.Context, projectID string, run store.Run, issue store.Issue, agent store.Agent) (*DelegationContext, error) {
-	lookup, ok := any(r.store).(delegationRecordLookup)
-	if !ok {
-		return nil, nil
-	}
-	value, err := lookup.GetDelegationByRun(ctx, projectID, run.ID)
+	value, err := r.store.GetDelegationByRun(ctx, projectID, run.ID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
 	}

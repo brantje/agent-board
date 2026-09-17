@@ -2,6 +2,7 @@ package executioncontext
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -82,5 +83,19 @@ func TestResolveTreatsMissingDelegationAsNormalRun(t *testing.T) {
 	}
 	if resolved.Safe.Delegation != nil {
 		t.Fatalf("normal Run delegation=%+v", resolved.Safe.Delegation)
+	}
+}
+
+func TestResolveFailsClosedWhenDelegationLineageCannotBeRead(t *testing.T) {
+	values := validStore()
+	lookupErr := errors.New("delegation storage unavailable")
+	resolver, err := NewResolver(delegationAwareStore{fakeStore: values, err: lookupErr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = resolver.Resolve(t.Context(), values.project.ID, values.run.ID)
+	apiErr, ok := AsError(err)
+	if !ok || apiErr.Code != "execution_delegation_unavailable" || !errors.Is(err, lookupErr) {
+		t.Fatalf("err=%#v", err)
 	}
 }
