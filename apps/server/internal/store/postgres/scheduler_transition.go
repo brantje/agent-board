@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -58,6 +59,9 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 
 	if input.RunStatus == "READY_FOR_REVIEW" {
 		if err := createPendingReview(ctx, tx, run); err != nil {
+			return store.SchedulerMutationResult{}, err
+		}
+		if err := queueDelegationParentResume(ctx, tx, run); err != nil {
 			return store.SchedulerMutationResult{}, err
 		}
 	}
@@ -124,6 +128,46 @@ func releaseReadyDelegationWorkspaceHandoffs(ctx context.Context, tx pgx.Tx, par
 		  AND child.status='QUEUED'
 		  AND child.queue_reason=$5
 	`, parent.ProjectID, parent.ID, parent.IssueID, parent.WorkspaceID, store.DelegationWorkspaceHandoffReadyReason)
+	return err
+}
+
+func queueDelegationParentResume(ctx context.Context, tx pgx.Tx, delegated store.Run) error {
+	var delegationID, parentRunID string
+	err := tx.QueryRow(ctx, `
+		SELECT delegation.id::text, parent.id::text
+		FROM delegations AS delegation
+		JOIN runs AS parent
+		  ON parent.project_id=delegation.project_id
+		 AND parent.id=delegation.parent_run_id
+		 AND parent.issue_id=delegation.issue_id
+		WHERE delegation.project_id=$1
+		  AND delegation.issue_id=$2
+		  AND delegation.delegated_run_id=$3
+		  AND parent.workspace_id=$4
+		FOR UPDATE OF delegation, parent
+	`, delegated.ProjectID, delegated.IssueID, delegated.ID, delegated.WorkspaceID).Scan(&delegationID, &parentRunID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	command, err := tx.Exec(ctx, `
+		UPDATE runs
+		SET status='QUEUED', queue_reason=NULL, failure_reason=NULL, completed_at=NULL, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND issue_id=$3 AND workspace_id=$4 AND status='PAUSED'
+	`, delegated.ProjectID, parentRunID, delegated.IssueID, delegated.WorkspaceID)
+	if err != nil {
+		return err
+	}
+	if command.RowsAffected() != 1 {
+		return store.ErrConflict
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key, available_at)
+		VALUES ($1, $2, 'RESUME', 'QUEUED', $3, now())
+	`, delegated.ProjectID, parentRunID, "delegation:"+delegationID+":resume-parent")
 	return err
 }
 
