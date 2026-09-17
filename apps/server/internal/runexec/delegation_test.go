@@ -5,14 +5,16 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type delegationCapabilityStore struct {
 	store.ControlPlaneStore
-	got    store.RequestDelegationCommand
-	result store.RequestDelegationResult
+	got      store.RequestDelegationCommand
+	result   store.RequestDelegationResult
+	appended []store.Event
 }
 
 func (s *delegationCapabilityStore) RequestDelegation(_ context.Context, input store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
@@ -30,6 +32,20 @@ func (s *delegationCapabilityStore) ListDelegationsByParentRun(context.Context, 
 
 func (s *delegationCapabilityStore) SetIssueStatus(context.Context, store.IssueStatusMutation) (store.IssueMutationResult, error) {
 	return store.IssueMutationResult{}, nil
+}
+
+func (s *delegationCapabilityStore) AppendEvent(_ context.Context, event store.Event) (store.Event, error) {
+	s.appended = append(s.appended, event)
+	return event, nil
+}
+
+type delegationEventPublisher struct {
+	events []store.Event
+}
+
+func (p *delegationEventPublisher) Publish(_ context.Context, event store.Event) error {
+	p.events = append(p.events, event)
+	return nil
 }
 
 func TestEngineRequestDelegationCapabilityDerivesParentIdentity(t *testing.T) {
@@ -64,6 +80,44 @@ func TestEngineRequestDelegationCapabilityDerivesParentIdentity(t *testing.T) {
 	}
 	if storage.got.ProjectID != safe.Project.ID || storage.got.ParentRunID != safe.Run.ID || storage.got.TargetAgentID != "target-agent-1" || storage.got.Task != "bounded task" || storage.got.RequestKey != "tool-part-1" {
 		t.Fatalf("canonical command=%+v", storage.got)
+	}
+}
+
+func TestEngineRequestDelegationPublishesPersistedEvent(t *testing.T) {
+	persisted := store.Event{ID: "event-1", Type: "delegation.created", ProjectID: "project-1"}
+	storage := &delegationCapabilityStore{result: store.RequestDelegationResult{
+		Delegation:   store.Delegation{ID: "delegation-1"},
+		DelegatedRun: store.Run{ID: "delegated-run-1"},
+		Events:       []store.Event{persisted},
+	}}
+	publisher := &delegationEventPublisher{}
+	recorder, err := evidence.NewRecorder(storage, publisher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	safe := executioncontext.SafeContext{
+		Project: executioncontext.ProjectContext{ID: "project-1"},
+		Run:     executioncontext.RunContext{ID: "parent-run-1"},
+		Agent:   executioncontext.AgentContext{ID: "parent-agent-1", AllowDelegation: true},
+	}
+	processor := &Processor{store: storage, events: recorder}
+	request, err := processor.engineRequest(t.Context(), safe, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Delegation == nil {
+		t.Fatal("delegation capability is unavailable")
+	}
+	if _, err := request.Delegation.Delegate(t.Context(), engine.DelegationRequest{
+		TargetAgentID: "target-agent-1", Task: "bounded task", RequestKey: "tool-call-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(storage.appended) != 0 {
+		t.Fatalf("persisted delegation event was appended again: %+v", storage.appended)
+	}
+	if len(publisher.events) != 1 || publisher.events[0].ID != persisted.ID {
+		t.Fatalf("published events=%+v", publisher.events)
 	}
 }
 
