@@ -6,8 +6,9 @@ import (
 )
 
 const (
-	MaxDelegationTaskCharacters          = 16 << 10
-	DelegationWorkspaceHandoffWaitReason = "delegation_handoff"
+	MaxDelegationTaskCharacters           = 16 << 10
+	DelegationWorkspaceHandoffWaitReason  = "delegation_handoff"
+	DelegationWorkspaceHandoffReadyReason = "delegation_handoff_ready"
 )
 
 type Delegation struct {
@@ -45,9 +46,10 @@ type DelegationStore interface {
 	ListDelegationsByParentRun(context.Context, string, string) ([]Delegation, error)
 }
 
-// DelegationWorkspaceHandoffStore releases a delegated Run only after the
+// DelegationWorkspaceHandoffStore marks a delegated Run ready only after the
 // authoritative parent execution has durably returned its current Workspace
-// state through the normal Workspace/Git hand-back boundary.
+// state. Scheduler transition then releases that Run atomically with the parent
+// yielding Workspace ownership.
 type DelegationWorkspaceHandoffStore interface {
-	CompleteDelegationWorkspaceHandoff(context.Context, string, string, string, string) error
+	MarkDelegationWorkspaceHandoffReady(context.Context, string, string, string, string) error
 }

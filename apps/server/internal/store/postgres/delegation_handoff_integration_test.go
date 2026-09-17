@@ -8,7 +8,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-func TestDelegationWorkspaceHandoffDefersAndReleasesSchedulerJob(t *testing.T) {
+func TestDelegationWorkspaceHandoffDefersAndMarksSchedulerJobReady(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
 	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
@@ -28,7 +28,7 @@ func TestDelegationWorkspaceHandoffDefersAndReleasesSchedulerJob(t *testing.T) {
 		t.Fatalf("delegated job is runnable before handoff: availableAt=%s", created.SchedulerJob.AvailableAt)
 	}
 
-	if err := f.store.CompleteDelegationWorkspaceHandoff(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); err != nil {
+	if err := f.store.MarkDelegationWorkspaceHandoffReady(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); err != nil {
 		t.Fatal(err)
 	}
 	var waitReason *string
@@ -40,23 +40,23 @@ func TestDelegationWorkspaceHandoffDefersAndReleasesSchedulerJob(t *testing.T) {
 	`, f.project.ID, created.SchedulerJob.ID).Scan(&waitReason, &availableAt); err != nil {
 		t.Fatal(err)
 	}
-	if waitReason != nil {
-		t.Fatalf("scheduler wait reason=%q want nil", *waitReason)
+	if waitReason == nil || *waitReason != store.DelegationWorkspaceHandoffReadyReason {
+		t.Fatalf("scheduler wait reason=%v want %q", waitReason, store.DelegationWorkspaceHandoffReadyReason)
 	}
-	if availableAt.After(time.Now().Add(time.Minute)) {
-		t.Fatalf("delegated job was not released: availableAt=%s", availableAt)
+	if !availableAt.After(time.Now().AddDate(50, 0, 0)) {
+		t.Fatalf("ready delegated job became runnable before parent PAUSED: availableAt=%s", availableAt)
 	}
 	run, err := f.store.GetRun(ctx, f.project.ID, created.DelegatedRun.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.QueueReason != nil {
-		t.Fatalf("run queue reason=%q want nil", *run.QueueReason)
+	if run.QueueReason == nil || *run.QueueReason != store.DelegationWorkspaceHandoffReadyReason {
+		t.Fatalf("run queue reason=%v want %q", run.QueueReason, store.DelegationWorkspaceHandoffReadyReason)
 	}
 
 	// A recovery replay after the durable release is harmless.
-	if err := f.store.CompleteDelegationWorkspaceHandoff(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); err != nil {
-		t.Fatalf("idempotent handoff completion: %v", err)
+	if err := f.store.MarkDelegationWorkspaceHandoffReady(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); err != nil {
+		t.Fatalf("idempotent handoff readiness: %v", err)
 	}
 }
 
@@ -76,7 +76,7 @@ func TestDelegationWorkspaceHandoffFailsClosedAfterParentStops(t *testing.T) {
 	`, f.project.ID, f.parentRun.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.CompleteDelegationWorkspaceHandoff(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); !errors.Is(err, store.ErrConflict) {
+	if err := f.store.MarkDelegationWorkspaceHandoffReady(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); !errors.Is(err, store.ErrConflict) {
 		t.Fatalf("handoff err=%v want conflict", err)
 	}
 
@@ -99,7 +99,7 @@ func TestDelegationWorkspaceHandoffRejectsSubstitutedChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.store.CompleteDelegationWorkspaceHandoff(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, f.parentRun.ID); !errors.Is(err, store.ErrNotFound) {
+	if err := f.store.MarkDelegationWorkspaceHandoffReady(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, f.parentRun.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("substituted child err=%v want not found", err)
 	}
 }

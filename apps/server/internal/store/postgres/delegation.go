@@ -177,11 +177,10 @@ func holdDelegatedRunForWorkspaceHandoff(ctx context.Context, tx pgx.Tx, run sto
 	return run, job, nil
 }
 
-// CompleteDelegationWorkspaceHandoff makes the already-created delegated START
-// job eligible for normal scheduler admission. The parent is still RUNNING at
-// this point, so the existing shared-Workspace admission fence continues to
-// prevent the delegate from starting until the parent actually yields.
-func (s *Store) CompleteDelegationWorkspaceHandoff(ctx context.Context, projectID, parentRunID, delegationID, delegatedRunID string) error {
+// MarkDelegationWorkspaceHandoffReady records that the authoritative parent
+// has safely returned its Workspace state. The delegated START job remains
+// non-runnable until the scheduler atomically transitions the parent to PAUSED.
+func (s *Store) MarkDelegationWorkspaceHandoffReady(ctx context.Context, projectID, parentRunID, delegationID, delegatedRunID string) error {
 	projectID = strings.TrimSpace(projectID)
 	parentRunID = strings.TrimSpace(parentRunID)
 	delegationID = strings.TrimSpace(delegationID)
@@ -237,25 +236,26 @@ func (s *Store) CompleteDelegationWorkspaceHandoff(ctx context.Context, projectI
 	if err != nil {
 		return err
 	}
-	if job.WaitReason == nil || *job.WaitReason != store.DelegationWorkspaceHandoffWaitReason {
+	if job.WaitReason != nil && *job.WaitReason == store.DelegationWorkspaceHandoffReadyReason {
 		return tx.Commit(ctx)
 	}
-	if parent.Status != "RUNNING" || delegated.Status != "QUEUED" || job.State != "QUEUED" {
+	if parent.Status != "RUNNING" || delegated.Status != "QUEUED" || job.State != "QUEUED" ||
+		job.WaitReason == nil || *job.WaitReason != store.DelegationWorkspaceHandoffWaitReason {
 		return store.ErrConflict
 	}
 
 	if _, err := tx.Exec(ctx, `
 		UPDATE scheduler_jobs
-		SET wait_reason=NULL, available_at=now(), updated_at=now()
-		WHERE project_id=$1 AND id=$2 AND run_id=$3 AND state='QUEUED' AND wait_reason=$4
-	`, projectID, job.ID, delegatedRunID, store.DelegationWorkspaceHandoffWaitReason); err != nil {
+		SET wait_reason=$4, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND run_id=$3 AND state='QUEUED' AND wait_reason=$5
+	`, projectID, job.ID, delegatedRunID, store.DelegationWorkspaceHandoffReadyReason, store.DelegationWorkspaceHandoffWaitReason); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE runs
-		SET queue_reason=NULL, updated_at=now()
-		WHERE project_id=$1 AND id=$2 AND status='QUEUED' AND queue_reason=$3
-	`, projectID, delegatedRunID, store.DelegationWorkspaceHandoffWaitReason); err != nil {
+		SET queue_reason=$3, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND status='QUEUED' AND queue_reason=$4
+	`, projectID, delegatedRunID, store.DelegationWorkspaceHandoffReadyReason, store.DelegationWorkspaceHandoffWaitReason); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
