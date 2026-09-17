@@ -9,6 +9,7 @@ const (
 	MaxDelegationTaskCharacters           = 16 << 10
 	DelegationWorkspaceHandoffWaitReason  = "delegation_handoff"
 	DelegationWorkspaceHandoffReadyReason = "delegation_handoff_ready"
+	DelegationWorkspaceAccessWrite        = "WRITE"
 )
 
 type Delegation struct {

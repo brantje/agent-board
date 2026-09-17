@@ -76,16 +76,17 @@ func runDTO(v store.Run, issueKeys map[string]string) RunDTO {
 
 func delegationDTO(v store.Delegation, issueKeys map[string]string) DelegationDTO {
 	return DelegationDTO{
-		ID:             v.ID,
-		ProjectID:      v.ProjectID,
-		IssueID:        issueKeyForUUID(issueKeys, v.IssueID),
-		ParentRunID:    v.ParentRunID,
-		ParentAgentID:  v.ParentAgentID,
-		TargetAgentID:  v.TargetAgentID,
-		Task:           v.Task,
-		DelegatedRunID: v.DelegatedRunID,
-		RequestKey:     v.RequestKey,
-		CreatedAt:      v.CreatedAt,
-		UpdatedAt:      v.UpdatedAt,
+		ID:              v.ID,
+		ProjectID:       v.ProjectID,
+		IssueID:         issueKeyForUUID(issueKeys, v.IssueID),
+		ParentRunID:     v.ParentRunID,
+		ParentAgentID:   v.ParentAgentID,
+		TargetAgentID:   v.TargetAgentID,
+		Task:            v.Task,
+		DelegatedRunID:  v.DelegatedRunID,
+		WorkspaceAccess: store.DelegationWorkspaceAccessWrite,
+		RequestKey:      v.RequestKey,
+		CreatedAt:       v.CreatedAt,
+		UpdatedAt:       v.UpdatedAt,
 	}
 }
