@@ -31,6 +31,10 @@ func delegationFixture() store.Delegation {
 	}
 }
 
+func (f *fakeControlPlaneStore) RequestDelegation(context.Context, store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
+	return store.RequestDelegationResult{}, store.ErrInvalidArgument
+}
+
 func (f *fakeControlPlaneStore) GetDelegationByRun(_ context.Context, pid, childRunID string) (store.Delegation, error) {
 	if pid != projectID || childRunID != delegatedRunID {
 		return store.Delegation{}, store.ErrNotFound
