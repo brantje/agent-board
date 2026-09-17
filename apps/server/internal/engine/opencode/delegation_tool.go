@@ -81,11 +81,53 @@ func (t *delegationToolTracker) Handle(ctx context.Context, event client.Event, 
 	if event.Type != "permission.asked" && event.Type != "permission.v2.asked" {
 		return nil
 	}
-	var permission client.PermissionRequest
-	if err := json.Unmarshal(event.Properties, &permission); err != nil {
+	permission, err := decodeDelegationPermission(event)
+	if err != nil {
 		return fmt.Errorf("opencode engine: decode delegation permission event: %w", err)
 	}
 	return t.applyPermission(ctx, native, sessionID, permission, requester)
+}
+
+func decodeDelegationPermission(event client.Event) (client.PermissionRequest, error) {
+	if event.Type == "permission.asked" {
+		var permission client.PermissionRequest
+		if err := json.Unmarshal(event.Properties, &permission); err != nil {
+			return client.PermissionRequest{}, err
+		}
+		return permission, nil
+	}
+
+	var current struct {
+		ID        string          `json:"id"`
+		SessionID string          `json:"sessionID"`
+		Action    string          `json:"action"`
+		Resources []string        `json:"resources"`
+		Save      []string        `json:"save"`
+		Metadata  json.RawMessage `json:"metadata"`
+		Source    *struct {
+			Type      string `json:"type"`
+			MessageID string `json:"messageID"`
+			CallID    string `json:"callID"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(event.Properties, &current); err != nil {
+		return client.PermissionRequest{}, err
+	}
+	permission := client.PermissionRequest{
+		ID:         current.ID,
+		SessionID:  current.SessionID,
+		Permission: current.Action,
+		Patterns:   current.Resources,
+		Metadata:   current.Metadata,
+		Always:     current.Save,
+	}
+	if current.Source != nil && current.Source.Type == "tool" {
+		permission.Tool = &struct {
+			MessageID string `json:"messageID"`
+			CallID    string `json:"callID"`
+		}{MessageID: current.Source.MessageID, CallID: current.Source.CallID}
+	}
+	return permission, nil
 }
 
 func (t *delegationToolTracker) Reconcile(ctx context.Context, native *client.Client, sessionID string, requester engine.DelegationRequester) error {
