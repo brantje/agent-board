@@ -69,6 +69,58 @@ func TestRecoveredOpenCodeProcessRestartsWhenCapabilitiesDiffer(t *testing.T) {
 	_ = fresh.Terminate(t.Context())
 }
 
+func TestRecoveredOpenCodeProcessRestartsWhenRequiredCapabilitiesCannotBeInspected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/health" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"healthy": true, "version": "test"})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached := newFakeOpenCodeProcess(parsed.Host)
+	fresh := newFakeOpenCodeProcess(parsed.Host)
+	launcher := &capabilityAttachLauncher{attached: attached, fresh: fresh}
+	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", parsed.Port(), map[string]string{}, true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered || process != fresh || launcher.starts != 1 {
+		t.Fatalf("process=%T recovered=%v starts=%d", process, recovered, launcher.starts)
+	}
+	_ = fresh.Terminate(t.Context())
+}
+
+func TestRecoveredOpenCodeProcessReusesUnknownCapabilitiesWhenNoToolsRequired(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/health" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"healthy": true, "version": "test"})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attached := newFakeOpenCodeProcess(parsed.Host)
+	fresh := newFakeOpenCodeProcess(parsed.Host)
+	launcher := &capabilityAttachLauncher{attached: attached, fresh: fresh}
+	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", parsed.Port(), map[string]string{}, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !recovered || process != attached || launcher.starts != 0 {
+		t.Fatalf("process=%T recovered=%v starts=%d", process, recovered, launcher.starts)
+	}
+	_ = attached.Terminate(t.Context())
+}
+
 func TestServerEnvironmentRequiresAgentBoardDelegationPermissionApproval(t *testing.T) {
 	env, err := serverEnvironment(executioncontext.SafeContext{
 		Run:      executioncontext.RunContext{ID: "run-1"},
