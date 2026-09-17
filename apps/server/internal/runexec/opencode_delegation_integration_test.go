@@ -71,7 +71,7 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := beforeChild.AssignedTo()
-	if owner == nil || owner.Type != store.AssigneeTypeAgent || owner.ID != parentAgent.ID {
+	if owner == nil || owner.Type != "AGENT" || owner.ID != parentAgent.ID {
 		t.Fatalf("delegation changed Issue owner before child execution: %+v", owner)
 	}
 	statusBeforeChild := beforeChild.Status
@@ -122,7 +122,7 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	afterOwner := afterChild.AssignedTo()
-	if afterOwner == nil || afterOwner.Type != store.AssigneeTypeAgent || afterOwner.ID != parentAgent.ID {
+	if afterOwner == nil || afterOwner.Type != "AGENT" || afterOwner.ID != parentAgent.ID {
 		t.Fatalf("delegated execution changed Issue owner: %+v", afterOwner)
 	}
 	if afterChild.Status != statusBeforeChild {
