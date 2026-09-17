@@ -3,6 +3,7 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,8 +12,9 @@ import (
 )
 
 const (
-	delegationToolName   = "delegate_task"
-	delegationToolSource = `import { tool } from "@opencode-ai/plugin"
+	delegationToolName       = "delegate_task"
+	delegationPermissionName = "agent_board_delegate"
+	delegationToolSource     = `import { tool } from "@opencode-ai/plugin"
 
 export default tool({
   description: "Delegate one bounded task on the current Agent Board Issue to another Agent. Parent Issue/Run identity is server-owned.",
@@ -20,8 +22,21 @@ export default tool({
     targetAgentId: tool.schema.string().describe("Target Agent ID"),
     task: tool.schema.string().describe("Bounded task for the target Agent"),
   },
-  async execute({ targetAgentId, task }) {
-    return "Emitted delegation request for Agent " + targetAgentId + ": " + task
+  async execute({ targetAgentId, task }, context) {
+    const callID = String(context.callID ?? "").trim()
+    if (!callID) throw new Error("delegate_task requires a stable call identity")
+    await context.ask({
+      permission: "agent_board_delegate",
+      patterns: [callID],
+      always: [],
+      metadata: {
+        tool: "delegate_task",
+        targetAgentId,
+        task,
+        callID,
+      },
+    })
+    return "Delegation accepted for Agent " + targetAgentId
   },
 })
 `
@@ -47,137 +62,100 @@ exec opencode serve --hostname "$1" --port "$2"`
 	return []string{"sh", "-c", script, "agent-board-opencode", host, port, statusSource, delegationSource}
 }
 
-type delegationToolPart struct {
-	ID        string `json:"id"`
-	SessionID string `json:"sessionID"`
-	Type      string `json:"type"`
-	Tool      string `json:"tool"`
-	State     struct {
-		Status string          `json:"status"`
-		Input  json.RawMessage `json:"input,omitempty"`
-	} `json:"state"`
+type delegationPermissionMetadata struct {
+	Tool          string `json:"tool"`
+	TargetAgentID string `json:"targetAgentId"`
+	Task          string `json:"task"`
+	CallID        string `json:"callID"`
 }
 
 type delegationToolTracker struct {
-	seen map[string]struct{}
+	accepted map[string]struct{}
 }
 
 func newDelegationToolTracker() *delegationToolTracker {
-	return &delegationToolTracker{seen: make(map[string]struct{})}
+	return &delegationToolTracker{accepted: make(map[string]struct{})}
 }
 
-func (t *delegationToolTracker) Handle(ctx context.Context, event client.Event, sessionID string, requester engine.DelegationRequester) error {
-	if event.Type != "message.part.updated" {
+func (t *delegationToolTracker) Handle(ctx context.Context, event client.Event, native *client.Client, sessionID string, requester engine.DelegationRequester) error {
+	if event.Type != "permission.asked" && event.Type != "permission.v2.asked" {
 		return nil
 	}
-	var update struct {
-		SessionID string          `json:"sessionID"`
-		Part      json.RawMessage `json:"part"`
+	var permission client.PermissionRequest
+	if err := json.Unmarshal(event.Properties, &permission); err != nil {
+		return fmt.Errorf("opencode engine: decode delegation permission event: %w", err)
 	}
-	if err := json.Unmarshal(event.Properties, &update); err != nil {
-		return fmt.Errorf("opencode engine: decode delegation tool event: %w", err)
-	}
-	if update.SessionID != sessionID || len(update.Part) == 0 {
-		return nil
-	}
-	part, err := decodeDelegationToolPart(update.Part)
-	if err != nil {
-		return err
-	}
-	return t.applyPart(ctx, part, sessionID, requester)
+	return t.applyPermission(ctx, native, sessionID, permission, requester)
 }
 
 func (t *delegationToolTracker) Reconcile(ctx context.Context, native *client.Client, sessionID string, requester engine.DelegationRequester) error {
-	parts, err := durableDelegationToolParts(ctx, native, sessionID)
-	if err != nil {
-		return err
+	if native == nil {
+		return fmt.Errorf("opencode engine: native client is required for delegation reconciliation")
 	}
-	for _, part := range parts {
-		if err := t.applyPart(ctx, part, sessionID, requester); err != nil {
+	permissions, err := native.ListPermissions(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("opencode engine: list delegation permissions: %w", err)
+	}
+	for _, permission := range permissions {
+		if err := t.applyPermission(ctx, native, sessionID, permission, requester); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func durableDelegationToolParts(ctx context.Context, native *client.Client, sessionID string) ([]delegationToolPart, error) {
+func (t *delegationToolTracker) applyPermission(ctx context.Context, native *client.Client, sessionID string, permission client.PermissionRequest, requester engine.DelegationRequester) error {
+	if permission.SessionID != sessionID || permission.Permission != delegationPermissionName {
+		return nil
+	}
 	if native == nil {
-		return nil, fmt.Errorf("opencode engine: native client is required for delegation reconciliation")
+		return fmt.Errorf("opencode engine: native client is required for delegation permission")
 	}
-	messages, err := native.ListMessages(ctx, sessionID)
-	if err != nil {
-		return nil, fmt.Errorf("opencode engine: list messages for delegation reconciliation: %w", err)
+	requestID := strings.TrimSpace(permission.ID)
+	if requestID == "" {
+		return fmt.Errorf("opencode engine: delegation permission is missing request id")
 	}
-	parts := make([]delegationToolPart, 0)
-	for _, message := range messages {
-		var info struct {
-			SessionID string `json:"sessionID"`
-		}
-		if len(message.Info) > 0 {
-			if err := json.Unmarshal(message.Info, &info); err != nil {
-				return nil, fmt.Errorf("opencode engine: decode delegation message info: %w", err)
-			}
-			if info.SessionID != "" && info.SessionID != sessionID {
-				continue
-			}
-		}
-		for _, raw := range message.Parts {
-			part, err := decodeDelegationToolPart(raw)
-			if err != nil {
-				return nil, err
-			}
-			if part.Type == "tool" && part.Tool == delegationToolName && part.State.Status == "completed" &&
-				(part.SessionID == "" || part.SessionID == sessionID) {
-				parts = append(parts, part)
-			}
-		}
+	callID := ""
+	if permission.Tool != nil {
+		callID = strings.TrimSpace(permission.Tool.CallID)
 	}
-	return parts, nil
-}
-
-func decodeDelegationToolPart(raw json.RawMessage) (delegationToolPart, error) {
-	var part delegationToolPart
-	if err := json.Unmarshal(raw, &part); err != nil {
-		return delegationToolPart{}, fmt.Errorf("opencode engine: decode delegation tool part: %w", err)
+	if callID == "" {
+		return t.rejectPermission(ctx, native, sessionID, requestID, fmt.Errorf("delegation permission is missing tool call id"))
 	}
-	return part, nil
-}
-
-func (t *delegationToolTracker) applyPart(ctx context.Context, part delegationToolPart, sessionID string, requester engine.DelegationRequester) error {
-	if part.SessionID != "" && part.SessionID != sessionID {
-		return nil
+	var metadata delegationPermissionMetadata
+	if len(permission.Metadata) == 0 || json.Unmarshal(permission.Metadata, &metadata) != nil {
+		return t.rejectPermission(ctx, native, sessionID, requestID, fmt.Errorf("delegation permission metadata is invalid"))
 	}
-	if part.Type != "tool" || part.Tool != delegationToolName || part.State.Status != "completed" {
-		return nil
+	metadata.Tool = strings.TrimSpace(metadata.Tool)
+	metadata.TargetAgentID = strings.TrimSpace(metadata.TargetAgentID)
+	metadata.Task = strings.TrimSpace(metadata.Task)
+	metadata.CallID = strings.TrimSpace(metadata.CallID)
+	if metadata.Tool != delegationToolName || metadata.TargetAgentID == "" || metadata.Task == "" || metadata.CallID != callID {
+		return t.rejectPermission(ctx, native, sessionID, requestID, fmt.Errorf("delegation permission metadata is inconsistent"))
 	}
-	partID := strings.TrimSpace(part.ID)
-	if partID == "" {
-		return fmt.Errorf("opencode engine: delegation tool completion is missing part id")
-	}
-	if _, duplicate := t.seen[partID]; duplicate {
-		return nil
-	}
-	input := decodeToolInput(part.State.Input)
-	targetAgentID, ok := input["targetAgentId"].(string)
-	targetAgentID = strings.TrimSpace(targetAgentID)
-	if !ok || targetAgentID == "" {
-		return fmt.Errorf("opencode engine: delegation tool requires targetAgentId")
-	}
-	task, ok := input["task"].(string)
-	task = strings.TrimSpace(task)
-	if !ok || task == "" {
-		return fmt.Errorf("opencode engine: delegation tool requires task")
+	if _, duplicate := t.accepted[callID]; duplicate {
+		return native.ReplyPermission(ctx, sessionID, requestID, "once")
 	}
 	if requester == nil {
-		return fmt.Errorf("opencode engine: delegation capability is unavailable")
+		return t.rejectPermission(ctx, native, sessionID, requestID, fmt.Errorf("delegation capability is unavailable"))
 	}
 	if _, err := requester.Delegate(ctx, engine.DelegationRequest{
-		TargetAgentID: targetAgentID,
-		Task:          task,
-		RequestKey:    partID,
+		TargetAgentID: metadata.TargetAgentID,
+		Task:          metadata.Task,
+		RequestKey:    callID,
 	}); err != nil {
-		return fmt.Errorf("opencode engine: request delegation: %w", err)
+		return t.rejectPermission(ctx, native, sessionID, requestID, err)
 	}
-	t.seen[partID] = struct{}{}
+	if err := native.ReplyPermission(ctx, sessionID, requestID, "once"); err != nil {
+		return fmt.Errorf("opencode engine: approve delegation permission: %w", err)
+	}
+	t.accepted[callID] = struct{}{}
+	return nil
+}
+
+func (t *delegationToolTracker) rejectPermission(ctx context.Context, native *client.Client, sessionID, requestID string, cause error) error {
+	if err := native.ReplyPermission(ctx, sessionID, requestID, "reject"); err != nil {
+		return errors.Join(fmt.Errorf("opencode engine: reject delegation permission: %w", err), cause)
+	}
 	return nil
 }
