@@ -44,13 +44,23 @@ Text, single-choice, and multi-choice Questions round-trip when they are represe
 
 Duplicate/stale Agent Board answers are rejected by the durable Question state. If a native reply fails after OpenCode may already have accepted it, the adapter checks the authoritative pending-Question list before deciding whether a retry is necessary.
 
+## Delegation capability
+
+OpenCode receives Agent Board tools from trusted Engine capabilities rather than from static adapter configuration. An authoritative Run receives `delegate_task(targetAgentId, task)` only when its Agent has `Allow delegation` enabled. A delegated Run receives neither `delegate_task` nor `set_issue_status`, so nested delegation and authoritative Issue status mutation are absent from the model-visible tool surface.
+
+The OpenCode adapter is only a transport bridge. It does not validate target eligibility, create Runs, inspect capacity, or schedule work. When OpenCode completes a native `delegate_task` part, the adapter forwards the target Agent and bounded task to the shared delegation capability. The durable native tool-part ID becomes the canonical request key; parent Project/Run/Agent identity is supplied by trusted execution context and cannot be forged by tool input.
+
+Completed delegation tool parts are reconciled from native OpenCode history after attach/reconnect/completion. Replaying a completed part is safe because the canonical backend command is idempotent for the same parent Run + request key. A request-key reuse with different target/task content is a conflict rather than a second delegation.
+
+Delegated prompts identify the bounded delegated task and the fact that the parent Run remains authoritative. They do not include Issue-status or delegation guidance. The delegated Run still executes through the normal Run/scheduler/Workspace pipeline; OpenCode has no separate delegation queue or direct Agent-to-Agent connection.
+
 ## Evidence and reasoning boundary
 
 The adapter may persist explicitly emitted OpenCode messages, plans, rationale, progress, discoveries, summaries, reasoning text, tool activity, files, tests, completion, and failure information when the native protocol exposes them reliably. A finalized native `reasoning` part is stored as canonical `agent.message` evidence with `kind: "reasoning"`; the Run UI presents that emitted trace as a Thought.
 
 This boundary does not authorize Agent Board to infer reasoning from tool calls, reconstruct reasoning that OpenCode did not emit, or make a second model request to classify or manufacture timeline activity. Unclassified visible messages continue to fall back to the generic `agent.message` kind.
 
-The injected task bootstrap includes the persisted Issue Board status plus explicit status guidance. Activity suppression intentionally removes only the exact literal `issueStatusPromptGuidance` paragraph from visible OpenCode text before persistence. The remaining bootstrap prompt may stay visible. v0.1 does not use structural, fuzzy, or generalized prompt suppression; changing that behavior would be a separate product decision.
+The injected task bootstrap includes the persisted Issue Board status plus explicit status guidance for authoritative Runs. Activity suppression intentionally removes only the exact literal `issueStatusPromptGuidance` paragraph from visible OpenCode text before persistence. The remaining bootstrap prompt may stay visible. v0.1 does not use structural, fuzzy, or generalized prompt suppression; changing that behavior would be a separate product decision.
 
 OpenCode tool lifecycle Events retain the native call identifier as `toolCallId` and may include sanitized `input`, `summary`, a bounded `resultPreview`, and `reason`. The UI uses `toolCallId` to collapse started/completed/failed lifecycle Events into one logical tool row. Large output remains raw/blob evidence rather than being copied into structured Events.
 
@@ -58,13 +68,15 @@ All structured activity still passes through Agent Board's centralized Run-scope
 
 ## Credential-gated real verification
 
-The deterministic unit/integration tests run without provider credentials and cover protocol framing, session-local connectivity, native Question mapping, same-session reply behavior, reconnect reconciliation, stale answers, audit-event ordering, Run-scoped OpenCode endpoints, and process-local database isolation.
+The deterministic unit/integration tests run without provider credentials and cover protocol framing, session-local connectivity, native Question mapping, same-session reply behavior, reconnect reconciliation, stale answers, audit-event ordering, Run-scoped OpenCode endpoints, process-local database isolation, capability-gated Agent Board tools, delegation request-key derivation, and delegation recovery replay.
 
-Credential-gated tests prove a real model-backed OpenCode path through Agent Board's scheduler. Both Docker Runtime and persistent Runner variants reset the PostgreSQL `public` schema. They refuse to do so unless the database is named `agent_board_test` and `AGENT_BOARD_TEST_DATABASE_RESET=1` is set. Never point them at a development or production database.
+Credential-gated tests prove a real model-backed OpenCode path through Agent Board's scheduler. Both Docker Runtime and persistent Runner variants reset the PostgreSQL `public` schema where their fixture requires exclusive state. They refuse to do so unless the database is named `agent_board_test` and `AGENT_BOARD_TEST_DATABASE_RESET=1` is set. Never point them at a development or production database.
 
 `TestOpenCodeRunnerNormalCodingRun` in `apps/server/internal/runexec/opencode_runner_integration_test.go` is the preferred v0.1 path: scheduler selects a live `agent-runner`, transfers the Issue Workspace, starts OpenCode on that runner, talks to OpenRouter, and syncs untracked results back without a Runtime Instance. `TestOpenCodeInternalRunnerNormalCodingRun` covers the same coding path through `SuperviseInternalRunner`. `opencode` must be on the runner host `$PATH`. `AGENT_BOARD_TEST_OPENCODE_API_KEY` / `AGENT_BOARD_TEST_OPENCODE_MODEL` may fall back to `OPENROUTER_API_KEY` / the first `OPENROUTER_MODELS` entry.
 
 `TestOpenCodeConcurrentRunnerSessionsNormalAndQuestions` is the concurrency regression. It starts three real capacity-1 host-process Runners, holds two real OpenCode Runs simultaneously in `WAITING_FOR_INPUT` on separate native Questions, requires a third normal coding Run to finish while those Questions remain blocked, then answers both Questions concurrently. The test verifies distinct Runner ownership, zero Question leakage into the normal Run, correct Workspace results for each Question answer, and the expected durable Question lifecycle for both sessions.
+
+`TestOpenCodeDockerOpenRouterDelegationEndToEnd` in `apps/server/internal/runexec/opencode_delegation_integration_test.go` is the phase-1 delegation proof. A real OpenRouter-backed parent OpenCode Agent invokes `delegate_task` itself. The test requires one durable delegation record, one ordinary target Run, parent/child lineage, a bounded child task, durable tool evidence, unchanged Issue ownership/status, and absence of authoritative status/delegation tools in the child. Because explicit Workspace handoff belongs to the next collaboration phase, the test cancels the parent after the delegation request is durably accepted so the normal scheduler can admit the child on the shared Issue Workspace.
 
 ```sh
 cd apps/server
@@ -80,7 +92,8 @@ go test -count=1 -timeout 6m -run '^TestOpenCodeRunnerNormalCodingRun$' -v ./int
 
 The Docker-backed tests remain for Runtime isolation:
 
-`TestOpenCodeDockerInteractiveQuestionRoundTrip` in `apps/server/internal/runexec/opencode_integration_test.go`.
+- `TestOpenCodeDockerInteractiveQuestionRoundTrip` in `apps/server/internal/runexec/opencode_integration_test.go`;
+- `TestOpenCodeDockerOpenRouterDelegationEndToEnd` in `apps/server/internal/runexec/opencode_delegation_integration_test.go`.
 
 ### 1. Build the Runtime image
 
@@ -110,9 +123,9 @@ docker run --rm --detach \
   pgvector/pgvector:pg18
 ```
 
-### 3. Run the gated test
+### 3. Run a gated Docker test
 
-Set the provider values to a model/provider that your OpenCode installation supports. `AGENT_BOARD_TEST_OPENCODE_BASE_URL` is optional for compatible/custom provider endpoints.
+Set the provider values to a model/provider that your OpenCode installation supports. `AGENT_BOARD_TEST_OPENCODE_BASE_URL` is optional for compatible/custom provider endpoints. The delegation E2E specifically requires `openrouter`.
 
 ```sh
 cd apps/server
@@ -122,10 +135,10 @@ AGENT_BOARD_TEST_DOCKER=1 \
 AGENT_BOARD_TEST_DATABASE_RESET=1 \
 AGENT_BOARD_TEST_DATABASE_URL='postgres://agent_board:agent_board@127.0.0.1:5432/agent_board_test?sslmode=disable' \
 AGENT_BOARD_TEST_OPENCODE_RUNTIME_IMAGE='agent-board-opencode-runtime:manual' \
-AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND='anthropic' \
+AGENT_BOARD_TEST_OPENCODE_PROVIDER_KIND='openrouter' \
 AGENT_BOARD_TEST_OPENCODE_MODEL='<model-id>' \
 AGENT_BOARD_TEST_OPENCODE_API_KEY='<provider-api-key>' \
-go test -count=1 -run '^TestOpenCodeDockerInteractiveQuestionRoundTrip$' -v ./internal/runexec
+go test -count=1 -run '^TestOpenCodeDockerOpenRouterDelegationEndToEnd$' -v ./internal/runexec
 ```
 
 For a custom endpoint, also set:
@@ -134,7 +147,7 @@ For a custom endpoint, also set:
 AGENT_BOARD_TEST_OPENCODE_BASE_URL='https://provider.example/v1'
 ```
 
-The test instructs the real OpenCode execution to ask one single-choice native Question before editing. It waits until Agent Board has a durable open Question and the Run is `WAITING_FOR_INPUT`, answers `beta` through `QuestionService`, and then requires:
+The Question round-trip test instructs the real OpenCode execution to ask one single-choice native Question before editing. It waits until Agent Board has a durable open Question and the Run is `WAITING_FOR_INPUT`, answers `beta` through `QuestionService`, and then requires:
 
 - the same in-flight Run to continue to `READY_FOR_REVIEW`;
 - exactly one OpenCode service Execution Session for the attempt;
