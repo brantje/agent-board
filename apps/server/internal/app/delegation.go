@@ -36,17 +36,6 @@ func (s *Service) RequestDelegation(ctx context.Context, projectID, parentRunID 
 	return result, nil
 }
 
-func (s *Service) MarkDelegationWorkspaceHandoffReady(ctx context.Context, projectID, parentRunID, delegationID, delegatedRunID string) error {
-	if s == nil || s.store == nil {
-		return fmt.Errorf("delegation service is unavailable")
-	}
-	handoffs, ok := any(s.store).(store.DelegationWorkspaceHandoffStore)
-	if !ok {
-		return fmt.Errorf("delegation workspace handoff store is unavailable")
-	}
-	return translateStoreError(handoffs.MarkDelegationWorkspaceHandoffReady(ctx, projectID, parentRunID, delegationID, delegatedRunID), "delegation workspace handoff")
-}
-
 func (s *Service) GetDelegationByRun(ctx context.Context, projectID, runID string) (store.Delegation, error) {
 	delegations, ok := any(s.store).(store.DelegationStore)
 	if !ok {
