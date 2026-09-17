@@ -91,7 +91,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	if err != nil {
 		return engine.Result{}, fmt.Errorf("opencode engine: parse native server address: %w", err)
 	}
-	process, recovered, err := launchOpenCodeProcess(ctx, request.Launcher, host, port, env)
+	process, recovered, err := launchOpenCodeProcessWithCapabilities(ctx, request.Launcher, host, port, env, request.IssueStatus != nil, request.Delegation != nil)
 	if err != nil {
 		return engine.Result{}, err
 	}
@@ -148,8 +148,12 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 
 	state := newRunState(session.ID, request.InteractiveQuestions, activitySink(request.Launcher))
 	statusTools := newIssueStatusToolTracker()
+	delegationTools := newDelegationToolTracker()
 	if recovered && !promptRequired {
 		if err := statusTools.ReconcileAttach(ctx, native, session.ID, request.IssueStatus); err != nil {
+			return engine.Result{}, err
+		}
+		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
 			return engine.Result{}, err
 		}
 	}
@@ -181,6 +185,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	}
 	finishCompleted := func() (engine.Result, error) {
 		if err := statusTools.Reconcile(ctx, native, session.ID, request.IssueStatus); err != nil {
+			return engine.Result{}, err
+		}
+		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
 			return engine.Result{}, err
 		}
 		if err := state.flushPendingMessages(ctx); err != nil {
@@ -269,6 +276,12 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 						reconcileErr,
 					)
 				}
+				if reconcileErr := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); reconcileErr != nil {
+					return engine.Result{}, errors.Join(
+						fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
+						reconcileErr,
+					)
+				}
 				stream, err = reconnectEvents(ctx, native)
 				if err != nil {
 					return engine.Result{}, errors.Join(fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err), err)
@@ -305,6 +318,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				continue
 			}
 			if err := statusTools.Handle(ctx, eventRead.event, session.ID, request.IssueStatus); err != nil {
+				return engine.Result{}, err
+			}
+			if err := delegationTools.Handle(ctx, eventRead.event, native, session.ID, request.Delegation); err != nil {
 				return engine.Result{}, err
 			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
@@ -370,7 +386,10 @@ func serverEnvironment(safe executioncontext.SafeContext, providerID string) (ma
 		}
 	}
 	config := map[string]any{
-		"permission": "allow",
+		"permission": map[string]any{
+			"*":                       "allow",
+			delegationPermissionName: "ask",
+		},
 		"provider": map[string]any{
 			providerID: providerConfig,
 		},
@@ -393,28 +412,25 @@ func serverEnvironment(safe executioncontext.SafeContext, providerID string) (ma
 }
 
 func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string) (engine.Process, bool, error) {
+	return launchOpenCodeProcessWithCapabilities(ctx, launcher, host, port, env, true, false)
+}
+
+func launchOpenCodeProcessWithCapabilities(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string, issueStatusEnabled, delegationEnabled bool) (engine.Process, bool, error) {
 	if attacher, ok := launcher.(engine.ProcessAttacher); ok {
 		process, err := attacher.Attach(ctx)
 		if err == nil {
 			if process == nil {
 				return nil, false, fmt.Errorf("opencode engine: attached process is unavailable")
 			}
-			return process, true, nil
+			return reconcileAttachedOpenCodeCapabilities(ctx, launcher, process, host, port, env, issueStatusEnabled, delegationEnabled)
 		}
 		if !errors.Is(err, engine.ErrNotAttachable) {
 			return nil, false, fmt.Errorf("opencode engine: attach existing server: %w", err)
 		}
 	}
-	process, err := launcher.Start(ctx, engine.ProcessRequest{
-		Command:               issueStatusServeCommand(host, port, env),
-		CWD:                   runtimepkg.WorkspaceTarget,
-		Env:                   env,
-		ProviderCredentialEnv: providerCredentialEnv,
-		Kind:                  "tool",
-		Name:                  "opencode-server",
-	})
+	process, err := startOpenCodeProcess(ctx, launcher, host, port, env, issueStatusEnabled, delegationEnabled)
 	if err != nil {
-		return nil, false, fmt.Errorf("opencode engine: start server: %w", err)
+		return nil, false, err
 	}
 	return process, false, nil
 }
@@ -490,6 +506,8 @@ func nativeWorkingDirectory(process engine.Process) string {
 
 const issueStatusPromptGuidance = "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When implementation or other work is complete and ready for human review or handoff, use REVIEW. Completing the requested implementation does not by itself mean DONE. For normal coding or implementation work, a successful final handoff should therefore normally leave the Issue in REVIEW, not DONE. Use DONE only when the Issue is fully finished and no human review, approval, or handoff remains. Before your final response, compare the final work outcome with the persisted Issue Board status and call set_issue_status(status) if the Board state should now be different. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required."
 
+const delegationPromptGuidance = "This Run may request bounded help from another Agent with delegate_task(targetAgentId, task). Use an explicit target Agent ID supplied by your instructions or trusted context; do not guess Agent identifiers. Delegation does not transfer Issue ownership or Review authority."
+
 func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	var sections []string
 	if role := strings.TrimSpace(safe.Agent.RoleInstructions); role != "" {
@@ -500,10 +518,20 @@ func initialTaskPrompt(safe executioncontext.SafeContext) string {
 		issue += "\n\n" + description
 	}
 	sections = append(sections, issue)
+	if safe.Delegation != nil && strings.TrimSpace(safe.Delegation.Task) != "" {
+		sections = append(sections, "Delegated task:\n"+strings.TrimSpace(safe.Delegation.Task))
+	}
 	if safe.ReviewFeedback != nil && strings.TrimSpace(safe.ReviewFeedback.Feedback) != "" {
 		sections = append(sections, "Review feedback:\n"+strings.TrimSpace(safe.ReviewFeedback.Feedback))
 	}
-	sections = append(sections, "Current persisted Issue Board status: "+strings.TrimSpace(safe.Issue.Status)+".\n"+issueStatusPromptGuidance)
+	if safe.Delegation == nil {
+		sections = append(sections, "Current persisted Issue Board status: "+strings.TrimSpace(safe.Issue.Status)+".\n"+issueStatusPromptGuidance)
+		if safe.Agent.AllowDelegation {
+			sections = append(sections, delegationPromptGuidance)
+		}
+	} else {
+		sections = append(sections, "This is delegated execution. Work only on the bounded delegated task. The parent Run remains authoritative for Issue ownership and Board/Review outcome; do not attempt to change Issue status or delegate further work.")
+	}
 	sections = append(sections, "Work directly in the current project directory and implement the requested issue. Treat /workspace as the logical workspace root: use project-relative paths for workspace files rather than absolute /workspace paths. If human input is required, use OpenCode's native Question capability rather than guessing.")
 	return strings.Join(sections, "\n\n")
 }

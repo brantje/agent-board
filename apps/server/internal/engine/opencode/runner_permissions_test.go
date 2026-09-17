@@ -8,7 +8,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 )
 
-func TestServerEnvironmentAllowsAllHeadlessToolCalls(t *testing.T) {
+func TestServerEnvironmentAllowsHeadlessToolsExceptTrustedDelegationHandshake(t *testing.T) {
 	env, err := serverEnvironment(executioncontext.SafeContext{
 		Model:    executioncontext.ModelContext{Model: "test-model"},
 		Provider: executioncontext.ProviderContext{Kind: "openrouter"},
@@ -16,12 +16,17 @@ func TestServerEnvironmentAllowsAllHeadlessToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var decoded map[string]any
+	var decoded struct {
+		Permission map[string]string `json:"permission"`
+	}
 	if err := json.Unmarshal([]byte(env["OPENCODE_CONFIG_CONTENT"]), &decoded); err != nil {
 		t.Fatalf("decode config: %v", err)
 	}
-	if decoded["permission"] != "allow" {
-		t.Fatalf("permission=%v want allow", decoded["permission"])
+	if decoded.Permission["*"] != "allow" {
+		t.Fatalf("default permission=%q want allow", decoded.Permission["*"])
+	}
+	if decoded.Permission[delegationPermissionName] != "ask" {
+		t.Fatalf("delegation permission=%q want ask", decoded.Permission[delegationPermissionName])
 	}
 }
 

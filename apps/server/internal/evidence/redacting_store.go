@@ -212,7 +212,32 @@ func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner
 	return base.GetRunner(ctx, id)
 }
 
+func (s *RedactingStore) RequestDelegation(ctx context.Context, input store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
+	base, ok := s.ControlPlaneStore.(store.DelegationStore)
+	if !ok {
+		return store.RequestDelegationResult{}, fmt.Errorf("redacting store base does not support delegation")
+	}
+	return base.RequestDelegation(ctx, input)
+}
+
+func (s *RedactingStore) GetDelegationByRun(ctx context.Context, projectID, runID string) (store.Delegation, error) {
+	base, ok := s.ControlPlaneStore.(store.DelegationStore)
+	if !ok {
+		return store.Delegation{}, fmt.Errorf("redacting store base does not support delegation")
+	}
+	return base.GetDelegationByRun(ctx, projectID, runID)
+}
+
+func (s *RedactingStore) ListDelegationsByParentRun(ctx context.Context, projectID, parentRunID string) ([]store.Delegation, error) {
+	base, ok := s.ControlPlaneStore.(store.DelegationStore)
+	if !ok {
+		return nil, fmt.Errorf("redacting store base does not support delegation")
+	}
+	return base.ListDelegationsByParentRun(ctx, projectID, parentRunID)
+}
+
 var _ store.IssueStatusMutationStore = (*RedactingStore)(nil)
 var _ store.IssueMutationActorStore = (*RedactingStore)(nil)
 var _ store.IssuePlacementStore = (*RedactingStore)(nil)
 var _ store.WorkspaceRevisionStore = (*RedactingStore)(nil)
+var _ store.DelegationStore = (*RedactingStore)(nil)

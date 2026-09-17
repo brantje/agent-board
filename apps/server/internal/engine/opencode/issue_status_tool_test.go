@@ -37,9 +37,9 @@ func (u *recordingIssueStatusUpdater) SetRecoveredStatus(ctx context.Context, st
 	return u.SetStatus(ctx, status)
 }
 
-func TestIssueStatusServeCommandInstallsToolOutsideWorkspace(t *testing.T) {
-	command := issueStatusServeCommand("127.0.0.1", "4100", nil)
-	if len(command) != 7 || command[0] != "sh" || command[1] != "-c" {
+func TestOpenCodeServeCommandInstallsIssueStatusToolOutsideWorkspace(t *testing.T) {
+	command := openCodeServeCommand("127.0.0.1", "4100", true, false)
+	if len(command) != 8 || command[0] != "sh" || command[1] != "-c" {
 		t.Fatalf("command=%q", command)
 	}
 	if command[4] != "127.0.0.1" || command[5] != "4100" {
@@ -51,6 +51,9 @@ func TestIssueStatusServeCommandInstallsToolOutsideWorkspace(t *testing.T) {
 	toolSource := command[6]
 	if !strings.Contains(toolSource, "@opencode-ai/plugin") || !strings.Contains(toolSource, "Board status") {
 		t.Fatalf("tool source=%q", toolSource)
+	}
+	if command[7] != "" {
+		t.Fatalf("delegation tool unexpectedly installed: %q", command[7])
 	}
 }
 

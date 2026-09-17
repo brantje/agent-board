@@ -93,6 +93,20 @@ export interface Run {
   currentBranch: string | null
 }
 
+export interface Delegation {
+  id: string
+  projectId: string
+  issueId: string
+  parentRunId: string
+  parentAgentId: string
+  targetAgentId: string
+  task: string
+  delegatedRunId: string
+  requestKey: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Assignee {
   type: 'USER' | 'AGENT' | 'SQUAD'
   id: string
@@ -124,6 +138,7 @@ export interface Agent {
   modelProfileId: string
   engineSettings: Record<string, unknown>
   concurrencyLimit: number
+  allowDelegation: boolean
   state: string
 }
 

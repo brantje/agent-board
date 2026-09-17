@@ -21,7 +21,7 @@ describe('intentional configuration inputs', () => {
   })
 
   it('uses Engine and Model Profile on Agents and omits server-owned credential references', () => {
-    expect(definitions.agents.fields.map(field => field.key)).toEqual(expect.arrayContaining(['engine', 'modelProfileId', 'engineSettings']))
+    expect(definitions.agents.fields.map(field => field.key)).toEqual(expect.arrayContaining(['engine', 'modelProfileId', 'engineSettings', 'allowDelegation']))
     expect(definitions.agents.fields.map(field => field.key)).not.toContain('runtimeId')
     expect(definitions.agents.fields.map(field => field.key)).not.toContain('executorProfileId')
     expect(definitions).not.toHaveProperty('executor-profiles')
@@ -29,6 +29,16 @@ describe('intentional configuration inputs', () => {
     expect(definitions).not.toHaveProperty('runtimes')
     expect(definitions.providers.fields.map(field => field.key)).not.toContain('credentialRef')
     expect(payloadFor('providers', draftFor('providers'))).not.toHaveProperty('credentialRef')
+  })
+
+  it('defaults Agent delegation off and roundtrips an explicit opt-in', () => {
+    const initial = draftFor('agents')
+    expect(initial.allowDelegation).toBe(false)
+    expect(payloadFor('agents', initial)).toMatchObject({ allowDelegation: false })
+
+    const enabled = draftFor('agents', { allowDelegation: true })
+    expect(enabled.allowDelegation).toBe(true)
+    expect(payloadFor('agents', enabled)).toMatchObject({ allowDelegation: true })
   })
 
   it('lists labeled OpenCode provider kinds with a custom option', () => {

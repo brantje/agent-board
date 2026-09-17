@@ -13,6 +13,7 @@ type SafeContext struct {
 	Runner         *RunnerContext         `json:"runner,omitempty"`
 	Workspace      WorkspaceContext       `json:"workspace"`
 	ReviewFeedback *ReviewFeedbackContext `json:"reviewFeedback,omitempty"`
+	Delegation     *DelegationContext     `json:"delegation,omitempty"`
 }
 
 type ProjectContext struct {
@@ -45,6 +46,7 @@ type AgentContext struct {
 	RoleInstructions string          `json:"roleInstructions"`
 	Engine           string          `json:"engine"`
 	EngineSettings   json.RawMessage `json:"engineSettings,omitempty"`
+	AllowDelegation  bool            `json:"allowDelegation"`
 }
 
 type ModelContext struct {
@@ -99,6 +101,15 @@ type ReviewFeedbackContext struct {
 	DecisionID    string `json:"decisionId"`
 	PreviousRunID string `json:"previousRunId"`
 	Feedback      string `json:"feedback"`
+}
+
+type DelegationContext struct {
+	ID            string `json:"id"`
+	ParentRunID   string `json:"parentRunId"`
+	ParentAgentID string `json:"parentAgentId"`
+	TargetAgentID string `json:"targetAgentId"`
+	Task          string `json:"task"`
+	RequestKey    string `json:"requestKey"`
 }
 
 type Resolved struct {

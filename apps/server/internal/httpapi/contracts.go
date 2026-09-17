@@ -131,6 +131,7 @@ type AgentDTO struct {
 	ModelProfileID   string          `json:"modelProfileId"`
 	EngineSettings   json.RawMessage `json:"engineSettings"`
 	ConcurrencyLimit int             `json:"concurrencyLimit"`
+	AllowDelegation  bool            `json:"allowDelegation"`
 	State            string          `json:"state"`
 	CreatedAt        time.Time       `json:"createdAt"`
 	UpdatedAt        time.Time       `json:"updatedAt"`
@@ -151,6 +152,20 @@ type RunDTO struct {
 	CompletedAt   *time.Time `json:"completedAt"`
 	UpdatedAt     time.Time  `json:"updatedAt"`
 	CurrentBranch *string    `json:"currentBranch"`
+}
+
+type DelegationDTO struct {
+	ID             string    `json:"id"`
+	ProjectID      string    `json:"projectId"`
+	IssueID        string    `json:"issueId"`
+	ParentRunID    string    `json:"parentRunId"`
+	ParentAgentID  string    `json:"parentAgentId"`
+	TargetAgentID  string    `json:"targetAgentId"`
+	Task           string    `json:"task"`
+	DelegatedRunID string    `json:"delegatedRunId"`
+	RequestKey     string    `json:"requestKey"`
+	CreatedAt      time.Time `json:"createdAt"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type CreateProjectRequest struct {
@@ -265,7 +280,14 @@ type CreateAgentRequest struct {
 	ModelProfileID   string          `json:"modelProfileId"`
 	EngineSettings   json.RawMessage `json:"engineSettings"`
 	ConcurrencyLimit int             `json:"concurrencyLimit"`
+	AllowDelegation  bool            `json:"allowDelegation"`
 	State            string          `json:"state"`
+}
+
+type CreateDelegationRequest struct {
+	TargetAgentID string `json:"targetAgentId"`
+	Task          string `json:"task"`
+	RequestKey    string `json:"requestKey"`
 }
 
 type AssignmentRequest struct {

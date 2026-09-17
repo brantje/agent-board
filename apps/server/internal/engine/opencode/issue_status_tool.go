@@ -26,16 +26,6 @@ export default tool({
 `
 )
 
-func issueStatusServeCommand(host, port string, _ map[string]string) []string {
-	const script = `set -eu
-config_home="${XDG_CONFIG_HOME:?XDG_CONFIG_HOME is required}"
-tool_dir="$config_home/opencode/tools"
-mkdir -p "$tool_dir"
-printf '%s' "$3" > "$tool_dir/set_issue_status.ts"
-exec opencode serve --hostname "$1" --port "$2"`
-	return []string{"sh", "-c", script, "agent-board-opencode", host, port, issueStatusToolSource}
-}
-
 type issueStatusToolPart struct {
 	ID        string `json:"id"`
 	SessionID string `json:"sessionID"`

@@ -18,6 +18,9 @@ func TestEngineAttachContinuesWhenRecoveredIssueStatusIsSuperseded(t *testing.T)
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
 	})
+	mux.HandleFunc("GET /experimental/tool/ids", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, []string{issueStatusToolName})
+	})
 	mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_existing", "directory": "/workspace"}})
 	})

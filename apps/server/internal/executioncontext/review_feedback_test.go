@@ -27,6 +27,9 @@ func (s *reviewFeedbackStore) GetRun(_ context.Context, _, runID string) (store.
 	}
 	return value, nil
 }
+func (s *reviewFeedbackStore) GetDelegationByRun(context.Context, string, string) (store.Delegation, error) {
+	return store.Delegation{}, store.ErrNotFound
+}
 func (s *reviewFeedbackStore) GetWorkspace(context.Context, string, string) (store.Workspace, error) {
 	return store.Workspace{}, store.ErrNotFound
 }

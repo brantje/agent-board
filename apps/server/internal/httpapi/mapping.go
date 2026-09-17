@@ -67,9 +67,25 @@ func runtimeDTO(v store.Runtime) RuntimeDTO {
 }
 
 func agentDTO(v store.Agent) AgentDTO {
-	return AgentDTO{v.ID, v.ProjectID, v.Name, v.RoleInstructions, v.Engine, v.ModelProfileID, v.EngineSettings, v.ConcurrencyLimit, v.State, v.CreatedAt, v.UpdatedAt}
+	return AgentDTO{v.ID, v.ProjectID, v.Name, v.RoleInstructions, v.Engine, v.ModelProfileID, v.EngineSettings, v.ConcurrencyLimit, v.AllowDelegation, v.State, v.CreatedAt, v.UpdatedAt}
 }
 
 func runDTO(v store.Run, issueKeys map[string]string) RunDTO {
 	return RunDTO{v.ID, v.ProjectID, issueKeyForUUID(issueKeys, v.IssueID), v.WorkspaceID, v.AgentID, v.Attempt, v.Status, v.QueueReason, v.FailureReason, v.CreatedAt, v.StartedAt, v.CompletedAt, v.UpdatedAt, v.CurrentBranch}
+}
+
+func delegationDTO(v store.Delegation, issueKeys map[string]string) DelegationDTO {
+	return DelegationDTO{
+		ID:             v.ID,
+		ProjectID:      v.ProjectID,
+		IssueID:        issueKeyForUUID(issueKeys, v.IssueID),
+		ParentRunID:    v.ParentRunID,
+		ParentAgentID:  v.ParentAgentID,
+		TargetAgentID:  v.TargetAgentID,
+		Task:           v.Task,
+		DelegatedRunID: v.DelegatedRunID,
+		RequestKey:     v.RequestKey,
+		CreatedAt:      v.CreatedAt,
+		UpdatedAt:      v.UpdatedAt,
+	}
 }
