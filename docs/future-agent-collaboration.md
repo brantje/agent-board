@@ -1,6 +1,6 @@
 # Agent collaboration, Squads and worker pools
 
-This document separates the implemented Squad foundation and canonical Agent delegation from later collaboration work. Future collaboration must continue to reuse Agent Board's canonical Issue, Run, scheduler, Workspace and Git lifecycle rather than creating a second execution system.
+This document separates the implemented Squad foundation, canonical phase-1 Agent delegation and serialized phase-2 Workspace handoff from later collaboration work. Future collaboration must continue to reuse Agent Board's canonical Issue, Run, scheduler, Workspace and Git lifecycle rather than creating a second execution system.
 
 ## Principle
 
@@ -94,13 +94,11 @@ This means the delegate inherits all state that the normal Workspace/Git boundar
 
 If parent finalization/sync fails, the child remains held and the parent fails instead of starting a delegate from stale state. If cancellation wins before the parent yields, synchronization may preserve trustworthy work but the delegated job remains held. Project/Issue/parent/child/Workspace identity is revalidated when the handoff is marked ready so cross-Project or substituted-Run handoffs fail closed.
 
-The delegate-to-parent boundary is symmetric. The delegated Run first completes its normal finalization/sync. When that Run reaches `READY_FOR_REVIEW`, its fenced scheduler transition requeues the same paused parent Run with one ordinary `RESUME` job. Workspace admission still serializes that resume, so the parent cannot execute concurrently with the delegate and receives the delegate's authoritative Issue-branch state through the normal execution path.
-
-A future truly parallel coding model may require isolated child Workspaces. If introduced, those Workspaces must derive from the current effective Issue Workspace state and return explicit durable changes for validation/application. They must not weaken the serialized v0.1 semantics or introduce a fresh clone that ignores current Issue state.
+Delegate work returns through the ordinary execution finalization/sync path and therefore advances the same authoritative Issue Workspace and branch. A later normal execution/continuation starts from that updated Workspace state through the existing transfer/materialization path; phase 2 does not itself decide when or why the parent is resumed.
 
 ## Delegated execution lifecycle
 
-The implemented serialized lifecycle is:
+The implemented serialized phase-2 lifecycle is:
 
 ```text
 Parent Run (RUNNING)
@@ -122,17 +120,15 @@ Parent Run (RUNNING)
            |
            +--> normal Workspace finalize/sync
            |
-           +--> READY_FOR_REVIEW
-           |
-           +--> ordinary parent RESUME job
-                    |
-                    v
-              parent Run continues
+           v
+      authoritative Issue Workspace/branch contains delegate work
 ```
 
-The parent and delegate remain ordinary Runs. The scheduler remains the only execution owner. Parent continuation uses the same Run identity rather than creating a replacement parent Run or a delegation-specific orchestration record.
+The parent and delegate remain ordinary Runs and the scheduler remains the only execution owner. Phase 2 deliberately stops at safe Workspace continuity. It does not persist a delegation result, schedule parent continuation, propagate lifecycle cancellation between parent and delegate, or define final delegated-result semantics.
 
-Failure and cancellation remain fail-closed: an unsafe handoff does not release the next writer. Restart recovery relies on durable delegation lineage, held scheduler state, Execution Sessions and native OpenCode tool history rather than process-local ownership flags.
+Those concerns belong to the next lifecycle phase. In particular, delegated completion must eventually use the smallest appropriate subtask terminal path rather than independently acting as the Issue's final Review candidate, and durable parent continuation must consume the delegate result plus the current authoritative Workspace revision exactly once.
+
+Failure and cancellation at the Workspace handoff remain fail-closed: an unsafe handoff does not release the next writer. Restart recovery relies on durable delegation lineage, held scheduler state, Execution Sessions and native OpenCode tool history rather than process-local ownership flags.
 
 Once Squad-aware delegation is implemented, a Squad leader may use the same canonical request command with suitable Agent members. Human User members remain collaboration identities unless a separate human-handoff/notification feature explicitly defines behavior for them.
 
@@ -184,13 +180,14 @@ Additional recursion/delegation-depth and rate/budget policies may be added when
 
 ## Ordering
 
-The reusable mixed-membership Squad/ownership foundation, canonical delegation request/lineage layer, and serialized Workspace handoff/parent continuation are implemented independently of future Squad-aware collaboration.
+The reusable mixed-membership Squad/ownership foundation, canonical delegation request/lineage layer and serialized Workspace handoff are implemented independently of future delegation-result lifecycle work.
 
 ```text
 complete v0.1 coding flow
  -> planning/automation where useful
  -> canonical delegation request/lineage [implemented]
- -> serialized Workspace handoff + parent continuation [implemented]
+ -> serialized Workspace handoff [implemented]
+ -> delegated outcomes + durable parent continuation/recovery
  -> Squad-aware delegation/member collaboration
  -> broader messaging/wake policy if needed
  -> worker registry/pools

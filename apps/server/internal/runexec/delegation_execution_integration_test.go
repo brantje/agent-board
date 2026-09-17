@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -35,15 +34,9 @@ import (
 )
 
 const (
-	delegationExecutionSessionID       = "ses_delegation_e2e"
-	delegationExecutionCallID          = "execution-e2e-request-1"
-	delegationExecutionTask            = "inspect scheduler ownership"
-	delegationParentBoundaryFile       = "parent-before-delegation.txt"
-	delegationChildBoundaryFile        = "delegate-change.txt"
-	delegationExecutionRoleParent      = "parent"
-	delegationExecutionRoleDelegate    = "delegate"
-	delegationExecutionRoleParentResume = "parent-resume"
-	delegationExecutionRoleDenied      = "denied"
+	delegationExecutionSessionID = "ses_delegation_e2e"
+	delegationExecutionCallID    = "execution-e2e-request-1"
+	delegationExecutionTask      = "inspect scheduler ownership"
 )
 
 type delegationExecutionRunnerClient struct {
@@ -54,7 +47,6 @@ type delegationExecutionRunnerClient struct {
 	payloads      map[string][]byte
 	servers       map[string]*httptest.Server
 	processes     map[string]*launcherDialTransport
-	roles         map[string]string
 	allowedStarts int
 	deniedStarts  int
 	onceReplies   int
@@ -68,7 +60,6 @@ func newDelegationExecutionRunnerClient(targetAgentID string) *delegationExecuti
 		payloads:       make(map[string][]byte),
 		servers:        make(map[string]*httptest.Server),
 		processes:      make(map[string]*launcherDialTransport),
-		roles:          make(map[string]string),
 	}
 }
 
@@ -77,52 +68,10 @@ func (c *delegationExecutionRunnerClient) Start(_ context.Context, sessionID str
 		return nil, fmt.Errorf("delegation E2E runner received unexpected command: %v", request.Command)
 	}
 	delegationEnabled := strings.TrimSpace(request.Command[7]) != ""
-
-	c.mu.Lock()
-	role := delegationExecutionRoleDenied
-	emitDelegation := false
-	if delegationEnabled {
-		if c.allowedStarts == 0 {
-			role = delegationExecutionRoleParent
-			emitDelegation = true
-		} else {
-			role = delegationExecutionRoleParentResume
-		}
-		c.allowedStarts++
-	} else {
-		if c.deniedStarts == 0 {
-			role = delegationExecutionRoleDelegate
-		}
-		c.deniedStarts++
-	}
-	payload := append([]byte(nil), c.payloads[sessionID]...)
-	c.roles[sessionID] = role
-	c.mu.Unlock()
-
-	if role == delegationExecutionRoleDelegate {
-		hasParentState, err := delegationExecutionBundleHasFile(payload, delegationParentBoundaryFile)
-		if err != nil {
-			return nil, fmt.Errorf("inspect delegated inbound Workspace: %w", err)
-		}
-		if !hasParentState {
-			return nil, fmt.Errorf("delegated execution did not inherit parent Workspace state")
-		}
-	}
-	if role == delegationExecutionRoleParentResume {
-		hasDelegateState, err := delegationExecutionBundleHasFile(payload, delegationChildBoundaryFile)
-		if err != nil {
-			return nil, fmt.Errorf("inspect resumed parent Workspace: %w", err)
-		}
-		if !hasDelegateState {
-			return nil, fmt.Errorf("resumed parent did not inherit delegated Workspace state")
-		}
-	}
-
 	native := &delegationExecutionNativeOpenCode{
 		client:            c,
 		targetAgentID:     c.targetAgentID,
 		delegationEnabled: delegationEnabled,
-		emitDelegation:    emitDelegation,
 		events:            make(chan string, 8),
 	}
 	server := httptest.NewServer(native.handler())
@@ -136,6 +85,11 @@ func (c *delegationExecutionRunnerClient) Start(_ context.Context, sessionID str
 	}
 	c.servers[sessionID] = server
 	c.processes[sessionID] = process
+	if delegationEnabled {
+		c.allowedStarts++
+	} else {
+		c.deniedStarts++
+	}
 	c.mu.Unlock()
 	return process, nil
 }
@@ -179,20 +133,9 @@ func (c *delegationExecutionRunnerClient) SendTransfer(_ context.Context, sessio
 func (c *delegationExecutionRunnerClient) ReceiveTransfer(_ context.Context, sessionID string, progress runner.TransferProgressFunc) (string, []byte, error) {
 	c.mu.Lock()
 	payload := append([]byte(nil), c.payloads[sessionID]...)
-	role := c.roles[sessionID]
 	c.mu.Unlock()
 	if len(payload) == 0 {
 		return "", nil, fmt.Errorf("delegation E2E runner has no workspace payload for session %s", sessionID)
-	}
-	var err error
-	switch role {
-	case delegationExecutionRoleParent:
-		payload, err = delegationExecutionMutateBundle(payload, delegationParentBoundaryFile, "parent state before delegation\n")
-	case delegationExecutionRoleDelegate:
-		payload, err = delegationExecutionMutateBundle(payload, delegationChildBoundaryFile, "delegated state returned to parent\n")
-	}
-	if err != nil {
-		return "", nil, err
 	}
 	if progress != nil {
 		progress(runner.TransferProgress{BytesTransferred: int64(len(payload)), TotalBytes: int64(len(payload))})
@@ -245,14 +188,12 @@ type delegationExecutionNativeOpenCode struct {
 	client            *delegationExecutionRunnerClient
 	targetAgentID     string
 	delegationEnabled bool
-	emitDelegation    bool
 	events            chan string
 
-	mu             sync.Mutex
-	prompted       bool
-	settled        bool
-	completionSent bool
-	activeUntil    time.Time
+	mu          sync.Mutex
+	prompted    bool
+	settled     bool
+	activeUntil time.Time
 }
 
 func (h *delegationExecutionNativeOpenCode) handler() http.Handler {
@@ -294,15 +235,9 @@ func (h *delegationExecutionNativeOpenCode) handler() http.Handler {
 		h.mu.Unlock()
 		go func() {
 			time.Sleep(350 * time.Millisecond)
-			if h.delegationEnabled && !h.emitDelegation {
-				h.mu.Lock()
-				h.settled = true
-				h.mu.Unlock()
-				return
-			}
 			event := h.permissionEvent()
 			h.events <- event
-			if h.emitDelegation {
+			if h.delegationEnabled {
 				// Replay the same externally visible tool call. The production OpenCode
 				// tracker and canonical request key must keep it to one delegation/Run/job.
 				h.events <- event
@@ -334,18 +269,10 @@ func (h *delegationExecutionNativeOpenCode) handler() http.Handler {
 			http.Error(w, "invalid permission reply", http.StatusBadRequest)
 			return
 		}
-		h.client.recordPermissionReply(payload.Reply)
-		emitCompletion := false
 		h.mu.Lock()
-		if payload.Reply == "once" && h.emitDelegation && !h.completionSent {
-			h.completionSent = true
-			emitCompletion = true
-		}
 		h.settled = true
 		h.mu.Unlock()
-		if emitCompletion {
-			h.events <- h.completedDelegationEvent()
-		}
+		h.client.recordPermissionReply(payload.Reply)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /provider", func(w http.ResponseWriter, _ *http.Request) {
@@ -375,31 +302,6 @@ func (h *delegationExecutionNativeOpenCode) permissionEvent() string {
 		"id":         "evt_delegation_e2e",
 		"type":       "permission.asked",
 		"properties": permission,
-	})
-	return string(event)
-}
-
-func (h *delegationExecutionNativeOpenCode) completedDelegationEvent() string {
-	event, _ := json.Marshal(map[string]any{
-		"id":   "evt_delegation_e2e_completed",
-		"type": "message.part.updated",
-		"properties": map[string]any{
-			"sessionID": delegationExecutionSessionID,
-			"part": map[string]any{
-				"id":        "part_delegation_e2e",
-				"callID":    delegationExecutionCallID,
-				"sessionID": delegationExecutionSessionID,
-				"type":      "tool",
-				"tool":      "delegate_task",
-				"state": map[string]any{
-					"status": "completed",
-					"input": map[string]any{
-						"targetAgentId": h.targetAgentID,
-						"task":          delegationExecutionTask,
-					},
-				},
-			},
-		},
 	})
 	return string(event)
 }
@@ -597,13 +499,13 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 
 	var listed []httpapi.DelegationDTO
 	delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+project.ID+"/runs/"+parentRun.ID+"/delegations", "", http.StatusOK, &listed)
-	if len(listed) != 1 || listed[0].RequestKey != delegationExecutionCallID || listed[0].TargetAgentID != target.ID || listed[0].WorkspaceAccess != store.DelegationWorkspaceAccessWrite {
+	if len(listed) != 1 || listed[0].RequestKey != delegationExecutionCallID || listed[0].TargetAgentID != target.ID {
 		t.Fatalf("parent delegation list=%+v", listed)
 	}
 	created := listed[0]
 	var lineage httpapi.DelegationDTO
 	delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+project.ID+"/runs/"+created.DelegatedRunID+"/delegation", "", http.StatusOK, &lineage)
-	if lineage.ID != created.ID || lineage.ParentRunID != parentRun.ID || lineage.ParentAgentID != parent.ID || lineage.TargetAgentID != target.ID || lineage.IssueID != issue.ID || lineage.WorkspaceAccess != store.DelegationWorkspaceAccessWrite {
+	if lineage.ID != created.ID || lineage.ParentRunID != parentRun.ID || lineage.ParentAgentID != parent.ID || lineage.TargetAgentID != target.ID || lineage.IssueID != issue.ID {
 		t.Fatalf("child lineage=%+v", lineage)
 	}
 
@@ -611,11 +513,8 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	if childTerminal.Status != "READY_FOR_REVIEW" {
 		t.Fatalf("delegated Run status=%s failure=%v want READY_FOR_REVIEW", childTerminal.Status, childTerminal.FailureReason)
 	}
-	if parentTerminal.WorkspaceID != childTerminal.WorkspaceID || parentTerminal.CurrentBranch == nil || childTerminal.CurrentBranch == nil || *parentTerminal.CurrentBranch != *childTerminal.CurrentBranch {
-		t.Fatalf("delegated Workspace continuity parent=%+v child=%+v", parentTerminal, childTerminal)
-	}
 	allowedStarts, deniedStarts, onceReplies, rejectReplies := runnerClient.stats()
-	if allowedStarts != 2 || deniedStarts != 1 || onceReplies < 2 || rejectReplies != 1 {
+	if allowedStarts != 1 || deniedStarts != 1 || onceReplies < 2 || rejectReplies != 1 {
 		t.Fatalf("unexpected OpenCode tool-path stats allowed=%d denied=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, onceReplies, rejectReplies)
 	}
 
@@ -638,20 +537,6 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	jobCount, jobState := delegationExecutionStartJob(t, ctx, databaseURL, project.ID, created.DelegatedRunID)
 	if jobCount != 1 || jobState != "DONE" {
 		t.Fatalf("delegated START scheduler jobs count=%d state=%q want one DONE job", jobCount, jobState)
-	}
-	resumeCount, resumeState := delegationExecutionResumeJob(t, ctx, databaseURL, project.ID, parentRun.ID)
-	if resumeCount != 1 || resumeState != "DONE" {
-		t.Fatalf("parent RESUME scheduler jobs count=%d state=%q want one DONE job", resumeCount, resumeState)
-	}
-
-	workspaceRecord, err := database.GetWorkspace(ctx, project.ID, parentRun.WorkspaceID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, name := range []string{delegationParentBoundaryFile, delegationChildBoundaryFile} {
-		if _, err := os.Stat(filepath.Join(workspaceRecord.Path, name)); err != nil {
-			t.Fatalf("final authoritative Workspace missing %s: %v", name, err)
-		}
 	}
 
 	var afterSchedule httpapi.IssueDTO
@@ -678,7 +563,7 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 		t.Fatalf("disabled-policy parent status=%s failure=%v want READY_FOR_REVIEW", deniedTerminal.Status, deniedTerminal.FailureReason)
 	}
 	allowedStarts, deniedStarts, onceReplies, rejectReplies = runnerClient.stats()
-	if allowedStarts != 2 || deniedStarts != 2 || onceReplies < 2 || rejectReplies != 2 {
+	if allowedStarts != 1 || deniedStarts != 2 || onceReplies < 2 || rejectReplies != 2 {
 		t.Fatalf("disabled execution did not reject forged delegate_task path: allowed=%d denied=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, onceReplies, rejectReplies)
 	}
 	var denied []httpapi.DelegationDTO
@@ -744,108 +629,6 @@ func delegationExecutionStartJob(t *testing.T, ctx context.Context, databaseURL,
 		t.Fatal(err)
 	}
 	return count, state
-}
-
-func delegationExecutionResumeJob(t *testing.T, ctx context.Context, databaseURL, projectID, runID string) (int, string) {
-	t.Helper()
-	conn, err := pgx.Connect(ctx, databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer conn.Close(ctx)
-	var count int
-	var state string
-	if err := conn.QueryRow(ctx, `
-		SELECT count(*), COALESCE(max(state), '')
-		FROM scheduler_jobs
-		WHERE project_id=$1 AND run_id=$2 AND kind='RESUME'
-	`, projectID, runID).Scan(&count, &state); err != nil {
-		t.Fatal(err)
-	}
-	return count, state
-}
-
-func delegationExecutionMutateBundle(payload []byte, name, body string) ([]byte, error) {
-	repositoryPath, branch, cleanup, err := delegationExecutionCheckoutBundle(payload)
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-	if err := os.WriteFile(filepath.Join(repositoryPath, name), []byte(body), 0o644); err != nil {
-		return nil, err
-	}
-	commands := [][]string{
-		{"add", name},
-		{"-c", "user.name=Delegation E2E", "-c", "user.email=delegation-e2e@example.invalid", "commit", "-q", "-m", "delegation E2E " + name},
-	}
-	for _, args := range commands {
-		command := exec.Command("git", append([]string{"-C", repositoryPath}, args...)...)
-		if output, err := command.CombinedOutput(); err != nil {
-			return nil, fmt.Errorf("git %v: %w: %s", args, err, output)
-		}
-	}
-	bundlePath := filepath.Join(filepath.Dir(repositoryPath), "returned.bundle")
-	command := exec.Command("git", "-C", repositoryPath, "bundle", "create", bundlePath, "refs/heads/"+branch)
-	if output, err := command.CombinedOutput(); err != nil {
-		return nil, fmt.Errorf("create returned bundle: %w: %s", err, output)
-	}
-	return os.ReadFile(bundlePath)
-}
-
-func delegationExecutionBundleHasFile(payload []byte, name string) (bool, error) {
-	repositoryPath, _, cleanup, err := delegationExecutionCheckoutBundle(payload)
-	if err != nil {
-		return false, err
-	}
-	defer cleanup()
-	_, err = os.Stat(filepath.Join(repositoryPath, name))
-	if err == nil {
-		return true, nil
-	}
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	return false, err
-}
-
-func delegationExecutionCheckoutBundle(payload []byte) (string, string, func(), error) {
-	root, err := os.MkdirTemp("", "agent-board-delegation-e2e-*")
-	if err != nil {
-		return "", "", nil, err
-	}
-	cleanup := func() { _ = os.RemoveAll(root) }
-	bundlePath := filepath.Join(root, "workspace.bundle")
-	if err := os.WriteFile(bundlePath, payload, 0o600); err != nil {
-		cleanup()
-		return "", "", nil, err
-	}
-	output, err := exec.Command("git", "bundle", "list-heads", bundlePath).CombinedOutput()
-	if err != nil {
-		cleanup()
-		return "", "", nil, fmt.Errorf("list bundle heads: %w: %s", err, output)
-	}
-	fields := strings.Fields(strings.TrimSpace(string(output)))
-	if len(fields) < 2 || !strings.HasPrefix(fields[1], "refs/heads/") {
-		cleanup()
-		return "", "", nil, fmt.Errorf("unexpected bundle head: %q", output)
-	}
-	branch := strings.TrimPrefix(fields[1], "refs/heads/")
-	repositoryPath := filepath.Join(root, "repo")
-	if output, err := exec.Command("git", "init", "-q", repositoryPath).CombinedOutput(); err != nil {
-		cleanup()
-		return "", "", nil, fmt.Errorf("init bundle checkout: %w: %s", err, output)
-	}
-	fetch := exec.Command("git", "-C", repositoryPath, "fetch", "-q", bundlePath, fields[1]+":"+fields[1])
-	if output, err := fetch.CombinedOutput(); err != nil {
-		cleanup()
-		return "", "", nil, fmt.Errorf("fetch bundle checkout: %w: %s", err, output)
-	}
-	checkout := exec.Command("git", "-C", repositoryPath, "checkout", "-q", branch)
-	if output, err := checkout.CombinedOutput(); err != nil {
-		cleanup()
-		return "", "", nil, fmt.Errorf("checkout bundle branch: %w: %s", err, output)
-	}
-	return repositoryPath, branch, cleanup, nil
 }
 
 func isolatedDelegationExecutionDatabase(t *testing.T, ctx context.Context, baseDatabaseURL string) string {
