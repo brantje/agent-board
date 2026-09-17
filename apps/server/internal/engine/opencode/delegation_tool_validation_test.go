@@ -8,125 +8,62 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 )
 
-func TestDelegationToolTrackerRejectsMalformedAndUnavailableCompletions(t *testing.T) {
+func TestDelegationPermissionTrackerRejectsMalformedAndUnavailableRequests(t *testing.T) {
 	tracker := newDelegationToolTracker()
 	ctx := t.Context()
 
-	if err := tracker.Handle(ctx, client.Event{Type: "session.updated"}, "ses_1", nil); err != nil {
+	if err := tracker.Handle(ctx, client.Event{Type: "session.updated"}, nil, "ses_1", nil); err != nil {
 		t.Fatalf("unrelated event returned error: %v", err)
 	}
-	if err := tracker.Handle(ctx, client.Event{Type: "message.part.updated", Properties: json.RawMessage(`{`)}, "ses_1", nil); err == nil || !strings.Contains(err.Error(), "decode delegation tool event") {
+	if err := tracker.Handle(ctx, client.Event{Type: "permission.asked", Properties: json.RawMessage(`{`)}, nil, "ses_1", nil); err == nil || !strings.Contains(err.Error(), "decode delegation permission event") {
 		t.Fatalf("malformed event error=%v", err)
 	}
 
-	foreignProperties, err := json.Marshal(map[string]any{
-		"sessionID": "ses_other",
-		"part":      delegationToolPartPayload("ses_other", "part_foreign", "agent-2", "task"),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.Handle(ctx, client.Event{Type: "message.part.updated", Properties: foreignProperties}, "ses_1", nil); err != nil {
+	var replies []permissionReply
+	native := delegationPermissionClient(t, nil, &replies)
+	foreign := delegationPermissionRequest(t, "per_foreign", "ses_other", "call_foreign", "agent-2", "task")
+	if err := tracker.Handle(ctx, delegationPermissionEvent(t, foreign), native, "ses_1", &recordingDelegationRequester{}); err != nil {
 		t.Fatalf("foreign session event returned error: %v", err)
 	}
-
-	if _, err := decodeDelegationToolPart(json.RawMessage(`{`)); err == nil || !strings.Contains(err.Error(), "decode delegation tool part") {
-		t.Fatalf("malformed part error=%v", err)
+	if len(replies) != 0 {
+		t.Fatalf("foreign request was replied to: %+v", replies)
 	}
 
-	missingID, err := decodeDelegationToolPart(mustJSON(t, delegationToolPartPayload("ses_1", " ", "agent-2", "task")))
-	if err != nil {
-		t.Fatal(err)
+	missingCall := delegationPermissionRequest(t, "per_missing", "ses_1", "", "agent-2", "task")
+	if err := tracker.Handle(ctx, delegationPermissionEvent(t, missingCall), native, "ses_1", &recordingDelegationRequester{}); err != nil {
+		t.Fatalf("missing call id rejection returned error: %v", err)
 	}
-	if err := tracker.applyPart(ctx, missingID, "ses_1", &recordingDelegationRequester{}); err == nil || !strings.Contains(err.Error(), "missing part id") {
-		t.Fatalf("missing id error=%v", err)
-	}
-
-	missingTarget, err := decodeDelegationToolPart(mustJSON(t, delegationToolPartPayload("ses_1", "part_target", " ", "task")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.applyPart(ctx, missingTarget, "ses_1", &recordingDelegationRequester{}); err == nil || !strings.Contains(err.Error(), "requires targetAgentId") {
-		t.Fatalf("missing target error=%v", err)
+	if len(replies) != 1 || replies[0].response != "reject" {
+		t.Fatalf("missing call id replies=%+v", replies)
 	}
 
-	missingTask, err := decodeDelegationToolPart(mustJSON(t, delegationToolPartPayload("ses_1", "part_task", "agent-2", " ")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.applyPart(ctx, missingTask, "ses_1", &recordingDelegationRequester{}); err == nil || !strings.Contains(err.Error(), "requires task") {
-		t.Fatalf("missing task error=%v", err)
-	}
-
-	withoutCapability, err := decodeDelegationToolPart(mustJSON(t, delegationToolPartPayload("ses_1", "part_capability", "agent-2", "task")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.applyPart(ctx, withoutCapability, "ses_1", nil); err == nil || !strings.Contains(err.Error(), "capability is unavailable") {
-		t.Fatalf("missing capability error=%v", err)
-	}
-}
-
-func TestDelegationToolTrackerIgnoresIncompleteAndForeignHistory(t *testing.T) {
-	tracker := newDelegationToolTracker()
-	ctx := t.Context()
-
-	emptyPartProperties := mustJSON(t, map[string]any{"sessionID": "ses_1"})
-	if err := tracker.Handle(ctx, client.Event{Type: "message.part.updated", Properties: emptyPartProperties}, "ses_1", nil); err != nil {
-		t.Fatalf("event without part returned error: %v", err)
-	}
-
-	foreignPart, err := decodeDelegationToolPart(mustJSON(t, delegationToolPartPayload("ses_other", "part_foreign", "agent-2", "task")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.applyPart(ctx, foreignPart, "ses_1", &recordingDelegationRequester{}); err != nil {
-		t.Fatalf("foreign part returned error: %v", err)
-	}
-
-	irrelevantPart := foreignPart
-	irrelevantPart.SessionID = "ses_1"
-	irrelevantPart.Type = "text"
-	if err := tracker.applyPart(ctx, irrelevantPart, "ses_1", &recordingDelegationRequester{}); err != nil {
-		t.Fatalf("irrelevant part returned error: %v", err)
-	}
-
-	native := delegationHistoryClient(t, "ses_1", []any{
-		map[string]any{
-			"info": map[string]any{"sessionID": "ses_other"},
-			"parts": []any{delegationToolPartPayload("ses_other", "part_history_foreign", "agent-2", "task")},
-		},
-		map[string]any{
-			"info": map[string]any{"sessionID": "ses_1"},
-			"parts": []any{delegationToolPartPayload("", "part_history_local", "agent-2", "task")},
-		},
+	mismatched := delegationPermissionRequest(t, "per_mismatch", "ses_1", "call_1", "agent-2", "task")
+	mismatched.Metadata = mustJSON(t, delegationPermissionMetadata{
+		Tool: delegationToolName, TargetAgentID: "agent-2", Task: "task", CallID: "call_other",
 	})
-	requester := &recordingDelegationRequester{}
-	if err := tracker.Reconcile(ctx, native, "ses_1", requester); err != nil {
-		t.Fatal(err)
+	if err := tracker.Handle(ctx, delegationPermissionEvent(t, mismatched), native, "ses_1", &recordingDelegationRequester{}); err != nil {
+		t.Fatalf("mismatched call id rejection returned error: %v", err)
 	}
-	if len(requester.requests) != 1 || requester.requests[0].RequestKey != "part_history_local" {
-		t.Fatalf("requests=%+v", requester.requests)
+	if len(replies) != 2 || replies[1].response != "reject" {
+		t.Fatalf("mismatched call id replies=%+v", replies)
+	}
+
+	unavailable := delegationPermissionRequest(t, "per_unavailable", "ses_1", "call_2", "agent-2", "task")
+	if err := tracker.Handle(ctx, delegationPermissionEvent(t, unavailable), native, "ses_1", nil); err != nil {
+		t.Fatalf("unavailable capability rejection returned error: %v", err)
+	}
+	if len(replies) != 3 || replies[2].response != "reject" {
+		t.Fatalf("unavailable capability replies=%+v", replies)
 	}
 }
 
-func TestDelegationToolTrackerRejectsMalformedDurableMessageInfo(t *testing.T) {
-	native := delegationHistoryClient(t, "ses_1", []any{
-		map[string]any{
-			"info":  "invalid",
-			"parts": []any{},
-		},
-	})
+func TestDelegationPermissionTrackerRequiresNativeClient(t *testing.T) {
 	tracker := newDelegationToolTracker()
-	err := tracker.Reconcile(t.Context(), native, "ses_1", &recordingDelegationRequester{})
-	if err == nil || !strings.Contains(err.Error(), "decode delegation message info") {
-		t.Fatalf("malformed message info error=%v", err)
-	}
-}
-
-func TestDelegationToolTrackerReconcileRequiresNativeClient(t *testing.T) {
-	tracker := newDelegationToolTracker()
-	if err := tracker.Reconcile(t.Context(), nil, "ses_1", &recordingDelegationRequester{}); err == nil || !strings.Contains(err.Error(), "native client is required") {
+	request := delegationPermissionRequest(t, "per_1", "ses_1", "call_1", "agent-2", "task")
+	if err := tracker.Handle(t.Context(), delegationPermissionEvent(t, request), nil, "ses_1", &recordingDelegationRequester{}); err == nil || !strings.Contains(err.Error(), "native client is required") {
 		t.Fatalf("nil native client error=%v", err)
+	}
+	if err := tracker.Reconcile(t.Context(), nil, "ses_1", &recordingDelegationRequester{}); err == nil || !strings.Contains(err.Error(), "native client is required") {
+		t.Fatalf("nil reconcile client error=%v", err)
 	}
 }
