@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,12 +19,13 @@ import (
 )
 
 func TestDelegationPublicAPIEndToEnd(t *testing.T) {
-	databaseURL := strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_DATABASE_URL"))
-	if databaseURL == "" {
+	baseDatabaseURL := strings.TrimSpace(os.Getenv("AGENT_BOARD_TEST_DATABASE_URL"))
+	if baseDatabaseURL == "" {
 		t.Skip("AGENT_BOARD_TEST_DATABASE_URL is required for delegation API E2E")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	databaseURL := isolatedDelegationAPIDatabase(t, ctx, baseDatabaseURL)
 	database, err := postgres.Open(ctx, databaseURL)
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +141,60 @@ func TestDelegationPublicAPIEndToEnd(t *testing.T) {
 	}
 }
 
+func isolatedDelegationAPIDatabase(t *testing.T, ctx context.Context, baseDatabaseURL string) string {
+	t.Helper()
+	parsed, err := url.Parse(baseDatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	databaseName := fmt.Sprintf("agent_board_delegation_%x", uint64(time.Now().UnixNano()))
+	admin, err := pgx.Connect(ctx, baseDatabaseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+databaseName); err != nil {
+		_ = admin.Close(ctx)
+		t.Fatal(err)
+	}
+	if err := admin.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cleanup, connectErr := pgx.Connect(cleanupCtx, baseDatabaseURL)
+		if connectErr != nil {
+			t.Errorf("connect to drop delegation API database: %v", connectErr)
+			return
+		}
+		defer cleanup.Close(cleanupCtx)
+		if _, dropErr := cleanup.Exec(cleanupCtx, "DROP DATABASE IF EXISTS "+databaseName+" WITH (FORCE)"); dropErr != nil {
+			t.Errorf("drop delegation API database: %v", dropErr)
+		}
+	})
+
+	parsed.Path = "/" + databaseName
+	isolatedURL := parsed.String()
+	schemaConfig, err := pgx.ParseConfig(isolatedURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	schemaConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+	schemaConn, err := pgx.ConnectConfig(ctx, schemaConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer schemaConn.Close(ctx)
+	schema, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "packages", "database", "schema.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := schemaConn.Exec(ctx, string(schema)); err != nil {
+		t.Fatalf("apply isolated delegation API schema: %v", err)
+	}
+	return isolatedURL
+}
+
 func markDelegationAPIParentRunning(t *testing.T, ctx context.Context, conn *pgx.Conn, projectID, runID string) {
 	t.Helper()
 	result, err := conn.Exec(ctx, `UPDATE runs SET status='RUNNING', started_at=COALESCE(started_at, now()), updated_at=now() WHERE project_id=$1 AND id=$2 AND status='QUEUED'`, projectID, runID)
@@ -151,12 +208,7 @@ func markDelegationAPIParentRunning(t *testing.T, ctx context.Context, conn *pgx
 
 func delegationAPIJSON(t *testing.T, router http.Handler, method, path, body string, wantStatus int, target any) {
 	t.Helper()
-	var reader *strings.Reader
-	if body == "" {
-		reader = strings.NewReader("")
-	} else {
-		reader = strings.NewReader(body)
-	}
+	reader := strings.NewReader(body)
 	request := httptest.NewRequest(method, path, reader)
 	if body != "" {
 		request.Header.Set("Content-Type", "application/json")
