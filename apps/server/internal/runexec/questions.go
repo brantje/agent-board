@@ -32,7 +32,7 @@ func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.Saf
 			request.IssueStatus = &issueStatusUpdater{store: statusStore, events: p.events, safe: safe}
 		}
 		if safe.Agent.AllowDelegation {
-			request.Delegation = newDelegationRequester(p.store, safe)
+			request.Delegation = newDelegationRequester(p.store, p.events, safe)
 		}
 	}
 	if !store.SupportsQuestionStore(p.store) {
