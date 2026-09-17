@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
+	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -108,6 +109,7 @@ func TestLocalDelegationHandoffFinalizesWorkspaceBeforeYield(t *testing.T) {
 func TestRunnerDelegationHandoffSyncsWorkspaceBeforeYield(t *testing.T) {
 	repository := initProcessTestRepository(t)
 	safe := processTestSafeContext(repository)
+	safe.Runner = &executioncontext.RunnerContext{ID: "runner-1"}
 	baseStore := &runnerSyncStore{}
 	client := &successfulSyncClient{payload: runnerTransferPayload(t, repository)}
 	processor := newRunnerSyncProcessor(t, repository, safe, baseStore, client)
@@ -144,6 +146,7 @@ func TestRunnerDelegationHandoffSyncsWorkspaceBeforeYield(t *testing.T) {
 func TestDelegationHandoffFailureDoesNotReleaseChild(t *testing.T) {
 	repository := initProcessTestRepository(t)
 	safe := processTestSafeContext(repository)
+	safe.Runner = &executioncontext.RunnerContext{ID: "runner-1"}
 	baseStore := &runnerSyncStore{}
 	client := &failingSyncClient{}
 	processor := newRunnerSyncProcessor(t, repository, safe, baseStore, client)
@@ -177,6 +180,7 @@ func TestDelegationHandoffFailureDoesNotReleaseChild(t *testing.T) {
 func TestDelegationHandoffCancellationSyncsButDoesNotReleaseChild(t *testing.T) {
 	repository := initProcessTestRepository(t)
 	safe := processTestSafeContext(repository)
+	safe.Runner = &executioncontext.RunnerContext{ID: "runner-1"}
 	baseStore := &runnerSyncStore{}
 	client := &successfulSyncClient{payload: runnerTransferPayload(t, repository)}
 	processor := newRunnerSyncProcessor(t, repository, safe, baseStore, client)
