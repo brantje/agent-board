@@ -153,10 +153,8 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		if err := statusTools.ReconcileAttach(ctx, native, session.ID, request.IssueStatus); err != nil {
 			return engine.Result{}, err
 		}
-		if request.Delegation != nil {
-			if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
-				return engine.Result{}, err
-			}
+		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
+			return engine.Result{}, err
 		}
 	}
 	state.seedModelUsage(settings.ProviderID, request.Context.Model.Model, nil)
@@ -189,10 +187,8 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		if err := statusTools.Reconcile(ctx, native, session.ID, request.IssueStatus); err != nil {
 			return engine.Result{}, err
 		}
-		if request.Delegation != nil {
-			if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
-				return engine.Result{}, err
-			}
+		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
+			return engine.Result{}, err
 		}
 		if err := state.flushPendingMessages(ctx); err != nil {
 			return engine.Result{}, err
@@ -280,13 +276,11 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 						reconcileErr,
 					)
 				}
-				if request.Delegation != nil {
-					if reconcileErr := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); reconcileErr != nil {
-						return engine.Result{}, errors.Join(
-							fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
-							reconcileErr,
-						)
-					}
+				if reconcileErr := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); reconcileErr != nil {
+					return engine.Result{}, errors.Join(
+						fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
+						reconcileErr,
+					)
 				}
 				stream, err = reconnectEvents(ctx, native)
 				if err != nil {
@@ -326,10 +320,8 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			if err := statusTools.Handle(ctx, eventRead.event, session.ID, request.IssueStatus); err != nil {
 				return engine.Result{}, err
 			}
-			if request.Delegation != nil {
-				if err := delegationTools.Handle(ctx, eventRead.event, session.ID, request.Delegation); err != nil {
-					return engine.Result{}, err
-				}
+			if err := delegationTools.Handle(ctx, eventRead.event, native, session.ID, request.Delegation); err != nil {
+				return engine.Result{}, err
 			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
 				return engine.Result{}, err
@@ -394,7 +386,10 @@ func serverEnvironment(safe executioncontext.SafeContext, providerID string) (ma
 		}
 	}
 	config := map[string]any{
-		"permission": "allow",
+		"permission": map[string]any{
+			"*":                       "allow",
+			delegationPermissionName: "ask",
+		},
 		"provider": map[string]any{
 			providerID: providerConfig,
 		},
@@ -427,22 +422,15 @@ func launchOpenCodeProcessWithCapabilities(ctx context.Context, launcher engine.
 			if process == nil {
 				return nil, false, fmt.Errorf("opencode engine: attached process is unavailable")
 			}
-			return process, true, nil
+			return reconcileAttachedOpenCodeCapabilities(ctx, launcher, process, host, port, env, issueStatusEnabled, delegationEnabled)
 		}
 		if !errors.Is(err, engine.ErrNotAttachable) {
 			return nil, false, fmt.Errorf("opencode engine: attach existing server: %w", err)
 		}
 	}
-	process, err := launcher.Start(ctx, engine.ProcessRequest{
-		Command:               openCodeServeCommand(host, port, issueStatusEnabled, delegationEnabled),
-		CWD:                   runtimepkg.WorkspaceTarget,
-		Env:                   env,
-		ProviderCredentialEnv: providerCredentialEnv,
-		Kind:                  "tool",
-		Name:                  "opencode-server",
-	})
+	process, err := startOpenCodeProcess(ctx, launcher, host, port, env, issueStatusEnabled, delegationEnabled)
 	if err != nil {
-		return nil, false, fmt.Errorf("opencode engine: start server: %w", err)
+		return nil, false, err
 	}
 	return process, false, nil
 }
