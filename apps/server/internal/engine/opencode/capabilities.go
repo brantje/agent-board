@@ -2,9 +2,11 @@ package opencode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"sync"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
@@ -34,7 +36,18 @@ func reconcileAttachedOpenCodeCapabilities(ctx context.Context, launcher engine.
 	ids, err := native.ToolIDs(ctx)
 	native.CloseIdleConnections()
 	if err != nil {
-		return nil, false, fmt.Errorf("opencode engine: inspect attached tool capabilities: %w", err)
+		var httpErr *client.HTTPError
+		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
+			// Older/reduced OpenCode servers may not expose tool discovery. Reuse
+			// them only when delegation is not required. If delegation is required,
+			// restart so the current run cannot silently lose its server-owned tool.
+			if !delegationEnabled {
+				return process, true, nil
+			}
+			ids = nil
+		} else {
+			return nil, false, fmt.Errorf("opencode engine: inspect attached tool capabilities: %w", err)
+		}
 	}
 	if openCodeToolCapabilitiesMatch(ids, issueStatusEnabled, delegationEnabled) {
 		return process, true, nil

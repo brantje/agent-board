@@ -89,6 +89,9 @@ func (t *delegationToolTracker) Handle(ctx context.Context, event client.Event, 
 }
 
 func (t *delegationToolTracker) Reconcile(ctx context.Context, native *client.Client, sessionID string, requester engine.DelegationRequester) error {
+	if requester == nil {
+		return nil
+	}
 	if native == nil {
 		return fmt.Errorf("opencode engine: native client is required for delegation reconciliation")
 	}
