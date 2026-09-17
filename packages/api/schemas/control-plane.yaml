@@ -215,7 +215,7 @@ RuntimeInput:
     enabled: {type: boolean, default: true}
 Agent:
   type: object
-  required: [id, projectId, name, roleInstructions, engine, modelProfileId, engineSettings, concurrencyLimit, state, createdAt, updatedAt]
+  required: [id, projectId, name, roleInstructions, engine, modelProfileId, engineSettings, concurrencyLimit, allowDelegation, state, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: [string, 'null'], format: uuid}
@@ -225,6 +225,9 @@ Agent:
     modelProfileId: {type: string, format: uuid}
     engineSettings: {$ref: '#/JSONMap'}
     concurrencyLimit: {type: integer, minimum: 1}
+    allowDelegation:
+      type: boolean
+      description: Whether authoritative Runs for this Agent receive the trusted delegation capability.
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED]}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
@@ -239,6 +242,10 @@ AgentInput:
     modelProfileId: {type: string, format: uuid}
     engineSettings: {$ref: '#/JSONMap'}
     concurrencyLimit: {type: integer, minimum: 1, default: 1}
+    allowDelegation:
+      type: boolean
+      default: false
+      description: Allow this Agent's authoritative Runs to delegate bounded work to eligible Agents.
     state: {type: string, enum: [DRAFT, ENABLED, DISABLED, ARCHIVED], default: ENABLED}
 IssueCreator:
   type: object
@@ -352,6 +359,37 @@ Run:
     currentBranch:
       type: [string, 'null']
       description: Live Issue Workspace Git checkout for this Run.
+DelegationCreate:
+  type: object
+  additionalProperties: false
+  required: [targetAgentId, task, requestKey]
+  properties:
+    targetAgentId: {type: string, format: uuid}
+    task:
+      type: string
+      minLength: 1
+      maxLength: 16384
+      description: Explicit bounded task for the delegated Run.
+    requestKey:
+      type: string
+      minLength: 1
+      description: Caller-stable idempotency key scoped to the parent Run.
+Delegation:
+  type: object
+  additionalProperties: false
+  required: [id, projectId, issueId, parentRunId, parentAgentId, targetAgentId, task, delegatedRunId, requestKey, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: string, format: uuid}
+    issueId: {$ref: '#/IssueKey'}
+    parentRunId: {type: string, format: uuid}
+    parentAgentId: {type: string, format: uuid}
+    targetAgentId: {type: string, format: uuid}
+    task: {type: string}
+    delegatedRunId: {type: string, format: uuid}
+    requestKey: {type: string}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
 Assignee:
   type: object
   additionalProperties: false
