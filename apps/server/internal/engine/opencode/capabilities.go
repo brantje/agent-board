@@ -38,10 +38,10 @@ func reconcileAttachedOpenCodeCapabilities(ctx context.Context, launcher engine.
 	if err != nil {
 		var httpErr *client.HTTPError
 		if errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound {
-			// Older/reduced OpenCode servers may not expose tool discovery. Reuse
-			// them only when delegation is not required. If delegation is required,
-			// restart so the current run cannot silently lose its server-owned tool.
-			if !delegationEnabled {
+			// Older/reduced OpenCode servers may not expose tool discovery. They are
+			// safe to reuse only when this execution needs neither Agent Board tool;
+			// otherwise restart so the effective capability files are known-good.
+			if !issueStatusEnabled && !delegationEnabled {
 				return process, true, nil
 			}
 			ids = nil
