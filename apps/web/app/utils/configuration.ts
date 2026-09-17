@@ -138,6 +138,7 @@ export const definitions: Record<ConfigKind, Definition> = {
       reference('modelProfileId', 'Model Profile', 'model-profiles'),
       { key: 'engineSettings', label: 'Engine settings', type: 'json', initial: '{}' },
       { key: 'concurrencyLimit', label: 'Concurrency limit', type: 'number', initial: 1, min: 1, required: true },
+      { key: 'allowDelegation', label: 'Allow delegation', type: 'checkbox', initial: false, help: 'Allow authoritative Runs for this Agent to delegate bounded work to eligible Agents.' },
       { key: 'state', label: 'State', type: 'select', options: ['DRAFT', 'ENABLED', 'DISABLED', 'ARCHIVED'], initial: 'ENABLED' }
     ]
   }
