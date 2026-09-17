@@ -102,6 +102,7 @@ export interface Delegation {
   targetAgentId: string
   task: string
   delegatedRunId: string
+  workspaceAccess: 'WRITE'
   requestKey: string
   createdAt: string
   updatedAt: string
