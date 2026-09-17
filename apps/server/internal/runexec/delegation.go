@@ -7,6 +7,7 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/engine"
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -16,12 +17,16 @@ type delegationRequester struct {
 	safe    executioncontext.SafeContext
 }
 
-func newDelegationRequester(candidate any, safe executioncontext.SafeContext) engine.DelegationRequester {
+func newDelegationRequester(candidate any, events *evidence.Recorder, safe executioncontext.SafeContext) engine.DelegationRequester {
 	controlPlane, ok := candidate.(store.ControlPlaneStore)
 	if !ok {
 		return nil
 	}
-	return &delegationRequester{service: app.New(controlPlane), safe: safe}
+	service := app.New(controlPlane)
+	if events != nil {
+		service.SetEventRecorder(events)
+	}
+	return &delegationRequester{service: service, safe: safe}
 }
 
 func (r *delegationRequester) Delegate(ctx context.Context, request engine.DelegationRequest) (engine.Delegation, error) {
