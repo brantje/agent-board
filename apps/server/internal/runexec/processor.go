@@ -269,6 +269,7 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 	if errors.Is(engineErr, engine.ErrWaitingForInput) {
 		return p.finishWaitingForInput(ctx, safe, instance)
 	}
+	handoff, handoffRequested := engine.AsDelegationHandoff(engineErr)
 
 	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	_, finalizeErr := p.finalizeServerWorkspace(finalizeCtx, safe)
@@ -281,10 +282,14 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
 	}
+	if handoffRequested {
+		if combined := errors.Join(finalizeErr, cleanupErr); combined != nil {
+			return p.failExecution(ctx, safe, combined, &instance.ID)
+		}
+		return p.finishDelegationWorkspaceHandoff(ctx, safe, handoff, &instance.ID)
+	}
 	if combined := errors.Join(engineErr, finalizeErr, cleanupErr); combined != nil {
-		reason := safeFailure(combined)
-		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, &instance.ID, nil)
-		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
+		return p.failExecution(ctx, safe, combined, &instance.ID)
 	}
 	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, &instance.ID, nil); err != nil {
 		return scheduler.Result{}, err
@@ -834,6 +839,7 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 	if errors.Is(engineErr, engine.ErrWaitingForInput) {
 		return p.finishWaitingForInputRunner(ctx, safe)
 	}
+	handoff, handoffRequested := engine.AsDelegationHandoff(engineErr)
 
 	syncCtx, cancelSync := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	syncErr := p.syncWorkspaceFromRunner(syncCtx, safe, runnerID, attachSessionID)
@@ -841,10 +847,14 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
 	}
+	if handoffRequested {
+		if syncErr != nil {
+			return p.failExecution(ctx, safe, syncErr, nil)
+		}
+		return p.finishDelegationWorkspaceHandoff(ctx, safe, handoff, nil)
+	}
 	if combined := errors.Join(engineErr, syncErr); combined != nil {
-		reason := safeFailure(combined)
-		_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, nil, nil)
-		return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
+		return p.failExecution(ctx, safe, combined, nil)
 	}
 	if engineResult.Summary != "" {
 		if err := p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, nil, nil); err != nil {
