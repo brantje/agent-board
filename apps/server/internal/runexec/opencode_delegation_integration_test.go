@@ -58,7 +58,7 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	// #139 owns explicit Workspace handoff. Phase 1 deliberately reuses the
 	// Issue Workspace, so release the parent after its durable request and let
 	// the normal scheduler admit the child without a test-only execution path.
-	if err := fixture.services.ControlPlane.CancelRun(fixture.ctx, project.ID, parentRun.ID); err != nil {
+	if err := fixture.services.CancelRun(fixture.ctx, project.ID, parentRun.ID); err != nil {
 		parent, getErr := fixture.database.GetRun(fixture.ctx, project.ID, parentRun.ID)
 		if getErr != nil || parent.Status != "CANCELLED" {
 			t.Fatalf("cancel parent after delegation: %v (run=%+v getErr=%v)", err, parent, getErr)
