@@ -28,13 +28,16 @@ func TestDelegationOpenAPIPathsAndSchemas(t *testing.T) {
 		t.Fatal(err)
 	}
 	pathsDoc := string(pathsData)
-	for _, operation := range []string{"createRunDelegation", "listRunDelegations", "getRunDelegation"} {
+	for _, operation := range []string{"listRunDelegations", "getRunDelegation"} {
 		if !strings.Contains(pathsDoc, "operationId: "+operation) {
 			t.Fatalf("delegation path document missing %s: %s", operation, pathsData)
 		}
 	}
-	if strings.Count(pathsDoc, "operationId:") != 3 {
-		t.Fatalf("delegation path document must define three operations: %s", pathsData)
+	if strings.Contains(pathsDoc, "operationId: createRunDelegation") || strings.Contains(pathsDoc, "\n  post:") {
+		t.Fatalf("delegation write operation must not be public: %s", pathsData)
+	}
+	if strings.Count(pathsDoc, "operationId:") != 2 {
+		t.Fatalf("delegation path document must define two read operations: %s", pathsData)
 	}
 
 	schemaData, err := os.ReadFile(filepath.Join(root, "schemas", "control-plane.yaml"))
@@ -43,11 +46,9 @@ func TestDelegationOpenAPIPathsAndSchemas(t *testing.T) {
 	}
 	schemaDoc := string(schemaData)
 	for _, fragment := range []string{
-		"DelegationCreate:",
 		"Delegation:",
 		"allowDelegation:",
 		"default: false",
-		"maxLength: 16384",
 	} {
 		if !strings.Contains(schemaDoc, fragment) {
 			t.Fatalf("delegation schema contract missing %q", fragment)

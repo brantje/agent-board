@@ -16,24 +16,6 @@ parentCollection:
                 $ref: ../schemas/control-plane.yaml#/Delegation
       default:
         $ref: ../components/api-components.yaml#/responses/Error
-  post:
-    operationId: createRunDelegation
-    description: Requests bounded work from an eligible Agent through the canonical delegation command. The parent Run and its authoritative Agent/Issue are derived from the path and persisted execution context.
-    requestBody:
-      required: true
-      content:
-        application/json:
-          schema:
-            $ref: ../schemas/control-plane.yaml#/DelegationCreate
-    responses:
-      '201':
-        description: Accepted durable delegation lineage. Execution state remains authoritative on the linked normal Run and scheduler job.
-        content:
-          application/json:
-            schema:
-              $ref: ../schemas/control-plane.yaml#/Delegation
-      default:
-        $ref: ../components/api-components.yaml#/responses/Error
 childResource:
   parameters:
   - $ref: ../components/api-components.yaml#/parameters/ProjectID

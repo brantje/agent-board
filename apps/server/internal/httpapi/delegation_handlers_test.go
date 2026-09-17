@@ -31,28 +31,6 @@ func delegationFixture() store.Delegation {
 	}
 }
 
-func (f *fakeControlPlaneStore) RequestDelegation(_ context.Context, command store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
-	value := delegationFixture()
-	value.ProjectID = command.ProjectID
-	value.ParentRunID = command.ParentRunID
-	value.TargetAgentID = command.TargetAgentID
-	value.Task = command.Task
-	value.RequestKey = command.RequestKey
-	agentID := command.TargetAgentID
-	return store.RequestDelegationResult{
-		Delegation: value,
-		DelegatedRun: store.Run{
-			ID:          delegatedRunID,
-			ProjectID:   command.ProjectID,
-			IssueID:     issueID,
-			WorkspaceID: workspaceID,
-			AgentID:     &agentID,
-			Attempt:     2,
-			Status:      "QUEUED",
-		},
-	}, nil
-}
-
 func (f *fakeControlPlaneStore) GetDelegationByRun(_ context.Context, pid, childRunID string) (store.Delegation, error) {
 	if pid != projectID || childRunID != delegatedRunID {
 		return store.Delegation{}, store.ErrNotFound
@@ -67,25 +45,11 @@ func (f *fakeControlPlaneStore) ListDelegationsByParentRun(_ context.Context, pi
 	return []store.Delegation{delegationFixture()}, nil
 }
 
-func TestDelegationRequestAndInspectionRoutes(t *testing.T) {
+func TestDelegationInspectionRoutesAreReadOnly(t *testing.T) {
 	router := NewRouter(app.New(&fakeControlPlaneStore{}))
-	body := `{"targetAgentId":"` + otherID + `","task":"inspect scheduler ownership","requestKey":"request-1"}`
-	request := httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/runs/"+runID+"/delegations", strings.NewReader(body))
-	response := httptest.NewRecorder()
-	router.ServeHTTP(response, request)
-	if response.Code != http.StatusCreated {
-		t.Fatalf("POST status=%d body=%s", response.Code, response.Body.String())
-	}
-	var created DelegationDTO
-	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
-	}
-	if created.IssueID != issueKey || created.ParentRunID != runID || created.TargetAgentID != otherID || created.DelegatedRunID != delegatedRunID {
-		t.Fatalf("created=%+v", created)
-	}
 
-	request = httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID+"/runs/"+runID+"/delegations", nil)
-	response = httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID+"/runs/"+runID+"/delegations", nil)
+	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
 		t.Fatalf("list status=%d body=%s", response.Code, response.Body.String())
@@ -94,7 +58,7 @@ func TestDelegationRequestAndInspectionRoutes(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &listed); err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || listed[0].ID != created.ID {
+	if len(listed) != 1 || listed[0].ID != delegationFixture().ID {
 		t.Fatalf("listed=%+v", listed)
 	}
 
@@ -110,6 +74,14 @@ func TestDelegationRequestAndInspectionRoutes(t *testing.T) {
 	}
 	if child.ParentRunID != runID || child.DelegatedRunID != delegatedRunID {
 		t.Fatalf("child=%+v", child)
+	}
+
+	body := `{"targetAgentId":"` + otherID + `","task":"must not be public","requestKey":"forged-parent"}`
+	request = httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/runs/"+runID+"/delegations", strings.NewReader(body))
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status=%d want=%d body=%s", response.Code, http.StatusMethodNotAllowed, response.Body.String())
 	}
 }
 
