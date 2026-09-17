@@ -1,9 +1,12 @@
 package runexec
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,116 +19,103 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/engine"
+	"github.com/brantje/agent-board/apps/server/internal/engine/opencode"
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
+	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/httpapi"
 	"github.com/brantje/agent-board/apps/server/internal/repository"
 	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
+	"github.com/brantje/agent-board/apps/server/internal/secrets"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 	"github.com/jackc/pgx/v5"
 )
 
-const delegationExecutionEngineName = "delegation-e2e"
-
-type delegationExecutionEngine struct {
-	targetAgentID string
-
-	mu                  sync.Mutex
-	created             engine.Delegation
-	replayed            engine.Delegation
-	enabledExecutions   int
-	disabledExecutions  int
-	delegatedExecutions int
-}
-
-func (e *delegationExecutionEngine) Name() string { return delegationExecutionEngineName }
-
-func (e *delegationExecutionEngine) Execute(ctx context.Context, request engine.Request) (engine.Result, error) {
-	if request.Context.Delegation != nil {
-		if request.Delegation != nil || request.IssueStatus != nil {
-			return engine.Result{}, fmt.Errorf("delegated execution received authoritative parent capabilities")
-		}
-		e.mu.Lock()
-		e.delegatedExecutions++
-		e.mu.Unlock()
-		return engine.Result{Summary: "delegated execution completed"}, nil
-	}
-
-	if !request.Context.Agent.AllowDelegation {
-		if request.Delegation != nil {
-			return engine.Result{}, fmt.Errorf("disabled parent received delegation capability")
-		}
-		e.mu.Lock()
-		e.disabledExecutions++
-		e.mu.Unlock()
-		return engine.Result{Summary: "delegation capability withheld"}, nil
-	}
-	if request.Delegation == nil {
-		return engine.Result{}, fmt.Errorf("enabled parent did not receive delegation capability")
-	}
-
-	delegationRequest := engine.DelegationRequest{
-		TargetAgentID: e.targetAgentID,
-		Task:          "inspect scheduler ownership",
-		RequestKey:    "execution-e2e-request-1",
-	}
-	created, err := request.Delegation.Delegate(ctx, delegationRequest)
-	if err != nil {
-		return engine.Result{}, err
-	}
-	replayed, err := request.Delegation.Delegate(ctx, delegationRequest)
-	if err != nil {
-		return engine.Result{}, err
-	}
-	if replayed.ID != created.ID || replayed.RunID != created.RunID {
-		return engine.Result{}, fmt.Errorf("idempotent replay created a different delegation: first=%+v replay=%+v", created, replayed)
-	}
-
-	e.mu.Lock()
-	e.created = created
-	e.replayed = replayed
-	e.enabledExecutions++
-	e.mu.Unlock()
-	return engine.Result{Summary: "delegation requested"}, nil
-}
-
-func (e *delegationExecutionEngine) snapshot() (engine.Delegation, engine.Delegation, int, int, int) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.created, e.replayed, e.enabledExecutions, e.disabledExecutions, e.delegatedExecutions
-}
-
-type delegationExecutionSessions struct{}
-
-func (delegationExecutionSessions) Start(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error) {
-	return nil, fmt.Errorf("delegation E2E engine must not launch a subprocess")
-}
-
-func (delegationExecutionSessions) Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error) {
-	return nil, fmt.Errorf("delegation E2E engine must not attach a subprocess")
-}
-
-func (delegationExecutionSessions) ReconcileAll(context.Context) error { return nil }
-
-func (delegationExecutionSessions) CreateRunnerSession(_ context.Context, projectID, runID, runnerID string) (store.ExecutionSession, error) {
-	return store.ExecutionSession{
-		ID:        "delegation-e2e-" + runID,
-		ProjectID: projectID,
-		RunID:     runID,
-		RunnerID:  runnerID,
-		Status:    "PENDING",
-	}, nil
-}
+const (
+	delegationExecutionSessionID = "ses_delegation_e2e"
+	delegationExecutionCallID    = "execution-e2e-request-1"
+	delegationExecutionTask      = "inspect scheduler ownership"
+)
 
 type delegationExecutionRunnerClient struct {
-	mu       sync.Mutex
-	payloads map[string][]byte
+	*launcherClient
+	targetAgentID string
+
+	mu            sync.Mutex
+	payloads      map[string][]byte
+	servers       map[string]*httptest.Server
+	processes     map[string]*launcherDialTransport
+	allowedStarts int
+	deniedStarts  int
+	onceReplies   int
+	rejectReplies int
 }
 
-func newDelegationExecutionRunnerClient() *delegationExecutionRunnerClient {
-	return &delegationExecutionRunnerClient{payloads: make(map[string][]byte)}
+func newDelegationExecutionRunnerClient(targetAgentID string) *delegationExecutionRunnerClient {
+	return &delegationExecutionRunnerClient{
+		launcherClient: newLauncherClient("", "", 0, nil),
+		targetAgentID:  targetAgentID,
+		payloads:       make(map[string][]byte),
+		servers:        make(map[string]*httptest.Server),
+		processes:      make(map[string]*launcherDialTransport),
+	}
+}
+
+func (c *delegationExecutionRunnerClient) Start(_ context.Context, sessionID string, request runner.Request) (runner.ProcessSession, error) {
+	if len(request.Command) < 8 || request.Command[0] != "sh" || request.Command[1] != "-c" || !strings.Contains(request.Command[2], "opencode serve") {
+		return nil, fmt.Errorf("delegation E2E runner received unexpected command: %v", request.Command)
+	}
+	delegationEnabled := strings.TrimSpace(request.Command[7]) != ""
+	native := &delegationExecutionNativeOpenCode{
+		client:            c,
+		targetAgentID:     c.targetAgentID,
+		delegationEnabled: delegationEnabled,
+		events:            make(chan string, 8),
+	}
+	server := httptest.NewServer(native.handler())
+	process := &launcherDialTransport{id: sessionID, done: make(chan struct{})}
+
+	c.mu.Lock()
+	if previous := c.servers[sessionID]; previous != nil {
+		c.mu.Unlock()
+		server.Close()
+		return nil, fmt.Errorf("delegation E2E runner session %s already started", sessionID)
+	}
+	c.servers[sessionID] = server
+	c.processes[sessionID] = process
+	if delegationEnabled {
+		c.allowedStarts++
+	} else {
+		c.deniedStarts++
+	}
+	c.mu.Unlock()
+	return process, nil
+}
+
+func (c *delegationExecutionRunnerClient) Attach(sessionID string) (runner.ProcessSession, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	process := c.processes[sessionID]
+	if process == nil {
+		return nil, nil
+	}
+	return process, nil
+}
+
+func (c *delegationExecutionRunnerClient) DialSession(ctx context.Context, sessionID, network, _ string) (net.Conn, error) {
+	c.mu.Lock()
+	server := c.servers[sessionID]
+	c.mu.Unlock()
+	if server == nil {
+		return nil, fmt.Errorf("delegation E2E runner has no native OpenCode server for session %s", sessionID)
+	}
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		return nil, err
+	}
+	return (&net.Dialer{}).DialContext(ctx, network, parsed.Host)
 }
 
 func (c *delegationExecutionRunnerClient) SendTransfer(_ context.Context, sessionID, _, direction string, payload []byte, progress runner.TransferProgressFunc) error {
@@ -157,6 +147,170 @@ func (*delegationExecutionRunnerClient) ConfirmTransferApplied(context.Context, 
 	return nil
 }
 
+func (c *delegationExecutionRunnerClient) Close() error {
+	c.mu.Lock()
+	servers := make([]*httptest.Server, 0, len(c.servers))
+	for _, server := range c.servers {
+		servers = append(servers, server)
+	}
+	processes := make([]*launcherDialTransport, 0, len(c.processes))
+	for _, process := range c.processes {
+		processes = append(processes, process)
+	}
+	c.mu.Unlock()
+	for _, process := range processes {
+		process.finish()
+	}
+	for _, server := range servers {
+		server.Close()
+	}
+	return c.launcherClient.Close()
+}
+
+func (c *delegationExecutionRunnerClient) recordPermissionReply(reply string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	switch reply {
+	case "once":
+		c.onceReplies++
+	case "reject":
+		c.rejectReplies++
+	}
+}
+
+func (c *delegationExecutionRunnerClient) stats() (int, int, int, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.allowedStarts, c.deniedStarts, c.onceReplies, c.rejectReplies
+}
+
+type delegationExecutionNativeOpenCode struct {
+	client            *delegationExecutionRunnerClient
+	targetAgentID     string
+	delegationEnabled bool
+	events            chan string
+
+	mu          sync.Mutex
+	prompted    bool
+	settled     bool
+	activeUntil time.Time
+}
+
+func (h *delegationExecutionNativeOpenCode) handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
+		delegationExecutionNativeJSON(w, map[string]any{"healthy": true, "version": "delegation-e2e"})
+	})
+	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, _ *http.Request) {
+		delegationExecutionNativeJSON(w, map[string]any{"data": map[string]any{"id": delegationExecutionSessionID, "directory": "/workspace"}})
+	})
+	mux.HandleFunc("GET /event", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+			return
+		}
+		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"properties\":{}}\n\n")
+		flusher.Flush()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			case event := <-h.events:
+				_, _ = io.WriteString(w, "data: "+event+"\n\n")
+				flusher.Flush()
+			}
+		}
+	})
+	mux.HandleFunc("POST /session/"+delegationExecutionSessionID+"/prompt_async", func(w http.ResponseWriter, _ *http.Request) {
+		h.mu.Lock()
+		if h.prompted {
+			h.mu.Unlock()
+			http.Error(w, "prompt already sent", http.StatusConflict)
+			return
+		}
+		h.prompted = true
+		h.activeUntil = time.Now().Add(700 * time.Millisecond)
+		h.mu.Unlock()
+		go func() {
+			time.Sleep(350 * time.Millisecond)
+			event := h.permissionEvent()
+			h.events <- event
+			if h.delegationEnabled {
+				// Replay the same externally visible tool call. The production OpenCode
+				// tracker and canonical request key must keep it to one delegation/Run/job.
+				h.events <- event
+			}
+		}()
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
+		h.mu.Lock()
+		active := h.prompted && (time.Now().Before(h.activeUntil) || !h.settled)
+		h.mu.Unlock()
+		if active {
+			delegationExecutionNativeJSON(w, map[string]any{delegationExecutionSessionID: map[string]any{"type": "busy"}})
+			return
+		}
+		delegationExecutionNativeJSON(w, map[string]any{})
+	})
+	mux.HandleFunc("GET /question", func(w http.ResponseWriter, _ *http.Request) {
+		delegationExecutionNativeJSON(w, []any{})
+	})
+	mux.HandleFunc("GET /permission", func(w http.ResponseWriter, _ *http.Request) {
+		delegationExecutionNativeJSON(w, []any{})
+	})
+	mux.HandleFunc("POST /permission/per_delegation_e2e/reply", func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Reply string `json:"reply"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid permission reply", http.StatusBadRequest)
+			return
+		}
+		h.mu.Lock()
+		h.settled = true
+		h.mu.Unlock()
+		h.client.recordPermissionReply(payload.Reply)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /provider", func(w http.ResponseWriter, _ *http.Request) {
+		delegationExecutionNativeJSON(w, map[string]any{"all": []any{}})
+	})
+	mux.HandleFunc("GET /session/"+delegationExecutionSessionID+"/message", func(w http.ResponseWriter, _ *http.Request) {
+		delegationExecutionNativeJSON(w, []any{})
+	})
+	return mux
+}
+
+func (h *delegationExecutionNativeOpenCode) permissionEvent() string {
+	permission := map[string]any{
+		"id":         "per_delegation_e2e",
+		"sessionID":  delegationExecutionSessionID,
+		"permission": "agent_board_delegate",
+		"patterns":   []string{delegationExecutionCallID},
+		"metadata": map[string]any{
+			"tool":          "delegate_task",
+			"targetAgentId": h.targetAgentID,
+			"task":          delegationExecutionTask,
+			"callID":        delegationExecutionCallID,
+		},
+		"tool": map[string]any{"messageID": "msg_delegation_e2e", "callID": delegationExecutionCallID},
+	}
+	event, _ := json.Marshal(map[string]any{
+		"id":         "evt_delegation_e2e",
+		"type":       "permission.asked",
+		"properties": permission,
+	})
+	return string(event)
+}
+
+func delegationExecutionNativeJSON(w http.ResponseWriter, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(value)
+}
+
 type delegationExecutionRunnerConnector struct {
 	client runnerClient
 }
@@ -178,7 +332,16 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close()
-	database.SetEngineRegistered(func(name string) bool { return name == delegationExecutionEngineName })
+	database.SetEngineRegistered(func(name string) bool { return name == opencode.Name })
+
+	cipher, err := secrets.NewAESGCM(1, map[int][]byte{1: bytes.Repeat([]byte{0x5a}, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretService, err := secrets.NewService(database, cipher)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	repositoryPath := createScriptedFixtureRepository(t, ctx)
 	repositoryPolicy, err := repository.NewPolicy([]string{filepath.Dir(repositoryPath)})
@@ -193,7 +356,7 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	services, err := app.NewServicesWithRuntimes(database, materializer, nil)
+	services, err := app.NewServicesWithRuntimes(database, materializer, nil, secretService)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,23 +366,23 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 		}
 	}()
 
-	router := httpapi.NewRouter(services.ControlPlane)
+	router := httpapi.NewRouterWithSecrets(services.ControlPlane, secretService)
 	prefix := fmt.Sprintf("D%08X", uint32(time.Now().UnixNano()))
 	var project httpapi.ProjectDTO
 	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects", fmt.Sprintf(`{"name":"Delegation execution E2E","issuePrefix":"%s","repositoryPath":%q,"defaultBranch":"main","workflowSettings":{}}`, prefix, repositoryPath), http.StatusCreated, &project)
 
 	var provider httpapi.ProviderDTO
-	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects/"+project.ID+"/providers", `{"name":"Provider","kind":"test","enabled":true,"safeMetadata":{}}`, http.StatusCreated, &provider)
+	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects/"+project.ID+"/providers", `{"name":"Provider","kind":"openrouter","credential":"delegation-e2e-provider-key","enabled":true,"safeMetadata":{}}`, http.StatusCreated, &provider)
 	var model httpapi.ModelProfileDTO
-	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects/"+project.ID+"/model-profiles", fmt.Sprintf(`{"providerId":"%s","name":"Model","model":"test","generationSettings":{},"enabled":true}`, provider.ID), http.StatusCreated, &model)
+	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects/"+project.ID+"/model-profiles", fmt.Sprintf(`{"providerId":"%s","name":"Model","model":"test-model","generationSettings":{},"enabled":true}`, provider.ID), http.StatusCreated, &model)
 
 	var parent httpapi.AgentDTO
-	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects/"+project.ID+"/agents", fmt.Sprintf(`{"name":"Parent","roleInstructions":"delegate bounded work","engine":%q,"modelProfileId":"%s","engineSettings":{},"concurrencyLimit":1,"allowDelegation":true,"state":"ENABLED"}`, delegationExecutionEngineName, model.ID), http.StatusCreated, &parent)
+	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects/"+project.ID+"/agents", fmt.Sprintf(`{"name":"Parent","roleInstructions":"delegate bounded work","engine":%q,"modelProfileId":"%s","engineSettings":{},"concurrencyLimit":1,"allowDelegation":true,"state":"ENABLED"}`, opencode.Name, model.ID), http.StatusCreated, &parent)
 	if !parent.AllowDelegation {
 		t.Fatal("public Agent create did not persist allowDelegation")
 	}
 	var target httpapi.AgentDTO
-	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects/"+project.ID+"/agents", fmt.Sprintf(`{"name":"Target","roleInstructions":"perform bounded work","engine":%q,"modelProfileId":"%s","engineSettings":{},"concurrencyLimit":1,"allowDelegation":false,"state":"ENABLED"}`, delegationExecutionEngineName, model.ID), http.StatusCreated, &target)
+	delegationExecutionJSON(t, router, http.MethodPost, "/api/projects/"+project.ID+"/agents", fmt.Sprintf(`{"name":"Target","roleInstructions":"perform bounded work","engine":%q,"modelProfileId":"%s","engineSettings":{},"concurrencyLimit":1,"allowDelegation":false,"state":"ENABLED"}`, opencode.Name, model.ID), http.StatusCreated, &target)
 
 	runnerRecord, err := database.CreateRunner(ctx, store.Runner{Name: "Delegation E2E Runner", TokenHash: make([]byte, 32)})
 	if err != nil {
@@ -229,7 +392,7 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	database.SetRunnerCandidates(func(name string) []string {
-		if name != delegationExecutionEngineName {
+		if name != opencode.Name {
 			return nil
 		}
 		return []string{runnerRecord.ID}
@@ -263,17 +426,33 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testEngine := &delegationExecutionEngine{targetAgentID: target.ID}
-	engines, err := engine.NewRegistry(testEngine)
+	engines, err := engine.NewRegistry(opencode.New())
 	if err != nil {
 		t.Fatal(err)
 	}
-	runnerClient := newDelegationExecutionRunnerClient()
+	runnerClient := newDelegationExecutionRunnerClient(target.ID)
+	defer func() {
+		if err := runnerClient.Close(); err != nil {
+			t.Errorf("close delegation E2E runner: %v", err)
+		}
+	}()
+	transportSessions, err := newLauncherExecutionSessionService(services.ExecutionStore, runnerClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparer, err := executioncontext.NewPreparer(services.ExecutionContext, secretService, services.ExecutionStore, services.Redaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authorizedSessions, err := app.NewAuthorizedExecutionSessionService(transportSessions, preparer)
+	if err != nil {
+		t.Fatal(err)
+	}
 	processor, err := NewProcessor(
 		services.ExecutionStore,
 		services.ExecutionContext,
 		services.RuntimeInstances,
-		delegationExecutionSessions{},
+		authorizedSessions,
 		engines,
 		recorder,
 		output,
@@ -315,34 +494,28 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 
 	parentTerminal := waitForDelegationExecutionRun(t, ctx, router, project.ID, parentRun.ID)
 	if parentTerminal.Status != "READY_FOR_REVIEW" {
-		t.Fatalf("parent Run status=%s want READY_FOR_REVIEW", parentTerminal.Status)
-	}
-	created, replayed, enabledExecutions, disabledExecutions, delegatedExecutions := testEngine.snapshot()
-	if enabledExecutions != 1 || disabledExecutions != 0 || delegatedExecutions != 0 {
-		t.Fatalf("unexpected Engine executions enabled=%d disabled=%d delegated=%d", enabledExecutions, disabledExecutions, delegatedExecutions)
-	}
-	if created.ID == "" || created.RunID == "" || replayed.ID != created.ID || replayed.RunID != created.RunID {
-		t.Fatalf("Engine delegation replay was not stable: first=%+v replay=%+v", created, replayed)
+		t.Fatalf("parent Run status=%s failure=%v want READY_FOR_REVIEW", parentTerminal.Status, parentTerminal.FailureReason)
 	}
 
 	var listed []httpapi.DelegationDTO
 	delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+project.ID+"/runs/"+parentRun.ID+"/delegations", "", http.StatusOK, &listed)
-	if len(listed) != 1 || listed[0].ID != created.ID || listed[0].DelegatedRunID != created.RunID {
+	if len(listed) != 1 || listed[0].RequestKey != delegationExecutionCallID || listed[0].TargetAgentID != target.ID {
 		t.Fatalf("parent delegation list=%+v", listed)
 	}
+	created := listed[0]
 	var lineage httpapi.DelegationDTO
-	delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+project.ID+"/runs/"+created.RunID+"/delegation", "", http.StatusOK, &lineage)
-	if lineage.ParentRunID != parentRun.ID || lineage.ParentAgentID != parent.ID || lineage.TargetAgentID != target.ID || lineage.IssueID != issue.ID {
+	delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+project.ID+"/runs/"+created.DelegatedRunID+"/delegation", "", http.StatusOK, &lineage)
+	if lineage.ID != created.ID || lineage.ParentRunID != parentRun.ID || lineage.ParentAgentID != parent.ID || lineage.TargetAgentID != target.ID || lineage.IssueID != issue.ID {
 		t.Fatalf("child lineage=%+v", lineage)
 	}
 
-	childTerminal := waitForDelegationExecutionRun(t, ctx, router, project.ID, created.RunID)
+	childTerminal := waitForDelegationExecutionRun(t, ctx, router, project.ID, created.DelegatedRunID)
 	if childTerminal.Status != "READY_FOR_REVIEW" {
-		t.Fatalf("delegated Run status=%s want READY_FOR_REVIEW", childTerminal.Status)
+		t.Fatalf("delegated Run status=%s failure=%v want READY_FOR_REVIEW", childTerminal.Status, childTerminal.FailureReason)
 	}
-	_, _, enabledExecutions, disabledExecutions, delegatedExecutions = testEngine.snapshot()
-	if enabledExecutions != 1 || disabledExecutions != 0 || delegatedExecutions != 1 {
-		t.Fatalf("unexpected Engine executions after child enabled=%d disabled=%d delegated=%d", enabledExecutions, disabledExecutions, delegatedExecutions)
+	allowedStarts, deniedStarts, onceReplies, rejectReplies := runnerClient.stats()
+	if allowedStarts != 1 || deniedStarts != 1 || onceReplies < 2 || rejectReplies != 1 {
+		t.Fatalf("unexpected OpenCode tool-path stats allowed=%d denied=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, onceReplies, rejectReplies)
 	}
 
 	var runs []httpapi.RunDTO
@@ -353,15 +526,15 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 			continue
 		}
 		children++
-		if run.ID != created.RunID || run.WorkspaceID != parentRun.WorkspaceID || run.Status != "READY_FOR_REVIEW" {
+		if run.ID != created.DelegatedRunID || run.WorkspaceID != parentRun.WorkspaceID || run.Status != "READY_FOR_REVIEW" {
 			t.Fatalf("ordinary delegated Run=%+v", run)
 		}
 	}
 	if children != 1 {
-		t.Fatalf("delegated Run count=%d want 1", children)
+		t.Fatalf("delegated Run count=%d want 1 after replayed delegate_task permission", children)
 	}
 
-	jobCount, jobState := delegationExecutionStartJob(t, ctx, databaseURL, project.ID, created.RunID)
+	jobCount, jobState := delegationExecutionStartJob(t, ctx, databaseURL, project.ID, created.DelegatedRunID)
 	if jobCount != 1 || jobState != "DONE" {
 		t.Fatalf("delegated START scheduler jobs count=%d state=%q want one DONE job", jobCount, jobState)
 	}
@@ -387,11 +560,11 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	}
 	deniedTerminal := waitForDelegationExecutionRun(t, ctx, router, project.ID, deniedExecution.ActiveRun.ID)
 	if deniedTerminal.Status != "READY_FOR_REVIEW" {
-		t.Fatalf("disabled-policy parent status=%s want READY_FOR_REVIEW", deniedTerminal.Status)
+		t.Fatalf("disabled-policy parent status=%s failure=%v want READY_FOR_REVIEW", deniedTerminal.Status, deniedTerminal.FailureReason)
 	}
-	_, _, enabledExecutions, disabledExecutions, delegatedExecutions = testEngine.snapshot()
-	if enabledExecutions != 1 || disabledExecutions != 1 || delegatedExecutions != 1 {
-		t.Fatalf("disabled execution did not observe withheld capability: enabled=%d disabled=%d delegated=%d", enabledExecutions, disabledExecutions, delegatedExecutions)
+	allowedStarts, deniedStarts, onceReplies, rejectReplies = runnerClient.stats()
+	if allowedStarts != 1 || deniedStarts != 2 || onceReplies < 2 || rejectReplies != 2 {
+		t.Fatalf("disabled execution did not reject forged delegate_task path: allowed=%d denied=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, onceReplies, rejectReplies)
 	}
 	var denied []httpapi.DelegationDTO
 	delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+project.ID+"/runs/"+deniedExecution.ActiveRun.ID+"/delegations", "", http.StatusOK, &denied)
