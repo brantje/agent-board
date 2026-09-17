@@ -12,6 +12,10 @@ import (
 	runtimepkg "github.com/brantje/agent-board/apps/server/internal/runtime"
 )
 
+type attachedProcessResetter interface {
+	ResetAttachedProcess()
+}
+
 func reconcileAttachedOpenCodeCapabilities(ctx context.Context, launcher engine.ProcessLauncher, process engine.Process, host, port string, env map[string]string, issueStatusEnabled, delegationEnabled bool) (engine.Process, bool, error) {
 	connector, ok := process.(engine.SessionConnector)
 	if !ok {
@@ -42,6 +46,9 @@ func reconcileAttachedOpenCodeCapabilities(ctx context.Context, launcher engine.
 		return nil, false, fmt.Errorf("opencode engine: restart server for capability change: %w", err)
 	}
 	waitDrained(drained, serviceStopTimeout)
+	if resetter, ok := launcher.(attachedProcessResetter); ok {
+		resetter.ResetAttachedProcess()
+	}
 	fresh, err := startOpenCodeProcess(ctx, launcher, host, port, env, issueStatusEnabled, delegationEnabled)
 	if err != nil {
 		return nil, false, err
