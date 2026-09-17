@@ -27,6 +27,11 @@ func (r *recordingDelegationRequester) Delegate(_ context.Context, request engin
 	return engine.Delegation{ID: "delegation-1", RunID: "run-2"}, nil
 }
 
+type permissionReply struct {
+	requestID string
+	response  string
+}
+
 func TestOpenCodeServeCommandInstallsOnlyAvailableTools(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -57,38 +62,57 @@ func TestOpenCodeServeCommandInstallsOnlyAvailableTools(t *testing.T) {
 			}
 		})
 	}
+	if !strings.Contains(delegationToolSource, "context.ask") || !strings.Contains(delegationToolSource, delegationPermissionName) || !strings.Contains(delegationToolSource, "context.callID") {
+		t.Fatalf("delegation tool source does not synchronously bind to Agent Board: %s", delegationToolSource)
+	}
 }
 
-func TestDelegationToolCompletionUsesPartIDAsRequestKeyOnce(t *testing.T) {
+func TestDelegationPermissionSuccessCompletesOnlyAfterCanonicalRequest(t *testing.T) {
+	var replies []permissionReply
+	native := delegationPermissionClient(t, nil, &replies)
 	tracker := newDelegationToolTracker()
 	requester := &recordingDelegationRequester{}
-	event := delegationToolEvent(t, "ses_1", "part_1", "agent-2", "inspect scheduler ownership")
+	event := delegationPermissionEvent(t, delegationPermissionRequest(t, "per_1", "ses_1", "call_1", "agent-2", "inspect scheduler ownership"))
 
-	if err := tracker.Handle(t.Context(), event, "ses_1", requester); err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.Handle(t.Context(), event, "ses_1", requester); err != nil {
+	if err := tracker.Handle(t.Context(), event, native, "ses_1", requester); err != nil {
 		t.Fatal(err)
 	}
 	if len(requester.requests) != 1 {
 		t.Fatalf("requests=%v", requester.requests)
 	}
 	got := requester.requests[0]
-	if got.TargetAgentID != "agent-2" || got.Task != "inspect scheduler ownership" || got.RequestKey != "part_1" {
+	if got.TargetAgentID != "agent-2" || got.Task != "inspect scheduler ownership" || got.RequestKey != "call_1" {
 		t.Fatalf("request=%+v", got)
+	}
+	if len(replies) != 1 || replies[0].requestID != "per_1" || replies[0].response != "once" {
+		t.Fatalf("permission replies=%+v", replies)
 	}
 }
 
-func TestDelegationToolReconcileReplaysEveryDurableCompletion(t *testing.T) {
-	native := delegationHistoryClient(t, "ses_1", []any{
-		map[string]any{
-			"info": map[string]any{"sessionID": "ses_1"},
-			"parts": []any{
-				delegationToolPartPayload("ses_1", "part_1", "agent-2", "task one"),
-				delegationToolPartPayload("ses_1", "part_2", "agent-3", "task two"),
-			},
-		},
-	})
+func TestDelegationPermissionRejectionSurfacesAsToolFailure(t *testing.T) {
+	var replies []permissionReply
+	native := delegationPermissionClient(t, nil, &replies)
+	tracker := newDelegationToolTracker()
+	requester := &recordingDelegationRequester{err: errors.New("self delegation is not allowed")}
+	event := delegationPermissionEvent(t, delegationPermissionRequest(t, "per_1", "ses_1", "call_1", "agent-2", "task"))
+
+	if err := tracker.Handle(t.Context(), event, native, "ses_1", requester); err != nil {
+		t.Fatalf("backend rejection should be returned to OpenCode via permission rejection, got %v", err)
+	}
+	if len(requester.requests) != 1 {
+		t.Fatalf("requests=%v", requester.requests)
+	}
+	if len(replies) != 1 || replies[0].response != "reject" {
+		t.Fatalf("permission replies=%+v", replies)
+	}
+}
+
+func TestDelegationPermissionReplayIsIdempotent(t *testing.T) {
+	pending := []client.PermissionRequest{
+		delegationPermissionRequest(t, "per_1", "ses_1", "call_1", "agent-2", "task"),
+	}
+	var replies []permissionReply
+	native := delegationPermissionClient(t, pending, &replies)
 	tracker := newDelegationToolTracker()
 	requester := &recordingDelegationRequester{}
 
@@ -98,26 +122,29 @@ func TestDelegationToolReconcileReplaysEveryDurableCompletion(t *testing.T) {
 	if err := tracker.Reconcile(t.Context(), native, "ses_1", requester); err != nil {
 		t.Fatal(err)
 	}
-	if len(requester.requests) != 2 {
-		t.Fatalf("requests=%v", requester.requests)
+	if len(requester.requests) != 1 || requester.requests[0].RequestKey != "call_1" {
+		t.Fatalf("requests=%+v", requester.requests)
 	}
-	if requester.requests[0].RequestKey != "part_1" || requester.requests[1].RequestKey != "part_2" {
-		t.Fatalf("request keys=%v", requester.requests)
+	if len(replies) != 2 || replies[0].response != "once" || replies[1].response != "once" {
+		t.Fatalf("permission replies=%+v", replies)
 	}
 }
 
-func TestDelegationToolFailureIsRetried(t *testing.T) {
+func TestDelegationCompletedToolEventDoesNotCreateAnotherRequest(t *testing.T) {
 	tracker := newDelegationToolTracker()
-	requester := &recordingDelegationRequester{err: errors.New("conflict")}
-	event := delegationToolEvent(t, "ses_1", "part_1", "agent-2", "task")
-	for attempt := 0; attempt < 2; attempt++ {
-		err := tracker.Handle(t.Context(), event, "ses_1", requester)
-		if err == nil || !strings.Contains(err.Error(), "conflict") {
-			t.Fatalf("attempt %d err=%v", attempt+1, err)
-		}
+	requester := &recordingDelegationRequester{}
+	event := client.Event{Type: "message.part.updated", Properties: mustJSON(t, map[string]any{
+		"sessionID": "ses_1",
+		"part": map[string]any{
+			"id": "part_1", "sessionID": "ses_1", "type": "tool", "tool": delegationToolName,
+			"state": map[string]any{"status": "completed", "input": map[string]any{"targetAgentId": "agent-2", "task": "task"}},
+		},
+	})}
+	if err := tracker.Handle(t.Context(), event, nil, "ses_1", requester); err != nil {
+		t.Fatal(err)
 	}
-	if len(requester.requests) != 2 {
-		t.Fatalf("requests=%v", requester.requests)
+	if len(requester.requests) != 0 {
+		t.Fatalf("completed tool replay created delegation requests: %+v", requester.requests)
 	}
 }
 
@@ -149,14 +176,25 @@ func TestInitialTaskPromptAdvertisesDelegationForAuthorizedParent(t *testing.T) 
 	}
 }
 
-func delegationHistoryClient(t *testing.T, sessionID string, messages []any) *client.Client {
+func delegationPermissionClient(t *testing.T, pending []client.PermissionRequest, replies *[]permissionReply) *client.Client {
 	t.Helper()
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /session/"+sessionID+"/message", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /permission", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(messages); err != nil {
+		if err := json.NewEncoder(w).Encode(pending); err != nil {
 			t.Fatal(err)
 		}
+	})
+	mux.HandleFunc("POST /permission/{requestID}/reply", func(w http.ResponseWriter, r *http.Request) {
+		var payload struct {
+			Reply string `json:"reply"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		*replies = append(*replies, permissionReply{requestID: r.PathValue("requestID"), response: payload.Reply})
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("true"))
 	})
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
@@ -167,30 +205,23 @@ func delegationHistoryClient(t *testing.T, sessionID string, messages []any) *cl
 	return native
 }
 
-func delegationToolEvent(t *testing.T, sessionID, partID, targetAgentID, task string) client.Event {
+func delegationPermissionEvent(t *testing.T, permission client.PermissionRequest) client.Event {
 	t.Helper()
-	properties, err := json.Marshal(map[string]any{
-		"sessionID": sessionID,
-		"part":      delegationToolPartPayload(sessionID, partID, targetAgentID, task),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	return client.Event{Type: "message.part.updated", Properties: properties}
+	return client.Event{Type: "permission.asked", Properties: mustJSON(t, permission)}
 }
 
-func delegationToolPartPayload(sessionID, partID, targetAgentID, task string) map[string]any {
-	return map[string]any{
-		"id":        partID,
-		"sessionID": sessionID,
-		"type":      "tool",
-		"tool":      delegationToolName,
-		"state": map[string]any{
-			"status": "completed",
-			"input": map[string]any{
-				"targetAgentId": targetAgentID,
-				"task":          task,
-			},
-		},
+func delegationPermissionRequest(t *testing.T, requestID, sessionID, callID, targetAgentID, task string) client.PermissionRequest {
+	t.Helper()
+	metadata := mustJSON(t, delegationPermissionMetadata{
+		Tool: delegationToolName, TargetAgentID: targetAgentID, Task: task, CallID: callID,
+	})
+	request := client.PermissionRequest{
+		ID: requestID, SessionID: sessionID, Permission: delegationPermissionName,
+		Patterns: []string{callID}, Metadata: metadata,
 	}
+	request.Tool = &struct {
+		MessageID string `json:"messageID"`
+		CallID    string `json:"callID"`
+	}{MessageID: "msg_1", CallID: callID}
+	return request
 }
