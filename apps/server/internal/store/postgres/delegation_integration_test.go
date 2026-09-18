@@ -74,6 +74,46 @@ func TestRequestDelegationCreatesOneNormalRunAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestGetDelegationByContinuationJobUsesExactParentResumeJob(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "Inspect continuation lookup.", RequestKey: "continuation-lookup",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var jobID string
+	if err := f.store.pool.QueryRow(ctx, `
+		INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key)
+		VALUES ($1, $2, 'RESUME', 'QUEUED', $3)
+		RETURNING id::text
+	`, f.project.ID, f.parentRun.ID, "delegation:"+created.Delegation.ID+":resume").Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE delegations
+		SET continuation_job_id=$3
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, created.Delegation.ID, jobID); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := f.store.GetDelegationByContinuationJob(ctx, f.project.ID, f.parentRun.ID, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != created.Delegation.ID || got.ContinuationJobID == nil || *got.ContinuationJobID != jobID {
+		t.Fatalf("delegation=%+v want id=%s continuationJob=%s", got, created.Delegation.ID, jobID)
+	}
+
+	if _, err := f.store.GetDelegationByContinuationJob(ctx, f.project.ID, f.parentRun.ID, "99999999-9999-4999-8999-999999999999"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing continuation err=%v want not found", err)
+	}
+}
+
 func TestRequestDelegationRejectsPolicySelfActiveAndChangedRetry(t *testing.T) {
 	t.Run("policy disabled", func(t *testing.T) {
 		f := newDelegationFixture(t, false)
