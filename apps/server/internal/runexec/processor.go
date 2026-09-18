@@ -319,6 +319,16 @@ func (p *Processor) runEngineWithContinuation(ctx context.Context, run store.Run
 			return scheduler.Result{}, uncertaintyErr
 		}
 	}
+	if engineErr == nil || handoffRequested {
+		boundary := "completed"
+		if handoffRequested {
+			boundary = "delegation_handoff"
+		}
+		if err := p.record(ctx, safe, "engine.execution.completed", map[string]any{"boundary": boundary}, &instance.ID, nil); err != nil {
+			cleanupErr := p.cleanupRuntime(ctx, safe, instance)
+			return p.failExecution(ctx, safe, errors.Join(err, cleanupErr), &instance.ID)
+		}
+	}
 
 	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	_, finalizeErr := p.finalizeServerWorkspace(finalizeCtx, safe)
@@ -425,7 +435,7 @@ func (p *Processor) Reconcile(ctx context.Context, claim *store.SchedulerAdmissi
 	// finalized from one authoritative terminal session, while a parent may finish
 	// a previously recorded Workspace handoff. All ambiguous ownership remains
 	// UNKNOWN.
-	outcome, reason, recovered, err := p.recoverDelegatedTerminalRun(ctx, claim.Run, sessions)
+	outcome, reason, recovered, err := p.recoverDelegatedTerminalRun(ctx, claim.Run, sessions, false)
 	if err != nil {
 		return store.SchedulerReconciliationUnknown, nil, err
 	}
@@ -495,7 +505,7 @@ func (p *Processor) reconcileDelegatedRunWithTerminalParent(ctx context.Context,
 	if len(liveExecutionSessionsForRun(matching, run.ID)) != 0 {
 		return store.SchedulerReconciliationUnknown, nil, nil
 	}
-	outcome, reason, recovered, err := p.recoverDelegatedTerminalRun(ctx, run, matching)
+	outcome, reason, recovered, err := p.recoverDelegatedTerminalRun(ctx, run, matching, true)
 	if err != nil {
 		return store.SchedulerReconciliationUnknown, nil, err
 	}
@@ -531,7 +541,7 @@ func liveExecutionSessionsForRun(sessions []store.ExecutionSession, runID string
 
 const delegationRecoveryEventPageSize = 500
 
-func (p *Processor) recoverDelegatedTerminalRun(ctx context.Context, run store.Run, sessions []store.ExecutionSession) (store.SchedulerReconciliationOutcome, *string, bool, error) {
+func (p *Processor) recoverDelegatedTerminalRun(ctx context.Context, run store.Run, sessions []store.ExecutionSession, cancellationAuthoritative bool) (store.SchedulerReconciliationOutcome, *string, bool, error) {
 	recovery, ok := p.store.(delegatedTerminalRecoveryStore)
 	if !ok {
 		return "", nil, false, nil
@@ -579,13 +589,13 @@ func (p *Processor) recoverDelegatedTerminalRun(ctx context.Context, run store.R
 			return store.SchedulerReconciliationUnknown, nil, true, err
 		}
 	}
-	switch session.Status {
-	case "COMPLETED":
+	switch recoveredExecutionOutcome(session, events, "completed", cancellationAuthoritative) {
+	case recoveredExecutionSucceeded:
 		return store.SchedulerReconciliationCompleted, nil, true, nil
-	case "FAILED":
+	case recoveredExecutionFailed:
 		reason := delegatedRecoveryFailureReason(events)
 		return store.SchedulerReconciliationFailed, &reason, true, nil
-	case "CANCELLED":
+	case recoveredExecutionCancelled:
 		return store.SchedulerReconciliationCancelled, nil, true, nil
 	default:
 		return store.SchedulerReconciliationUnknown, nil, true, nil
@@ -612,6 +622,49 @@ func terminalDelegatedExecutionSession(sessions []store.ExecutionSession, runID 
 		candidate = session
 	}
 	return candidate, candidate.ID != ""
+}
+
+type recoveredExecutionState string
+
+const (
+	recoveredExecutionUnknown   recoveredExecutionState = "unknown"
+	recoveredExecutionSucceeded recoveredExecutionState = "succeeded"
+	recoveredExecutionFailed    recoveredExecutionState = "failed"
+	recoveredExecutionCancelled recoveredExecutionState = "cancelled"
+)
+
+func recoveredExecutionOutcome(session store.ExecutionSession, events []store.Event, successBoundary string, cancellationAuthoritative bool) recoveredExecutionState {
+	switch session.Status {
+	case "COMPLETED":
+		return recoveredExecutionSucceeded
+	case "FAILED":
+		return recoveredExecutionFailed
+	case "CANCELLED":
+		if cancellationAuthoritative || hasRunEvent(events, "run.cancellation_requested") {
+			return recoveredExecutionCancelled
+		}
+		for _, event := range events {
+			if event.Type != "engine.execution.completed" {
+				continue
+			}
+			var payload struct {
+				Boundary string `json:"boundary"`
+			}
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.Boundary == successBoundary {
+				return recoveredExecutionSucceeded
+			}
+		}
+	}
+	return recoveredExecutionUnknown
+}
+
+func hasRunEvent(events []store.Event, eventType string) bool {
+	for _, event := range events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
 }
 
 func delegationWorkspaceAcceptedEvidence(events []store.Event, delegationID string) bool {
@@ -680,13 +733,12 @@ func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run s
 		if !completed {
 			continue
 		}
-		// A durable tool completion and Workspace hand-back are not enough when
-		// cancellation or failure won the execution boundary. Only a uniquely
-		// completed authoritative parent Execution Session may finish handoff
-		// recovery; FAILED/CANCELLED sessions remain fail-closed even if their
-		// cleanup synchronized trustworthy partial work.
-		session, ok := completedDelegationExecutionSession(sessions, run.ID)
-		if !ok {
+		// ExecutionSession status is transport state. In particular OpenCode may
+		// intentionally terminate its service process after a successful handoff,
+		// which persists as CANCELLED. Only the durable logical Engine boundary may
+		// reinterpret that transport status as a successful handoff.
+		session, ok := terminalDelegatedExecutionSession(sessions, run.ID)
+		if !ok || recoveredExecutionOutcome(session, events, "delegation_handoff", false) != recoveredExecutionSucceeded {
 			continue
 		}
 		if !synchronized {
@@ -774,23 +826,6 @@ func delegationRecoveryEvidence(events []store.Event, delegation store.Delegatio
 		}
 	}
 	return completedSequence != 0, false
-}
-
-func completedDelegationExecutionSession(sessions []store.ExecutionSession, runID string) (store.ExecutionSession, bool) {
-	var candidate store.ExecutionSession
-	for _, session := range sessions {
-		if session.RunID != runID || session.Status != "COMPLETED" {
-			continue
-		}
-		if strings.TrimSpace(session.RunnerID) == "" && strings.TrimSpace(session.RuntimeInstanceID) == "" {
-			continue
-		}
-		if candidate.ID != "" && candidate.ID != session.ID {
-			return store.ExecutionSession{}, false
-		}
-		candidate = session
-	}
-	return candidate, candidate.ID != ""
 }
 
 func (p *Processor) delegationRecoveryContext(ctx context.Context, run store.Run) (executioncontext.SafeContext, error) {
@@ -1321,6 +1356,15 @@ func (p *Processor) runEngineOnRunnerWithContinuation(ctx context.Context, run s
 	if engineErr != nil && !handoffRequested {
 		if uncertaintyErr := p.executionUncertainty(ctx, run, engineErr); uncertaintyErr != nil {
 			return scheduler.Result{}, uncertaintyErr
+		}
+	}
+	if engineErr == nil || handoffRequested {
+		boundary := "completed"
+		if handoffRequested {
+			boundary = "delegation_handoff"
+		}
+		if err := p.record(ctx, safe, "engine.execution.completed", map[string]any{"boundary": boundary}, nil, nil); err != nil {
+			return p.failExecution(ctx, safe, err, nil)
 		}
 	}
 

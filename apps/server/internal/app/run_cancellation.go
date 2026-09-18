@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -30,6 +31,20 @@ func (s *Services) CancelRun(ctx context.Context, projectID, runID string) error
 	}
 
 	cancelled := s.Scheduler.CancelRun(projectID, runID)
+	if cancelled && s.Events != nil {
+		payload, encodeErr := evidence.EncodePayload(map[string]any{"source": "run_cancel"})
+		if encodeErr != nil {
+			return encodeErr
+		}
+		issueID, workspaceID := run.IssueID, run.WorkspaceID
+		if _, recordErr := s.Events.Record(ctx, store.Event{
+			Type: "run.cancellation_requested", ProjectID: run.ProjectID,
+			IssueID: &issueID, RunID: &run.ID, AgentID: run.AgentID, WorkspaceID: &workspaceID,
+			Actor: store.EmptyObject, Payload: payload,
+		}); recordErr != nil {
+			return recordErr
+		}
+	}
 	if !cancelled {
 		inactive, ok := s.ControlPlane.store.(store.InactiveRunCancellationStore)
 		if !ok {
