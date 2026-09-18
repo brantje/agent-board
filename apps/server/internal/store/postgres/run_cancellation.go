@@ -39,6 +39,13 @@ func (s *Store) CancelInactiveRun(ctx context.Context, projectID, runID string) 
 			return store.RunCancellationResult{}, store.ErrConflict
 		}
 	case "STARTING":
+		// Serialize cancellation with Runner Execution Session admission. If a
+		// session wins the Workspace lock first, the active-session check below
+		// keeps ownership fail-closed. If cancellation wins, session creation
+		// re-checks the Run after taking the same lock and rejects CANCELLED.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, workspaceBootstrapLockPrefix+current.WorkspaceID); err != nil {
+			return store.RunCancellationResult{}, err
+		}
 		active, err := activeRunExecutionSessionTx(ctx, tx, projectID, runID)
 		if err != nil {
 			return store.RunCancellationResult{}, err

@@ -155,6 +155,7 @@ func (s *Store) CreateExecutionSession(ctx context.Context, input store.Executio
 		 AND workspace.id = run.workspace_id
 		WHERE run.project_id = $1
 		  AND run.id = $2
+		  AND run.status <> 'CANCELLED'
 		  AND workspace.id = $3::uuid
 		FOR UPDATE OF workspace
 	`, input.ProjectID, input.RunID, workspaceID).Scan(&workspaceID); err != nil {

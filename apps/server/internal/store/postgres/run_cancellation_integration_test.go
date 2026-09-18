@@ -68,6 +68,28 @@ func TestCancelInactiveRunCancelsClaimedRunBeforeExecutionStarts(t *testing.T) {
 	}
 }
 
+func TestCreateExecutionSessionRejectsDurablyCancelledClaim(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	_, _ = claimDelegationParentJob(t, f)
+	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	projectID := f.project.ID
+	runnerValue, err := f.store.CreateRunner(ctx, store.Runner{
+		ProjectID: &projectID, Name: "post-cancel-session-runner", TokenHash: make([]byte, 32),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: projectID, RunID: f.parentRun.ID, RunnerID: runnerValue.ID,
+		Status: "PENDING", CWD: "/workspace", CommandArgv: []byte(`["agent"]`),
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Execution Session created after durable cancellation: err=%v want ErrNotFound", err)
+	}
+}
+
 func TestCancelInactiveRunRefusesClaimedRunWithLiveExecutionSession(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
