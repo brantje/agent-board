@@ -861,6 +861,9 @@ func TestReconcileCancelsUnstartedDelegatedChildWhenParentIsDurablyTerminal(t *t
 func TestReconcileCancelledDelegatedChildRefinalizesDurableLocalWorkspaceBeforeTerminalizing(t *testing.T) {
 	storeFake, run, delegation, safe := delegatedChildRecoveryFixture(t)
 	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "CANCELLED", RuntimeInstanceID: "runtime-instance-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "run.cancellation_requested", map[string]any{"source": "run_cancel"}),
+	}
 	storeFake.current = "accepted-sha"
 	provenance, err := json.Marshal(executioncontext.Provenance{SchemaVersion: executioncontext.ProvenanceSchemaVersion, Context: safe})
 	if err != nil {
