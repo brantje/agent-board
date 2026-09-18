@@ -121,3 +121,34 @@ func TestListExecutionSessionsByRunner(t *testing.T) {
 		t.Fatalf("invalid status error=%v", err)
 	}
 }
+
+func TestExecutionSessionAdmissionPromptIsImmutablePerSession(t *testing.T) {
+	s := New(testPool(t))
+	ctx := t.Context()
+	fixture := seedRunFixture(t, s, "execution-session-admission")
+	instance, err := s.CreateRuntimeInstance(ctx, store.RuntimeInstance{
+		ProjectID: fixture.project.ID, WorkspaceID: fixture.workspace.ID, RuntimeID: fixture.runtime.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := s.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: fixture.project.ID, RunID: fixture.run.ID, RuntimeInstanceID: instance.ID,
+		Status: "PENDING", CommandArgv: json.RawMessage(`["opencode","serve"]`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := "original admitted prompt\nwith exact whitespace"
+	got, err := s.GetOrCreateExecutionSessionAdmissionPrompt(ctx, fixture.project.ID, session.ID, original)
+	if err != nil || got != original {
+		t.Fatalf("first admission prompt=%q err=%v", got, err)
+	}
+	got, err = s.GetOrCreateExecutionSessionAdmissionPrompt(ctx, fixture.project.ID, session.ID, "new prompt from mutable state")
+	if err != nil || got != original {
+		t.Fatalf("recovered admission prompt=%q err=%v want original", got, err)
+	}
+	if _, err := s.GetOrCreateExecutionSessionAdmissionPrompt(ctx, fixture.project.ID, session.ID, "   "); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("blank prompt error=%v want ErrInvalidArgument", err)
+	}
+}

@@ -493,6 +493,7 @@ CREATE TABLE execution_sessions (
     status text NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'STARTING', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED')),
     cwd text NOT NULL DEFAULT '/workspace' CHECK (btrim(cwd) <> ''),
     command_argv jsonb NOT NULL DEFAULT '[]'::jsonb CHECK (jsonb_typeof(command_argv) = 'array'),
+    admission_prompt text CHECK (admission_prompt IS NULL OR btrim(admission_prompt) <> ''),
     exit_code integer,
     created_at timestamptz NOT NULL DEFAULT now(),
     started_at timestamptz,

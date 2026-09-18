@@ -52,6 +52,16 @@ func (s *RedactingStore) PutRunProvenance(ctx context.Context, projectID, runID 
 	return s.ControlPlaneStore.PutRunProvenance(ctx, projectID, runID, redacted)
 }
 
+func (s *RedactingStore) GetOrCreateExecutionSessionAdmissionPrompt(ctx context.Context, projectID, sessionID, prompt string) (string, error) {
+	base, ok := s.ControlPlaneStore.(store.ExecutionSessionAdmissionStore)
+	if !ok {
+		return "", fmt.Errorf("redacting store base does not support Execution Session admission prompts")
+	}
+	// This is private execution identity, not user-visible evidence. Preserve it
+	// byte-for-byte so native admission checks remain exact.
+	return base.GetOrCreateExecutionSessionAdmissionPrompt(ctx, projectID, sessionID, prompt)
+}
+
 func (s *RedactingStore) AppendEvent(ctx context.Context, input store.Event) (store.Event, error) {
 	var err error
 	if input.RunID == nil {

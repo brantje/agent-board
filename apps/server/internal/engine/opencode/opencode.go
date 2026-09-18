@@ -135,7 +135,14 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	}
 
 	initialPrompt := initialTaskPromptWithDelegationContinuation(request.Context, request.DelegationContinuation)
-	session, promptRequired, err := ensureNativeSession(ctx, native, request.Context, settings, initialPrompt, recovered)
+	admissionPrompt := initialPrompt
+	if admissions, ok := request.Launcher.(engine.ExecutionAdmissionPromptStore); ok {
+		admissionPrompt, err = admissions.GetOrCreateAdmissionPrompt(ctx, process.ID(), initialPrompt)
+		if err != nil {
+			return engine.Result{}, fmt.Errorf("opencode engine: persist execution admission prompt: %w", err)
+		}
+	}
+	session, promptRequired, err := ensureNativeSession(ctx, native, request.Context, settings, admissionPrompt, recovered)
 	if err != nil {
 		return engine.Result{}, err
 	}
@@ -184,7 +191,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, err
 	}
 	if promptRequired {
-		if err := native.Prompt(ctx, session.ID, initialPrompt); err != nil {
+		if err := native.Prompt(ctx, session.ID, admissionPrompt); err != nil {
 			return engine.Result{}, fmt.Errorf("opencode engine: send initial task: %w", err)
 		}
 	}

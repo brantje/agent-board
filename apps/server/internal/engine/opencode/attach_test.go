@@ -27,6 +27,20 @@ func (l *fakeAttachLauncher) Attach(context.Context) (engine.Process, error) {
 	return l.process, nil
 }
 
+type fakeAdmissionAttachLauncher struct {
+	fakeAttachLauncher
+	admissionPrompt string
+	candidates      []string
+}
+
+func (l *fakeAdmissionAttachLauncher) GetOrCreateAdmissionPrompt(_ context.Context, _ string, candidate string) (string, error) {
+	l.candidates = append(l.candidates, candidate)
+	if l.admissionPrompt == "" {
+		l.admissionPrompt = candidate
+	}
+	return l.admissionPrompt, nil
+}
+
 func attachedExecutionContext() executioncontext.SafeContext {
 	return executioncontext.SafeContext{
 		Issue:    executioncontext.IssueContext{Title: "Resume after restart"},
@@ -424,4 +438,116 @@ func executeAttachedRequest(t *testing.T, mux http.Handler) (*fakeAttachLauncher
 		InteractiveQuestions: questions,
 	})
 	return launcher, questions, err
+}
+
+func TestEngineAttachUsesOriginalAdmissionPromptAfterContinuationRevisionChanges(t *testing.T) {
+	safe := attachedExecutionContext()
+	originalContinuation := &engine.DelegationContinuation{
+		DelegationID: "delegation-1", TargetAgentID: "agent-child", Task: "inspect change",
+		Outcome: "SUCCEEDED", ResultSummary: "done", DelegatedRunID: "child-run",
+		WorkspaceChangesAccepted: true, WorkspaceRevision: "R1",
+	}
+	currentContinuation := *originalContinuation
+	currentContinuation.WorkspaceRevision = "R2"
+	originalPrompt := initialTaskPromptWithDelegationContinuation(safe, originalContinuation)
+	currentPrompt := initialTaskPromptWithDelegationContinuation(safe, &currentContinuation)
+	if originalPrompt == currentPrompt {
+		t.Fatal("continuation revision did not change prompt")
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
+	})
+	mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_existing", "directory": "/workspace"}})
+	})
+	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"ses_existing": map[string]any{"type": "idle"}})
+	})
+	mux.HandleFunc("GET /question", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, []any{})
+	})
+	mux.HandleFunc("GET /session/ses_existing/message", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, []any{map[string]any{
+			"info": map[string]any{"sessionID": "ses_existing", "role": "user"},
+			"parts": []any{map[string]any{"type": "text", "text": originalPrompt}},
+		}})
+	})
+	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+		_, _ = io.WriteString(w, "data: {\"id\":\"connected\",\"type\":\"server.connected\",\"properties\":{}}\n\n")
+		flusher.Flush()
+		<-r.Context().Done()
+	})
+	mux.HandleFunc("POST /session/ses_existing/abort", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &fakeAdmissionAttachLauncher{
+		fakeAttachLauncher: fakeAttachLauncher{fakeOpenCodeLauncher: fakeOpenCodeLauncher{process: newFakeOpenCodeProcess(parsed.Host)}},
+		admissionPrompt: originalPrompt,
+	}
+	adapter := newWithAddress(parsed.Host)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = adapter.Execute(ctx, engine.Request{
+		Context: safe, Launcher: launcher, InteractiveQuestions: &fakeInteractiveQuestions{},
+		DelegationContinuation: &currentContinuation,
+	})
+	if err != nil {
+		t.Fatalf("Execute() recovery error=%v", err)
+	}
+	if launcher.starts != 0 || launcher.attaches != 1 {
+		t.Fatalf("starts=%d attaches=%d", launcher.starts, launcher.attaches)
+	}
+	if len(launcher.candidates) != 1 || launcher.candidates[0] != currentPrompt {
+		t.Fatalf("current recovery candidate was not constructed from R2")
+	}
+}
+
+func TestEngineAttachRejectsWrongNativeSessionAgainstStoredAdmissionPrompt(t *testing.T) {
+	safe := attachedExecutionContext()
+	originalPrompt := initialTaskPromptWithDelegationContinuation(safe, nil)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
+	})
+	mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_wrong", "directory": "/workspace"}})
+	})
+	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"ses_wrong": map[string]any{"type": "busy"}})
+	})
+	mux.HandleFunc("GET /session/ses_wrong/message", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, []any{map[string]any{
+			"info": map[string]any{"sessionID": "ses_wrong", "role": "user"},
+			"parts": []any{map[string]any{"type": "text", "text": "different original task"}},
+		}})
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &fakeAdmissionAttachLauncher{
+		fakeAttachLauncher: fakeAttachLauncher{fakeOpenCodeLauncher: fakeOpenCodeLauncher{process: newFakeOpenCodeProcess(parsed.Host)}},
+		admissionPrompt: originalPrompt,
+	}
+	adapter := newWithAddress(parsed.Host)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err = adapter.Execute(ctx, engine.Request{Context: safe, Launcher: launcher, InteractiveQuestions: &fakeInteractiveQuestions{}})
+	if err == nil || !strings.Contains(err.Error(), "expected prompt cannot be proven") {
+		t.Fatalf("Execute() wrong-session error=%v", err)
+	}
 }

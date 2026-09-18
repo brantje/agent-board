@@ -16,3 +16,10 @@ type ActivityEvent struct {
 type ActivitySink interface {
 	RecordActivity(context.Context, ActivityEvent) error
 }
+
+// ExecutionAdmissionPromptStore binds the first initial prompt to the durable
+// execution session that owns a native Engine process. Recovered executions use
+// the stored prompt instead of reconstructing identity from mutable context.
+type ExecutionAdmissionPromptStore interface {
+	GetOrCreateAdmissionPrompt(context.Context, string, string) (string, error)
+}
