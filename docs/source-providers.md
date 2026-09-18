@@ -133,11 +133,13 @@ Provider APIs remain authoritative for provider-owned state. Agent Board persist
 
 Agent Board-created Change Requests are linked directly to the originating Issue when created.
 
-Externally created PRs/MRs may be associated when their provider event contains an unambiguous Agent Board Issue key through the deterministic agent-board/<issue-key> branch, the Issue key in the title, or a configured closing keyword such as Closes AB-123, Fixes AB-123 or Resolves AB-123.
+Externally created PRs/MRs may be discovered as association candidates when their provider event contains an unambiguous Agent Board Issue key through the deterministic agent-board/<issue-key> branch, the Issue key in the title, or a configured closing keyword such as Closes AB-123, Fixes AB-123 or Resolves AB-123.
 
-A bare Issue-key mention in arbitrary body text must not be enough to trigger delivery/status behavior.
+Before persisting that association, Agent Board must verify that the external Change Request belongs to the Project's configured Source Connection and Source Repository. The durable association records the exact Project, Issue, Source Connection, Source Repository and provider Change Request identity.
 
-String matching is a recovery/discovery mechanism. It must not replace the exact durable association for Change Requests created by Agent Board.
+A bare Issue-key mention in arbitrary body text must not be enough to trigger association, delivery or status behavior.
+
+String matching is a recovery/discovery mechanism only. It never authorizes Issue completion by itself. An externally discovered Change Request may drive a `Complete on external merge` policy only when the durable association matches the Project/Issue/Source Connection/Source Repository, that Project explicitly enables the policy, the Change Request targets the configured Project target branch/ref, and the provider's current authoritative state confirms the Change Request is merged. A webhook payload or string match alone is insufficient.
 
 ## Webhooks and reconciliation
 
@@ -145,9 +147,15 @@ Each provider integration verifies its native webhook signature/token before res
 
 Provider-specific payloads are normalized into shared application events such as repository metadata changes, Change Request opened/updated/closed/reopened/merged, head-SHA changes, and checks/pipeline status changes.
 
-Webhook delivery is not assumed to be exactly once. Processing must be idempotent and safe under duplicate, reordered and delayed delivery.
+Webhook delivery is not assumed to be exactly once. When a provider supplies a stable delivery/event ID, Agent Board persists it scoped to the Source Connection and treats an already-processed delivery as a no-op.
 
-Periodic or on-demand provider refresh may repair missed webhook state. The provider API remains the source of truth for current external PR/MR/check/mergeability state.
+Webhook payloads are change notifications, not authoritative snapshots. Before changing durable provider-owned Change Request/check/mergeability state or evaluating an external-merge completion policy, the handler re-reads the affected resource from the provider API and applies that current state. Distinct delayed or reordered events therefore cannot overwrite a newer provider snapshot merely because they arrived later.
+
+Where a provider exposes a documented monotonic revision/version or trustworthy resource-update marker, Agent Board may persist it and reject older snapshots explicitly. Do not invent cross-provider timestamp ordering when the provider does not guarantee one.
+
+If the authoritative provider read is temporarily unavailable, retain the last known durable snapshot and retry/reconcile later rather than applying a potentially stale webhook payload as truth. Periodic or on-demand provider refresh repairs missed webhook state; it is recovery, not the primary stale-event safety mechanism.
+
+Any derived delivery/completion transition must itself be idempotent and operate through the canonical Project/Issue delivery-policy command using the durable Change Request association.
 
 ## CI, checks and mergeability
 
