@@ -11,6 +11,17 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 )
 
+
+func TestDelegationHandoffNilTrackerFailsClosed(t *testing.T) {
+	var tracker *delegationToolTracker
+	if err := tracker.Handle(t.Context(), client.Event{}, nil, "ses_1", nil); err == nil {
+		t.Fatal("nil delegation tracker Handle did not fail closed")
+	}
+	if err := tracker.Reconcile(t.Context(), nil, "ses_1", nil); err == nil {
+		t.Fatal("nil delegation tracker Reconcile did not fail closed")
+	}
+}
+
 func TestDelegationHandoffWaitsForCompletedToolPart(t *testing.T) {
 	var replies []permissionReply
 	native := delegationPermissionClient(t, nil, &replies)
