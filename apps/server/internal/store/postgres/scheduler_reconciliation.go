@@ -174,11 +174,23 @@ func (s *Store) resolveReconciliation(ctx context.Context, input store.Scheduler
 	}
 
 	switch input.Outcome {
-	case store.SchedulerReconciliationActive, store.SchedulerReconciliationUnknown:
+	case store.SchedulerReconciliationActive:
 		if err := tx.Commit(ctx); err != nil {
 			return store.SchedulerMutationResult{}, err
 		}
 		return store.SchedulerMutationResult{Run: current}, nil
+	case store.SchedulerReconciliationUnknown:
+		recovered, run, err := recoverReadyDelegationWorkspaceHandoff(ctx, tx, current, input)
+		if err != nil {
+			return store.SchedulerMutationResult{}, err
+		}
+		if !recovered {
+			run = current
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return store.SchedulerMutationResult{}, err
+		}
+		return store.SchedulerMutationResult{Run: run}, nil
 	case store.SchedulerReconciliationRetry:
 		run, err := scanRun(tx.QueryRow(ctx, `
 			UPDATE runs
@@ -208,6 +220,93 @@ func (s *Store) resolveReconciliation(ctx context.Context, input store.Scheduler
 	default:
 		return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 	}
+}
+
+func recoverReadyDelegationWorkspaceHandoff(
+	ctx context.Context,
+	tx pgx.Tx,
+	current store.Run,
+	input store.SchedulerReconciliation,
+) (bool, store.Run, error) {
+	if current.Status != "RUNNING" {
+		return false, current, nil
+	}
+
+	var ready bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM delegations AS delegation
+			JOIN runs AS child
+			  ON child.project_id=delegation.project_id
+			 AND child.id=delegation.delegated_run_id
+			JOIN scheduler_jobs AS child_job
+			  ON child_job.project_id=delegation.project_id
+			 AND child_job.run_id=delegation.delegated_run_id
+			 AND child_job.kind='START'
+			WHERE delegation.project_id=$1
+			  AND delegation.parent_run_id=$2
+			  AND delegation.issue_id=$3
+			  AND child.issue_id=$3
+			  AND child.workspace_id=$4
+			  AND child.status='QUEUED'
+			  AND child.queue_reason=$5
+			  AND child_job.state='QUEUED'
+			  AND child_job.wait_reason=$5
+		)
+	`, current.ProjectID, current.ID, current.IssueID, current.WorkspaceID, store.DelegationWorkspaceHandoffReadyReason).Scan(&ready); err != nil {
+		return false, store.Run{}, err
+	}
+	if !ready {
+		return false, current, nil
+	}
+
+	// Revalidate execution authority inside the same transaction that yields the
+	// parent claim. A ready delegation is insufficient while any authoritative
+	// parent Execution Session is still live.
+	var live bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM execution_sessions
+			WHERE project_id=$1
+			  AND run_id=$2
+			  AND status IN ('PENDING', 'STARTING', 'RUNNING')
+		)
+	`, current.ProjectID, current.ID).Scan(&live); err != nil {
+		return false, store.Run{}, err
+	}
+	if live {
+		return false, current, nil
+	}
+
+	run, err := scanRun(tx.QueryRow(ctx, `
+		UPDATE runs
+		SET status='PAUSED', queue_reason=NULL, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND status='RUNNING'
+		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt, status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+	`, current.ProjectID, current.ID))
+	if err != nil {
+		return false, store.Run{}, err
+	}
+	if err := releaseReadyDelegationWorkspaceHandoffs(ctx, tx, run); err != nil {
+		return false, store.Run{}, err
+	}
+	command, err := tx.Exec(ctx, `
+		UPDATE scheduler_jobs
+		SET state='DONE', wait_reason=NULL, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND run_id=$3 AND state='CLAIMED'
+	`, input.ProjectID, input.JobID, input.RunID)
+	if err != nil {
+		return false, store.Run{}, err
+	}
+	if command.RowsAffected() != 1 {
+		return false, store.Run{}, store.ErrNotFound
+	}
+	if err := releaseReconciledOwnership(ctx, tx, input.ProjectID, input.JobID, input.LeaseToken); err != nil {
+		return false, store.Run{}, err
+	}
+	return true, run, nil
 }
 
 func (s *Store) resolveReconciliationTerminal(ctx context.Context, tx pgx.Tx, input store.SchedulerReconciliation) (store.SchedulerMutationResult, error) {
