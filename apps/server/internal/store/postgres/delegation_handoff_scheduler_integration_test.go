@@ -87,6 +87,53 @@ func TestSchedulerCancellationDoesNotReleaseReadyDelegationHandoff(t *testing.T)
 }
 
 
+
+func TestDelegationHandoffReadySurvivesStoreRestart(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	parentJobID, leaseToken := claimDelegationParentJob(t, f)
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "resume handoff after restart", RequestKey: "restart-ready",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDelegationWorkspaceHandoffReady(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted := New(f.store.pool)
+	var waitReason *string
+	var availableAt time.Time
+	if err := restarted.pool.QueryRow(ctx, `
+		SELECT wait_reason, available_at
+		FROM scheduler_jobs
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, created.SchedulerJob.ID).Scan(&waitReason, &availableAt); err != nil {
+		t.Fatal(err)
+	}
+	if waitReason == nil || *waitReason != store.DelegationWorkspaceHandoffReadyReason || !availableAt.After(time.Now().AddDate(50, 0, 0)) {
+		t.Fatalf("restart lost held handoff state: waitReason=%v availableAt=%s", waitReason, availableAt)
+	}
+
+	if _, err := restarted.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: parentJobID, RunID: f.parentRun.ID, LeaseToken: leaseToken, RunStatus: "PAUSED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := restarted.pool.QueryRow(ctx, `
+		SELECT wait_reason, available_at
+		FROM scheduler_jobs
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, created.SchedulerJob.ID).Scan(&waitReason, &availableAt); err != nil {
+		t.Fatal(err)
+	}
+	if waitReason != nil || availableAt.After(time.Now().Add(time.Minute)) {
+		t.Fatalf("restart did not release durable handoff after parent pause: waitReason=%v availableAt=%s", waitReason, availableAt)
+	}
+}
+
 func TestDelegationHandoffTransfersRunnerWorkspaceOwnershipToChild(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
