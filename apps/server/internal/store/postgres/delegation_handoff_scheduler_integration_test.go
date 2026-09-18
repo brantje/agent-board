@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"errors"
 	"testing"
 	"time"
 
