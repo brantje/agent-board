@@ -395,6 +395,7 @@ Start with:
 - [`docs/domain-model.md`](./docs/domain-model.md) — durable concepts and invariants
 - [`docs/scheduler.md`](./docs/scheduler.md) — scheduling and capacity
 - [`docs/source-control.md`](./docs/source-control.md) — repository and Git behavior
+- [`docs/source-providers.md`](./docs/source-providers.md) — GitHub, GitLab and Forgejo connections, PR/MR state and delivery
 - [`docs/agent-runner.md`](./docs/agent-runner.md) — Runner protocol and execution sessions
 - [`docs/execution-evidence.md`](./docs/execution-evidence.md) — logs, provenance and Artifacts
 - [`docs/authorization.md`](./docs/authorization.md) — Users, Groups and Project roles
@@ -433,7 +434,7 @@ Squads [implemented]
   -> Squad-aware collaboration [later]
 ```
 
-Planning, Automations, richer source-provider integrations, delivery policies, worker pools and broader integrations build on the same core model rather than introducing parallel execution systems.
+After delegated outcomes / parent continuation, GitHub, GitLab and Forgejo are the next major product area as Tier-1 Source Providers: repository discovery, ephemeral Git credentials, webhooks, PR/MR state, CI/mergeability and provider-aware delivery all build on the same Git-native core. Planning, Automations, worker pools and broader integrations continue from there without introducing parallel execution systems.
 
 See [`docs/roadmap.md`](./docs/roadmap.md) for current ordering.
 

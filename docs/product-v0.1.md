@@ -116,7 +116,9 @@ Issue prefix is immutable and globally unique and forms public Issue keys such a
 
 Local source paths are validated against deployment-authorized repository roots; Project configuration is not arbitrary filesystem access.
 
-A remote Git source is saved provider-neutrally. The Runner uses its host Git authentication to fetch/push; v0.1 does not require a GitHub/GitLab/etc. Source Connection merely to execute a remote Git Project.
+A remote Git source is saved provider-neutrally. The Runner uses its host Git authentication to fetch/push in the v0.1 generic Git path.
+
+Post-v0.1 Tier-1 Source Provider integration adds connected GitHub, GitLab and Forgejo repositories with repository discovery, provider-backed ephemeral Git credentials, webhooks and PR/MR delivery. That provider layer must reuse this same remote Git execution model rather than replace it.
 
 Every Issue uses a deterministic branch `agent-board/<issue-key>` and continues that branch across attempts.
 
@@ -289,11 +291,15 @@ For a remote Git Project, publishing the Issue branch is **not** remote target i
 
 ## Future Project delivery policy
 
-After Source Connections/source-provider actions exist, a Project may choose an explicit delivery policy.
+Tier-1 Source Providers (GitHub, GitLab and Forgejo) provide the authenticated repository, webhook and Change Request boundary required for remote delivery.
 
-The safe default remains human-gated delivery. A later autonomous policy may automatically create or update a pull/merge request after a successful verified Review without requiring Agent Board's internal approval first.
+A Project may then choose an explicit delivery policy.
 
-Automatic merge/deploy is a separate, stronger permission and must not be implied by PR/MR creation.
+The safe default remains human-gated delivery. An autonomous policy may explicitly create or update a pull/merge request after a successful verified candidate without requiring Agent Board's internal approval first.
+
+Provider merge, Issue completion-on-merge, automatic merge, deploy and release are separate permissions/policies. None is implied merely by Source Provider connectivity or PR/MR creation.
+
+See `source-providers.md`.
 
 ## Execution preflight
 
@@ -305,20 +311,25 @@ Connected Runner availability/protocol capability, Project Runner policy, source
 
 For remote Git sources, runtime Git authentication failures are explicit; Agent Board does not silently fall back to local transfer.
 
-## Explicitly after the v0.1 flow
+## Post-v0.1 product areas
 
-- planning strategy: Auto / Always plan / Skip planning
-- scheduled Automations creating normal Issues
-- Agent-created follow-up Issues
-- authenticated Source Connections and provider-specific repository actions
-- Project PR/MR delivery policy
-- delegated outcome/result protocol and automatic parent continuation
-- Squad-aware delegation/member collaboration
-- worker pools / warm / spot execution
-- higher concurrent Execution Session capacity where safe/useful
-- users, groups, permissions and broader multi-user administration
-- additional provider/account integrations
-- Plugins and plugin ecosystem work last
+Some post-v0.1 foundations are already implemented, including multi-user authorization, Squads, canonical Agent delegation and serialized delegated Workspace handoff.
+
+Current and next product areas are:
+
+- delegated outcome/result protocol and durable parent continuation/recovery;
+- Tier-1 GitHub, GitLab and Forgejo Source Providers;
+- repository discovery and provider-backed ephemeral Git credentials;
+- provider PR/MR state, webhooks, CI/check summaries and mergeability;
+- explicit Project PR/MR delivery policy;
+- planning strategy: Auto / Always plan / Skip planning;
+- scheduled Automations creating normal Issues;
+- Agent-created follow-up Issues;
+- Squad-aware delegation/member collaboration;
+- worker pools / warm / spot execution;
+- broader identity/administration only where concrete requirements need it;
+- additional integrations and coding Engines;
+- Plugins and plugin ecosystem work last.
 
 ## Implementation priority
 
@@ -333,7 +344,7 @@ For remote Git sources, runtime Git authentication failures are explicit; Agent 
 9. operational preflight/Runner-availability truthfulness
 10. first real coding Engine (OpenCode first)
 11. prove Project source -> Run -> Runner -> Execution Session -> Engine -> Git changes -> Review end to end
-12. only then broaden provider-specific repository integrations and the roadmap
+12. extend the same Git/Review model with Tier-1 GitHub, GitLab and Forgejo Source Providers and provider-aware delivery
 
 Frontend implementation uses Nuxt 4 + Nuxt UI v4 and remains within this v0.1 product scope. Plugin work is deliberately last, including after future users/groups/permissions work unless explicitly reprioritized.
 
