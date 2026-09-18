@@ -17,6 +17,7 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/runner"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
+	sharedworkspace "github.com/brantje/agent-board/packages/workspacegit"
 )
 
 type pendingRecoveryExecutionStore struct {
@@ -72,9 +73,22 @@ func (c *materializingTransferClient) SendTransfer(ctx context.Context, _, trans
 	if err := os.WriteFile(bundlePath, payload, 0o600); err != nil {
 		return err
 	}
-	cmd := exec.CommandContext(ctx, "git", "clone", "-q", bundlePath, c.workspacePath)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return errors.New("materialize transferred Workspace: " + err.Error() + ": " + string(output))
+	branch, revision, err := sharedworkspace.BundleHead(ctx, bundlePath, "git", time.Minute)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(c.workspacePath), 0o755); err != nil {
+		return err
+	}
+	for _, args := range [][]string{
+		{"init", "-q", c.workspacePath},
+		{"-C", c.workspacePath, "fetch", "--no-tags", "--no-write-fetch-head", bundlePath, "refs/heads/" + branch + ":refs/agent-board/materialize/" + revision},
+		{"-C", c.workspacePath, "checkout", "-q", "-B", branch, "refs/agent-board/materialize/" + revision},
+	} {
+		cmd := exec.CommandContext(ctx, "git", args...)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return errors.New("materialize transferred Workspace: " + err.Error() + ": " + string(output))
+		}
 	}
 	return nil
 }
