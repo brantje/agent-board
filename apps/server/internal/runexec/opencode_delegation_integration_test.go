@@ -53,9 +53,8 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	if delegation.ParentAgentID != parentAgent.ID || delegation.TargetAgentID != target.ID || delegation.DelegatedRunID == "" {
 		t.Fatalf("delegation=%+v", delegation)
 	}
-	assertOpenCodeDelegationToolEvidence(t, fixture, project.ID, parentRun.ID)
-
 	parentPaused := waitForOpenCodeRunStatus(t, fixture, project.ID, parentRun.ID, "PAUSED")
+	assertOpenCodeDelegationToolEvidence(t, fixture, project.ID, parentRun.ID)
 	if parentPaused.WorkspaceID != parentRun.WorkspaceID {
 		t.Fatalf("paused parent Workspace=%s want %s", parentPaused.WorkspaceID, parentRun.WorkspaceID)
 	}
