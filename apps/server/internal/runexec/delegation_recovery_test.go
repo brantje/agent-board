@@ -790,3 +790,58 @@ func TestReconcileCancelledDelegatedChildRefinalizesDurableLocalWorkspaceBeforeT
 		t.Fatalf("local handback was not durably marked accepted: %+v", storeFake.events)
 	}
 }
+
+func TestReconcileDelegatedChildWithEligibleParentKeepsNormalActiveExecution(t *testing.T) {
+	storeFake, child, _ := terminalParentDelegatedChildFixture(t)
+	storeFake.parent.Status = "PAUSED"
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: child.ID, Status: "RUNNING", RunnerID: "runner-1"}}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: child})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != store.SchedulerReconciliationActive || reason != nil {
+		t.Fatalf("outcome=%s reason=%v want ACTIVE", outcome, reason)
+	}
+}
+
+func TestReconcileDelegatedChildRejectsMismatchedParentLineage(t *testing.T) {
+	storeFake, child, _ := terminalParentDelegatedChildFixture(t)
+	storeFake.parent.WorkspaceID = "different-workspace"
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: child})
+	if outcome != store.SchedulerReconciliationUnknown || reason != nil || err == nil {
+		t.Fatalf("outcome=%s reason=%v err=%v want UNKNOWN lineage error", outcome, reason, err)
+	}
+}
+
+func TestReconcileTerminalParentRunningDelegateRequiresCancellationCapability(t *testing.T) {
+	storeFake, child, _ := terminalParentDelegatedChildFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: child.ID, Status: "RUNNING", RunnerID: "runner-1"}}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: child})
+	if outcome != store.SchedulerReconciliationUnknown || reason != nil || err == nil {
+		t.Fatalf("outcome=%s reason=%v err=%v want UNKNOWN cancellation capability error", outcome, reason, err)
+	}
+}
+
+func TestReconcileTerminalParentMultipleLiveDelegateSessionsStaysUnknown(t *testing.T) {
+	storeFake, child, _ := terminalParentDelegatedChildFixture(t)
+	storeFake.sessions = []store.ExecutionSession{
+		{ID: "session-1", RunID: child.ID, Status: "RUNNING", RunnerID: "runner-1"},
+		{ID: "session-2", RunID: child.ID, Status: "STARTING", RunnerID: "runner-1"},
+	}
+	sessions := &cancellingReconcileSessions{store: storeFake.delegationRecoveryStore}
+	processor := &Processor{store: storeFake, sessions: sessions}
+
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: child})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != store.SchedulerReconciliationUnknown || reason != nil || sessions.calls != 0 {
+		t.Fatalf("outcome=%s reason=%v cancelCalls=%d want UNKNOWN without cancellation", outcome, reason, sessions.calls)
+	}
+}
