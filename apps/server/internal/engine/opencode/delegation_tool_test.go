@@ -225,3 +225,35 @@ func delegationPermissionRequest(t *testing.T, requestID, sessionID, callID, tar
 	}{MessageID: "msg_1", CallID: callID}
 	return request
 }
+
+func TestInitialTaskPromptIncludesBoundedDelegationContinuation(t *testing.T) {
+	prompt := initialTaskPromptWithDelegationContinuation(executioncontext.SafeContext{
+		Issue: executioncontext.IssueContext{Title: "Parent issue", Status: "IN_PROGRESS"},
+	}, &engine.DelegationContinuation{
+		DelegationID:             "delegation-1",
+		TargetAgentID:            "agent-target",
+		Task:                     "Inspect the bounded component.",
+		Outcome:                  "SUCCEEDED",
+		ResultSummary:            "The delegated check passed.",
+		DelegatedRunID:           "child-run-1",
+		ResultEventID:            "event-1",
+		WorkspaceChangesAccepted: true,
+		WorkspaceRevision:        "abc123",
+	})
+	for _, want := range []string{
+		"Delegation ID: delegation-1",
+		"Target Agent ID: agent-target",
+		"Delegated task: Inspect the bounded component.",
+		"Outcome: SUCCEEDED",
+		"Result summary: The delegated check passed.",
+		"Delegated Run ID: child-run-1",
+		"Result evidence Event ID: event-1",
+		"Workspace changes accepted: true",
+		"Current Issue Workspace revision: abc123",
+		"Continue as the authoritative parent",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+}

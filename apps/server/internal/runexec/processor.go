@@ -134,17 +134,21 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	if err != nil {
 		return failed(err), nil
 	}
+	delegationContinuation, err := p.loadDelegationContinuation(ctx, claim, run)
+	if err != nil {
+		return failed(err), nil
+	}
 	live, err := p.liveExecutionSession(ctx, run)
 	if err != nil {
 		return failed(err), nil
 	}
 	if live != nil {
-		return p.attachExistingExecution(ctx, run, resolved.Safe, *live)
+		return p.attachExistingExecution(ctx, run, resolved.Safe, *live, delegationContinuation)
 	}
-	return p.startNewExecution(ctx, claim, run, resolved.Safe)
+	return p.startNewExecution(ctx, claim, run, resolved.Safe, delegationContinuation)
 }
 
-func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext) (scheduler.Result, error) {
+func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
 	runEventType := "run.started"
 	if claim.Job.Kind == "RESUME" {
 		runEventType = "run.resumed"
@@ -178,7 +182,7 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 		if err := p.transferWorkspaceToRunner(ctx, safe, runnerID, session.ID); err != nil {
 			return failed(err), nil
 		}
-		return p.runEngineOnRunner(ctx, run, safe, runnerID, session.ID)
+		return p.runEngineOnRunnerWithContinuation(ctx, run, safe, runnerID, session.ID, delegationContinuation)
 	}
 	if p.runtimes == nil {
 		return failed(fmt.Errorf("scheduler admission is missing runner id")), nil
@@ -203,17 +207,17 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 		_ = p.cleanupRuntime(ctx, safe, instance)
 		return scheduler.Result{}, err
 	}
-	return p.runEngine(ctx, run, safe, instance, "")
+	return p.runEngineWithContinuation(ctx, run, safe, instance, "", delegationContinuation)
 }
 
-func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, session store.ExecutionSession) (scheduler.Result, error) {
+func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, session store.ExecutionSession, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
 	if err := p.record(ctx, safe, "run.resumed", map[string]any{"reason": "lease_reconciliation"}, nil, nil); err != nil {
 		return scheduler.Result{}, err
 	}
 	p.branches.observeIfChanged(ctx, safe, nil)
 	if session.RunnerID != "" {
 		safe = p.attachRunnerProvenance(ctx, safe, session.RunnerID)
-		return p.runEngineOnRunner(ctx, run, safe, session.RunnerID, session.ID)
+		return p.runEngineOnRunnerWithContinuation(ctx, run, safe, session.RunnerID, session.ID, delegationContinuation)
 	}
 	if p.runtimes == nil {
 		return failed(fmt.Errorf("legacy runtime execution is unavailable")), nil
@@ -226,7 +230,7 @@ func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, 
 	if err != nil {
 		return failed(err), nil
 	}
-	return p.runEngine(ctx, run, safe, instance, session.ID)
+	return p.runEngineWithContinuation(ctx, run, safe, instance, session.ID, delegationContinuation)
 }
 
 func (p *Processor) materializeExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance) (store.RuntimeInstance, executioncontext.SafeContext, error) {
@@ -251,6 +255,10 @@ func (p *Processor) materializeExecution(ctx context.Context, run store.Run, saf
 }
 
 func (p *Processor) runEngine(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance, attachSessionID string) (scheduler.Result, error) {
+	return p.runEngineWithContinuation(ctx, run, safe, instance, attachSessionID, nil)
+}
+
+func (p *Processor) runEngineWithContinuation(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance, attachSessionID string, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
 	adapter, err := p.engines.Get(safe.Agent.Engine)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
@@ -266,7 +274,7 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 		scope:             evidence.RunScope{ProjectID: run.ProjectID, IssueID: run.IssueID, RunID: run.ID},
 		branches:          p.branches,
 	}
-	request, err := p.engineRequest(ctx, safe, launcher, instance.ID)
+	request, err := p.engineRequestWithDelegationContinuation(ctx, safe, launcher, instance.ID, delegationContinuation)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 		return failed(errors.Join(err, cleanupErr)), nil
@@ -1000,6 +1008,10 @@ func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executio
 }
 
 func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe executioncontext.SafeContext, runnerID, attachSessionID string) (scheduler.Result, error) {
+	return p.runEngineOnRunnerWithContinuation(ctx, run, safe, runnerID, attachSessionID, nil)
+}
+
+func (p *Processor) runEngineOnRunnerWithContinuation(ctx context.Context, run store.Run, safe executioncontext.SafeContext, runnerID, attachSessionID string, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
 	adapter, err := p.engines.Get(safe.Agent.Engine)
 	if err != nil {
 		return failed(err), nil
@@ -1010,7 +1022,7 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 		scope:    evidence.RunScope{ProjectID: run.ProjectID, IssueID: run.IssueID, RunID: run.ID},
 		branches: p.branches,
 	}
-	request, err := p.engineRequest(ctx, safe, launcher, "")
+	request, err := p.engineRequestWithDelegationContinuation(ctx, safe, launcher, "", delegationContinuation)
 	if err != nil {
 		return failed(err), nil
 	}

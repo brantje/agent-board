@@ -6,7 +6,10 @@ import (
 )
 
 func (s *processTestStore) GetWorkspaceCurrentRevision(context.Context, string, string) (string, error) {
-	return "", nil
+	if s.workspaceRevisionErr != nil {
+		return "", s.workspaceRevisionErr
+	}
+	return s.workspaceRevision, nil
 }
 
 func (s *processTestStore) UpdateWorkspaceCurrentRevision(_ context.Context, _, _, revision string) (string, error) {

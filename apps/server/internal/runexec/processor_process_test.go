@@ -22,13 +22,17 @@ import (
 )
 
 type processTestStore struct {
-	mu              sync.Mutex
-	provenance      json.RawMessage
-	events          []store.Event
-	artifacts       []store.Artifact
-	chunks          []store.RawOutputChunk
-	sessions        []store.ExecutionSession
-	listSessionsErr error
+	mu                     sync.Mutex
+	provenance             json.RawMessage
+	events                 []store.Event
+	artifacts              []store.Artifact
+	chunks                 []store.RawOutputChunk
+	sessions               []store.ExecutionSession
+	listSessionsErr        error
+	delegationContinuation store.Delegation
+	delegationErr          error
+	workspaceRevision      string
+	workspaceRevisionErr   error
 }
 
 func (s *processTestStore) PutRunProvenance(_ context.Context, _, _ string, value json.RawMessage) error {
@@ -98,6 +102,16 @@ func (s *processTestStore) GetWorkspace(_ context.Context, projectID, workspaceI
 func (s *processTestStore) UpdateWorkspaceCurrentBranch(_ context.Context, projectID, workspaceID, currentBranch string) (store.Workspace, error) {
 	branch := currentBranch
 	return store.Workspace{ID: workspaceID, ProjectID: projectID, WorkingBranch: "agent-board/AB-1", CurrentBranch: &branch, BootstrapStatus: "READY"}, nil
+}
+
+func (s *processTestStore) GetDelegationByContinuationJob(context.Context, string, string, string) (store.Delegation, error) {
+	if s.delegationErr != nil {
+		return store.Delegation{}, s.delegationErr
+	}
+	if s.delegationContinuation.ID == "" {
+		return store.Delegation{}, store.ErrNotFound
+	}
+	return s.delegationContinuation, nil
 }
 
 type processTestResolver struct {

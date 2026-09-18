@@ -136,6 +136,21 @@ type Delegation struct {
 	RunID string
 }
 
+// DelegationContinuation is bounded server-owned input for resuming a parent
+// Run after one delegated child reaches a durable terminal outcome. It is
+// execution-time state, not immutable Run provenance.
+type DelegationContinuation struct {
+	DelegationID             string
+	TargetAgentID            string
+	Task                     string
+	Outcome                  string
+	ResultSummary            string
+	DelegatedRunID           string
+	ResultEventID            string
+	WorkspaceChangesAccepted bool
+	WorkspaceRevision        string
+}
+
 // DelegationRequester is the narrow server-owned capability for a trusted
 // Engine adapter to request bounded work from another Agent. Project, Issue,
 // parent Run and parent Agent identities are always derived server-side.
@@ -144,13 +159,14 @@ type DelegationRequester interface {
 }
 
 type Request struct {
-	Context              executioncontext.SafeContext
-	Launcher             ProcessLauncher
-	Questions            Questioner
-	InteractiveQuestions InteractiveQuestioner
-	IssueStatus          IssueStatusUpdater
-	Delegation           DelegationRequester
-	Continuation         *Continuation
+	Context                executioncontext.SafeContext
+	Launcher               ProcessLauncher
+	Questions              Questioner
+	InteractiveQuestions   InteractiveQuestioner
+	IssueStatus            IssueStatusUpdater
+	Delegation             DelegationRequester
+	Continuation           *Continuation
+	DelegationContinuation *DelegationContinuation
 }
 
 type Result struct {

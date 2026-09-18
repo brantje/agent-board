@@ -57,6 +57,13 @@ type DelegationStore interface {
 	ListDelegationsByParentRun(context.Context, string, string) ([]Delegation, error)
 }
 
+// DelegationContinuationStore resolves the exact delegated result that created
+// a parent RESUME job. Keeping this lookup keyed by scheduler job prevents a
+// later delegation on the same parent Run from supplying stale continuation data.
+type DelegationContinuationStore interface {
+	GetDelegationByContinuationJob(context.Context, string, string, string) (Delegation, error)
+}
+
 // DelegationWorkspaceHandoffStore marks a delegated Run ready only after the
 // authoritative parent execution has durably returned its current Workspace
 // state. Scheduler transition then releases that Run atomically with the parent

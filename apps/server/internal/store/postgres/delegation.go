@@ -312,6 +312,14 @@ func (s *Store) GetDelegationByRun(ctx context.Context, projectID, runID string)
 	`, projectID, runID))
 }
 
+func (s *Store) GetDelegationByContinuationJob(ctx context.Context, projectID, parentRunID, jobID string) (store.Delegation, error) {
+	return scanDelegation(s.pool.QueryRow(ctx, `
+		SELECT `+delegationSelectColumns+`
+		FROM delegations
+		WHERE project_id=$1 AND parent_run_id=$2 AND continuation_job_id=$3
+	`, projectID, parentRunID, jobID))
+}
+
 func (s *Store) ListDelegationsByParentRun(ctx context.Context, projectID, parentRunID string) ([]store.Delegation, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+delegationSelectColumns+`

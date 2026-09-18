@@ -26,7 +26,11 @@ type runtimeAcquirer interface {
 }
 
 func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string) (engine.Request, error) {
-	request := engine.Request{Context: safe, Launcher: launcher}
+	return p.engineRequestWithDelegationContinuation(ctx, safe, launcher, runtimeInstanceID, nil)
+}
+
+func (p *Processor) engineRequestWithDelegationContinuation(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string, delegationContinuation *engine.DelegationContinuation) (engine.Request, error) {
+	request := engine.Request{Context: safe, Launcher: launcher, DelegationContinuation: delegationContinuation}
 	if safe.Delegation == nil {
 		if statusStore, ok := any(p.store).(issueStatusStore); ok {
 			request.IssueStatus = &issueStatusUpdater{store: statusStore, events: p.events, safe: safe}
