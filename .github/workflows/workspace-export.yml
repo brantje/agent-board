@@ -10,6 +10,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: 4c7a5088d61914b3718d944cb75ad74d023ac8d5
       - uses: actions/setup-go@v5
         with:
           go-version-file: apps/server/go.mod
