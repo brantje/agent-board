@@ -440,6 +440,45 @@ func TestDelegationRecoveryContextRejectsIdentitySubstitution(t *testing.T) {
 }
 
 
+func TestRecoverDelegationWorkspaceHandoffAcceptsCancelledServiceAfterConfirmedHandoff(t *testing.T) {
+	storeFake, run, delegation, _ := delegationRecoveryFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "CANCELLED", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "tool.completed", evidence.ToolPayload{
+			Name: "delegate_task", ToolCallID: delegation.RequestKey,
+			Input: map[string]any{"targetAgentId": delegation.TargetAgentID, "task": delegation.Task},
+		}),
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 2, "engine.execution.completed", map[string]any{"boundary": "delegation_handoff"}),
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 3, "workspace.transfer.completed", map[string]any{"direction": "from_runner"}),
+	}
+	processor := &Processor{store: storeFake}
+	if err := processor.recoverDelegationWorkspaceHandoff(t.Context(), run, storeFake.sessions); err != nil {
+		t.Fatal(err)
+	}
+	if len(storeFake.marks) != 1 {
+		t.Fatalf("handoff ready marks=%d want 1", len(storeFake.marks))
+	}
+}
+
+func TestRecoverDelegationWorkspaceHandoffRejectsAmbiguousCancelledService(t *testing.T) {
+	storeFake, run, delegation, _ := delegationRecoveryFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "CANCELLED", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "tool.completed", evidence.ToolPayload{
+			Name: "delegate_task", ToolCallID: delegation.RequestKey,
+			Input: map[string]any{"targetAgentId": delegation.TargetAgentID, "task": delegation.Task},
+		}),
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 2, "workspace.transfer.completed", map[string]any{"direction": "from_runner"}),
+	}
+	processor := &Processor{store: storeFake}
+	if err := processor.recoverDelegationWorkspaceHandoff(t.Context(), run, storeFake.sessions); err != nil {
+		t.Fatal(err)
+	}
+	if len(storeFake.marks) != 0 {
+		t.Fatalf("ambiguous CANCELLED service marked handoff ready %d times", len(storeFake.marks))
+	}
+}
+
 func TestRecoverDelegationWorkspaceHandoffPropagatesDurableStoreFailures(t *testing.T) {
 	sentinel := errors.New("durable store unavailable")
 
@@ -571,6 +610,33 @@ func TestReconcileRecoversTerminalDelegatedChildWithoutEngineReplay(t *testing.T
 	}
 }
 
+func TestReconcileRecoversCancelledOpenCodeServiceAsSuccessfulDelegatedExecution(t *testing.T) {
+	storeFake, run, delegation, _ := delegatedChildRecoveryFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "CANCELLED", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "engine.execution.completed", map[string]any{"boundary": "completed"}),
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 2, "delegation.workspace_accepted", map[string]any{"delegationId": delegation.ID}),
+	}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil || outcome != store.SchedulerReconciliationCompleted || reason != nil {
+		t.Fatalf("outcome=%s reason=%v err=%v want COMPLETED", outcome, reason, err)
+	}
+}
+
+func TestReconcileLeavesAmbiguousCancelledDelegatedExecutionUnknown(t *testing.T) {
+	storeFake, run, delegation, _ := delegatedChildRecoveryFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "CANCELLED", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "delegation.workspace_accepted", map[string]any{"delegationId": delegation.ID}),
+	}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil || outcome != store.SchedulerReconciliationUnknown || reason != nil {
+		t.Fatalf("outcome=%s reason=%v err=%v want UNKNOWN", outcome, reason, err)
+	}
+}
+
 func TestReconcileRejectsDelegatedChildTargetAgentLineageMismatch(t *testing.T) {
 	storeFake, run, delegation, _ := delegatedChildRecoveryFixture(t)
 	wrongAgent := "other-agent"
@@ -604,6 +670,10 @@ func TestReconcileRecoversFailedAndCancelledDelegatedChildren(t *testing.T) {
 			sequence := int64(1)
 			if tt.wantReason != "" {
 				storeFake.events = append(storeFake.events, delegationRecoveryEvent(t, run.ProjectID, run.ID, sequence, "run.failed", map[string]any{"reason": tt.wantReason}))
+				sequence++
+			}
+			if tt.session == "CANCELLED" {
+				storeFake.events = append(storeFake.events, delegationRecoveryEvent(t, run.ProjectID, run.ID, sequence, "run.cancellation_requested", map[string]any{"source": "run_cancel"}))
 				sequence++
 			}
 			storeFake.events = append(storeFake.events, delegationRecoveryEvent(t, run.ProjectID, run.ID, sequence, "workspace.transfer.completed", map[string]any{"direction": "from_runner"}))
