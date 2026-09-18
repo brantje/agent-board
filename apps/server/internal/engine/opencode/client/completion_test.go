@@ -153,3 +153,91 @@ func TestClientListMessages(t *testing.T) {
 		}
 	})
 }
+
+func TestPromptAdmittedRequiresExactUserTurn(t *testing.T) {
+	tests := []struct {
+		name      string
+		messages  any
+		want      bool
+		wantError bool
+	}{
+		{name: "empty history means not admitted", messages: []any{}},
+		{name: "exact user prompt is admitted", messages: []any{map[string]any{
+			"info": map[string]any{"role": "user"},
+			"parts": []any{map[string]any{"type": "text", "text": "do the task"}},
+		}}, want: true},
+		{name: "assistant-only history is ambiguous", messages: []any{map[string]any{
+			"info": map[string]any{"role": "assistant"},
+			"parts": []any{map[string]any{"type": "text", "text": "working"}},
+		}}, wantError: true},
+		{name: "different user turn is ambiguous", messages: []any{map[string]any{
+			"info": map[string]any{"role": "user"},
+			"parts": []any{map[string]any{"type": "text", "text": "other task"}},
+		}}, wantError: true},
+	}
+	t.Run("unavailable history is ambiguous", func(t *testing.T) {
+		server := httptest.NewServer(http.NotFoundHandler())
+		defer server.Close()
+		native, err := New(server.Client(), server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if admitted, err := native.PromptAdmitted(t.Context(), "ses_1", "do the task"); err == nil || admitted {
+			t.Fatalf("PromptAdmitted()=(%v,%v) want false with ambiguity error", admitted, err)
+		}
+	})
+
+	t.Run("requires identifiers", func(t *testing.T) {
+		native, err := New(http.DefaultClient, "http://opencode.example")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, input := range []struct{ sessionID, expected string }{
+			{sessionID: "", expected: "do the task"},
+			{sessionID: "ses_1", expected: ""},
+		} {
+			if admitted, err := native.PromptAdmitted(t.Context(), input.sessionID, input.expected); err == nil || admitted {
+				t.Fatalf("PromptAdmitted(%q,%q)=(%v,%v) want validation error", input.sessionID, input.expected, admitted, err)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "message without info", body: `[{"parts":[]}]`},
+		{name: "malformed info", body: `[{"info":"not-an-object","parts":[]}]`},
+		{name: "malformed user part", body: `[{"info":{"role":"user"},"parts":["not-an-object"]}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			native, err := New(server.Client(), server.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if admitted, err := native.PromptAdmitted(t.Context(), "ses_1", "do the task"); err == nil || admitted {
+				t.Fatalf("PromptAdmitted()=(%v,%v) want malformed-history error", admitted, err)
+			}
+		})
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(t, w, http.StatusOK, tc.messages)
+			}))
+			defer server.Close()
+			native, err := New(server.Client(), server.URL)
+			if err != nil { t.Fatal(err) }
+			got, err := native.PromptAdmitted(t.Context(), "ses_1", "do the task")
+			if (err != nil) != tc.wantError || got != tc.want {
+				t.Fatalf("PromptAdmitted()=(%v,%v) want (%v,error=%v)", got, err, tc.want, tc.wantError)
+			}
+		})
+	}
+}

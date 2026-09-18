@@ -82,7 +82,7 @@ func assertDelegatedWorkspaceFeedsLaterNormalRun(
 	}
 
 	_, _, continuationStarts, _, _ := runnerClient.stats()
-	if continuationStarts != 1 {
-		t.Fatalf("ordinary continuation executions that observed delegated state=%d want 1", continuationStarts)
+	if continuationStarts != 2 {
+		t.Fatalf("continuation executions that observed delegated state=%d want 2 (parent resume plus later ordinary Run)", continuationStarts)
 	}
 }

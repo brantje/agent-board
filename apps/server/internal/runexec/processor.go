@@ -38,10 +38,28 @@ type ExecutionStore interface {
 	UpdateWorkspaceCurrentBranch(context.Context, string, string, string) (store.Workspace, error)
 }
 
+type delegationRecoveryEventStore interface {
+	ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error)
+}
+
 type delegationHandoffRecoveryStore interface {
 	store.DelegationStore
 	store.DelegationWorkspaceHandoffStore
-	ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error)
+	delegationRecoveryEventStore
+}
+
+type delegatedTerminalRecoveryStore interface {
+	store.DelegationStore
+	delegationRecoveryEventStore
+}
+
+type delegatedParentRunStore interface {
+	store.DelegationStore
+	GetRun(context.Context, string, string) (store.Run, error)
+}
+
+type executionSessionCanceller interface {
+	Cancel(context.Context, string, string, time.Duration) error
 }
 
 type SessionService interface {
@@ -134,17 +152,21 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	if err != nil {
 		return failed(err), nil
 	}
+	delegationContinuation, err := p.loadDelegationContinuation(ctx, claim, run)
+	if err != nil {
+		return failed(err), nil
+	}
 	live, err := p.liveExecutionSession(ctx, run)
 	if err != nil {
 		return failed(err), nil
 	}
 	if live != nil {
-		return p.attachExistingExecution(ctx, run, resolved.Safe, *live)
+		return p.attachExistingExecution(ctx, run, resolved.Safe, *live, delegationContinuation)
 	}
-	return p.startNewExecution(ctx, claim, run, resolved.Safe)
+	return p.startNewExecution(ctx, claim, run, resolved.Safe, delegationContinuation)
 }
 
-func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext) (scheduler.Result, error) {
+func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
 	runEventType := "run.started"
 	if claim.Job.Kind == "RESUME" {
 		runEventType = "run.resumed"
@@ -171,14 +193,11 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 		if err != nil {
 			return failed(err), nil
 		}
-		safe = p.attachRunnerProvenance(ctx, safe, runnerID)
-		if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
+		safe, err = p.prepareRunnerSessionWorkspace(ctx, run, safe, runnerID, session.ID)
+		if err != nil {
 			return failed(err), nil
 		}
-		if err := p.transferWorkspaceToRunner(ctx, safe, runnerID, session.ID); err != nil {
-			return failed(err), nil
-		}
-		return p.runEngineOnRunner(ctx, run, safe, runnerID, session.ID)
+		return p.runEngineOnRunnerWithContinuation(ctx, run, safe, runnerID, session.ID, delegationContinuation)
 	}
 	if p.runtimes == nil {
 		return failed(fmt.Errorf("scheduler admission is missing runner id")), nil
@@ -203,17 +222,32 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 		_ = p.cleanupRuntime(ctx, safe, instance)
 		return scheduler.Result{}, err
 	}
-	return p.runEngine(ctx, run, safe, instance, "")
+	return p.runEngineWithContinuation(ctx, run, safe, instance, "", delegationContinuation)
 }
 
-func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, session store.ExecutionSession) (scheduler.Result, error) {
+func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, session store.ExecutionSession, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
 	if err := p.record(ctx, safe, "run.resumed", map[string]any{"reason": "lease_reconciliation"}, nil, nil); err != nil {
 		return scheduler.Result{}, err
 	}
 	p.branches.observeIfChanged(ctx, safe, nil)
 	if session.RunnerID != "" {
-		safe = p.attachRunnerProvenance(ctx, safe, session.RunnerID)
-		return p.runEngineOnRunner(ctx, run, safe, session.RunnerID, session.ID)
+		if session.Status == "PENDING" {
+			if !isRemoteGitProject(safe) {
+				ready, err := p.ensureRunnerWorkspace(ctx, run, safe)
+				if err != nil {
+					return failed(err), nil
+				}
+				safe = ready
+			}
+			var err error
+			safe, err = p.prepareRunnerSessionWorkspace(ctx, run, safe, session.RunnerID, session.ID)
+			if err != nil {
+				return failed(err), nil
+			}
+		} else {
+			safe = p.attachRunnerProvenance(ctx, safe, session.RunnerID)
+		}
+		return p.runEngineOnRunnerWithContinuation(ctx, run, safe, session.RunnerID, session.ID, delegationContinuation)
 	}
 	if p.runtimes == nil {
 		return failed(fmt.Errorf("legacy runtime execution is unavailable")), nil
@@ -226,7 +260,7 @@ func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, 
 	if err != nil {
 		return failed(err), nil
 	}
-	return p.runEngine(ctx, run, safe, instance, session.ID)
+	return p.runEngineWithContinuation(ctx, run, safe, instance, session.ID, delegationContinuation)
 }
 
 func (p *Processor) materializeExecution(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance) (store.RuntimeInstance, executioncontext.SafeContext, error) {
@@ -251,6 +285,10 @@ func (p *Processor) materializeExecution(ctx context.Context, run store.Run, saf
 }
 
 func (p *Processor) runEngine(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance, attachSessionID string) (scheduler.Result, error) {
+	return p.runEngineWithContinuation(ctx, run, safe, instance, attachSessionID, nil)
+}
+
+func (p *Processor) runEngineWithContinuation(ctx context.Context, run store.Run, safe executioncontext.SafeContext, instance store.RuntimeInstance, attachSessionID string, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
 	adapter, err := p.engines.Get(safe.Agent.Engine)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
@@ -266,7 +304,7 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 		scope:             evidence.RunScope{ProjectID: run.ProjectID, IssueID: run.IssueID, RunID: run.ID},
 		branches:          p.branches,
 	}
-	request, err := p.engineRequest(ctx, safe, launcher, instance.ID)
+	request, err := p.engineRequestWithDelegationContinuation(ctx, safe, launcher, instance.ID, delegationContinuation)
 	if err != nil {
 		cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 		return failed(errors.Join(err, cleanupErr)), nil
@@ -276,9 +314,16 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 		return p.finishWaitingForInput(ctx, safe, instance)
 	}
 	handoff, handoffRequested := engine.AsDelegationHandoff(engineErr)
-
+	if engineErr != nil && !handoffRequested {
+		if uncertaintyErr := p.executionUncertainty(ctx, run, engineErr); uncertaintyErr != nil {
+			return scheduler.Result{}, uncertaintyErr
+		}
+	}
 	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	_, finalizeErr := p.finalizeServerWorkspace(finalizeCtx, safe)
+	if finalizeErr == nil {
+		finalizeErr = p.recordDelegationWorkspaceAccepted(finalizeCtx, safe, &instance.ID)
+	}
 	cancelFinalize()
 	if engineErr == nil && finalizeErr == nil && engineResult.Summary != "" {
 		engineErr = p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, &instance.ID, nil)
@@ -297,10 +342,24 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 	if combined := errors.Join(engineErr, finalizeErr, cleanupErr); combined != nil {
 		return p.failExecution(ctx, safe, combined, &instance.ID)
 	}
-	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, &instance.ID, nil); err != nil {
-		return scheduler.Result{}, err
+	return p.finishSuccessfulExecution(ctx, safe, &instance.ID)
+}
+
+func (p *Processor) executionUncertainty(ctx context.Context, run store.Run, cause error) error {
+	if cause == nil {
+		return nil
 	}
-	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
+	live, err := p.liveExecutionSession(ctx, run)
+	if err != nil {
+		return errors.Join(cause, fmt.Errorf("run execution: inspect Execution Session after execution error: %w", err))
+	}
+	if live == nil {
+		return nil
+	}
+	return errors.Join(cause, fmt.Errorf(
+		"run execution: Execution Session %s remains %s after execution error; reconciliation is required",
+		live.ID, live.Status,
+	))
 }
 
 func (p *Processor) liveExecutionSession(ctx context.Context, run store.Run) (*store.ExecutionSession, error) {
@@ -338,6 +397,13 @@ func (p *Processor) Reconcile(ctx context.Context, claim *store.SchedulerAdmissi
 	if err != nil {
 		return store.SchedulerReconciliationUnknown, nil, err
 	}
+	parentTerminal, err := p.delegatedParentTerminal(ctx, claim.Run)
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, err
+	}
+	if parentTerminal {
+		return p.reconcileDelegatedRunWithTerminalParent(ctx, claim.Run, sessions)
+	}
 	seen := false
 	for _, session := range sessions {
 		if session.RunID != claim.Run.ID {
@@ -353,18 +419,290 @@ func (p *Processor) Reconcile(ctx context.Context, claim *store.SchedulerAdmissi
 		return store.SchedulerReconciliationRetry, nil, nil
 	}
 	// Once any external Execution Session existed, lack of a live session is not
-	// enough proof that replaying the Engine is safe. Delegation handoff recovery
-	// is the narrow exception: it may reuse a completed Runner session only when
-	// durable native tool evidence matches the canonical delegation. The Engine
-	// is never replayed, and scheduler ownership remains UNKNOWN until the store
-	// observes the durable handoff-ready marker.
+	// enough proof that replaying the Engine is safe. Delegation recovery has two
+	// narrow exceptions that never replay the Engine: a delegated child may be
+	// finalized from one authoritative terminal session, while a parent may finish
+	// a previously recorded Workspace handoff. All ambiguous ownership remains
+	// UNKNOWN.
+	outcome, reason, recovered, err := p.recoverDelegatedTerminalRun(ctx, claim.Run, sessions, false)
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, err
+	}
+	if recovered {
+		return outcome, reason, nil
+	}
 	if err := p.recoverDelegationWorkspaceHandoff(ctx, claim.Run, sessions); err != nil {
 		return store.SchedulerReconciliationUnknown, nil, err
 	}
 	return store.SchedulerReconciliationUnknown, nil, nil
 }
 
+func (p *Processor) delegatedParentTerminal(ctx context.Context, child store.Run) (bool, error) {
+	lineage, ok := p.store.(delegatedParentRunStore)
+	if !ok {
+		return false, nil
+	}
+	delegation, err := lineage.GetDelegationByRun(ctx, child.ProjectID, child.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	parent, err := lineage.GetRun(ctx, child.ProjectID, delegation.ParentRunID)
+	if err != nil {
+		return false, err
+	}
+	if delegation.IssueID != child.IssueID || parent.IssueID != child.IssueID || parent.WorkspaceID != child.WorkspaceID || parent.AgentID == nil || *parent.AgentID != delegation.ParentAgentID || child.AgentID == nil || *child.AgentID != delegation.TargetAgentID {
+		return false, fmt.Errorf("run execution: delegated parent lineage does not match authoritative Runs")
+	}
+	switch parent.Status {
+	case "COMPLETED", "FAILED", "CANCELLED":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+func (p *Processor) reconcileDelegatedRunWithTerminalParent(ctx context.Context, run store.Run, sessions []store.ExecutionSession) (store.SchedulerReconciliationOutcome, *string, error) {
+	live := liveExecutionSessionsForRun(sessions, run.ID)
+	if len(live) > 1 {
+		return store.SchedulerReconciliationUnknown, nil, nil
+	}
+	if len(live) == 1 {
+		canceller, ok := p.sessions.(executionSessionCanceller)
+		if !ok {
+			return store.SchedulerReconciliationUnknown, nil, fmt.Errorf("run execution: execution session cancellation is unavailable")
+		}
+		if err := canceller.Cancel(ctx, run.ProjectID, live[0].ID, processCancellationCleanupTimeout); err != nil {
+			return store.SchedulerReconciliationUnknown, nil, err
+		}
+		if err := p.sessions.ReconcileAll(ctx); err != nil {
+			return store.SchedulerReconciliationUnknown, nil, err
+		}
+		var err error
+		sessions, err = p.store.ListExecutionSessions(ctx, run.ProjectID, []string{"PENDING", "STARTING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"})
+		if err != nil {
+			return store.SchedulerReconciliationUnknown, nil, err
+		}
+	}
+
+	matching := executionSessionsForRun(sessions, run.ID)
+	if len(matching) == 0 {
+		return store.SchedulerReconciliationCancelled, nil, nil
+	}
+	if len(liveExecutionSessionsForRun(matching, run.ID)) != 0 {
+		return store.SchedulerReconciliationUnknown, nil, nil
+	}
+	outcome, reason, recovered, err := p.recoverDelegatedTerminalRun(ctx, run, matching, true)
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, err
+	}
+	if recovered {
+		return outcome, reason, nil
+	}
+	return store.SchedulerReconciliationUnknown, nil, nil
+}
+
+func executionSessionsForRun(sessions []store.ExecutionSession, runID string) []store.ExecutionSession {
+	matching := make([]store.ExecutionSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session.RunID == runID {
+			matching = append(matching, session)
+		}
+	}
+	return matching
+}
+
+func liveExecutionSessionsForRun(sessions []store.ExecutionSession, runID string) []store.ExecutionSession {
+	matching := make([]store.ExecutionSession, 0, 1)
+	for _, session := range sessions {
+		if session.RunID != runID {
+			continue
+		}
+		switch session.Status {
+		case "PENDING", "STARTING", "RUNNING":
+			matching = append(matching, session)
+		}
+	}
+	return matching
+}
+
 const delegationRecoveryEventPageSize = 500
+
+func (p *Processor) recoverDelegatedTerminalRun(ctx context.Context, run store.Run, sessions []store.ExecutionSession, cancellationAuthoritative bool) (store.SchedulerReconciliationOutcome, *string, bool, error) {
+	recovery, ok := p.store.(delegatedTerminalRecoveryStore)
+	if !ok {
+		return "", nil, false, nil
+	}
+	delegation, err := recovery.GetDelegationByRun(ctx, run.ProjectID, run.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", nil, false, nil
+	}
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, true, err
+	}
+	if run.AgentID == nil || *run.AgentID != delegation.TargetAgentID {
+		return store.SchedulerReconciliationUnknown, nil, true, fmt.Errorf("run execution: delegated child Agent lineage does not match canonical delegation")
+	}
+	session, ok := terminalDelegatedExecutionSession(sessions, run.ID)
+	if !ok {
+		return store.SchedulerReconciliationUnknown, nil, true, nil
+	}
+	events, err := listDelegationRecoveryEvents(ctx, recovery, run.ProjectID, run.ID)
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, true, err
+	}
+	if !delegationWorkspaceAcceptedEvidence(events, delegation.ID) {
+		safe, err := p.delegationRecoveryContext(ctx, run)
+		if err != nil {
+			return store.SchedulerReconciliationUnknown, nil, true, err
+		}
+		if safe.Delegation == nil || safe.Delegation.ID != delegation.ID || safe.Delegation.ParentRunID != delegation.ParentRunID {
+			return store.SchedulerReconciliationUnknown, nil, true, fmt.Errorf("run execution: delegated recovery provenance does not match canonical delegation")
+		}
+		syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		switch {
+		case strings.TrimSpace(session.RunnerID) != "":
+			err = p.syncWorkspaceFromRunner(syncCtx, safe, session.RunnerID, session.ID)
+		case strings.TrimSpace(session.RuntimeInstanceID) != "":
+			_, err = p.finalizeServerWorkspace(syncCtx, safe)
+		default:
+			err = fmt.Errorf("run execution: terminal delegated session has no recoverable execution owner")
+		}
+		if err == nil {
+			err = p.recordDelegationWorkspaceAccepted(syncCtx, safe, optionalEventID(session.RuntimeInstanceID))
+		}
+		cancel()
+		if err != nil {
+			return store.SchedulerReconciliationUnknown, nil, true, err
+		}
+	}
+	switch recoveredExecutionOutcome(session, events, "completed", cancellationAuthoritative) {
+	case recoveredExecutionSucceeded:
+		return store.SchedulerReconciliationCompleted, nil, true, nil
+	case recoveredExecutionFailed:
+		reason := delegatedRecoveryFailureReason(events)
+		return store.SchedulerReconciliationFailed, &reason, true, nil
+	case recoveredExecutionCancelled:
+		return store.SchedulerReconciliationCancelled, nil, true, nil
+	default:
+		return store.SchedulerReconciliationUnknown, nil, true, nil
+	}
+}
+
+func terminalDelegatedExecutionSession(sessions []store.ExecutionSession, runID string) (store.ExecutionSession, bool) {
+	var candidate store.ExecutionSession
+	for _, session := range sessions {
+		if session.RunID != runID {
+			continue
+		}
+		switch session.Status {
+		case "COMPLETED", "FAILED", "CANCELLED":
+		default:
+			continue
+		}
+		if strings.TrimSpace(session.RunnerID) == "" && strings.TrimSpace(session.RuntimeInstanceID) == "" {
+			return store.ExecutionSession{}, false
+		}
+		if candidate.ID != "" && candidate.ID != session.ID {
+			return store.ExecutionSession{}, false
+		}
+		candidate = session
+	}
+	return candidate, candidate.ID != ""
+}
+
+type recoveredExecutionState string
+
+const (
+	recoveredExecutionUnknown   recoveredExecutionState = "unknown"
+	recoveredExecutionSucceeded recoveredExecutionState = "succeeded"
+	recoveredExecutionFailed    recoveredExecutionState = "failed"
+	recoveredExecutionCancelled recoveredExecutionState = "cancelled"
+)
+
+func recoveredExecutionOutcome(session store.ExecutionSession, events []store.Event, successBoundary string, cancellationAuthoritative bool) recoveredExecutionState {
+	switch session.Status {
+	case "COMPLETED":
+		return recoveredExecutionSucceeded
+	case "FAILED":
+		return recoveredExecutionFailed
+	case "CANCELLED":
+		if cancellationAuthoritative || hasRunEvent(events, "run.cancellation_requested") {
+			return recoveredExecutionCancelled
+		}
+		for _, event := range events {
+			if event.Type != "engine.execution.completed" {
+				continue
+			}
+			var payload struct {
+				Boundary string `json:"boundary"`
+			}
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.Boundary == successBoundary {
+				return recoveredExecutionSucceeded
+			}
+		}
+		if hasRunEvent(events, "run.failed") {
+			return recoveredExecutionFailed
+		}
+	}
+	return recoveredExecutionUnknown
+}
+
+func hasRunEvent(events []store.Event, eventType string) bool {
+	for _, event := range events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func delegationWorkspaceAcceptedEvidence(events []store.Event, delegationID string) bool {
+	for _, event := range events {
+		if event.Type == "delegation.workspace_accepted" {
+			var payload struct {
+				DelegationID string `json:"delegationId"`
+			}
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.DelegationID == delegationID {
+				return true
+			}
+		}
+		if authoritativeWorkspaceHandbackEvent(event) {
+			return true
+		}
+	}
+	return false
+}
+
+func authoritativeWorkspaceHandbackEvent(event store.Event) bool {
+	if event.Type != "workspace.transfer.completed" {
+		return false
+	}
+	var payload struct {
+		Direction string `json:"direction"`
+	}
+	if json.Unmarshal(event.Payload, &payload) != nil {
+		return false
+	}
+	return payload.Direction == "from_runner" || payload.Direction == "git_publish"
+}
+
+func delegatedRecoveryFailureReason(events []store.Event) string {
+	for index := len(events) - 1; index >= 0; index-- {
+		if events[index].Type != "run.failed" {
+			continue
+		}
+		var payload struct {
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal(events[index].Payload, &payload) == nil && strings.TrimSpace(payload.Reason) != "" {
+			return safeFailure(errors.New(payload.Reason))
+		}
+	}
+	return "delegated execution failed during reconciliation"
+}
 
 func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run store.Run, sessions []store.ExecutionSession) error {
 	recovery, ok := p.store.(delegationHandoffRecoveryStore)
@@ -387,13 +725,12 @@ func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run s
 		if !completed {
 			continue
 		}
-		// A durable tool completion and Workspace hand-back are not enough when
-		// cancellation or failure won the execution boundary. Only a uniquely
-		// completed authoritative parent Execution Session may finish handoff
-		// recovery; FAILED/CANCELLED sessions remain fail-closed even if their
-		// cleanup synchronized trustworthy partial work.
-		session, ok := completedDelegationExecutionSession(sessions, run.ID)
-		if !ok {
+		// ExecutionSession status is transport state. In particular OpenCode may
+		// intentionally terminate its service process after a successful handoff,
+		// which persists as CANCELLED. Only the durable logical Engine boundary may
+		// reinterpret that transport status as a successful handoff.
+		session, ok := terminalDelegatedExecutionSession(sessions, run.ID)
+		if !ok || recoveredExecutionOutcome(session, events, "delegation_handoff", false) != recoveredExecutionSucceeded {
 			continue
 		}
 		if !synchronized {
@@ -428,7 +765,7 @@ func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run s
 	return nil
 }
 
-func listDelegationRecoveryEvents(ctx context.Context, recovery delegationHandoffRecoveryStore, projectID, runID string) ([]store.Event, error) {
+func listDelegationRecoveryEvents(ctx context.Context, recovery delegationRecoveryEventStore, projectID, runID string) ([]store.Event, error) {
 	var result []store.Event
 	after := int64(0)
 	for {
@@ -473,37 +810,14 @@ func delegationRecoveryEvidence(events []store.Event, delegation store.Delegatio
 			}
 			continue
 		}
-		if completedSequence == 0 || *event.Sequence <= completedSequence || event.Type != "workspace.transfer.completed" {
+		if completedSequence == 0 || *event.Sequence <= completedSequence {
 			continue
 		}
-		var payload struct {
-			Direction string `json:"direction"`
-		}
-		if err := json.Unmarshal(event.Payload, &payload); err != nil {
-			continue
-		}
-		if payload.Direction == "from_runner" || payload.Direction == "git_publish" {
+		if authoritativeWorkspaceHandbackEvent(event) {
 			return true, true
 		}
 	}
 	return completedSequence != 0, false
-}
-
-func completedDelegationExecutionSession(sessions []store.ExecutionSession, runID string) (store.ExecutionSession, bool) {
-	var candidate store.ExecutionSession
-	for _, session := range sessions {
-		if session.RunID != runID || session.Status != "COMPLETED" {
-			continue
-		}
-		if strings.TrimSpace(session.RunnerID) == "" && strings.TrimSpace(session.RuntimeInstanceID) == "" {
-			continue
-		}
-		if candidate.ID != "" && candidate.ID != session.ID {
-			return store.ExecutionSession{}, false
-		}
-		candidate = session
-	}
-	return candidate, candidate.ID != ""
 }
 
 func (p *Processor) delegationRecoveryContext(ctx context.Context, run store.Run) (executioncontext.SafeContext, error) {
@@ -951,6 +1265,17 @@ func (p *Processor) ensureRunnerWorkspace(ctx context.Context, run store.Run, sa
 	return materialized.Safe, nil
 }
 
+func (p *Processor) prepareRunnerSessionWorkspace(ctx context.Context, run store.Run, safe executioncontext.SafeContext, runnerID, sessionID string) (executioncontext.SafeContext, error) {
+	safe = p.attachRunnerProvenance(ctx, safe, runnerID)
+	if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
+		return executioncontext.SafeContext{}, err
+	}
+	if err := p.transferWorkspaceToRunner(ctx, safe, runnerID, sessionID); err != nil {
+		return executioncontext.SafeContext{}, err
+	}
+	return safe, nil
+}
+
 func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
 	if isRemoteGitProject(safe) {
 		return p.prepareRemoteGitWorkspace(ctx, safe, runnerID, sessionID)
@@ -997,6 +1322,10 @@ func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executio
 }
 
 func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe executioncontext.SafeContext, runnerID, attachSessionID string) (scheduler.Result, error) {
+	return p.runEngineOnRunnerWithContinuation(ctx, run, safe, runnerID, attachSessionID, nil)
+}
+
+func (p *Processor) runEngineOnRunnerWithContinuation(ctx context.Context, run store.Run, safe executioncontext.SafeContext, runnerID, attachSessionID string, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
 	adapter, err := p.engines.Get(safe.Agent.Engine)
 	if err != nil {
 		return failed(err), nil
@@ -1007,7 +1336,7 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 		scope:    evidence.RunScope{ProjectID: run.ProjectID, IssueID: run.IssueID, RunID: run.ID},
 		branches: p.branches,
 	}
-	request, err := p.engineRequest(ctx, safe, launcher, "")
+	request, err := p.engineRequestWithDelegationContinuation(ctx, safe, launcher, "", delegationContinuation)
 	if err != nil {
 		return failed(err), nil
 	}
@@ -1016,9 +1345,16 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 		return p.finishWaitingForInputRunner(ctx, safe)
 	}
 	handoff, handoffRequested := engine.AsDelegationHandoff(engineErr)
-
+	if engineErr != nil && !handoffRequested {
+		if uncertaintyErr := p.executionUncertainty(ctx, run, engineErr); uncertaintyErr != nil {
+			return scheduler.Result{}, uncertaintyErr
+		}
+	}
 	syncCtx, cancelSync := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	syncErr := p.syncWorkspaceFromRunner(syncCtx, safe, runnerID, attachSessionID)
+	if syncErr == nil {
+		syncErr = p.recordDelegationWorkspaceAccepted(syncCtx, safe, nil)
+	}
 	cancelSync()
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
@@ -1037,7 +1373,23 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 			return scheduler.Result{}, err
 		}
 	}
-	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, nil, nil); err != nil {
+	return p.finishSuccessfulExecution(ctx, safe, nil)
+}
+
+func (p *Processor) recordDelegationWorkspaceAccepted(ctx context.Context, safe executioncontext.SafeContext, runtimeInstanceID *string) error {
+	if safe.Delegation == nil {
+		return nil
+	}
+	return p.record(ctx, safe, "delegation.workspace_accepted", map[string]any{
+		"delegationId": safe.Delegation.ID,
+	}, runtimeInstanceID, nil)
+}
+
+func (p *Processor) finishSuccessfulExecution(ctx context.Context, safe executioncontext.SafeContext, runtimeInstanceID *string) (scheduler.Result, error) {
+	if safe.Delegation != nil {
+		return scheduler.Result{RunStatus: "COMPLETED"}, nil
+	}
+	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, runtimeInstanceID, nil); err != nil {
 		return scheduler.Result{}, err
 	}
 	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil

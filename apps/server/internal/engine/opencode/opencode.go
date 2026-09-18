@@ -111,8 +111,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	}()
 
 	stopped := false
+	preserveServiceForReconciliation := false
 	defer func() {
-		if !stopped {
+		if !stopped && !preserveServiceForReconciliation {
 			stopped = true
 			_ = stopService(ctx, process)
 		}
@@ -133,7 +134,15 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, err
 	}
 
-	session, promptRequired, err := ensureNativeSession(ctx, native, request.Context, settings, recovered)
+	initialPrompt := initialTaskPromptWithDelegationContinuation(request.Context, request.DelegationContinuation)
+	admissionPrompt := initialPrompt
+	if admissions, ok := request.Launcher.(engine.ExecutionAdmissionPromptStore); ok {
+		admissionPrompt, err = admissions.GetOrCreateAdmissionPrompt(ctx, process.ID(), initialPrompt)
+		if err != nil {
+			return engine.Result{}, fmt.Errorf("opencode engine: persist execution admission prompt: %w", err)
+		}
+	}
+	session, promptRequired, err := ensureNativeSession(ctx, native, request.Context, settings, admissionPrompt, recovered)
 	if err != nil {
 		return engine.Result{}, err
 	}
@@ -149,12 +158,29 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	state := newRunState(session.ID, request.InteractiveQuestions, activitySink(request.Launcher))
 	statusTools := newIssueStatusToolTracker()
 	delegationTools := newDelegationToolTracker()
+	completeDelegationHandoff := func(err error) error {
+		if !errors.Is(err, engine.ErrDelegationHandoff) {
+			return err
+		}
+		if boundaryErr := recordExecutionBoundary(ctx, state.activity, "delegation_handoff"); boundaryErr != nil {
+			preserveServiceForReconciliation = true
+			return fmt.Errorf("opencode engine: persist delegation handoff execution boundary: %w", boundaryErr)
+		}
+		_ = stream.Close()
+		stopped = true
+		if stopErr := stopServiceForDelegationHandoff(ctx, process); stopErr != nil {
+			waitDrained(drainDone, serviceStopTimeout)
+			return stopErr
+		}
+		waitDrained(drainDone, serviceStopTimeout)
+		return err
+	}
 	if recovered && !promptRequired {
 		if err := statusTools.ReconcileAttach(ctx, native, session.ID, request.IssueStatus); err != nil {
 			return engine.Result{}, err
 		}
 		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
-			return engine.Result{}, err
+			return engine.Result{}, completeDelegationHandoff(err)
 		}
 	}
 	state.seedModelUsage(settings.ProviderID, request.Context.Model.Model, nil)
@@ -165,7 +191,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, err
 	}
 	if promptRequired {
-		if err := native.Prompt(ctx, session.ID, initialTaskPrompt(request.Context)); err != nil {
+		if err := native.Prompt(ctx, session.ID, admissionPrompt); err != nil {
 			return engine.Result{}, fmt.Errorf("opencode engine: send initial task: %w", err)
 		}
 	}
@@ -188,7 +214,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			return engine.Result{}, err
 		}
 		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
-			return engine.Result{}, err
+			return engine.Result{}, completeDelegationHandoff(err)
 		}
 		if err := state.flushPendingMessages(ctx); err != nil {
 			return engine.Result{}, err
@@ -199,6 +225,10 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		}
 		if failed {
 			return engine.Result{}, fmt.Errorf("opencode engine: native session error: %s", message)
+		}
+		if boundaryErr := recordExecutionBoundary(ctx, state.activity, "completed"); boundaryErr != nil {
+			preserveServiceForReconciliation = true
+			return engine.Result{}, fmt.Errorf("opencode engine: persist completed execution boundary: %w", boundaryErr)
 		}
 		return finish()
 	}
@@ -277,6 +307,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 					)
 				}
 				if reconcileErr := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); reconcileErr != nil {
+					if errors.Is(reconcileErr, engine.ErrDelegationHandoff) {
+						return engine.Result{}, completeDelegationHandoff(reconcileErr)
+					}
 					return engine.Result{}, errors.Join(
 						fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
 						reconcileErr,
@@ -330,7 +363,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 						return engine.Result{}, activityErr
 					}
 				}
-				return engine.Result{}, err
+				return engine.Result{}, completeDelegationHandoff(err)
 			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
 				return engine.Result{}, err
@@ -342,6 +375,24 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			}
 		}
 	}
+}
+
+
+func recordExecutionBoundary(ctx context.Context, activity engine.ActivitySink, boundary string) error {
+	if activity == nil {
+		return nil
+	}
+	return activity.RecordActivity(ctx, engine.ActivityEvent{
+		Type:    "engine.execution.completed",
+		Payload: map[string]any{"boundary": boundary},
+	})
+}
+
+func stopServiceForDelegationHandoff(ctx context.Context, process engine.Process) error {
+	if err := stopService(ctx, process); err != nil {
+		return fmt.Errorf("opencode engine: delegation handoff service shutdown is uncertain: %w", err)
+	}
+	return nil
 }
 
 type settings struct {
@@ -444,7 +495,7 @@ func launchOpenCodeProcessWithCapabilities(ctx context.Context, launcher engine.
 	return process, false, nil
 }
 
-func ensureNativeSession(ctx context.Context, native *client.Client, safe executioncontext.SafeContext, settings settings, recovered bool) (client.Session, bool, error) {
+func ensureNativeSession(ctx context.Context, native *client.Client, safe executioncontext.SafeContext, settings settings, expectedPrompt string, recovered bool) (client.Session, bool, error) {
 	if recovered {
 		listed, err := native.ListSessions(ctx)
 		if err != nil {
@@ -455,7 +506,11 @@ func ensureNativeSession(ctx context.Context, native *client.Client, safe execut
 			return client.Session{}, false, err
 		}
 		if strings.TrimSpace(session.ID) != "" {
-			return session, false, nil
+			admitted, err := native.PromptAdmitted(ctx, session.ID, expectedPrompt)
+			if err != nil {
+				return client.Session{}, false, fmt.Errorf("opencode engine: prove recovered prompt admission: %w", err)
+			}
+			return session, !admitted, nil
 		}
 	}
 	session, err := native.CreateSession(ctx, client.CreateSessionRequest{
@@ -518,6 +573,10 @@ const issueStatusPromptGuidance = "Issue Board status is an explicit workflow de
 const delegationPromptGuidance = "This Run may request bounded help from another Agent with delegate_task(targetAgentId, task). Use an explicit target Agent ID supplied by your instructions or trusted context; do not guess Agent identifiers. Delegation does not transfer Issue ownership or Review authority."
 
 func initialTaskPrompt(safe executioncontext.SafeContext) string {
+	return initialTaskPromptWithDelegationContinuation(safe, nil)
+}
+
+func initialTaskPromptWithDelegationContinuation(safe executioncontext.SafeContext, continuation *engine.DelegationContinuation) string {
 	var sections []string
 	if role := strings.TrimSpace(safe.Agent.RoleInstructions); role != "" {
 		sections = append(sections, "Agent role instructions:\n"+role)
@@ -532,6 +591,24 @@ func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	}
 	if safe.ReviewFeedback != nil && strings.TrimSpace(safe.ReviewFeedback.Feedback) != "" {
 		sections = append(sections, "Review feedback:\n"+strings.TrimSpace(safe.ReviewFeedback.Feedback))
+	}
+	if continuation != nil {
+		resultEventID := strings.TrimSpace(continuation.ResultEventID)
+		if resultEventID == "" {
+			resultEventID = "none"
+		}
+		sections = append(sections, fmt.Sprintf(
+			"Delegation result returned to this parent Run:\nDelegation ID: %s\nTarget Agent ID: %s\nDelegated task: %s\nOutcome: %s\nResult summary: %s\nDelegated Run ID: %s\nResult evidence Event ID: %s\nWorkspace changes accepted: %t\nCurrent Issue Workspace revision: %s\nContinue as the authoritative parent using the current Workspace state. Do not replay the delegated task merely to reconstruct its result.",
+			strings.TrimSpace(continuation.DelegationID),
+			strings.TrimSpace(continuation.TargetAgentID),
+			strings.TrimSpace(continuation.Task),
+			strings.TrimSpace(continuation.Outcome),
+			strings.TrimSpace(continuation.ResultSummary),
+			strings.TrimSpace(continuation.DelegatedRunID),
+			resultEventID,
+			continuation.WorkspaceChangesAccepted,
+			strings.TrimSpace(continuation.WorkspaceRevision),
+		))
 	}
 	if safe.Delegation == nil {
 		sections = append(sections, "Current persisted Issue Board status: "+strings.TrimSpace(safe.Issue.Status)+".\n"+issueStatusPromptGuidance)

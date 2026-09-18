@@ -35,11 +35,11 @@ import (
 )
 
 const (
-	delegationExecutionSessionID    = "ses_delegation_e2e"
-	delegationExecutionCallID       = "execution-e2e-request-1"
-	delegationExecutionTask         = "inspect scheduler ownership"
-	delegationParentBoundaryFile    = "parent-before-delegation.txt"
-	delegationChildBoundaryFile     = "delegate-change.txt"
+	delegationExecutionSessionID        = "ses_delegation_e2e"
+	delegationExecutionCallID           = "execution-e2e-request-1"
+	delegationExecutionTask             = "inspect scheduler ownership"
+	delegationParentBoundaryFile        = "parent-before-delegation.txt"
+	delegationChildBoundaryFile         = "delegate-change.txt"
 	delegationExecutionRoleParent       = "parent"
 	delegationExecutionRoleDelegate     = "delegate"
 	delegationExecutionRoleContinuation = "continuation"
@@ -50,11 +50,11 @@ type delegationExecutionRunnerClient struct {
 	*launcherClient
 	targetAgentID string
 
-	mu            sync.Mutex
-	payloads      map[string][]byte
-	servers       map[string]*httptest.Server
-	processes     map[string]*launcherDialTransport
-	roles         map[string]string
+	mu                 sync.Mutex
+	payloads           map[string][]byte
+	servers            map[string]*httptest.Server
+	processes          map[string]*launcherDialTransport
+	roles              map[string]string
 	allowedStarts      int
 	deniedStarts       int
 	continuationStarts int
@@ -86,23 +86,23 @@ func (c *delegationExecutionRunnerClient) Start(_ context.Context, sessionID str
 	role := delegationExecutionRoleDenied
 	emitDelegation := false
 	continuation := false
-	if !delegationEnabled && len(payload) != 0 {
+	if len(payload) != 0 {
 		hasDelegatedState, err := delegationExecutionBundleHasFile(payload, delegationChildBoundaryFile)
 		if err != nil {
-			return nil, fmt.Errorf("inspect ordinary continuation inbound Workspace: %w", err)
+			return nil, fmt.Errorf("inspect continuation inbound Workspace: %w", err)
 		}
 		continuation = hasDelegatedState
 	}
 
 	c.mu.Lock()
 	switch {
+	case continuation:
+		role = delegationExecutionRoleContinuation
+		c.continuationStarts++
 	case delegationEnabled:
 		role = delegationExecutionRoleParent
 		emitDelegation = true
 		c.allowedStarts++
-	case continuation:
-		role = delegationExecutionRoleContinuation
-		c.continuationStarts++
 	default:
 		if c.deniedStarts == 0 {
 			role = delegationExecutionRoleDelegate
@@ -136,6 +136,7 @@ func (c *delegationExecutionRunnerClient) Start(_ context.Context, sessionID str
 		targetAgentID:     c.targetAgentID,
 		delegationEnabled: delegationEnabled,
 		emitDelegation:    emitDelegation,
+		emitPermission:    role != delegationExecutionRoleContinuation,
 		events:            make(chan string, 8),
 	}
 	server := httptest.NewServer(native.handler())
@@ -259,6 +260,7 @@ type delegationExecutionNativeOpenCode struct {
 	targetAgentID     string
 	delegationEnabled bool
 	emitDelegation    bool
+	emitPermission    bool
 	events            chan string
 
 	mu             sync.Mutex
@@ -304,17 +306,22 @@ func (h *delegationExecutionNativeOpenCode) handler() http.Handler {
 		}
 		h.prompted = true
 		h.activeUntil = time.Now().Add(700 * time.Millisecond)
+		if !h.emitPermission {
+			h.settled = true
+		}
 		h.mu.Unlock()
-		go func() {
-			time.Sleep(350 * time.Millisecond)
-			event := h.permissionEvent()
-			h.events <- event
-			if h.emitDelegation {
-				// Replay the same externally visible tool call. The production OpenCode
-				// tracker and canonical request key must keep it to one delegation/Run/job.
+		if h.emitPermission {
+			go func() {
+				time.Sleep(350 * time.Millisecond)
+				event := h.permissionEvent()
 				h.events <- event
-			}
-		}()
+				if h.emitDelegation {
+					// Replay the same externally visible tool call. The production OpenCode
+					// tracker and canonical request key must keep it to one delegation/Run/job.
+					h.events <- event
+				}
+			}()
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
@@ -615,14 +622,18 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	}
 
 	childTerminal := waitForDelegationExecutionRun(t, ctx, router, project.ID, created.DelegatedRunID)
-	if childTerminal.Status != "READY_FOR_REVIEW" {
-		t.Fatalf("delegated Run status=%s failure=%v want READY_FOR_REVIEW", childTerminal.Status, childTerminal.FailureReason)
+	if childTerminal.Status != "COMPLETED" {
+		t.Fatalf("delegated Run status=%s failure=%v want COMPLETED", childTerminal.Status, childTerminal.FailureReason)
 	}
 	if parentTerminal.WorkspaceID != childTerminal.WorkspaceID || parentTerminal.CurrentBranch == nil || childTerminal.CurrentBranch == nil || *parentTerminal.CurrentBranch != *childTerminal.CurrentBranch {
 		t.Fatalf("delegated Workspace continuity parent=%+v child=%+v", parentTerminal, childTerminal)
 	}
+	parentFinal := waitForDelegationExecutionRunStatus(t, ctx, router, project.ID, parentRun.ID, "READY_FOR_REVIEW")
+	if parentFinal.WorkspaceID != parentRun.WorkspaceID {
+		t.Fatalf("resumed parent Workspace=%s want %s", parentFinal.WorkspaceID, parentRun.WorkspaceID)
+	}
 	allowedStarts, deniedStarts, continuationStarts, onceReplies, rejectReplies := runnerClient.stats()
-	if allowedStarts != 1 || deniedStarts != 1 || continuationStarts != 0 || onceReplies < 2 || rejectReplies != 1 {
+	if allowedStarts != 1 || deniedStarts != 1 || continuationStarts != 1 || onceReplies < 2 || rejectReplies != 1 {
 		t.Fatalf("unexpected OpenCode tool-path stats allowed=%d denied=%d continuation=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, continuationStarts, onceReplies, rejectReplies)
 	}
 
@@ -634,7 +645,7 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 			continue
 		}
 		children++
-		if run.ID != created.DelegatedRunID || run.WorkspaceID != parentRun.WorkspaceID || run.Status != "READY_FOR_REVIEW" {
+		if run.ID != created.DelegatedRunID || run.WorkspaceID != parentRun.WorkspaceID || run.Status != "COMPLETED" {
 			t.Fatalf("ordinary delegated Run=%+v", run)
 		}
 	}
@@ -693,7 +704,7 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 		t.Fatalf("disabled-policy parent status=%s failure=%v want READY_FOR_REVIEW", deniedTerminal.Status, deniedTerminal.FailureReason)
 	}
 	allowedStarts, deniedStarts, continuationStarts, onceReplies, rejectReplies = runnerClient.stats()
-	if allowedStarts != 1 || deniedStarts != 2 || continuationStarts != 1 || onceReplies < 2 || rejectReplies != 3 {
+	if allowedStarts != 1 || deniedStarts != 2 || continuationStarts != 2 || onceReplies < 2 || rejectReplies != 2 {
 		t.Fatalf("disabled execution did not reject forged delegate_task path: allowed=%d denied=%d continuation=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, continuationStarts, onceReplies, rejectReplies)
 	}
 	var denied []httpapi.DelegationDTO
@@ -729,7 +740,7 @@ func waitForDelegationExecutionRun(t *testing.T, ctx context.Context, router htt
 			}
 			last = run
 			switch run.Status {
-			case "PAUSED", "READY_FOR_REVIEW", "FAILED", "CANCELLED":
+			case "PAUSED", "COMPLETED", "READY_FOR_REVIEW", "FAILED", "CANCELLED":
 				return run
 			}
 			break
@@ -737,6 +748,39 @@ func waitForDelegationExecutionRun(t *testing.T, ctx context.Context, router htt
 		select {
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for Run %s: %v last=%+v", runID, ctx.Err(), last)
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForDelegationExecutionRunStatus(t *testing.T, ctx context.Context, router http.Handler, projectID, runID, status string) httpapi.RunDTO {
+	t.Helper()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	var last httpapi.RunDTO
+	for {
+		var runs []httpapi.RunDTO
+		delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+projectID+"/runs", "", http.StatusOK, &runs)
+		for _, run := range runs {
+			if run.ID != runID {
+				continue
+			}
+			last = run
+			if run.Status == status {
+				return run
+			}
+			if run.Status == "COMPLETED" || run.Status == "FAILED" || run.Status == "CANCELLED" {
+				failure := ""
+				if run.FailureReason != nil {
+					failure = *run.FailureReason
+				}
+				t.Fatalf("Run %s reached terminal status %s while waiting for %s: failure=%q", runID, run.Status, status, failure)
+			}
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for Run %s status %s: %v last=%+v", runID, status, ctx.Err(), last)
 		case <-ticker.C:
 		}
 	}
@@ -863,7 +907,7 @@ func isolatedDelegationExecutionDatabase(t *testing.T, ctx context.Context, base
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
 		cleanup, connectErr := pgx.Connect(cleanupCtx, baseDatabaseURL)
 		if connectErr != nil {

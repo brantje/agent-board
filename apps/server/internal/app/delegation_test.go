@@ -24,6 +24,10 @@ type delegationServiceStore struct {
 	listParentRunID string
 	listResult      []store.Delegation
 	listErr         error
+
+	runs        map[string]store.Run
+	revision    string
+	revisionErr error
 }
 
 func (s *delegationServiceStore) RequestDelegation(_ context.Context, command store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
@@ -41,6 +45,53 @@ func (s *delegationServiceStore) ListDelegationsByParentRun(_ context.Context, p
 	s.listProjectID = projectID
 	s.listParentRunID = parentRunID
 	return s.listResult, s.listErr
+}
+
+func (s *delegationServiceStore) GetRun(_ context.Context, projectID, runID string) (store.Run, error) {
+	if s.runs != nil {
+		run, ok := s.runs[runID]
+		if !ok || run.ProjectID != projectID {
+			return store.Run{}, store.ErrNotFound
+		}
+		return run, nil
+	}
+	for _, delegation := range append([]store.Delegation{s.getResult}, s.listResult...) {
+		if delegation.ProjectID != projectID {
+			continue
+		}
+		if runID == delegation.ParentRunID {
+			agentID := delegation.ParentAgentID
+			return store.Run{ID: runID, ProjectID: projectID, IssueID: delegation.IssueID, WorkspaceID: "workspace-1", AgentID: &agentID, Status: "PAUSED"}, nil
+		}
+		if runID == delegation.DelegatedRunID {
+			agentID := delegation.TargetAgentID
+			return store.Run{ID: runID, ProjectID: projectID, IssueID: delegation.IssueID, WorkspaceID: "workspace-1", AgentID: &agentID, Status: "COMPLETED"}, nil
+		}
+	}
+	return store.Run{}, store.ErrNotFound
+}
+
+func (s *delegationServiceStore) GetWorkspaceCurrentRevision(context.Context, string, string) (string, error) {
+	if s.revisionErr != nil {
+		return "", s.revisionErr
+	}
+	if s.revision != "" {
+		return s.revision, nil
+	}
+	return "revision-1", nil
+}
+
+type delegationNoRevisionStore struct {
+	store.ControlPlaneStore
+	runs map[string]store.Run
+}
+
+func (s *delegationNoRevisionStore) GetRun(_ context.Context, projectID, runID string) (store.Run, error) {
+	run, ok := s.runs[runID]
+	if !ok || run.ProjectID != projectID {
+		return store.Run{}, store.ErrNotFound
+	}
+	return run, nil
 }
 
 type unsupportedDelegationStore struct {
@@ -111,8 +162,11 @@ func TestRequestDelegationRejectsUnavailableStoresAndTranslatesErrors(t *testing
 
 func TestDelegationQueriesUseDelegationStoreAndTranslateErrors(t *testing.T) {
 	backend := &delegationServiceStore{
-		getResult:  store.Delegation{ID: "child-lineage"},
-		listResult: []store.Delegation{{ID: "first"}, {ID: "second"}},
+		getResult: store.Delegation{ID: "child-lineage", ProjectID: "project", IssueID: "issue", ParentRunID: "parent-run", DelegatedRunID: "child-run"},
+		listResult: []store.Delegation{
+			{ID: "first", ProjectID: "project", IssueID: "issue", ParentRunID: "parent-run", DelegatedRunID: "child-1"},
+			{ID: "second", ProjectID: "project", IssueID: "issue", ParentRunID: "parent-run", DelegatedRunID: "child-2"},
+		},
 	}
 	service := New(backend)
 
@@ -120,7 +174,7 @@ func TestDelegationQueriesUseDelegationStoreAndTranslateErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != "child-lineage" || backend.getProjectID != "project" || backend.getRunID != "child-run" {
+	if got.ID != "child-lineage" || got.ParentRunStatus != "PAUSED" || got.DelegatedRunStatus != "COMPLETED" || got.WorkspaceRevision != "revision-1" || backend.getProjectID != "project" || backend.getRunID != "child-run" {
 		t.Fatalf("get delegation = %+v, project=%q run=%q", got, backend.getProjectID, backend.getRunID)
 	}
 
@@ -149,3 +203,81 @@ func TestDelegationQueriesUseDelegationStoreAndTranslateErrors(t *testing.T) {
 		t.Fatal("list accepted store without delegation support")
 	}
 }
+
+func TestDelegationInspectionFailsClosedOnBrokenAuthoritativeState(t *testing.T) {
+	value := store.Delegation{
+		ID: "delegation", ProjectID: "project", IssueID: "issue", ParentRunID: "parent",
+		ParentAgentID: "parent-agent", TargetAgentID: "target-agent", DelegatedRunID: "child",
+	}
+	parentAgentID, targetAgentID := value.ParentAgentID, value.TargetAgentID
+	parent := store.Run{ID: "parent", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", AgentID: &parentAgentID, Status: "PAUSED"}
+	child := store.Run{ID: "child", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", AgentID: &targetAgentID, Status: "COMPLETED"}
+
+	t.Run("missing parent", func(t *testing.T) {
+		backend := &delegationServiceStore{runs: map[string]store.Run{"child": child}}
+		_, err := New(backend).inspectDelegation(t.Context(), value)
+		if err == nil || !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("err=%v want not found", err)
+		}
+	})
+
+	t.Run("missing child", func(t *testing.T) {
+		backend := &delegationServiceStore{runs: map[string]store.Run{"parent": parent}}
+		_, err := New(backend).inspectDelegation(t.Context(), value)
+		if err == nil || !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("err=%v want not found", err)
+		}
+	})
+
+	t.Run("lineage mismatch", func(t *testing.T) {
+		wrongChild := child
+		wrongChild.WorkspaceID = "other-workspace"
+		backend := &delegationServiceStore{runs: map[string]store.Run{"parent": parent, "child": wrongChild}}
+		_, err := New(backend).inspectDelegation(t.Context(), value)
+		if err == nil || !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("err=%v want conflict", err)
+		}
+	})
+
+	t.Run("target Agent mismatch", func(t *testing.T) {
+		wrongAgent := "other-agent"
+		wrongChild := child
+		wrongChild.AgentID = &wrongAgent
+		backend := &delegationServiceStore{runs: map[string]store.Run{"parent": parent, "child": wrongChild}}
+		_, err := New(backend).inspectDelegation(t.Context(), value)
+		if err == nil || !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("err=%v want conflict", err)
+		}
+	})
+
+	t.Run("revision failure", func(t *testing.T) {
+		backend := &delegationServiceStore{
+			runs:        map[string]store.Run{"parent": parent, "child": child},
+			revisionErr: store.ErrConflict,
+		}
+		_, err := New(backend).inspectDelegation(t.Context(), value)
+		if err == nil || !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("err=%v want translated conflict", err)
+		}
+	})
+}
+
+func TestDelegationInspectionRejectsMissingWorkspaceRevisionReader(t *testing.T) {
+	value := store.Delegation{ID: "delegation", ProjectID: "project", IssueID: "issue", ParentRunID: "parent", DelegatedRunID: "child"}
+	backend := &delegationNoRevisionStore{runs: map[string]store.Run{
+		"parent": {ID: "parent", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", Status: "PAUSED"},
+		"child":  {ID: "child", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", Status: "COMPLETED"},
+	}}
+	if _, err := New(backend).inspectDelegation(t.Context(), value); err == nil {
+		t.Fatal("inspection accepted store without Workspace revision reader")
+	}
+}
+
+func TestListDelegationsPropagatesRevisionFailure(t *testing.T) {
+	value := store.Delegation{ID: "delegation", ProjectID: "project", IssueID: "issue", ParentRunID: "parent", DelegatedRunID: "child"}
+	backend := &delegationServiceStore{listResult: []store.Delegation{value}, revisionErr: store.ErrConflict}
+	if _, err := New(backend).ListDelegationsByParentRun(t.Context(), "project", "parent"); err == nil || !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("err=%v want revision conflict", err)
+	}
+}
+

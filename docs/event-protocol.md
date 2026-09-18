@@ -293,9 +293,10 @@ These Events describe use and authorization only. They never contain the secret 
 delegation.created
 delegation.completed
 delegation.failed
+delegation.cancelled
 ```
 
-Canonical delegation already persists `delegation.created` and carries parent/child Run relationships so the execution tree is reconstructable. Serialized Workspace handoff is represented through the ordinary Run, scheduler and Workspace/Git lifecycle rather than a second delegation event stream. `delegation.completed` / `delegation.failed` belong to the later delegated-outcome lifecycle if that phase needs them; phase 2 does not manufacture result events merely for Workspace handoff.
+Canonical delegation persists `delegation.created` and carries parent/child Run relationships so the execution tree is reconstructable. Serialized Workspace handoff is represented through the ordinary Run, scheduler and Workspace/Git lifecycle rather than a second delegation event stream. When the delegated Run reaches a trustworthy terminal outcome, the result lifecycle emits exactly one meaningful parent-scoped `delegation.completed`, `delegation.failed`, or `delegation.cancelled` Event while detailed commands, messages, tests, files and raw output remain in the delegated Run's existing evidence. Restart reconciliation reuses the same terminalization path rather than mirroring child history into delegation Events.
 
 ## Payload contracts
 

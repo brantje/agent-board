@@ -21,6 +21,7 @@ type executionSessionStoreFake struct {
 	instance         store.RuntimeInstance
 	session          store.ExecutionSession
 	sessionsByRunner []store.ExecutionSession
+	admissionPrompt  string
 }
 
 func (s *executionSessionStoreFake) GetRun(context.Context, string, string) (store.Run, error) {
@@ -100,6 +101,18 @@ func (s *executionSessionStoreFake) UpdateRuntimeInstanceRunnerStatus(_ context.
 	defer s.mu.Unlock()
 	s.instance.RunnerStatus = status
 	return s.instance, nil
+}
+
+func (s *executionSessionStoreFake) GetOrCreateExecutionSessionAdmissionPrompt(_ context.Context, projectID, sessionID, prompt string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if projectID != s.run.ProjectID || sessionID == "" || prompt == "" {
+		return "", store.ErrInvalidArgument
+	}
+	if s.admissionPrompt == "" {
+		s.admissionPrompt = prompt
+	}
+	return s.admissionPrompt, nil
 }
 
 type fakeExecutionTransport struct {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -48,6 +50,16 @@ func (s *RedactingStore) PutRunProvenance(ctx context.Context, projectID, runID 
 		return err
 	}
 	return s.ControlPlaneStore.PutRunProvenance(ctx, projectID, runID, redacted)
+}
+
+func (s *RedactingStore) GetOrCreateExecutionSessionAdmissionPrompt(ctx context.Context, projectID, sessionID, prompt string) (string, error) {
+	base, ok := s.ControlPlaneStore.(store.ExecutionSessionAdmissionStore)
+	if !ok {
+		return "", fmt.Errorf("redacting store base does not support Execution Session admission prompts")
+	}
+	// This is private execution identity, not user-visible evidence. Preserve it
+	// byte-for-byte so native admission checks remain exact.
+	return base.GetOrCreateExecutionSessionAdmissionPrompt(ctx, projectID, sessionID, prompt)
 }
 
 func (s *RedactingStore) AppendEvent(ctx context.Context, input store.Event) (store.Event, error) {
@@ -217,6 +229,11 @@ func (s *RedactingStore) RequestDelegation(ctx context.Context, input store.Requ
 	if !ok {
 		return store.RequestDelegationResult{}, fmt.Errorf("redacting store base does not support delegation")
 	}
+	input.Task = strings.TrimSpace(input.Task)
+	if utf8.RuneCountInString(input.Task) > store.MaxDelegationTaskCharacters {
+		return store.RequestDelegationResult{}, store.ErrInvalidArgument
+	}
+	input.Task = s.registry.RedactString(input.ParentRunID, input.Task)
 	return base.RequestDelegation(ctx, input)
 }
 
@@ -228,6 +245,14 @@ func (s *RedactingStore) GetDelegationByRun(ctx context.Context, projectID, runI
 	return base.GetDelegationByRun(ctx, projectID, runID)
 }
 
+func (s *RedactingStore) GetDelegationByContinuationJob(ctx context.Context, projectID, parentRunID, jobID string) (store.Delegation, error) {
+	base, ok := s.ControlPlaneStore.(store.DelegationContinuationStore)
+	if !ok {
+		return store.Delegation{}, fmt.Errorf("redacting store base does not support delegation continuation")
+	}
+	return base.GetDelegationByContinuationJob(ctx, projectID, parentRunID, jobID)
+}
+
 func (s *RedactingStore) ListDelegationsByParentRun(ctx context.Context, projectID, parentRunID string) ([]store.Delegation, error) {
 	base, ok := s.ControlPlaneStore.(store.DelegationStore)
 	if !ok {
@@ -236,8 +261,17 @@ func (s *RedactingStore) ListDelegationsByParentRun(ctx context.Context, project
 	return base.ListDelegationsByParentRun(ctx, projectID, parentRunID)
 }
 
+func (s *RedactingStore) CancelInactiveRun(ctx context.Context, projectID, runID string) (store.RunCancellationResult, error) {
+	base, ok := s.ControlPlaneStore.(store.InactiveRunCancellationStore)
+	if !ok {
+		return store.RunCancellationResult{}, fmt.Errorf("redacting store base does not support inactive Run cancellation")
+	}
+	return base.CancelInactiveRun(ctx, projectID, runID)
+}
+
 var _ store.IssueStatusMutationStore = (*RedactingStore)(nil)
 var _ store.IssueMutationActorStore = (*RedactingStore)(nil)
 var _ store.IssuePlacementStore = (*RedactingStore)(nil)
 var _ store.WorkspaceRevisionStore = (*RedactingStore)(nil)
 var _ store.DelegationStore = (*RedactingStore)(nil)
+var _ store.DelegationContinuationStore = (*RedactingStore)(nil)

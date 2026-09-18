@@ -444,6 +444,21 @@ func (p *AuthorizedExecutionProcess) takeReleaseLocked() func() {
 	return release
 }
 
+func (s *AuthorizedExecutionSessionService) GetOrCreateAdmissionPrompt(ctx context.Context, projectID, sessionID, prompt string) (string, error) {
+	if s == nil || s.sessions == nil {
+		return "", NewError("execution_session_unavailable", "Execution Session service is unavailable", store.ErrInvalidArgument)
+	}
+	admissions, ok := s.sessions.store.(store.ExecutionSessionAdmissionStore)
+	if !ok {
+		return "", NewError("execution_session_admission_unavailable", "Execution Session admission identity is unavailable", store.ErrConflict)
+	}
+	admitted, err := admissions.GetOrCreateExecutionSessionAdmissionPrompt(ctx, projectID, sessionID, prompt)
+	if err != nil {
+		return "", translateStoreError(err, "execution_session")
+	}
+	return admitted, nil
+}
+
 func (s *AuthorizedExecutionSessionService) ReconcileAll(ctx context.Context) error {
 	return s.sessions.ReconcileAll(ctx)
 }

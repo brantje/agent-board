@@ -35,6 +35,16 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 	if input.RunStatus == "FAILED" && (input.FailureReason == nil || strings.TrimSpace(*input.FailureReason) == "") {
 		return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 	}
+	switch input.RunStatus {
+	case "READY_FOR_REVIEW", "COMPLETED", "FAILED", "CANCELLED":
+		active, err := activeRunExecutionSessionTx(ctx, tx, input.ProjectID, input.RunID)
+		if err != nil {
+			return store.SchedulerMutationResult{}, err
+		}
+		if active {
+			return store.SchedulerMutationResult{}, store.ErrConflict
+		}
+	}
 
 	run, err := scanRun(tx.QueryRow(ctx, `
 		UPDATE runs
@@ -66,6 +76,10 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 			return store.SchedulerMutationResult{}, err
 		}
 	}
+	delegationEvents, err := finalizeDelegatedRunTx(ctx, tx, run)
+	if err != nil {
+		return store.SchedulerMutationResult{}, err
+	}
 
 	if release {
 		if _, err := tx.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, input.ProjectID, input.JobID); err != nil {
@@ -86,7 +100,7 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 	if err := tx.Commit(ctx); err != nil {
 		return store.SchedulerMutationResult{}, err
 	}
-	return store.SchedulerMutationResult{Run: run}, nil
+	return store.SchedulerMutationResult{Run: run, Events: delegationEvents}, nil
 }
 
 func releaseReadyDelegationWorkspaceHandoffs(ctx context.Context, tx pgx.Tx, parent store.Run) error {

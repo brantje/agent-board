@@ -1,6 +1,9 @@
 package httpapi
 
-import "github.com/brantje/agent-board/apps/server/internal/store"
+import (
+	"github.com/brantje/agent-board/apps/server/internal/app"
+	"github.com/brantje/agent-board/apps/server/internal/store"
+)
 
 func projectDTO(v store.Project) ProjectDTO {
 	return ProjectDTO{
@@ -74,19 +77,28 @@ func runDTO(v store.Run, issueKeys map[string]string) RunDTO {
 	return RunDTO{v.ID, v.ProjectID, issueKeyForUUID(issueKeys, v.IssueID), v.WorkspaceID, v.AgentID, v.Attempt, v.Status, v.QueueReason, v.FailureReason, v.CreatedAt, v.StartedAt, v.CompletedAt, v.UpdatedAt, v.CurrentBranch}
 }
 
-func delegationDTO(v store.Delegation, issueKeys map[string]string) DelegationDTO {
+func delegationDTO(v app.DelegationInspection, issueKeys map[string]string) DelegationDTO {
 	return DelegationDTO{
-		ID:              v.ID,
-		ProjectID:       v.ProjectID,
-		IssueID:         issueKeyForUUID(issueKeys, v.IssueID),
-		ParentRunID:     v.ParentRunID,
-		ParentAgentID:   v.ParentAgentID,
-		TargetAgentID:   v.TargetAgentID,
-		Task:            v.Task,
-		DelegatedRunID:  v.DelegatedRunID,
-		WorkspaceAccess: store.DelegationWorkspaceAccessWrite,
-		RequestKey:      v.RequestKey,
-		CreatedAt:       v.CreatedAt,
-		UpdatedAt:       v.UpdatedAt,
+		ID:                       v.ID,
+		ProjectID:                v.ProjectID,
+		IssueID:                  issueKeyForUUID(issueKeys, v.IssueID),
+		ParentRunID:              v.ParentRunID,
+		ParentAgentID:            v.ParentAgentID,
+		TargetAgentID:            v.TargetAgentID,
+		Task:                     v.Task,
+		DelegatedRunID:           v.DelegatedRunID,
+		WorkspaceAccess:          store.DelegationWorkspaceAccessWrite,
+		RequestKey:               v.RequestKey,
+		ParentRunStatus:          v.ParentRunStatus,
+		DelegatedRunStatus:       v.DelegatedRunStatus,
+		Outcome:                  v.Outcome,
+		ResultSummary:            v.ResultSummary,
+		ResultEventID:            v.ResultEventID,
+		WorkspaceChangesAccepted: v.WorkspaceChangesAccepted,
+		WorkspaceRevision:        v.WorkspaceRevision,
+		ContinuationJobID:        v.ContinuationJobID,
+		CompletedAt:              v.CompletedAt,
+		CreatedAt:                v.CreatedAt,
+		UpdatedAt:                v.UpdatedAt,
 	}
 }

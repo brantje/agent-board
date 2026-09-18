@@ -83,7 +83,7 @@ This Squad foundation does not implicitly delegate or fan work out to members. C
 - optional autonomous PR/MR delivery after a successful verified candidate
 - canonical Agent delegation with per-Agent `Allow delegation` [implemented]
 - serialized same-Workspace/same-branch delegation handoff [implemented]
-- delegated outcome/result lifecycle and automatic parent continuation [later]
+- delegated outcome/result lifecycle and automatic parent continuation [implemented]
 - Squad-aware delegation/member collaboration built on the existing Squad ownership model [later]
 - broader Agent messaging/wake semantics where useful
 

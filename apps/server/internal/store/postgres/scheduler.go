@@ -85,8 +85,27 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	job, run, agentID, modelProfileID, err := lockNextAdmissionCandidate(ctx, tx)
-	if errors.Is(err, errSchedulerConfigurationUnavailable) {
-		if err := deferQueuedJob(ctx, tx, job, schedulerConfigurationWaitReason, backoffMicros); err != nil {
+	configurationUnavailable := errors.Is(err, errSchedulerConfigurationUnavailable)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil && !configurationUnavailable {
+		return nil, err
+	}
+
+	parentTerminal, err := delegatedParentTerminalTx(ctx, tx, run)
+	if err != nil {
+		return nil, err
+	}
+	if parentTerminal {
+		occupied, err := inactiveRunExecutionOccupiedTx(ctx, tx, run.ProjectID, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		if occupied {
+			return nil, store.ErrConflict
+		}
+		if _, err := cancelInactiveRunTx(ctx, tx, run); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -94,11 +113,14 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 		}
 		return nil, nil
 	}
-	if errors.Is(err, store.ErrNotFound) {
+	if configurationUnavailable {
+		if err := deferQueuedJob(ctx, tx, job, schedulerConfigurationWaitReason, backoffMicros); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
 		return nil, nil
-	}
-	if err != nil {
-		return nil, err
 	}
 
 	occupied, err := workspaceAdmissionOccupied(ctx, tx, run)
@@ -229,10 +251,25 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 		LEFT JOIN model_profiles AS model
 		  ON model.id=agent.model_profile_id
 		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
+		LEFT JOIN LATERAL (
+			SELECT true AS required
+			FROM delegations AS delegation
+			JOIN runs AS parent
+			  ON parent.project_id=delegation.project_id
+			 AND parent.id=delegation.parent_run_id
+			WHERE delegation.project_id=run.project_id
+			  AND delegation.delegated_run_id=run.id
+			  AND delegation.outcome IS NULL
+			  AND parent.status IN ('COMPLETED','FAILED','CANCELLED')
+			LIMIT 1
+		) AS terminal_parent_cleanup ON true
 		WHERE job.state='QUEUED'
-		  AND job.available_at <= now()
 		  AND run.status='QUEUED'
-		ORDER BY job.available_at, job.created_at, job.id
+		  AND (
+			job.available_at <= now()
+			OR terminal_parent_cleanup.required IS TRUE
+		  )
+		ORDER BY terminal_parent_cleanup.required DESC NULLS LAST, job.available_at, job.created_at, job.id
 		FOR UPDATE OF job, run SKIP LOCKED
 		LIMIT 1
 	`).Scan(

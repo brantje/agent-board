@@ -43,7 +43,7 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	parentAgent.AllowDelegation = true
-	parentAgent.RoleInstructions = "Immediately call delegate_task with targetAgentId " + target.ID + " and task 'Create delegated-result.txt containing exactly delegated-run-ok with no trailing newline. Do not modify any other file.' Do not change Issue status or perform that file task yourself. After the delegation tool completes, stop; do not ask a Question or perform additional work."
+	parentAgent.RoleInstructions = "If the prompt contains 'Delegation result returned to this parent Run:', do not call delegate_task again. Verify delegated-result.txt contains exactly delegated-run-ok, then create parent-resumed.txt containing exactly parent-resumed-ok with no trailing newline and finish normally without changing Issue status. Otherwise immediately call delegate_task with targetAgentId " + target.ID + " and task 'Create delegated-result.txt containing exactly delegated-run-ok with no trailing newline. Do not modify any other file.' Do not change Issue status or perform that file task yourself. After the delegation tool completes, stop; do not ask a Question or perform additional work."
 	if _, err := fixture.services.ControlPlane.UpdateAgent(fixture.ctx, &scope, parentAgent); err != nil {
 		t.Fatal(err)
 	}
@@ -69,8 +69,8 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	}
 	statusBeforeChild := beforeChild.Status
 
-	child := waitForScriptedRun(t, fixture.ctx, fixture.database, project.ID, delegation.DelegatedRunID)
-	if child.Status != "READY_FOR_REVIEW" {
+	child := waitForOpenCodeTerminalRun(t, fixture, project.ID, delegation.DelegatedRunID)
+	if child.Status != "COMPLETED" {
 		t.Fatalf("delegated Run status=%s failure=%q", child.Status, openCodeFailureReason(child.FailureReason))
 	}
 	if child.AgentID == nil || *child.AgentID != target.ID {
@@ -89,6 +89,15 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	}
 	if persisted.ID != delegation.ID || persisted.ParentRunID != parentRun.ID || persisted.Task != delegation.Task {
 		t.Fatalf("persisted child lineage=%+v want %+v", persisted, delegation)
+	}
+	if persisted.Outcome == nil || *persisted.Outcome != store.DelegationOutcomeSucceeded || persisted.ResultSummary == nil || strings.TrimSpace(*persisted.ResultSummary) == "" || persisted.ResultEventID == nil || persisted.WorkspaceChangesAccepted == nil || !*persisted.WorkspaceChangesAccepted || persisted.ContinuationJobID == nil || persisted.CompletedAt == nil {
+		t.Fatalf("persisted delegated result=%+v", persisted)
+	}
+	assertOpenCodeDelegationVisibleResult(t, fixture, project.ID, child.ID, persisted)
+	if _, err := fixture.database.GetReviewByRun(fixture.ctx, project.ID, child.ID); err == nil {
+		t.Fatal("delegated child unexpectedly created a Review")
+	} else if err != store.ErrNotFound {
+		t.Fatal(err)
 	}
 	delegations, err := fixture.database.ListDelegationsByParentRun(fixture.ctx, project.ID, parentRun.ID)
 	if err != nil {
@@ -111,18 +120,31 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Fatalf("target ordinary Run count=%d want 1", children)
 	}
 
+	parentFinal := waitForOpenCodeTerminalRun(t, fixture, project.ID, parentRun.ID)
+	if parentFinal.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("parent continuation status=%s failure=%q", parentFinal.Status, openCodeFailureReason(parentFinal.FailureReason))
+	}
+	assertOpenCodeWorkspaceFile(t, fixture.ctx, fixture.database, project.ID, parentFinal.WorkspaceID, "parent-resumed.txt", "parent-resumed-ok")
+	parentReview, err := fixture.database.GetReviewByRun(fixture.ctx, project.ID, parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentReview.Status != "PENDING" {
+		t.Fatalf("parent Review status=%s want PENDING", parentReview.Status)
+	}
 	afterChild, err := fixture.services.ControlPlane.GetIssue(fixture.ctx, project.ID, parentRun.IssueID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	afterOwner := afterChild.AssignedTo()
 	if afterOwner == nil || afterOwner.Type != "AGENT" || afterOwner.ID != parentAgent.ID {
-		t.Fatalf("delegated execution changed Issue owner: %+v", afterOwner)
+		t.Fatalf("delegation lifecycle changed Issue owner: %+v", afterOwner)
 	}
 	if afterChild.Status != statusBeforeChild {
-		t.Fatalf("delegated execution changed Issue status from %s to %s", statusBeforeChild, afterChild.Status)
+		t.Fatalf("delegation lifecycle changed Issue status from %s to %s", statusBeforeChild, afterChild.Status)
 	}
 	assertNoAuthoritativeDelegationTools(t, fixture, project.ID, child.ID)
+	assertOpenCodeDelegationResultEvidence(t, fixture, project.ID, parentRun.ID, child.ID)
 }
 
 func waitForOpenCodeDelegation(t *testing.T, fixture *openCodeIntegrationFixture, projectID, parentRunID string) store.Delegation {
@@ -172,6 +194,88 @@ func waitForOpenCodeRunStatus(t *testing.T, fixture *openCodeIntegrationFixture,
 			t.Fatalf("timed out waiting for Run %s status %s: current=%s", runID, status, run.Status)
 		case <-ticker.C:
 		}
+	}
+}
+
+func waitForOpenCodeTerminalRun(t *testing.T, fixture *openCodeIntegrationFixture, projectID, runID string) store.Run {
+	t.Helper()
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		run, err := fixture.database.GetRun(fixture.ctx, projectID, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch run.Status {
+		case "COMPLETED", "READY_FOR_REVIEW", "FAILED", "CANCELLED":
+			return run
+		}
+		select {
+		case <-fixture.ctx.Done():
+			t.Fatalf("timed out waiting for terminal Run %s: current=%s failure=%q", runID, run.Status, openCodeFailureReason(run.FailureReason))
+		case <-ticker.C:
+		}
+	}
+}
+
+func assertOpenCodeDelegationVisibleResult(t *testing.T, fixture *openCodeIntegrationFixture, projectID, childRunID string, delegation store.Delegation) {
+	t.Helper()
+	if delegation.ResultSummary == nil || delegation.ResultEventID == nil {
+		t.Fatalf("delegation result lacks summary/event reference: %+v", delegation)
+	}
+	events, err := fixture.database.ListRunEvents(fixture.ctx, projectID, childRunID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.ID != *delegation.ResultEventID {
+			continue
+		}
+		if event.Type != "agent.message" {
+			t.Fatalf("delegation result event type=%s want agent.message", event.Type)
+		}
+		var payload struct {
+			Message string `json:"message"`
+			Kind    string `json:"kind"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode delegation result event: %v", err)
+		}
+		if payload.Kind != "message" {
+			t.Fatalf("delegation result event kind=%q want message", payload.Kind)
+		}
+		if strings.TrimSpace(payload.Message) != strings.TrimSpace(*delegation.ResultSummary) {
+			t.Fatalf("delegation result summary=%q event message=%q", *delegation.ResultSummary, payload.Message)
+		}
+		return
+	}
+	t.Fatalf("delegation result event %s missing from child evidence", *delegation.ResultEventID)
+}
+
+func assertOpenCodeDelegationResultEvidence(t *testing.T, fixture *openCodeIntegrationFixture, projectID, parentRunID, childRunID string) {
+	t.Helper()
+	childEvents, err := fixture.database.ListRunEvents(fixture.ctx, projectID, childRunID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasIntegrationEvent(childEvents, "delegation.workspace_accepted") {
+		t.Fatalf("delegated child has no Workspace acceptance evidence: %v", eventTypes(childEvents))
+	}
+	if hasIntegrationEvent(childEvents, "run.ready_for_review") {
+		t.Fatalf("delegated child emitted Review-ready evidence: %v", eventTypes(childEvents))
+	}
+	parentEvents, err := fixture.database.ListRunEvents(fixture.ctx, projectID, parentRunID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := 0
+	for _, event := range parentEvents {
+		if event.Type == "delegation.completed" {
+			completed++
+		}
+	}
+	if completed != 1 {
+		t.Fatalf("delegation.completed event count=%d want 1: %v", completed, eventTypes(parentEvents))
 	}
 }
 

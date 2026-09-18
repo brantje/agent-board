@@ -143,6 +143,54 @@ func TestRunnerDelegationHandoffSyncsWorkspaceBeforeYield(t *testing.T) {
 	}
 }
 
+type delegationShutdownFailureEngine struct {
+	workspace string
+}
+
+func (e delegationShutdownFailureEngine) Name() string { return "test" }
+
+func (e delegationShutdownFailureEngine) Execute(ctx context.Context, request engine.Request) (engine.Result, error) {
+	result, err := (processTestEngine{workspace: e.workspace}).Execute(ctx, request)
+	if err != nil {
+		return engine.Result{}, err
+	}
+	return result, errors.New("opencode engine: delegation handoff service shutdown is uncertain")
+}
+
+func TestDelegationShutdownUncertaintyDoesNotReleaseChild(t *testing.T) {
+	repository := initProcessTestRepository(t)
+	safe := processTestSafeContext(repository)
+	safe.Runner = &executioncontext.RunnerContext{ID: "runner-1"}
+	baseStore := &runnerSyncStore{}
+	client := &successfulSyncClient{payload: runnerTransferPayload(t, repository)}
+	processor := newRunnerSyncProcessor(t, repository, safe, baseStore, client)
+	handoffStore := &runnerDelegationHandoffStore{runnerSyncStore: baseStore}
+	processor.store = handoffStore
+	registry, err := engine.NewRegistry(delegationShutdownFailureEngine{workspace: repository})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor.engines = registry
+	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID}
+
+	result, err := processor.runEngineOnRunner(t.Context(), run, safe, "runner-1", "session-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RunStatus != "FAILED" || result.FailureReason == nil {
+		t.Fatalf("shutdown uncertainty result=%+v", result)
+	}
+	if len(handoffStore.marks) != 0 {
+		t.Fatalf("shutdown uncertainty released delegated child: %+v", handoffStore.marks)
+	}
+	if len(client.directions) != 1 || client.directions[0] != "from_runner" || !client.confirmed {
+		t.Fatalf("shutdown uncertainty did not preserve Workspace handback: directions=%v confirmed=%v", client.directions, client.confirmed)
+	}
+	if !hasProcessTestEvent(baseStore.events, "run.failed") || hasProcessTestEvent(baseStore.events, "run.paused") {
+		t.Fatalf("shutdown uncertainty events=%+v", baseStore.events)
+	}
+}
+
 func TestDelegationHandoffFailureDoesNotReleaseChild(t *testing.T) {
 	repository := initProcessTestRepository(t)
 	safe := processTestSafeContext(repository)

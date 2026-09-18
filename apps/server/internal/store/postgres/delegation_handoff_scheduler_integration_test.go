@@ -329,29 +329,52 @@ func expireDelegationSchedulerLease(t *testing.T, s *Store, jobID, leaseToken st
 	}
 }
 
-func claimDelegationParentJob(t *testing.T, f delegationFixture) (string, string) {
+func admitDelegationParentJob(t *testing.T, f delegationFixture) *store.SchedulerAdmission {
 	t.Helper()
 	ctx := t.Context()
-	var jobID string
-	if err := f.store.pool.QueryRow(ctx, `
-		UPDATE scheduler_jobs
-		SET state='CLAIMED', wait_reason=NULL, updated_at=now()
-		WHERE project_id=$1 AND run_id=$2 AND kind='START' AND state='QUEUED'
-		RETURNING id::text
-	`, f.project.ID, f.parentRun.ID).Scan(&jobID); err != nil {
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE runs
+		SET status='QUEUED', started_at=NULL, updated_at=now()
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, f.parentRun.ID); err != nil {
 		t.Fatal(err)
 	}
-	var leaseToken string
-	if err := f.store.pool.QueryRow(ctx, `
-		INSERT INTO scheduler_leases (job_id, owner_id, expires_at)
-		VALUES ($1, 'delegation-handoff-test', now() + interval '5 minutes')
-		RETURNING lease_token::text
-	`, jobID).Scan(&leaseToken); err != nil {
+	runner, err := f.store.CreateRunner(ctx, store.Runner{Name: "delegation handoff runner", TokenHash: make([]byte, 32)})
+	if err != nil {
 		t.Fatal(err)
 	}
-	return jobID, leaseToken
+	if err := f.store.ObserveRunner(ctx, runner.ID, []byte(`{"max_active_sessions":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	f.store.SetRunnerCandidates(func(string) []string { return []string{runner.ID} })
+	claim, err := f.store.AdmitNextJob(ctx, "delegation-handoff-test", 5*time.Minute, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claim == nil || claim.Run.ID != f.parentRun.ID || claim.Run.Status != "STARTING" || claim.Job.State != "CLAIMED" {
+		t.Fatalf("parent admission=%+v", claim)
+	}
+	return claim
 }
 
+func claimDelegationParentJob(t *testing.T, f delegationFixture) (string, string) {
+	t.Helper()
+	claim := admitDelegationParentJob(t, f)
+	parent, err := f.store.TransitionAdmittedJob(t.Context(), store.SchedulerTransition{
+		ProjectID: f.project.ID,
+		JobID: claim.Job.ID,
+		RunID: claim.Run.ID,
+		LeaseToken: claim.Lease.LeaseToken,
+		RunStatus: "RUNNING",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != "RUNNING" {
+		t.Fatalf("parent status=%s want RUNNING", parent.Status)
+	}
+	return claim.Job.ID, claim.Lease.LeaseToken
+}
 
 type delegationRecoverySchedulerStore struct {
 	store.SchedulerStore

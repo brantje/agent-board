@@ -8,7 +8,8 @@ import (
 )
 
 var engineActivityTypes = map[string]struct{}{
-	"agent.message":   {},
+	"engine.execution.completed": {},
+	"agent.message":               {},
 	"tool.started":    {},
 	"tool.completed":  {},
 	"tool.failed":     {},
@@ -39,3 +40,20 @@ func (l *processLauncher) RecordActivity(ctx context.Context, activity engine.Ac
 }
 
 var _ engine.ActivitySink = (*processLauncher)(nil)
+
+type executionAdmissionPromptService interface {
+	GetOrCreateAdmissionPrompt(context.Context, string, string, string) (string, error)
+}
+
+func (l *processLauncher) GetOrCreateAdmissionPrompt(ctx context.Context, executionSessionID, prompt string) (string, error) {
+	if l == nil || l.sessions == nil {
+		return "", fmt.Errorf("run execution: Execution Session admission identity is unavailable")
+	}
+	service, ok := l.sessions.(executionAdmissionPromptService)
+	if !ok {
+		return "", fmt.Errorf("run execution: Execution Session admission identity is unsupported")
+	}
+	return service.GetOrCreateAdmissionPrompt(ctx, l.scope.ProjectID, executionSessionID, prompt)
+}
+
+var _ engine.ExecutionAdmissionPromptStore = (*processLauncher)(nil)

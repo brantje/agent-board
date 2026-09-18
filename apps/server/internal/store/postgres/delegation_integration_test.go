@@ -3,20 +3,59 @@ package postgres
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync"
 	"testing"
 
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
+	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type delegationFixture struct {
-	store      *Store
-	project    store.Project
-	issue      store.Issue
-	parent     store.Agent
-	target     store.Agent
-	parentRun  store.Run
-	model      store.ModelProfile
-	provider   store.Provider
+	store     *Store
+	project   store.Project
+	issue     store.Issue
+	parent    store.Agent
+	target    store.Agent
+	parentRun store.Run
+	model     store.ModelProfile
+	provider  store.Provider
+}
+
+func TestRequestDelegationPersistsRedactedTaskAndKeepsIdempotency(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	registry := redaction.NewRegistry()
+	const secret = "delegation-secret-value"
+	registry.Register(f.parentRun.ID, []string{secret})
+	secured := evidence.NewRedactingStore(f.store, registry)
+	input := store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "Inspect " + secret + " and report the bounded finding.", RequestKey: "redacted-task",
+	}
+
+	first, err := secured.RequestDelegation(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := f.store.GetDelegationByRun(t.Context(), f.project.ID, first.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(persisted.Task, secret) || persisted.Task == input.Task {
+		t.Fatalf("persisted delegation task leaked secret: %q", persisted.Task)
+	}
+	if persisted.Task == "" {
+		t.Fatal("redaction erased the complete delegation task")
+	}
+
+	retry, err := secured.RequestDelegation(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.Delegation.ID != first.Delegation.ID || retry.DelegatedRun.ID != first.DelegatedRun.ID {
+		t.Fatalf("redacted retry lost idempotency: first=%+v retry=%+v", first.Delegation, retry.Delegation)
+	}
 }
 
 func TestRequestDelegationCreatesOneNormalRunAndIsIdempotent(t *testing.T) {
@@ -38,6 +77,9 @@ func TestRequestDelegationCreatesOneNormalRunAndIsIdempotent(t *testing.T) {
 	}
 	if first.SchedulerJob.Kind != "START" || first.SchedulerJob.RunID != first.DelegatedRun.ID {
 		t.Fatalf("unexpected scheduler job: %+v", first.SchedulerJob)
+	}
+	if first.Delegation.Outcome != nil || first.Delegation.ResultSummary != nil || first.Delegation.ResultEventID != nil || first.Delegation.WorkspaceChangesAccepted != nil || first.Delegation.ContinuationJobID != nil || first.Delegation.CompletedAt != nil {
+		t.Fatalf("new delegation unexpectedly has terminal result state: %+v", first.Delegation)
 	}
 
 	retry, err := f.store.RequestDelegation(ctx, input)
@@ -68,6 +110,139 @@ func TestRequestDelegationCreatesOneNormalRunAndIsIdempotent(t *testing.T) {
 	}
 	if issue.Status != f.issue.Status || issue.AssigneeType == nil || *issue.AssigneeType != "AGENT" || issue.AssigneeID == nil || *issue.AssigneeID != f.parent.ID {
 		t.Fatalf("delegation changed Issue authority: before=%+v after=%+v", f.issue, issue)
+	}
+}
+
+func TestRequestDelegationSerializesUnfinishedDelegationsPerParent(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	firstInput := store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "first bounded task", RequestKey: "first-serial",
+	}
+	first, err := f.store.RequestDelegation(ctx, firstInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry, err := f.store.RequestDelegation(ctx, firstInput); err != nil || retry.Delegation.ID != first.Delegation.ID {
+		t.Fatalf("same request retry=%+v err=%v", retry, err)
+	}
+
+	other := createDelegationAgent(t, ctx, f.store, f.project, "Other target", false)
+	if _, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: other.ID,
+		Task: "second bounded task", RequestKey: "second-serial",
+	}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("second unfinished delegation err=%v want conflict", err)
+	}
+
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE delegations
+		SET outcome='SUCCEEDED', result_summary='done', workspace_changes_accepted=true, completed_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, first.Delegation.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: other.ID,
+		Task: "second bounded task", RequestKey: "second-serial",
+	})
+	if err != nil {
+		t.Fatalf("sequential delegation after terminal outcome: %v", err)
+	}
+	if second.Delegation.ID == first.Delegation.ID {
+		t.Fatal("sequential delegation reused prior delegation")
+	}
+}
+
+func TestConcurrentDelegationRequestsCreateAtMostOneUnfinishedChild(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	other := createDelegationAgent(t, ctx, f.store, f.project, "Concurrent target", false)
+	inputs := []store.RequestDelegationCommand{
+		{ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID, Task: "task A", RequestKey: "concurrent-a"},
+		{ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: other.ID, Task: "task B", RequestKey: "concurrent-b"},
+	}
+	start := make(chan struct{})
+	results := make(chan error, len(inputs))
+	var wg sync.WaitGroup
+	for _, input := range inputs {
+		input := input
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := f.store.RequestDelegation(ctx, input)
+			results <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	var succeeded, conflicted int
+	for err := range results {
+		switch {
+		case err == nil:
+			succeeded++
+		case errors.Is(err, store.ErrConflict):
+			conflicted++
+		default:
+			t.Fatalf("concurrent delegation error=%v", err)
+		}
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("concurrent results success=%d conflict=%d want 1/1", succeeded, conflicted)
+	}
+	var unfinished int
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT count(*) FROM delegations
+		WHERE project_id=$1 AND parent_run_id=$2 AND outcome IS NULL
+	`, f.project.ID, f.parentRun.ID).Scan(&unfinished); err != nil {
+		t.Fatal(err)
+	}
+	if unfinished != 1 {
+		t.Fatalf("unfinished delegations=%d want 1", unfinished)
+	}
+}
+
+func TestGetDelegationByContinuationJobUsesExactParentResumeJob(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "Inspect continuation lookup.", RequestKey: "continuation-lookup",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var jobID string
+	if err := f.store.pool.QueryRow(ctx, `
+		INSERT INTO scheduler_jobs (project_id, run_id, kind, state, idempotency_key)
+		VALUES ($1, $2, 'RESUME', 'QUEUED', $3)
+		RETURNING id::text
+	`, f.project.ID, f.parentRun.ID, "delegation:"+created.Delegation.ID+":resume").Scan(&jobID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE delegations
+		SET continuation_job_id=$3
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, created.Delegation.ID, jobID); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := f.store.GetDelegationByContinuationJob(ctx, f.project.ID, f.parentRun.ID, jobID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != created.Delegation.ID || got.ContinuationJobID == nil || *got.ContinuationJobID != jobID {
+		t.Fatalf("delegation=%+v want id=%s continuationJob=%s", got, created.Delegation.ID, jobID)
+	}
+
+	if _, err := f.store.GetDelegationByContinuationJob(ctx, f.project.ID, f.parentRun.ID, "99999999-9999-4999-8999-999999999999"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing continuation err=%v want not found", err)
 	}
 }
 

@@ -22,6 +22,12 @@ const delegationSelectColumns = `
 	task,
 	delegated_run_id::text,
 	request_key,
+	outcome,
+	result_summary,
+	result_event_id::text,
+	workspace_changes_accepted,
+	continuation_job_id::text,
+	completed_at,
 	created_at,
 	updated_at
 `
@@ -71,6 +77,23 @@ func (s *Store) RequestDelegation(ctx context.Context, input store.RequestDelega
 			return store.RequestDelegationResult{}, err
 		}
 		return result, nil
+	}
+
+	// The parent Run lock serializes delegation requests from the same parent.
+	// Same-request retries have already returned above, so any remaining
+	// unfinished delegation represents a distinct request and must complete
+	// before this parent can delegate again.
+	var unfinished bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM delegations
+			WHERE project_id=$1 AND parent_run_id=$2 AND outcome IS NULL
+		)
+	`, input.ProjectID, parent.ID).Scan(&unfinished); err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	if unfinished {
+		return store.RequestDelegationResult{}, store.ErrConflict
 	}
 
 	if parent.Status != "RUNNING" || parent.AgentID == nil || *parent.AgentID == input.TargetAgentID {
@@ -306,6 +329,14 @@ func (s *Store) GetDelegationByRun(ctx context.Context, projectID, runID string)
 	`, projectID, runID))
 }
 
+func (s *Store) GetDelegationByContinuationJob(ctx context.Context, projectID, parentRunID, jobID string) (store.Delegation, error) {
+	return scanDelegation(s.pool.QueryRow(ctx, `
+		SELECT `+delegationSelectColumns+`
+		FROM delegations
+		WHERE project_id=$1 AND parent_run_id=$2 AND continuation_job_id=$3
+	`, projectID, parentRunID, jobID))
+}
+
 func (s *Store) ListDelegationsByParentRun(ctx context.Context, projectID, parentRunID string) ([]store.Delegation, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT `+delegationSelectColumns+`
@@ -340,6 +371,12 @@ func scanDelegation(row pgx.Row) (store.Delegation, error) {
 		&value.Task,
 		&value.DelegatedRunID,
 		&value.RequestKey,
+		&value.Outcome,
+		&value.ResultSummary,
+		&value.ResultEventID,
+		&value.WorkspaceChangesAccepted,
+		&value.ContinuationJobID,
+		&value.CompletedAt,
 		&value.CreatedAt,
 		&value.UpdatedAt,
 	)

@@ -14,6 +14,19 @@ import (
 )
 
 func TestEngineAttachContinuesWhenRecoveredIssueStatusIsSuperseded(t *testing.T) {
+	safe := executioncontext.SafeContext{
+		Issue:    executioncontext.IssueContext{Title: "Resume without stale Board overwrite", Status: "IN_PROGRESS"},
+		Agent:    executioncontext.AgentContext{Engine: Name},
+		Model:    executioncontext.ModelContext{Model: "test-model"},
+		Provider: executioncontext.ProviderContext{Kind: "test-provider"},
+	}
+	originalSafe := safe
+	originalSafe.Issue.Status = "TODO"
+	originalPrompt := initialTaskPromptWithDelegationContinuation(originalSafe, nil)
+	currentPrompt := initialTaskPromptWithDelegationContinuation(safe, nil)
+	if originalPrompt == currentPrompt {
+		t.Fatal("Issue status mutation did not change prompt")
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
@@ -32,6 +45,10 @@ func TestEngineAttachContinuesWhenRecoveredIssueStatusIsSuperseded(t *testing.T)
 	})
 	mux.HandleFunc("GET /session/ses_existing/message", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, []any{
+			map[string]any{
+				"info": map[string]any{"sessionID": "ses_existing", "role": "user"},
+				"parts": []any{map[string]any{"type": "text", "text": originalPrompt}},
+			},
 			map[string]any{
 				"info": map[string]any{"sessionID": "ses_existing", "role": "assistant"},
 				"parts": []any{issueStatusToolPartPayload("ses_existing", "part_stale", "REVIEW")},
@@ -56,19 +73,17 @@ func TestEngineAttachContinuesWhenRecoveredIssueStatusIsSuperseded(t *testing.T)
 		t.Fatal(err)
 	}
 	process := newFakeOpenCodeProcess(parsed.Host)
-	launcher := &fakeAttachLauncher{fakeOpenCodeLauncher: fakeOpenCodeLauncher{process: process}}
+	launcher := &fakeAdmissionAttachLauncher{
+		fakeAttachLauncher: fakeAttachLauncher{fakeOpenCodeLauncher: fakeOpenCodeLauncher{process: process}},
+		admissionPrompt: originalPrompt,
+	}
 	statuses := &recordingIssueStatusUpdater{skipRecovered: true}
 	adapter := newWithAddress(parsed.Host)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	_, err = adapter.Execute(ctx, engine.Request{
-		Context: executioncontext.SafeContext{
-			Issue:    executioncontext.IssueContext{Title: "Resume without stale Board overwrite"},
-			Agent:    executioncontext.AgentContext{Engine: Name},
-			Model:    executioncontext.ModelContext{Model: "test-model"},
-			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
-		},
+		Context: safe,
 		Launcher:             launcher,
 		InteractiveQuestions: &fakeInteractiveQuestions{},
 		IssueStatus:          statuses,
@@ -84,5 +99,8 @@ func TestEngineAttachContinuesWhenRecoveredIssueStatusIsSuperseded(t *testing.T)
 	}
 	if len(statuses.statuses) != 0 {
 		t.Fatalf("superseded historical status unexpectedly applied: %v", statuses.statuses)
+	}
+	if len(launcher.candidates) != 1 || launcher.candidates[0] != currentPrompt {
+		t.Fatalf("recovery candidate was not reconstructed from current IN_PROGRESS state")
 	}
 }
