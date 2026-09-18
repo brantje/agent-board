@@ -70,7 +70,6 @@ func TestDelegationHandoffRecoveryUsesDurableCompletedToolPart(t *testing.T) {
 	}
 }
 
-
 func TestDelegationHandoffRecoveryFailsClosedOnInvalidCompletedHistory(t *testing.T) {
 	validInput := map[string]any{"targetAgentId": "agent-2", "task": "recover handoff"}
 	tests := []struct {
@@ -101,6 +100,52 @@ func TestDelegationHandoffRecoveryFailsClosedOnInvalidCompletedHistory(t *testin
 			}
 		})
 	}
+}
+
+func TestDelegationHandoffRecoveryFailsClosedOnUnavailableOrRejectedAuthority(t *testing.T) {
+	part := map[string]any{
+		"id": "part_1", "callID": "call_1", "sessionID": "ses_1", "type": "tool", "tool": delegationToolName,
+		"state": map[string]any{
+			"status": "completed",
+			"input":  map[string]any{"targetAgentId": "agent-2", "task": "recover handoff"},
+		},
+	}
+
+	t.Run("native history unavailable", func(t *testing.T) {
+		tracker := newDelegationToolTracker()
+		requester := &recordingDelegationRequester{}
+		if err := tracker.Reconcile(t.Context(), nil, "ses_1", requester); err == nil {
+			t.Fatal("missing native history was accepted")
+		}
+	})
+
+	t.Run("canonical replay rejected", func(t *testing.T) {
+		native := delegationRecoveryClient(t, []any{part})
+		tracker := newDelegationToolTracker()
+		requester := &recordingDelegationRequester{err: errors.New("delegation no longer allowed")}
+		if err := tracker.Reconcile(t.Context(), native, "ses_1", requester); err == nil {
+			t.Fatal("rejected canonical delegation replay was accepted")
+		}
+		if len(requester.requests) != 1 || tracker.handoff != nil {
+			t.Fatalf("rejected replay state: requests=%+v handoff=%+v", requester.requests, tracker.handoff)
+		}
+	})
+
+	t.Run("accepted input changed", func(t *testing.T) {
+		native := delegationRecoveryClient(t, []any{part})
+		tracker := newDelegationToolTracker()
+		tracker.accepted["call_1"] = acceptedDelegation{
+			request: engine.DelegationRequest{TargetAgentID: "agent-2", Task: "different task", RequestKey: "call_1"},
+			delegation: engine.Delegation{ID: "delegation-1", RunID: "run-2"},
+		}
+		requester := &recordingDelegationRequester{}
+		if err := tracker.Reconcile(t.Context(), native, "ses_1", requester); err == nil {
+			t.Fatal("changed recovered delegation input was accepted")
+		}
+		if len(requester.requests) != 0 || tracker.handoff != nil {
+			t.Fatalf("changed recovery state: requests=%+v handoff=%+v", requester.requests, tracker.handoff)
+		}
+	})
 }
 
 func TestDelegationHandoffRejectsChangedCompletedInput(t *testing.T) {
@@ -134,7 +179,6 @@ func completedDelegationToolEvent(t *testing.T, sessionID, partID, callID, targe
 		},
 	})}
 }
-
 
 func delegationRecoveryClient(t *testing.T, parts []any) *client.Client {
 	t.Helper()
