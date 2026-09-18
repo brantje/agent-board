@@ -244,3 +244,74 @@ func prepareDelegatedChildForTerminal(t *testing.T, requestKey string) (delegati
 	}
 	return f, created, childJobID, childLease
 }
+
+func TestParentCancellationBeforeLateDelegateCompletionNeverQueuesContinuation(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "cancel-parent-first")
+	ctx := t.Context()
+	cancelled, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.Run.Status != "CANCELLED" || cancelled.Event.Type != "run.cancelled" {
+		t.Fatalf("parent cancellation=%+v", cancelled)
+	}
+	childRunID := created.DelegatedRun.ID
+	mutation, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease, RunStatus: "COMPLETED",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation.Run.Status != "COMPLETED" {
+		t.Fatalf("child status=%s want COMPLETED", mutation.Run.Status)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeSucceeded || delegation.ContinuationJobID != nil {
+		t.Fatalf("late delegated result=%+v", delegation)
+	}
+	parent, err := f.store.GetRun(ctx, f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != "CANCELLED" {
+		t.Fatalf("parent status=%s want CANCELLED", parent.Status)
+	}
+}
+
+func TestParentCancellationAfterDelegateCompletionCancelsQueuedContinuation(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "cancel-after-child")
+	ctx := t.Context()
+	childRunID := created.DelegatedRun.ID
+	if _, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease, RunStatus: "COMPLETED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.ContinuationJobID == nil {
+		t.Fatal("delegated completion did not queue parent continuation")
+	}
+	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	var state string
+	if err := f.store.pool.QueryRow(ctx, `SELECT state FROM scheduler_jobs WHERE project_id=$1 AND id=$2`, f.project.ID, *delegation.ContinuationJobID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "CANCELLED" {
+		t.Fatalf("continuation state=%s want CANCELLED", state)
+	}
+	parent, err := f.store.GetRun(ctx, f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != "CANCELLED" {
+		t.Fatalf("parent status=%s want CANCELLED", parent.Status)
+	}
+}

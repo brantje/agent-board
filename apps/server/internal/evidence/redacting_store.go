@@ -236,6 +236,14 @@ func (s *RedactingStore) ListDelegationsByParentRun(ctx context.Context, project
 	return base.ListDelegationsByParentRun(ctx, projectID, parentRunID)
 }
 
+func (s *RedactingStore) CancelInactiveRun(ctx context.Context, projectID, runID string) (store.RunCancellationResult, error) {
+	base, ok := s.ControlPlaneStore.(store.InactiveRunCancellationStore)
+	if !ok {
+		return store.RunCancellationResult{}, fmt.Errorf("redacting store base does not support inactive Run cancellation")
+	}
+	return base.CancelInactiveRun(ctx, projectID, runID)
+}
+
 var _ store.IssueStatusMutationStore = (*RedactingStore)(nil)
 var _ store.IssueMutationActorStore = (*RedactingStore)(nil)
 var _ store.IssuePlacementStore = (*RedactingStore)(nil)
