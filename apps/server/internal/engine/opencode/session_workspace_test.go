@@ -156,6 +156,38 @@ func TestEnsureNativeSessionRecoveryCreatesWhenWorkspaceSessionMissing(t *testin
 	}
 }
 
+func TestEnsureNativeSessionRecoveryFailsClosedWhenPromptAdmissionCannotBeProven(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /session", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, []any{map[string]any{"id": "ses_existing", "directory": hostRunnerWorkspace}})
+	})
+	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, map[string]any{"ses_existing": map[string]any{"type": "idle"}})
+	})
+	mux.HandleFunc("GET /session/ses_existing/message", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "history unavailable", http.StatusServiceUnavailable)
+	})
+	native := newWorkspaceTestClient(t, mux, hostRunnerWorkspace)
+	if _, _, err := ensureNativeSession(t.Context(), native, executioncontext.SafeContext{
+		Model: executioncontext.ModelContext{Model: "test-model"},
+	}, settings{ProviderID: "test-provider"}, "expected prompt", true); err == nil {
+		t.Fatal("unprovable recovered Prompt admission was accepted")
+	}
+}
+
+func TestEnsureNativeSessionPropagatesFreshSessionCreationFailure(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("POST /api/session", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "create failed", http.StatusBadGateway)
+	})
+	native := newWorkspaceTestClient(t, mux, hostRunnerWorkspace)
+	if _, _, err := ensureNativeSession(t.Context(), native, executioncontext.SafeContext{
+		Model: executioncontext.ModelContext{Model: "test-model"},
+	}, settings{ProviderID: "test-provider"}, "expected prompt", false); err == nil {
+		t.Fatal("native session creation failure was ignored")
+	}
+}
+
 func TestNativeWorkingDirectoryUsesProcessPath(t *testing.T) {
 	if got := nativeWorkingDirectory(&fakeWorkingDirProcess{dir: hostRunnerWorkspace}); got != hostRunnerWorkspace {
 		t.Fatalf("working directory=%q want host runner path", got)
