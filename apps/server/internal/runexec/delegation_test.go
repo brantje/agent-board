@@ -15,6 +15,38 @@ type delegationCapabilityStore struct {
 	got      store.RequestDelegationCommand
 	result   store.RequestDelegationResult
 	appended []store.Event
+	targets  []store.DelegationTarget
+	issue    *store.Issue
+	squad    *store.Squad
+	agents   map[string]store.Agent
+}
+
+func (s *delegationCapabilityStore) ListDelegationTargets(context.Context, string, string) ([]store.DelegationTarget, error) {
+	if s.targets == nil {
+		return []store.DelegationTarget{{ID: "target-agent-1", Name: "Target agent"}}, nil
+	}
+	return append([]store.DelegationTarget(nil), s.targets...), nil
+}
+
+func (s *delegationCapabilityStore) GetIssue(_ context.Context, _, _ string) (store.Issue, error) {
+	if s.issue == nil {
+		return store.Issue{}, store.ErrNotFound
+	}
+	return *s.issue, nil
+}
+
+func (s *delegationCapabilityStore) GetSquad(_ context.Context, _, _ string) (store.Squad, error) {
+	if s.squad == nil {
+		return store.Squad{}, store.ErrNotFound
+	}
+	return *s.squad, nil
+}
+
+func (s *delegationCapabilityStore) GetAgentInScope(_ context.Context, _ *string, id string) (store.Agent, error) {
+	if agent, ok := s.agents[id]; ok {
+		return agent, nil
+	}
+	return store.Agent{}, store.ErrNotFound
 }
 
 func (s *delegationCapabilityStore) RequestDelegation(_ context.Context, input store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
@@ -83,6 +115,52 @@ func TestEngineRequestDelegationCapabilityDerivesParentIdentity(t *testing.T) {
 	}
 }
 
+func TestEngineRequestDelegationContextIncludesTargetsAndSquadMembers(t *testing.T) {
+	role := "implementation"
+	issueType, squadID := "SQUAD", "squad-1"
+	storage := &delegationCapabilityStore{
+		targets: []store.DelegationTarget{
+			{ID: "member-agent", Name: "Member agent"},
+			{ID: "other-agent", Name: "Other agent"},
+		},
+		issue: &store.Issue{ID: "issue-1", ProjectID: "project-1", AssigneeType: &issueType, AssigneeID: &squadID},
+		squad: &store.Squad{
+			ID: "squad-1", ProjectID: "project-1", Name: "Backend", LeaderAgentID: "parent-agent-1",
+			Members: []store.SquadMember{
+				{Type: store.SquadMemberTypeAgent, ID: "member-agent", Role: &role},
+				{Type: store.SquadMemberTypeUser, ID: "user-1"},
+			},
+		},
+		agents: map[string]store.Agent{
+			"parent-agent-1": {ID: "parent-agent-1", Name: "Leader"},
+			"member-agent":   {ID: "member-agent", Name: "Member agent"},
+		},
+	}
+	processor := &Processor{store: storage}
+	request, err := processor.engineRequest(t.Context(), executioncontext.SafeContext{
+		Project: executioncontext.ProjectContext{ID: "project-1"},
+		Issue:   executioncontext.IssueContext{ID: "issue-1"},
+		Run:     executioncontext.RunContext{ID: "parent-run-1"},
+		Agent:   executioncontext.AgentContext{ID: "parent-agent-1", AllowDelegation: true},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Delegation == nil || request.DelegationContext == nil {
+		t.Fatal("authoritative delegating Run did not receive delegation tool context")
+	}
+	if len(request.DelegationContext.Targets) != 2 || request.DelegationContext.Targets[0].ID != "member-agent" || request.DelegationContext.Targets[1].ID != "other-agent" {
+		t.Fatalf("targets=%+v", request.DelegationContext.Targets)
+	}
+	squad := request.DelegationContext.Squad
+	if squad == nil || squad.ID != "squad-1" || squad.LeaderAgentID != "parent-agent-1" || squad.LeaderAgentName != "Leader" {
+		t.Fatalf("squad context=%+v", squad)
+	}
+	if len(squad.Members) != 1 || squad.Members[0].ID != "member-agent" || squad.Members[0].Role == nil || *squad.Members[0].Role != role {
+		t.Fatalf("squad members=%+v", squad.Members)
+	}
+}
+
 func TestEngineRequestDelegationPublishesPersistedEvent(t *testing.T) {
 	persisted := store.Event{ID: "event-1", Type: "delegation.created", ProjectID: "project-1"}
 	storage := &delegationCapabilityStore{result: store.RequestDelegationResult{
@@ -134,8 +212,8 @@ func TestEngineRequestDelegationCapabilityIsPolicyAndAuthorityGated(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.Delegation != nil {
-		t.Fatal("allowDelegation=false exposed delegation capability")
+	if request.Delegation != nil || request.DelegationContext != nil {
+		t.Fatal("allowDelegation=false exposed delegation capability or context")
 	}
 	if request.IssueStatus == nil {
 		t.Fatal("normal Run should retain Issue status capability")
@@ -151,8 +229,8 @@ func TestEngineRequestDelegationCapabilityIsPolicyAndAuthorityGated(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.Delegation != nil {
-		t.Fatal("delegated Run exposed nested delegation capability")
+	if request.Delegation != nil || request.DelegationContext != nil {
+		t.Fatal("delegated Run exposed nested delegation capability or context")
 	}
 	if request.IssueStatus != nil {
 		t.Fatal("delegated Run exposed authoritative Issue status capability")

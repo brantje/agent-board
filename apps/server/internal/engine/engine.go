@@ -136,6 +136,30 @@ type Delegation struct {
 	RunID string
 }
 
+type DelegationTargetContext struct {
+	ID   string
+	Name string
+}
+
+type SquadDelegationMemberContext struct {
+	ID   string
+	Name string
+	Role *string
+}
+
+type SquadDelegationContext struct {
+	ID              string
+	Name            string
+	LeaderAgentID   string
+	LeaderAgentName string
+	Members         []SquadDelegationMemberContext
+}
+
+type DelegationToolContext struct {
+	Targets []DelegationTargetContext
+	Squad   *SquadDelegationContext
+}
+
 // DelegationContinuation is bounded server-owned input for resuming a parent
 // Run after one delegated child reaches a durable terminal outcome. It is
 // execution-time state, not immutable Run provenance.
@@ -165,6 +189,7 @@ type Request struct {
 	InteractiveQuestions   InteractiveQuestioner
 	IssueStatus            IssueStatusUpdater
 	Delegation             DelegationRequester
+	DelegationContext      *DelegationToolContext
 	Continuation           *Continuation
 	DelegationContinuation *DelegationContinuation
 }
