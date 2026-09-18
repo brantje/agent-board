@@ -571,6 +571,22 @@ func TestReconcileRecoversTerminalDelegatedChildWithoutEngineReplay(t *testing.T
 	}
 }
 
+func TestReconcileRejectsDelegatedChildTargetAgentLineageMismatch(t *testing.T) {
+	storeFake, run, delegation, _ := delegatedChildRecoveryFixture(t)
+	wrongAgent := "other-agent"
+	run.AgentID = &wrongAgent
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "COMPLETED", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "delegation.workspace_accepted", map[string]any{"delegationId": delegation.ID}),
+	}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if outcome != store.SchedulerReconciliationUnknown || reason != nil || err == nil {
+		t.Fatalf("outcome=%s reason=%v err=%v want UNKNOWN target-Agent lineage error", outcome, reason, err)
+	}
+}
+
 func TestReconcileRecoversFailedAndCancelledDelegatedChildren(t *testing.T) {
 	tests := []struct {
 		name string

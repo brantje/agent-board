@@ -370,6 +370,35 @@ func prepareDelegatedChildForTerminal(t *testing.T, requestKey string) (delegati
 	return f, created, childJobID, childLease
 }
 
+func TestDelegatedTerminalTransitionRejectsTargetAgentLineageMismatch(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "target-agent-lineage-mismatch")
+	ctx := t.Context()
+	if _, err := f.store.pool.Exec(ctx, "UPDATE runs SET agent_id=$3 WHERE project_id=$1 AND id=$2", f.project.ID, created.DelegatedRun.ID, f.parent.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: childJobID, RunID: created.DelegatedRun.ID,
+		LeaseToken: childLease, RunStatus: "COMPLETED",
+	}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("terminal transition with corrupted target Agent error=%v want ErrConflict", err)
+	}
+	child, err := f.store.GetRun(ctx, f.project.ID, created.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != "RUNNING" {
+		t.Fatalf("corrupted child terminal transition partially committed status=%s", child.Status)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome != nil || delegation.ContinuationJobID != nil {
+		t.Fatalf("corrupted lineage finalized delegation=%+v", delegation)
+	}
+}
+
 func TestDelegatedTerminalTransitionWaitsForExecutionSessionReconciliation(t *testing.T) {
 	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "execution-session-uncertainty")
 	ctx := t.Context()

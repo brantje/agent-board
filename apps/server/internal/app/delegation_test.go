@@ -60,10 +60,12 @@ func (s *delegationServiceStore) GetRun(_ context.Context, projectID, runID stri
 			continue
 		}
 		if runID == delegation.ParentRunID {
-			return store.Run{ID: runID, ProjectID: projectID, IssueID: delegation.IssueID, WorkspaceID: "workspace-1", Status: "PAUSED"}, nil
+			agentID := delegation.ParentAgentID
+			return store.Run{ID: runID, ProjectID: projectID, IssueID: delegation.IssueID, WorkspaceID: "workspace-1", AgentID: &agentID, Status: "PAUSED"}, nil
 		}
 		if runID == delegation.DelegatedRunID {
-			return store.Run{ID: runID, ProjectID: projectID, IssueID: delegation.IssueID, WorkspaceID: "workspace-1", Status: "COMPLETED"}, nil
+			agentID := delegation.TargetAgentID
+			return store.Run{ID: runID, ProjectID: projectID, IssueID: delegation.IssueID, WorkspaceID: "workspace-1", AgentID: &agentID, Status: "COMPLETED"}, nil
 		}
 	}
 	return store.Run{}, store.ErrNotFound
@@ -203,9 +205,13 @@ func TestDelegationQueriesUseDelegationStoreAndTranslateErrors(t *testing.T) {
 }
 
 func TestDelegationInspectionFailsClosedOnBrokenAuthoritativeState(t *testing.T) {
-	value := store.Delegation{ID: "delegation", ProjectID: "project", IssueID: "issue", ParentRunID: "parent", DelegatedRunID: "child"}
-	parent := store.Run{ID: "parent", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", Status: "PAUSED"}
-	child := store.Run{ID: "child", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", Status: "COMPLETED"}
+	value := store.Delegation{
+		ID: "delegation", ProjectID: "project", IssueID: "issue", ParentRunID: "parent",
+		ParentAgentID: "parent-agent", TargetAgentID: "target-agent", DelegatedRunID: "child",
+	}
+	parentAgentID, targetAgentID := value.ParentAgentID, value.TargetAgentID
+	parent := store.Run{ID: "parent", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", AgentID: &parentAgentID, Status: "PAUSED"}
+	child := store.Run{ID: "child", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", AgentID: &targetAgentID, Status: "COMPLETED"}
 
 	t.Run("missing parent", func(t *testing.T) {
 		backend := &delegationServiceStore{runs: map[string]store.Run{"child": child}}
@@ -226,6 +232,17 @@ func TestDelegationInspectionFailsClosedOnBrokenAuthoritativeState(t *testing.T)
 	t.Run("lineage mismatch", func(t *testing.T) {
 		wrongChild := child
 		wrongChild.WorkspaceID = "other-workspace"
+		backend := &delegationServiceStore{runs: map[string]store.Run{"parent": parent, "child": wrongChild}}
+		_, err := New(backend).inspectDelegation(t.Context(), value)
+		if err == nil || !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("err=%v want conflict", err)
+		}
+	})
+
+	t.Run("target Agent mismatch", func(t *testing.T) {
+		wrongAgent := "other-agent"
+		wrongChild := child
+		wrongChild.AgentID = &wrongAgent
 		backend := &delegationServiceStore{runs: map[string]store.Run{"parent": parent, "child": wrongChild}}
 		_, err := New(backend).inspectDelegation(t.Context(), value)
 		if err == nil || !errors.Is(err, store.ErrConflict) {
