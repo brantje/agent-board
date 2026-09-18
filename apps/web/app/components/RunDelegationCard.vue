@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Agent, Delegation } from '../types/api'
 import { ApiError, apiPath, apiRequest } from '../utils/api'
 import { useProjectEvents } from '../composables/useProjectEvents'
@@ -10,15 +10,20 @@ const outgoing = useResource<Delegation[]>(() => `${apiPath('runs', props.projec
 const agents = useResource<Agent[]>(() => apiPath('agents', props.projectId))
 const incoming = ref<Delegation>()
 const incomingError = ref<ApiError>()
+let incomingGeneration = 0
 
 const agentName = (id: string) => agents.data.value?.find(agent => agent.id === id)?.name || id
 const hasDelegation = computed(() => Boolean(incoming.value || outgoing.data.value?.length))
 
 async function loadIncoming() {
+  const generation = ++incomingGeneration
   incomingError.value = undefined
   try {
-    incoming.value = await apiRequest<Delegation>(`${apiPath('runs', props.projectId, props.runId)}/delegation`)
+    const result = await apiRequest<Delegation>(`${apiPath('runs', props.projectId, props.runId)}/delegation`)
+    if (generation !== incomingGeneration) return
+    incoming.value = result
   } catch (failure) {
+    if (generation !== incomingGeneration) return
     const error = failure as ApiError
     if (error.status === 404) {
       incoming.value = undefined
@@ -35,6 +40,7 @@ async function refreshDelegation() {
 
 onMounted(loadIncoming)
 watch(() => [props.projectId, props.runId], loadIncoming)
+onBeforeUnmount(() => { incomingGeneration++ })
 useProjectEvents(() => props.projectId, async event => {
   if (!event.type.startsWith('delegation.') && event.runId !== props.runId) return
   await refreshDelegation()

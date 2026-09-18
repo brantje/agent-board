@@ -103,6 +103,54 @@ describe('delegation inspection', () => {
     wrapper.unmount()
   })
 
+  it('ignores a superseded incoming delegation response after the Run changes', async () => {
+    let resolveOld!: (response: Response) => void
+    const oldIncoming = new Promise<Response>((resolve) => { resolveOld = resolve })
+    const delegation = (runId: string, task: string) => ({
+      id: `delegation-${runId}`,
+      projectId: 'p',
+      issueId: 'AB-1',
+      parentRunId: 'parent-run',
+      parentAgentId: 'parent-agent',
+      targetAgentId: 'target-agent',
+      task,
+      delegatedRunId: runId,
+      workspaceAccess: 'WRITE',
+      requestKey: `call-${runId}`,
+      parentRunStatus: 'PAUSED',
+      delegatedRunStatus: 'RUNNING',
+      outcome: null,
+      resultSummary: null,
+      resultEventId: null,
+      workspaceChangesAccepted: null,
+      workspaceRevision: 'abc123',
+      continuationJobId: null,
+      completedAt: null,
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z'
+    })
+    vi.stubGlobal('fetch', vi.fn((path: string) => {
+      if (path.endsWith('/agents')) return Promise.resolve(new Response(JSON.stringify([{ id: 'parent-agent', name: 'Lead Agent' }])))
+      if (path.endsWith('/delegations')) return Promise.resolve(new Response(JSON.stringify([])))
+      if (path.endsWith('/runs/old-run/delegation')) return oldIncoming
+      if (path.endsWith('/runs/new-run/delegation')) {
+        return Promise.resolve(new Response(JSON.stringify(delegation('new-run', 'new task'))))
+      }
+      return Promise.resolve(new Response(JSON.stringify([])))
+    }))
+
+    const wrapper = mount(RunDelegationCard, { props: { projectId: 'p', runId: 'old-run' }, global })
+    await flushPromises()
+    await wrapper.setProps({ runId: 'new-run' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('new task')
+
+    resolveOld(new Response(JSON.stringify(delegation('old-run', 'stale task'))))
+    await flushPromises()
+    expect(wrapper.text()).toContain('new task')
+    expect(wrapper.text()).not.toContain('stale task')
+    wrapper.unmount()
+  })
   it('renders Squad leader and descriptive member roles without implying fan-out', async () => {
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       if (path.endsWith('/squads/squad-1')) {
