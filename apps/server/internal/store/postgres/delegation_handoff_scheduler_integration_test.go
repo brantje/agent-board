@@ -86,6 +86,75 @@ func TestSchedulerCancellationDoesNotReleaseReadyDelegationHandoff(t *testing.T)
 	}
 }
 
+
+func TestDelegationHandoffTransfersRunnerWorkspaceOwnershipToChild(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	parentJobID, leaseToken := claimDelegationParentJob(t, f)
+
+	runner, err := f.store.CreateRunner(ctx, store.Runner{Name: "delegation-handoff-owner", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentSession, err := f.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: f.project.ID,
+		RunID:     f.parentRun.ID,
+		RunnerID:  runner.ID,
+		Status:    "PENDING",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
+		ProjectID:    f.project.ID,
+		SessionID:    parentSession.ID,
+		FromStatuses: []string{"PENDING"},
+		Status:       "COMPLETED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "continue from the handed-off workspace", RequestKey: "runner-owner-transfer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDelegationWorkspaceHandoffReady(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: parentJobID, RunID: f.parentRun.ID, LeaseToken: leaseToken, RunStatus: "PAUSED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if lock, err := f.store.AcquireWorkspaceBootstrapLock(ctx, f.parentRun.WorkspaceID); !errors.Is(err, store.ErrConflict) {
+		if lock != nil {
+			_ = lock.Release()
+		}
+		t.Fatalf("generic writer crossed paused handoff boundary: %v", err)
+	}
+
+	childSession, err := f.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: f.project.ID,
+		RunID:     created.DelegatedRun.ID,
+		RunnerID:  runner.ID,
+		Status:    "PENDING",
+	})
+	if err != nil {
+		t.Fatalf("create delegated child session: %v", err)
+	}
+	childLock, err := f.store.AcquireWorkspaceExecutionLock(ctx, f.parentRun.WorkspaceID, childSession.ID)
+	if err != nil {
+		t.Fatalf("delegated child did not take Workspace ownership: %v", err)
+	}
+	if err := childLock.Release(); err != nil {
+		t.Fatalf("release delegated child Workspace lock: %v", err)
+	}
+}
+
 func claimDelegationParentJob(t *testing.T, f delegationFixture) (string, string) {
 	t.Helper()
 	ctx := t.Context()
