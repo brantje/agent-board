@@ -2,6 +2,7 @@ package opencode
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -242,6 +243,119 @@ func TestEngineCompletesOnIdleWhenActivityPollBlocks(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Execute() error=%v", err)
 	}
+}
+
+type executionBoundaryLauncher struct {
+	*fakeOpenCodeLauncher
+	err               error
+	boundaryBeforeStop bool
+	boundaries        []string
+}
+
+func (l *executionBoundaryLauncher) RecordActivity(_ context.Context, event engine.ActivityEvent) error {
+	if event.Type != "engine.execution.completed" {
+		return nil
+	}
+	boundary, _ := event.Payload["boundary"].(string)
+	l.boundaries = append(l.boundaries, boundary)
+	select {
+	case <-l.process.done:
+		l.boundaryBeforeStop = false
+	default:
+		l.boundaryBeforeStop = true
+	}
+	return l.err
+}
+
+func TestEnginePersistsLogicalCompletionBeforeStoppingService(t *testing.T) {
+	var activeCalls atomic.Int32
+	server := newPollingNativeServer(t, "ses_boundary", func(w http.ResponseWriter, _ *http.Request) {
+		if activeCalls.Add(1) == 1 {
+			writeNativeJSON(t, w, map[string]any{"data": map[string]any{"ses_boundary": map[string]any{"type": "running"}}})
+			return
+		}
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{}})
+	})
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := newFakeOpenCodeProcess(parsed.Host)
+	launcher := &executionBoundaryLauncher{fakeOpenCodeLauncher: &fakeOpenCodeLauncher{process: process}}
+	adapter := newWithAddress(parsed.Host)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	_, err = adapter.Execute(ctx, engine.Request{
+		Context: executioncontext.SafeContext{
+			Issue: executioncontext.IssueContext{Title: "Persist logical completion"},
+			Agent: executioncontext.AgentContext{Engine: Name},
+			Model: executioncontext.ModelContext{Model: "test-model"},
+			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
+		},
+		Launcher: launcher,
+		InteractiveQuestions: &fakeInteractiveQuestions{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(launcher.boundaries) != 1 || launcher.boundaries[0] != "completed" || !launcher.boundaryBeforeStop {
+		t.Fatalf("boundaries=%v beforeStop=%v", launcher.boundaries, launcher.boundaryBeforeStop)
+	}
+	select {
+	case <-process.done:
+	default:
+		t.Fatal("OpenCode service was not stopped after durable logical completion")
+	}
+}
+
+func TestEngineLeavesServiceLiveWhenLogicalCompletionCannotBePersisted(t *testing.T) {
+	var activeCalls atomic.Int32
+	server := newPollingNativeServer(t, "ses_boundary_failure", func(w http.ResponseWriter, _ *http.Request) {
+		if activeCalls.Add(1) == 1 {
+			writeNativeJSON(t, w, map[string]any{"data": map[string]any{"ses_boundary_failure": map[string]any{"type": "running"}}})
+			return
+		}
+		writeNativeJSON(t, w, map[string]any{"data": map[string]any{}})
+	})
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	process := newFakeOpenCodeProcess(parsed.Host)
+	sentinel := errors.New("evidence unavailable")
+	launcher := &executionBoundaryLauncher{
+		fakeOpenCodeLauncher: &fakeOpenCodeLauncher{process: process},
+		err: sentinel,
+	}
+	adapter := newWithAddress(parsed.Host)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	_, err = adapter.Execute(ctx, engine.Request{
+		Context: executioncontext.SafeContext{
+			Issue: executioncontext.IssueContext{Title: "Fail closed on logical completion"},
+			Agent: executioncontext.AgentContext{Engine: Name},
+			Model: executioncontext.ModelContext{Model: "test-model"},
+			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
+		},
+		Launcher: launcher,
+		InteractiveQuestions: &fakeInteractiveQuestions{},
+	})
+	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "persist completed execution boundary") {
+		t.Fatalf("Execute() error=%v want durable boundary failure", err)
+	}
+	if len(launcher.boundaries) != 1 || launcher.boundaries[0] != "completed" || !launcher.boundaryBeforeStop {
+		t.Fatalf("boundaries=%v beforeStop=%v", launcher.boundaries, launcher.boundaryBeforeStop)
+	}
+	select {
+	case <-process.done:
+		t.Fatal("OpenCode service was stopped after logical completion became ambiguous")
+	default:
+	}
+	_ = process.Kill(t.Context())
 }
 
 func TestEngineCompletesFromAuthoritativeNativeActivityPolling(t *testing.T) {
