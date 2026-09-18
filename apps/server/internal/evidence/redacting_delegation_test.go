@@ -11,11 +11,14 @@ import (
 type delegationCapabilityStore struct {
 	store.ControlPlaneStore
 
-	requestCommand store.RequestDelegationCommand
-	getProjectID   string
-	getRunID       string
-	listProjectID  string
-	listParentRun  string
+	requestCommand      store.RequestDelegationCommand
+	getProjectID        string
+	getRunID            string
+	listProjectID       string
+	listParentRun       string
+	continuationProject string
+	continuationParent  string
+	continuationJob     string
 }
 
 func (s *delegationCapabilityStore) RequestDelegation(_ context.Context, command store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
@@ -27,6 +30,13 @@ func (s *delegationCapabilityStore) GetDelegationByRun(_ context.Context, projec
 	s.getProjectID = projectID
 	s.getRunID = runID
 	return store.Delegation{ID: "delegation", DelegatedRunID: runID}, nil
+}
+
+func (s *delegationCapabilityStore) GetDelegationByContinuationJob(_ context.Context, projectID, parentRunID, jobID string) (store.Delegation, error) {
+	s.continuationProject = projectID
+	s.continuationParent = parentRunID
+	s.continuationJob = jobID
+	return store.Delegation{ID: "delegation", ParentRunID: parentRunID, ContinuationJobID: &jobID}, nil
 }
 
 func (s *delegationCapabilityStore) ListDelegationsByParentRun(_ context.Context, projectID, parentRunID string) ([]store.Delegation, error) {
@@ -66,6 +76,14 @@ func TestRedactingStorePreservesDelegationCapability(t *testing.T) {
 		t.Fatalf("get delegation=%+v project=%q run=%q", got, base.getProjectID, base.getRunID)
 	}
 
+	continuation, err := wrapped.GetDelegationByContinuationJob(ctx, "project", "parent-run", "resume-job")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if continuation.ID != "delegation" || continuation.ContinuationJobID == nil || *continuation.ContinuationJobID != "resume-job" || base.continuationProject != "project" || base.continuationParent != "parent-run" || base.continuationJob != "resume-job" {
+		t.Fatalf("continuation delegation=%+v project=%q parentRun=%q job=%q", continuation, base.continuationProject, base.continuationParent, base.continuationJob)
+	}
+
 	listed, err := wrapped.ListDelegationsByParentRun(ctx, "project", "parent-run")
 	if err != nil {
 		t.Fatal(err)
@@ -84,6 +102,9 @@ func TestRedactingStoreReportsMissingDelegationCapability(t *testing.T) {
 	}
 	if _, err := wrapped.GetDelegationByRun(ctx, "project", "run"); err == nil {
 		t.Fatal("expected missing delegation lookup capability error")
+	}
+	if _, err := wrapped.GetDelegationByContinuationJob(ctx, "project", "parent-run", "resume-job"); err == nil {
+		t.Fatal("expected missing delegation continuation capability error")
 	}
 	if _, err := wrapped.ListDelegationsByParentRun(ctx, "project", "run"); err == nil {
 		t.Fatal("expected missing delegation list capability error")

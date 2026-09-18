@@ -228,6 +228,14 @@ func (s *RedactingStore) GetDelegationByRun(ctx context.Context, projectID, runI
 	return base.GetDelegationByRun(ctx, projectID, runID)
 }
 
+func (s *RedactingStore) GetDelegationByContinuationJob(ctx context.Context, projectID, parentRunID, jobID string) (store.Delegation, error) {
+	base, ok := s.ControlPlaneStore.(store.DelegationContinuationStore)
+	if !ok {
+		return store.Delegation{}, fmt.Errorf("redacting store base does not support delegation continuation")
+	}
+	return base.GetDelegationByContinuationJob(ctx, projectID, parentRunID, jobID)
+}
+
 func (s *RedactingStore) ListDelegationsByParentRun(ctx context.Context, projectID, parentRunID string) ([]store.Delegation, error) {
 	base, ok := s.ControlPlaneStore.(store.DelegationStore)
 	if !ok {
@@ -249,3 +257,4 @@ var _ store.IssueMutationActorStore = (*RedactingStore)(nil)
 var _ store.IssuePlacementStore = (*RedactingStore)(nil)
 var _ store.WorkspaceRevisionStore = (*RedactingStore)(nil)
 var _ store.DelegationStore = (*RedactingStore)(nil)
+var _ store.DelegationContinuationStore = (*RedactingStore)(nil)
