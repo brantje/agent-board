@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -363,6 +364,16 @@ func TestParentCancellationWinsClaimedDelegatedChildBeforeWorkerRegistration(t *
 	}
 }
 
+type cancellationEventAppender struct {
+	events []store.Event
+}
+
+func (s *cancellationEventAppender) AppendEvent(_ context.Context, event store.Event) (store.Event, error) {
+	event.ID = "event-" + event.Type
+	s.events = append(s.events, event)
+	return event, nil
+}
+
 type blockingCancellationProcessor struct {
 	started chan struct{}
 	once    sync.Once
@@ -412,7 +423,12 @@ func TestCancelRunCancelsRunningDelegateThroughSchedulerBoundary(t *testing.T) {
 		t.Fatal("scheduler did not start delegated child")
 	}
 
-	services := &Services{ControlPlane: New(base), Scheduler: coordinator}
+	eventStore := &cancellationEventAppender{}
+	recorder, err := evidence.NewRecorder(eventStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := &Services{ControlPlane: New(base), Scheduler: coordinator, Events: recorder}
 	if err := services.CancelRun(t.Context(), "project-1", "parent"); err != nil {
 		t.Fatal(err)
 	}
@@ -421,6 +437,10 @@ func TestCancelRunCancelsRunningDelegateThroughSchedulerBoundary(t *testing.T) {
 	}
 	if len(base.cancelled) != 1 || base.cancelled[0] != "parent" {
 		t.Fatalf("inactive cancellation unexpectedly handled running child: %v", base.cancelled)
+	}
+	if len(eventStore.events) != 1 || eventStore.events[0].Type != "run.cancellation_requested" ||
+		eventStore.events[0].RunID == nil || *eventStore.events[0].RunID != "child" {
+		t.Fatalf("active cancellation evidence=%+v want child run.cancellation_requested", eventStore.events)
 	}
 	select {
 	case transition := <-schedulerStore.transition:
