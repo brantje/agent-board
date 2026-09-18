@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -217,6 +219,11 @@ func (s *RedactingStore) RequestDelegation(ctx context.Context, input store.Requ
 	if !ok {
 		return store.RequestDelegationResult{}, fmt.Errorf("redacting store base does not support delegation")
 	}
+	input.Task = strings.TrimSpace(input.Task)
+	if utf8.RuneCountInString(input.Task) > store.MaxDelegationTaskCharacters {
+		return store.RequestDelegationResult{}, store.ErrInvalidArgument
+	}
+	input.Task = s.registry.RedactString(input.ParentRunID, input.Task)
 	return base.RequestDelegation(ctx, input)
 }
 
