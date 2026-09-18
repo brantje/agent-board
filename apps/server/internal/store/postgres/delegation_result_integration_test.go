@@ -440,3 +440,48 @@ func TestParentCancellationAfterDelegateCompletionCancelsQueuedContinuation(t *t
 		t.Fatalf("parent status=%s want CANCELLED", parent.Status)
 	}
 }
+
+func TestDelegatedTerminalResultTrustsAuthoritativeRunnerHandbackWithoutConvenienceMarker(t *testing.T) {
+	for _, direction := range []string{"from_runner", "git_publish"} {
+		t.Run(direction, func(t *testing.T) {
+			f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "accepted-handback-"+direction)
+			ctx := t.Context()
+			childRunID := created.DelegatedRun.ID
+			workspaceID, targetAgentID := created.DelegatedRun.WorkspaceID, f.target.ID
+			if _, err := f.store.AppendEvent(ctx, store.Event{
+				Type: "workspace.transfer.completed", ProjectID: f.project.ID, IssueID: &f.issue.ID,
+				RunID: &childRunID, AgentID: &targetAgentID, WorkspaceID: &workspaceID,
+				Actor: store.EmptyObject, Payload: []byte(`{"direction":"` + direction + `"}`),
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			mutation, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+				ProjectID: f.project.ID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease, RunStatus: "CANCELLED",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mutation.Run.Status != "CANCELLED" {
+				t.Fatalf("child status=%s want CANCELLED", mutation.Run.Status)
+			}
+			delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, childRunID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeCancelled || delegation.WorkspaceChangesAccepted == nil || !*delegation.WorkspaceChangesAccepted {
+				t.Fatalf("delegation result=%+v", delegation)
+			}
+			var markerEvents int
+			if err := f.store.pool.QueryRow(ctx, `
+				SELECT count(*) FROM events
+				WHERE project_id=$1 AND run_id=$2 AND type='delegation.workspace_accepted'
+			`, f.project.ID, childRunID).Scan(&markerEvents); err != nil {
+				t.Fatal(err)
+			}
+			if markerEvents != 0 {
+				t.Fatalf("test unexpectedly wrote convenience marker: %d", markerEvents)
+			}
+		})
+	}
+}

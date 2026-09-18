@@ -192,5 +192,29 @@ func TestRunEngineOnRunnerTerminalOutcomes(t *testing.T) {
 		if len(client.directions) != 1 || client.directions[0] != "from_runner" || !client.confirmed {
 			t.Fatalf("cancelled run did not complete sync-back: directions=%v confirmed=%v", client.directions, client.confirmed)
 		}
+
+		t.Run("delegated cancellation records accepted handback before returning cancellation", func(t *testing.T) {
+			repo := initProcessTestRepository(t)
+			safe := processTestSafeContext(repo)
+			safe.Runner = &executioncontext.RunnerContext{ID: "runner-1"}
+			safe.Delegation = &executioncontext.DelegationContext{
+				ID: "delegation-1", ParentRunID: "parent-run-1", ParentAgentID: "parent-agent-1",
+				TargetAgentID: safe.Agent.ID, Task: "bounded work", RequestKey: "call-1",
+			}
+			storeFake := &runnerSyncStore{}
+			client := &successfulSyncClient{payload: runnerTransferPayload(t, repo)}
+			processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
+			run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID}
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+
+			result, err := processor.runEngineOnRunner(ctx, run, safe, "runner-1", "session-1")
+			if !errors.Is(err, context.Canceled) || result.RunStatus != "" {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+			if !client.confirmed || !hasProcessTestEvent(storeFake.events, "workspace.transfer.completed") || !hasProcessTestEvent(storeFake.events, "delegation.workspace_accepted") {
+				t.Fatalf("delegated cancellation handback events=%+v confirmed=%v", storeFake.events, client.confirmed)
+			}
+		})
 	})
 }

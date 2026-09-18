@@ -185,7 +185,15 @@ func delegatedWorkspaceAccepted(ctx context.Context, tx pgx.Tx, child store.Run)
 		SELECT EXISTS (
 			SELECT 1
 			FROM events
-			WHERE project_id=$1 AND run_id=$2 AND type='delegation.workspace_accepted'
+			WHERE project_id=$1
+			  AND run_id=$2
+			  AND (
+				type='delegation.workspace_accepted'
+				OR (
+					type='workspace.transfer.completed'
+					AND payload->>'direction' IN ('from_runner', 'git_publish')
+				)
+			  )
 		)
 	`, child.ProjectID, child.ID).Scan(&accepted)
 	return accepted, err

@@ -585,9 +585,12 @@ func TestReconcileRecoversFailedAndCancelledDelegatedChildren(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			storeFake, run, _, _ := delegatedChildRecoveryFixture(t)
 			storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: tt.session, RunnerID: "runner-1"}}
+			sequence := int64(1)
 			if tt.wantReason != "" {
-				storeFake.events = []store.Event{delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "run.failed", map[string]any{"reason": tt.wantReason})}
+				storeFake.events = append(storeFake.events, delegationRecoveryEvent(t, run.ProjectID, run.ID, sequence, "run.failed", map[string]any{"reason": tt.wantReason}))
+				sequence++
 			}
+			storeFake.events = append(storeFake.events, delegationRecoveryEvent(t, run.ProjectID, run.ID, sequence, "workspace.transfer.completed", map[string]any{"direction": "from_runner"}))
 			processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
 			outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
 			if err != nil {
@@ -754,5 +757,36 @@ func TestReconcileCancelsUnstartedDelegatedChildWhenParentIsDurablyTerminal(t *t
 	}
 	if outcome != store.SchedulerReconciliationCancelled || reason != nil {
 		t.Fatalf("outcome=%s reason=%v want CANCELLED", outcome, reason)
+	}
+}
+
+func TestReconcileCancelledDelegatedChildRefinalizesDurableLocalWorkspaceBeforeTerminalizing(t *testing.T) {
+	storeFake, run, delegation, safe := delegatedChildRecoveryFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "CANCELLED", RuntimeInstanceID: "runtime-instance-1"}}
+	storeFake.current = "accepted-sha"
+	provenance, err := json.Marshal(executioncontext.Provenance{SchemaVersion: executioncontext.ProvenanceSchemaVersion, Context: safe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeFake.provenance = provenance
+	git := &serverFinalizeGit{revision: "accepted-sha"}
+	recorder, err := evidence.NewRecorder(storeFake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}, git: git, events: recorder}
+
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != store.SchedulerReconciliationCancelled || reason != nil {
+		t.Fatalf("outcome=%s reason=%v want CANCELLED", outcome, reason)
+	}
+	if git.start != "accepted-sha" || storeFake.persisted != "accepted-sha" {
+		t.Fatalf("re-finalized start=%q persisted=%q", git.start, storeFake.persisted)
+	}
+	if !delegationWorkspaceAcceptedEvidence(storeFake.events, delegation.ID) {
+		t.Fatalf("local handback was not durably marked accepted: %+v", storeFake.events)
 	}
 }
