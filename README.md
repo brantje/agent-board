@@ -161,7 +161,7 @@ There is no separate delegation scheduler, queue or Run type.
 
 Canonical delegation provides durable parent/child lineage, explicit delegation policy, serialized Workspace handoff, and restart-safe result/continuation on the existing Issue Workspace and branch. Accepting a delegation request creates the ordinary child Run but keeps its START job held. After the matching native `delegate_task` completes, the parent uses the normal Workspace/Git hand-back path and yields scheduler ownership; only then does the existing child become eligible for ordinary execution.
 
-A delegated Run completes as a subtask rather than becoming the Issue's Review candidate. Its bounded outcome/result is linked to ordinary Run evidence and atomically queues one normal `RESUME` for the same paused parent Run. The resumed parent receives the delegation identity, target, bounded task/result, evidence reference and current Workspace revision, then continues from the authoritative Issue branch. Parent cancellation propagates through the canonical Run-cancellation boundary, and terminal/restart reconciliation remains fail-closed when Runner or Workspace ownership is uncertain. Squad-aware delegation remains later lifecycle work. Delegation does not create parallel Workspaces, delegation branches, merge/rebase orchestration, or a second history system.
+A delegated Run completes as a subtask rather than becoming the Issue's Review candidate. Its bounded outcome/result is linked to ordinary Run evidence and atomically queues one normal `RESUME` for the same paused parent Run. The resumed parent receives the delegation identity, target, bounded task/result, evidence reference and current Workspace revision, then continues from the authoritative Issue branch. Parent cancellation propagates through the canonical Run-cancellation boundary, and terminal/restart reconciliation remains fail-closed when Runner or Workspace ownership is uncertain. Squad-owned Issues keep the Squad as owner while the leader receives trusted usable Agent identities and Squad Agent member/role context for explicit delegation through the same canonical command. Delegation does not create parallel Workspaces, delegation branches, merge/rebase orchestration, or a second history system.
 
 ### HTTP API and MCP
 
@@ -430,7 +430,7 @@ Squads [implemented]
   -> canonical delegation [implemented]
   -> serialized delegated Workspace handoff [implemented]
   -> delegated outcomes / parent continuation [implemented]
-  -> Squad-aware collaboration [later]
+  -> Squad-aware delegation context [implemented]
 ```
 
 Planning, Automations, richer source-provider integrations, delivery policies, worker pools and broader integrations build on the same core model rather than introducing parallel execution systems.

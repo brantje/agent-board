@@ -327,13 +327,13 @@ Read `docs/authorization.md` before changing authentication, Users, Groups, Proj
 - User members use the canonical active effective Project member/admin workflow eligibility rule on create/update; later loss of eligibility leaves deterministic stale roster context but no access.
 - Issue ownership may persist a Squad ID. The shared backend execution path resolves only the current Squad leader as the executing Agent without rewriting ownership.
 - Leader changes reuse normal reconciliation, Runs, scheduling and Workspaces. Additional members do not implicitly create Runs or alter ownership.
-- Current Squad behavior does not implicitly delegate or fan work out to members. Canonical Agent delegation and serialized Workspace handoff exist independently; Squad-aware member targeting remains future work.
+- Squad ownership does not implicitly delegate or fan work out to members. When the authoritative leader has effective delegation capability, trusted execution context exposes usable Agent target IDs/names plus Squad Agent member names/roles; the leader still delegates explicitly through the canonical command, and membership itself grants no delegation authority.
 
 Read `docs/future-agent-collaboration.md` before changing Squad ownership, leader execution or delegation behavior.
 
 ## Planned features
 
-Planning strategy, Automations, Agent-created Issues, Source Connections, delivery automation, Squad-aware delegation and worker pools reuse the canonical Issue/Run/scheduler/Workspace model. Delegated outcomes/parent continuation are already implemented on that model, and Squad-aware collaboration must build on the implemented Squad foundation rather than replacing it.
+Planning strategy, Automations, Agent-created Issues, Source Connections, delivery automation and worker pools reuse the canonical Issue/Run/scheduler/Workspace model. Canonical delegation, delegated outcomes/parent continuation, and Squad-aware trusted target/member context are implemented on that model; future human handoff or broader messaging must extend those boundaries rather than replacing them.
 
 Future Worker Pools supply/place Runner capacity but do not replace Agent, Runner or Execution Session identities. Legacy Runtime Instance identity remains separate wherever that compatibility path still exists.
 

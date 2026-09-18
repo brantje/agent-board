@@ -173,7 +173,7 @@ Routine healthy Provider probes do not trigger assignment scans.
 
 ## Delegation / Automation compatibility
 
-Delegated work and Automation-created Issues use this same scheduler. Phase-2 delegation creates an ordinary child START job that remains held until the parent completes the normal Workspace hand-back and atomically yields scheduler ownership; there is no private delegation queue or second scheduler.
+Delegated work and Automation-created Issues use this same scheduler. Delegation creates an ordinary child START job that remains held until the parent completes the normal Workspace hand-back and atomically yields scheduler ownership; there is no private delegation queue or second scheduler. For a Squad-owned Issue, only the resolved leader's normal parent Run is created automatically. Agent members become ordinary child Runs only after an explicit canonical delegation request; Squad membership, role context, and target discovery never enqueue or fan out work.
 
 ## Invariants
 
