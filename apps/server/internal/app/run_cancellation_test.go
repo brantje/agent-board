@@ -53,6 +53,7 @@ func TestCancelRunRejectsUnavailableInvalidTerminalAndUnownedRuns(t *testing.T) 
 
 type delegationCancelStore struct {
 	store.ControlPlaneStore
+	mu           sync.Mutex
 	runs         map[string]store.Run
 	delegations  []store.Delegation
 	cancelled    []string
@@ -66,13 +67,19 @@ func (s *delegationCancelStore) GetProject(context.Context, string) (store.Proje
 }
 
 func (s *delegationCancelStore) GetRun(_ context.Context, _, id string) (store.Run, error) {
+	s.mu.Lock()
 	if s.getRunCalls == nil {
 		s.getRunCalls = make(map[string]int)
 	}
 	s.getRunCalls[id]++
-	if s.beforeGetRun != nil {
-		s.beforeGetRun(id, s.getRunCalls[id])
+	call := s.getRunCalls[id]
+	before := s.beforeGetRun
+	s.mu.Unlock()
+	if before != nil {
+		before(id, call)
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	run, ok := s.runs[id]
 	if !ok {
 		return store.Run{}, store.ErrNotFound
@@ -81,6 +88,8 @@ func (s *delegationCancelStore) GetRun(_ context.Context, _, id string) (store.R
 }
 
 func (s *delegationCancelStore) CancelInactiveRun(_ context.Context, _, id string) (store.RunCancellationResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	run, ok := s.runs[id]
 	if !ok {
 		return store.RunCancellationResult{}, store.ErrNotFound
@@ -196,9 +205,11 @@ func (s *preRegistrationDelegationSchedulerStore) EnqueueJob(context.Context, st
 func (s *preRegistrationDelegationSchedulerStore) AdmitNextJob(ctx context.Context, _ string, _, _ time.Duration) (*store.SchedulerAdmission, error) {
 	var claim *store.SchedulerAdmission
 	s.once.Do(func() {
+		s.base.mu.Lock()
 		child := s.base.runs[s.admission.Run.ID]
 		child.Status = "STARTING"
 		s.base.runs[child.ID] = child
+		s.base.mu.Unlock()
 		copy := *s.admission
 		copy.Run = child
 		claim = &copy
@@ -223,6 +234,8 @@ func (s *preRegistrationDelegationSchedulerStore) TransitionAdmittedJob(_ contex
 	if input.RunStatus == "RUNNING" {
 		s.runningOnce.Do(func() { close(s.runningAttempted) })
 	}
+	s.base.mu.Lock()
+	defer s.base.mu.Unlock()
 	run := s.base.runs[input.RunID]
 	if run.Status == "CANCELLED" {
 		return store.Run{}, store.ErrConflict
@@ -293,16 +306,28 @@ func TestParentCancellationWinsClaimedDelegatedChildBeforeWorkerRegistration(t *
 	case <-time.After(time.Second):
 		t.Fatal("scheduler did not reach claimed pre-registration barrier")
 	}
-	if got := base.runs["child"].Status; got != "STARTING" {
-		t.Fatalf("child status=%s want STARTING after durable admission", got)
+	childBeforeCancel, err := base.GetRun(t.Context(), "project-1", "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if childBeforeCancel.Status != "STARTING" {
+		t.Fatalf("child status=%s want STARTING after durable admission", childBeforeCancel.Status)
 	}
 
 	services := &Services{ControlPlane: New(base), Scheduler: coordinator}
 	if err := services.CancelRun(t.Context(), "project-1", "parent"); err != nil {
 		t.Fatal(err)
 	}
-	if base.runs["parent"].Status != "CANCELLED" || base.runs["child"].Status != "CANCELLED" {
-		t.Fatalf("cancellation statuses parent=%s child=%s", base.runs["parent"].Status, base.runs["child"].Status)
+	parentAfterCancel, err := base.GetRun(t.Context(), "project-1", "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	childAfterCancel, err := base.GetRun(t.Context(), "project-1", "child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentAfterCancel.Status != "CANCELLED" || childAfterCancel.Status != "CANCELLED" {
+		t.Fatalf("cancellation statuses parent=%s child=%s", parentAfterCancel.Status, childAfterCancel.Status)
 	}
 	if base.delegations[0].ContinuationJobID != nil {
 		t.Fatalf("cancelled parent received continuation: %+v", base.delegations[0])
@@ -319,8 +344,12 @@ func TestParentCancellationWinsClaimedDelegatedChildBeforeWorkerRegistration(t *
 		t.Fatal("claimed delegated child entered Engine execution after parent cancellation")
 	default:
 	}
-	if base.runs["parent"].Status != "CANCELLED" {
-		t.Fatalf("stale worker resurrected parent to %s", base.runs["parent"].Status)
+	parentAfterWorker, err := base.GetRun(t.Context(), "project-1", "parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentAfterWorker.Status != "CANCELLED" {
+		t.Fatalf("stale worker resurrected parent to %s", parentAfterWorker.Status)
 	}
 
 	cancel()
