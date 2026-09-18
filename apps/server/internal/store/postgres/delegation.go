@@ -79,6 +79,23 @@ func (s *Store) RequestDelegation(ctx context.Context, input store.RequestDelega
 		return result, nil
 	}
 
+	// The parent Run lock serializes delegation requests from the same parent.
+	// Same-request retries have already returned above, so any remaining
+	// unfinished delegation represents a distinct request and must complete
+	// before this parent can delegate again.
+	var unfinished bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM delegations
+			WHERE project_id=$1 AND parent_run_id=$2 AND outcome IS NULL
+		)
+	`, input.ProjectID, parent.ID).Scan(&unfinished); err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	if unfinished {
+		return store.RequestDelegationResult{}, store.ErrConflict
+	}
+
 	if parent.Status != "RUNNING" || parent.AgentID == nil || *parent.AgentID == input.TargetAgentID {
 		return store.RequestDelegationResult{}, store.ErrConflict
 	}
