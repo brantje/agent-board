@@ -67,9 +67,6 @@ func (s *Services) cancelDelegatedChildren(ctx context.Context, projectID, paren
 		return err
 	}
 	for _, delegation := range values {
-		if delegation.Outcome != nil {
-			continue
-		}
 		child, err := s.ControlPlane.GetRun(ctx, projectID, delegation.DelegatedRunID)
 		if err != nil {
 			return err

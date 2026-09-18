@@ -291,6 +291,50 @@ func TestCancelRunRetriesDelegatedChildrenAfterParentIsAlreadyCancelled(t *testi
 	}
 }
 
+func TestCancelRunRetryTraversesCancelledDelegatedChildToUnfinishedGrandchild(t *testing.T) {
+	cancelledOutcome := store.DelegationOutcomeCancelled
+	base := &delegationCancelStore{
+		runs: map[string]store.Run{
+			"root":       {ID: "root", ProjectID: "project-1", Status: "PAUSED"},
+			"child":      {ID: "child", ProjectID: "project-1", Status: "QUEUED"},
+			"grandchild": {ID: "grandchild", ProjectID: "project-1", Status: "RUNNING"},
+		},
+		delegations: []store.Delegation{
+			{ID: "root-child", ProjectID: "project-1", ParentRunID: "root", DelegatedRunID: "child"},
+			{ID: "child-grandchild", ProjectID: "project-1", ParentRunID: "child", DelegatedRunID: "grandchild"},
+		},
+	}
+	services := &Services{ControlPlane: New(base), Scheduler: &scheduler.Coordinator{}}
+
+	if err := services.CancelRun(t.Context(), "project-1", "root"); err == nil {
+		t.Fatal("first root cancellation unexpectedly completed while grandchild was actively owned elsewhere")
+	}
+	if got := base.runs["root"].Status; got != "CANCELLED" {
+		t.Fatalf("root status=%s want CANCELLED after partial propagation", got)
+	}
+	if got := base.runs["child"].Status; got != "CANCELLED" {
+		t.Fatalf("child status=%s want CANCELLED after partial propagation", got)
+	}
+	if got := base.runs["grandchild"].Status; got != "RUNNING" {
+		t.Fatalf("grandchild status=%s want RUNNING before retry", got)
+	}
+
+	// The real delegated-child terminal transaction records this outcome before
+	// descendant propagation can fail. Root retry must still traverse the
+	// CANCELLED child rather than treating the recorded outcome as delivery proof.
+	base.delegations[0].Outcome = &cancelledOutcome
+	grandchild := base.runs["grandchild"]
+	grandchild.Status = "QUEUED"
+	base.runs["grandchild"] = grandchild
+
+	if err := services.CancelRun(t.Context(), "project-1", "root"); err != nil {
+		t.Fatalf("retry cancelled root: %v", err)
+	}
+	if got := base.runs["grandchild"].Status; got != "CANCELLED" {
+		t.Fatalf("grandchild status=%s want CANCELLED after root retry", got)
+	}
+}
+
 func TestCancelDelegatedChildrenTreatsConcurrentChildCompletionAsSuccessfulPropagation(t *testing.T) {
 	base := &delegationCancelStore{
 		runs: map[string]store.Run{
@@ -351,16 +395,16 @@ func TestCancelRunForUserAuthorizesWorkflowMutationBeforeCanonicalCancellation(t
 	}
 }
 
-func TestCancelDelegatedChildrenSkipsHandledAndTerminalDelegations(t *testing.T) {
+func TestCancelDelegatedChildrenSkipsTerminalChildrenRegardlessOfOutcome(t *testing.T) {
 	outcome := store.DelegationOutcomeSucceeded
 	base := &delegationCancelStore{
 		runs: map[string]store.Run{
-			"parent":         {ID: "parent", ProjectID: "project-1", Status: "PAUSED"},
-			"handled-child":  {ID: "handled-child", ProjectID: "project-1", Status: "RUNNING"},
-			"terminal-child": {ID: "terminal-child", ProjectID: "project-1", Status: "COMPLETED"},
+			"parent":            {ID: "parent", ProjectID: "project-1", Status: "PAUSED"},
+			"handled-terminal":  {ID: "handled-terminal", ProjectID: "project-1", Status: "COMPLETED"},
+			"terminal-child":    {ID: "terminal-child", ProjectID: "project-1", Status: "FAILED"},
 		},
 		delegations: []store.Delegation{
-			{ID: "handled", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "handled-child", Outcome: &outcome},
+			{ID: "handled", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "handled-terminal", Outcome: &outcome},
 			{ID: "terminal", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "terminal-child"},
 		},
 	}
