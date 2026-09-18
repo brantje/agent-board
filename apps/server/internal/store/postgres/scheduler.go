@@ -251,23 +251,25 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 		LEFT JOIN model_profiles AS model
 		  ON model.id=agent.model_profile_id
 		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
+		LEFT JOIN LATERAL (
+			SELECT true AS required
+			FROM delegations AS delegation
+			JOIN runs AS parent
+			  ON parent.project_id=delegation.project_id
+			 AND parent.id=delegation.parent_run_id
+			WHERE delegation.project_id=run.project_id
+			  AND delegation.delegated_run_id=run.id
+			  AND delegation.outcome IS NULL
+			  AND parent.status IN ('COMPLETED','FAILED','CANCELLED')
+			LIMIT 1
+		) AS terminal_parent_cleanup ON true
 		WHERE job.state='QUEUED'
 		  AND run.status='QUEUED'
 		  AND (
 			job.available_at <= now()
-			OR EXISTS (
-				SELECT 1
-				FROM delegations AS delegation
-				JOIN runs AS parent
-				  ON parent.project_id=delegation.project_id
-				 AND parent.id=delegation.parent_run_id
-				WHERE delegation.project_id=run.project_id
-				  AND delegation.delegated_run_id=run.id
-				  AND delegation.outcome IS NULL
-				  AND parent.status IN ('COMPLETED','FAILED','CANCELLED')
-			)
+			OR terminal_parent_cleanup.required IS TRUE
 		  )
-		ORDER BY job.available_at, job.created_at, job.id
+		ORDER BY terminal_parent_cleanup.required DESC NULLS LAST, job.available_at, job.created_at, job.id
 		FOR UPDATE OF job, run SKIP LOCKED
 		LIMIT 1
 	`).Scan(

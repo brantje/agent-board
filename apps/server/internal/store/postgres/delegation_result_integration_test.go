@@ -783,3 +783,104 @@ func TestSchedulerRestartCancelsHeldDelegateForDurablyCancelledParent(t *testing
 		t.Fatalf("restart delegation result=%+v", delegation)
 	}
 }
+
+
+func TestSchedulerPrioritizesTerminalParentHeldDelegateCleanupOverRunnableWork(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "terminal parent cleanup priority", RequestKey: "terminal-parent-cleanup-priority",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ordinaryFixture := runFixture{project: f.project, agent: f.target}
+	ordinaryRun := createQueuedFixtureRun(t, f.store, ordinaryFixture, "terminal-parent-cleanup-runnable")
+	ordinaryJob := enqueueFixtureRun(t, f.store, ordinaryFixture, ordinaryRun, "terminal-parent-cleanup-runnable")
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE scheduler_jobs
+		SET available_at=now() - interval '1 minute', updated_at=now()
+		WHERE id=$1
+	`, ordinaryJob.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE runs
+		SET status='CANCELLED', queue_reason=NULL, completed_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE scheduler_jobs
+		SET state='CANCELLED', wait_reason=NULL, updated_at=now()
+		WHERE project_id=$1 AND run_id=$2 AND state='QUEUED'
+	`, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	runner, err := f.store.CreateRunner(ctx, store.Runner{Name: "terminal parent cleanup runner", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ObserveRunner(ctx, runner.ID, []byte(`{"max_active_sessions":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	f.store.SetRunnerCandidates(func(string) []string { return []string{runner.ID} })
+
+	admission, err := f.store.AdmitNextJob(ctx, "terminal-parent-cleanup", time.Minute, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admission != nil {
+		t.Fatalf("ordinary work was admitted before terminal-parent cleanup: %+v", admission)
+	}
+
+	child, err := f.store.GetRun(ctx, f.project.ID, created.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != "CANCELLED" {
+		t.Fatalf("child status=%s want CANCELLED", child.Status)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeCancelled || delegation.ContinuationJobID != nil {
+		t.Fatalf("delegation after cleanup=%+v", delegation)
+	}
+
+	var childJobState, ordinaryJobState string
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT state
+		FROM scheduler_jobs
+		WHERE project_id=$1 AND run_id=$2 AND kind='START'
+	`, f.project.ID, child.ID).Scan(&childJobState); err != nil {
+		t.Fatal(err)
+	}
+	if childJobState == "QUEUED" {
+		t.Fatal("delegated child START job remained QUEUED after cleanup")
+	}
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT state
+		FROM scheduler_jobs
+		WHERE id=$1
+	`, ordinaryJob.ID).Scan(&ordinaryJobState); err != nil {
+		t.Fatal(err)
+	}
+	if ordinaryJobState != "QUEUED" {
+		t.Fatalf("ordinary job state=%s want QUEUED after cleanup pass", ordinaryJobState)
+	}
+
+	admission, err = f.store.AdmitNextJob(ctx, "ordinary-after-cleanup", time.Minute, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admission == nil || admission.Run.ID != ordinaryRun.ID || admission.Job.ID != ordinaryJob.ID {
+		t.Fatalf("ordinary admission after cleanup=%+v want run=%s job=%s", admission, ordinaryRun.ID, ordinaryJob.ID)
+	}
+}
