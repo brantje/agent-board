@@ -16,19 +16,14 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Skip("OpenRouter provider is required for the delegation E2E")
 	}
 
-	project, parentRun := fixture.createRun(t, openCodeRunSpec{
+	setup := fixture.createRunSetup(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Do not change Issue status. Do not edit files before the requested delegation.",
 		title:            "Prove OpenCode delegation",
 		description:      "Use the delegation capability exactly as directed by your role instructions. Do not perform the delegated file task yourself.",
 	})
-	if parentRun.AgentID == nil {
-		t.Fatal("parent Run has no Agent")
-	}
+	project := setup.Project
+	parentAgent := setup.Agent
 	scope := project.ID
-	parentAgent, err := fixture.services.ControlPlane.GetAgent(fixture.ctx, &scope, *parentRun.AgentID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	target, err := fixture.services.ControlPlane.CreateAgent(fixture.ctx, store.Agent{
 		ProjectID: &scope,
 		Name: "OpenCode delegation target",
@@ -60,7 +55,7 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	assigned, err := fixture.services.ControlPlane.SetIssueAssignee(
 		fixture.ctx,
 		project.ID,
-		parentRun.IssueID,
+		setup.Issue.ID,
 		&store.Assignee{Type: "SQUAD", ID: squad.ID},
 		store.EmptyObject,
 	)
@@ -75,10 +70,23 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var parentRun store.Run
 	for _, run := range runsBeforeDelegation {
-		if run.IssueID == parentRun.IssueID && run.AgentID != nil && *run.AgentID == target.ID {
-			t.Fatalf("Squad membership automatically fanned out target Run before delegate_task: %+v", run)
+		if run.IssueID != setup.Issue.ID || run.AgentID == nil {
+			continue
 		}
+		switch *run.AgentID {
+		case target.ID:
+			t.Fatalf("Squad membership automatically fanned out target Run before delegate_task: %+v", run)
+		case parentAgent.ID:
+			if parentRun.ID != "" {
+				t.Fatalf("Squad assignment created duplicate leader Runs: first=%+v second=%+v", parentRun, run)
+			}
+			parentRun = run
+		}
+	}
+	if parentRun.ID == "" {
+		t.Fatal("Squad assignment did not create the authoritative leader Run")
 	}
 
 	fixture.startScheduler(t)
