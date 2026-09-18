@@ -376,7 +376,7 @@ func TestDelegatedTerminalTransitionWaitsForExecutionSessionReconciliation(t *te
 	childRunID := created.DelegatedRun.ID
 	projectID := f.project.ID
 
-	runnerValue, err := f.store.CreateRunner(ctx, store.Runner{ProjectID: &projectID, Name: "delegation-uncertainty-runner"})
+	runnerValue, err := f.store.CreateRunner(ctx, store.Runner{ProjectID: &projectID, Name: "delegation-uncertainty-runner", TokenHash: make([]byte, 32)})
 	if err != nil {
 		t.Fatal(err)
 	}

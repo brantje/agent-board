@@ -150,27 +150,20 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	}
 	resolved, err := p.resolver.Resolve(ctx, run.ProjectID, run.ID)
 	if err != nil {
-		return p.checkedExecutionResult(ctx, run, failed(err))
+		return failed(err), nil
 	}
 	delegationContinuation, err := p.loadDelegationContinuation(ctx, claim, run)
 	if err != nil {
-		return p.checkedExecutionResult(ctx, run, failed(err))
+		return failed(err), nil
 	}
 	live, err := p.liveExecutionSession(ctx, run)
 	if err != nil {
-		return scheduler.Result{}, fmt.Errorf("run execution: inspect live Execution Session: %w", err)
+		return failed(err), nil
 	}
-
-	var result scheduler.Result
 	if live != nil {
-		result, err = p.attachExistingExecution(ctx, run, resolved.Safe, *live, delegationContinuation)
-	} else {
-		result, err = p.startNewExecution(ctx, claim, run, resolved.Safe, delegationContinuation)
+		return p.attachExistingExecution(ctx, run, resolved.Safe, *live, delegationContinuation)
 	}
-	if err != nil {
-		return result, err
-	}
-	return p.checkedExecutionResult(ctx, run, result)
+	return p.startNewExecution(ctx, claim, run, resolved.Safe, delegationContinuation)
 }
 
 func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
@@ -309,6 +302,11 @@ func (p *Processor) runEngineWithContinuation(ctx context.Context, run store.Run
 		return p.finishWaitingForInput(ctx, safe, instance)
 	}
 	handoff, handoffRequested := engine.AsDelegationHandoff(engineErr)
+	if engineErr != nil && !handoffRequested {
+		if uncertaintyErr := p.executionUncertainty(ctx, run, engineErr); uncertaintyErr != nil {
+			return scheduler.Result{}, uncertaintyErr
+		}
+	}
 
 	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	_, finalizeErr := p.finalizeServerWorkspace(finalizeCtx, safe)
@@ -336,20 +334,21 @@ func (p *Processor) runEngineWithContinuation(ctx context.Context, run store.Run
 	return p.finishSuccessfulExecution(ctx, safe, &instance.ID)
 }
 
-func (p *Processor) checkedExecutionResult(ctx context.Context, run store.Run, result scheduler.Result) (scheduler.Result, error) {
-	switch result.RunStatus {
-	case "READY_FOR_REVIEW", "COMPLETED", "FAILED", "CANCELLED":
-	default:
-		return result, nil
+func (p *Processor) executionUncertainty(ctx context.Context, run store.Run, cause error) error {
+	if cause == nil {
+		return nil
 	}
 	live, err := p.liveExecutionSession(ctx, run)
 	if err != nil {
-		return scheduler.Result{}, fmt.Errorf("run execution: confirm Execution Session state before %s: %w", result.RunStatus, err)
+		return errors.Join(cause, fmt.Errorf("run execution: inspect Execution Session after execution error: %w", err))
 	}
-	if live != nil {
-		return scheduler.Result{}, fmt.Errorf("run execution: Execution Session %s remains %s while Run result is %s; reconciliation is required", live.ID, live.Status, result.RunStatus)
+	if live == nil {
+		return nil
 	}
-	return result, nil
+	return errors.Join(cause, fmt.Errorf(
+		"run execution: Execution Session %s remains %s after execution error; reconciliation is required",
+		live.ID, live.Status,
+	))
 }
 
 func (p *Processor) liveExecutionSession(ctx context.Context, run store.Run) (*store.ExecutionSession, error) {
@@ -1293,6 +1292,11 @@ func (p *Processor) runEngineOnRunnerWithContinuation(ctx context.Context, run s
 		return p.finishWaitingForInputRunner(ctx, safe)
 	}
 	handoff, handoffRequested := engine.AsDelegationHandoff(engineErr)
+	if engineErr != nil && !handoffRequested {
+		if uncertaintyErr := p.executionUncertainty(ctx, run, engineErr); uncertaintyErr != nil {
+			return scheduler.Result{}, uncertaintyErr
+		}
+	}
 
 	syncCtx, cancelSync := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	syncErr := p.syncWorkspaceFromRunner(syncCtx, safe, runnerID, attachSessionID)

@@ -2,7 +2,6 @@ package runexec
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 
@@ -39,11 +38,6 @@ func (p *Processor) finishDelegationWorkspaceHandoff(ctx context.Context, safe e
 
 func (p *Processor) failExecution(ctx context.Context, safe executioncontext.SafeContext, cause error, runtimeInstanceID *string) (scheduler.Result, error) {
 	reason := safeFailure(cause)
-	result := scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}
-	checked, err := p.checkedExecutionResult(ctx, store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID}, result)
-	if err != nil {
-		return scheduler.Result{}, errors.Join(cause, err)
-	}
 	_ = p.record(ctx, safe, "run.failed", map[string]any{"reason": reason}, runtimeInstanceID, nil)
-	return checked, nil
+	return scheduler.Result{RunStatus: "FAILED", FailureReason: &reason}, nil
 }
