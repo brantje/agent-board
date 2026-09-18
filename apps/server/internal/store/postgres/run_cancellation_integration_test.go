@@ -39,7 +39,8 @@ func TestCancelInactiveRunCancelsQueuedSchedulerWorkAndPersistsEvent(t *testing.
 func TestCancelInactiveRunCancelsClaimedRunBeforeExecutionStarts(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
-	jobID, leaseToken := claimDelegationParentJob(t, f)
+	claim := admitDelegationParentJob(t, f)
+	jobID, leaseToken := claim.Job.ID, claim.Lease.LeaseToken
 
 	result, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID)
 	if err != nil {
@@ -71,7 +72,7 @@ func TestCancelInactiveRunCancelsClaimedRunBeforeExecutionStarts(t *testing.T) {
 func TestCreateExecutionSessionRejectsDurablyCancelledClaim(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
-	_, _ = claimDelegationParentJob(t, f)
+	_ = admitDelegationParentJob(t, f)
 	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +94,8 @@ func TestCreateExecutionSessionRejectsDurablyCancelledClaim(t *testing.T) {
 func TestCancelInactiveRunRefusesClaimedRunWithLiveExecutionSession(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
-	jobID, _ := claimDelegationParentJob(t, f)
+	claim := admitDelegationParentJob(t, f)
+	jobID := claim.Job.ID
 	projectID := f.project.ID
 	runnerValue, err := f.store.CreateRunner(ctx, store.Runner{
 		ProjectID: &projectID, Name: "claimed-cancellation-runner", TokenHash: make([]byte, 32),
