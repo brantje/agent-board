@@ -22,6 +22,12 @@ const delegationSelectColumns = `
 	task,
 	delegated_run_id::text,
 	request_key,
+	outcome,
+	result_summary,
+	result_event_id::text,
+	workspace_changes_accepted,
+	continuation_job_id::text,
+	completed_at,
 	created_at,
 	updated_at
 `
@@ -340,6 +346,12 @@ func scanDelegation(row pgx.Row) (store.Delegation, error) {
 		&value.Task,
 		&value.DelegatedRunID,
 		&value.RequestKey,
+		&value.Outcome,
+		&value.ResultSummary,
+		&value.ResultEventID,
+		&value.WorkspaceChangesAccepted,
+		&value.ContinuationJobID,
+		&value.CompletedAt,
 		&value.CreatedAt,
 		&value.UpdatedAt,
 	)

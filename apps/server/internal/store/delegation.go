@@ -7,23 +7,33 @@ import (
 
 const (
 	MaxDelegationTaskCharacters           = 16 << 10
+	MaxDelegationResultCharacters         = 4 << 10
 	DelegationWorkspaceHandoffWaitReason  = "delegation_handoff"
 	DelegationWorkspaceHandoffReadyReason = "delegation_handoff_ready"
 	DelegationWorkspaceAccessWrite        = "WRITE"
+	DelegationOutcomeSucceeded            = "SUCCEEDED"
+	DelegationOutcomeFailed               = "FAILED"
+	DelegationOutcomeCancelled            = "CANCELLED"
 )
 
 type Delegation struct {
-	ID             string
-	ProjectID      string
-	IssueID        string
-	ParentRunID    string
-	ParentAgentID  string
-	TargetAgentID  string
-	Task           string
-	DelegatedRunID string
-	RequestKey     string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID                       string
+	ProjectID                string
+	IssueID                  string
+	ParentRunID              string
+	ParentAgentID            string
+	TargetAgentID            string
+	Task                     string
+	DelegatedRunID           string
+	RequestKey               string
+	Outcome                  *string
+	ResultSummary            *string
+	ResultEventID            *string
+	WorkspaceChangesAccepted *bool
+	ContinuationJobID        *string
+	CompletedAt              *time.Time
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
 type RequestDelegationCommand struct {

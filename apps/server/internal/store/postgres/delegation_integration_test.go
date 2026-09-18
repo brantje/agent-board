@@ -9,14 +9,14 @@ import (
 )
 
 type delegationFixture struct {
-	store      *Store
-	project    store.Project
-	issue      store.Issue
-	parent     store.Agent
-	target     store.Agent
-	parentRun  store.Run
-	model      store.ModelProfile
-	provider   store.Provider
+	store     *Store
+	project   store.Project
+	issue     store.Issue
+	parent    store.Agent
+	target    store.Agent
+	parentRun store.Run
+	model     store.ModelProfile
+	provider  store.Provider
 }
 
 func TestRequestDelegationCreatesOneNormalRunAndIsIdempotent(t *testing.T) {
@@ -38,6 +38,9 @@ func TestRequestDelegationCreatesOneNormalRunAndIsIdempotent(t *testing.T) {
 	}
 	if first.SchedulerJob.Kind != "START" || first.SchedulerJob.RunID != first.DelegatedRun.ID {
 		t.Fatalf("unexpected scheduler job: %+v", first.SchedulerJob)
+	}
+	if first.Delegation.Outcome != nil || first.Delegation.ResultSummary != nil || first.Delegation.ResultEventID != nil || first.Delegation.WorkspaceChangesAccepted != nil || first.Delegation.ContinuationJobID != nil || first.Delegation.CompletedAt != nil {
+		t.Fatalf("new delegation unexpectedly has terminal result state: %+v", first.Delegation)
 	}
 
 	retry, err := f.store.RequestDelegation(ctx, input)
