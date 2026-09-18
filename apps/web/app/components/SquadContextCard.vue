@@ -13,12 +13,16 @@ const identityName = (type: SquadMember['type'], id: string) =>
 const leaderName = computed(() => squad.data.value
   ? identityName('AGENT', squad.data.value.leaderAgentId)
   : '')
+
+async function refresh() {
+  await Promise.all([squad.refresh(), assignees.refresh()])
+}
 </script>
 
 <template>
   <UCard data-squad-context>
     <h2 class="section-label mb-3">Squad context</h2>
-    <AsyncState :pending="squad.pending.value || assignees.pending.value" :error="squad.error.value || assignees.error.value" @retry="() => Promise.all([squad.refresh(), assignees.refresh()])">
+    <AsyncState :pending="squad.pending.value || assignees.pending.value" :error="squad.error.value || assignees.error.value" @retry="refresh">
       <div v-if="squad.data.value" class="space-y-3 text-sm">
         <div>
           <p class="text-muted">Owner</p>
