@@ -16,7 +16,7 @@ func (s *Store) ListDelegationTargets(ctx context.Context, projectID, parentAgen
 		return nil, store.ErrInvalidArgument
 	}
 
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		return nil, err
 	}
