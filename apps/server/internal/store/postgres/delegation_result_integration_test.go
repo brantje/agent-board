@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -674,5 +675,111 @@ func TestDelegatedTerminalResultTrustsAuthoritativeRunnerHandbackWithoutConvenie
 				t.Fatalf("test unexpectedly wrote convenience marker: %d", markerEvents)
 			}
 		})
+	}
+}
+
+
+func TestParentCancellationRaceEventuallyCancelsHeldDelegateThroughAdmission(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	parentJobID, parentLease := claimDelegationParentJob(t, f)
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "held child cancellation race", RequestKey: "cancel-held-race",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, created.DelegatedRun.ID); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("early child cancellation error=%v want ErrConflict while parent remains RUNNING", err)
+	}
+	child, err := f.store.GetRun(ctx, f.project.ID, created.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != "QUEUED" {
+		t.Fatalf("early child cancellation committed status=%s want QUEUED rollback", child.Status)
+	}
+
+	parentMutation, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: parentJobID, RunID: f.parentRun.ID, LeaseToken: parentLease, RunStatus: "CANCELLED",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentMutation.Run.Status != "CANCELLED" {
+		t.Fatalf("parent status=%s want CANCELLED", parentMutation.Run.Status)
+	}
+
+	admission, err := f.store.AdmitNextJob(ctx, "post-parent-cancel", time.Minute, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admission != nil {
+		t.Fatalf("terminal-parent delegate was admitted instead of cancelled: %+v", admission)
+	}
+	child, err = f.store.GetRun(ctx, f.project.ID, created.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != "CANCELLED" {
+		t.Fatalf("child status=%s want CANCELLED after durable parent cancellation", child.Status)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeCancelled || delegation.ContinuationJobID != nil {
+		t.Fatalf("delegation after parent cancellation=%+v", delegation)
+	}
+}
+
+func TestSchedulerRestartCancelsHeldDelegateForDurablyCancelledParent(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "restart orphan cleanup", RequestKey: "cancel-held-restart",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, "UPDATE runs SET status='CANCELLED', queue_reason=NULL, completed_at=now(), updated_at=now() WHERE project_id=$1 AND id=$2", f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, "UPDATE scheduler_jobs SET state='CANCELLED', wait_reason=NULL, updated_at=now() WHERE project_id=$1 AND run_id=$2 AND state='QUEUED'", f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	var heldUntil time.Time
+	if err := f.store.pool.QueryRow(ctx, "SELECT available_at FROM scheduler_jobs WHERE project_id=$1 AND run_id=$2 AND kind='START'", f.project.ID, created.DelegatedRun.ID).Scan(&heldUntil); err != nil {
+		t.Fatal(err)
+	}
+	if !heldUntil.After(time.Now().Add(24 * time.Hour)) {
+		t.Fatalf("delegated child is not held in the future: %s", heldUntil)
+	}
+
+	restarted := New(f.store.pool)
+	admission, err := restarted.AdmitNextJob(ctx, "restart-reconciler", time.Minute, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admission != nil {
+		t.Fatalf("restart admitted terminal-parent delegate: %+v", admission)
+	}
+	child, err := restarted.GetRun(ctx, f.project.ID, created.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != "CANCELLED" {
+		t.Fatalf("child status=%s want CANCELLED after restart admission sweep", child.Status)
+	}
+	delegation, err := restarted.GetDelegationByRun(ctx, f.project.ID, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeCancelled || delegation.ContinuationJobID != nil {
+		t.Fatalf("restart delegation result=%+v", delegation)
 	}
 }

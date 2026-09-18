@@ -85,19 +85,11 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	job, run, agentID, modelProfileID, err := lockNextAdmissionCandidate(ctx, tx)
-	if errors.Is(err, errSchedulerConfigurationUnavailable) {
-		if err := deferQueuedJob(ctx, tx, job, schedulerConfigurationWaitReason, backoffMicros); err != nil {
-			return nil, err
-		}
-		if err := tx.Commit(ctx); err != nil {
-			return nil, err
-		}
-		return nil, nil
-	}
+	configurationUnavailable := errors.Is(err, errSchedulerConfigurationUnavailable)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
 	}
-	if err != nil {
+	if err != nil && !configurationUnavailable {
 		return nil, err
 	}
 
@@ -114,6 +106,15 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 			return nil, store.ErrConflict
 		}
 		if _, err := cancelInactiveRunTx(ctx, tx, run); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	if configurationUnavailable {
+		if err := deferQueuedJob(ctx, tx, job, schedulerConfigurationWaitReason, backoffMicros); err != nil {
 			return nil, err
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -251,8 +252,21 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 		  ON model.id=agent.model_profile_id
 		 AND (model.project_id IS NULL OR model.project_id=run.project_id)
 		WHERE job.state='QUEUED'
-		  AND job.available_at <= now()
 		  AND run.status='QUEUED'
+		  AND (
+			job.available_at <= now()
+			OR EXISTS (
+				SELECT 1
+				FROM delegations AS delegation
+				JOIN runs AS parent
+				  ON parent.project_id=delegation.project_id
+				 AND parent.id=delegation.parent_run_id
+				WHERE delegation.project_id=run.project_id
+				  AND delegation.delegated_run_id=run.id
+				  AND delegation.outcome IS NULL
+				  AND parent.status IN ('COMPLETED','FAILED','CANCELLED')
+			)
+		  )
 		ORDER BY job.available_at, job.created_at, job.id
 		FOR UPDATE OF job, run SKIP LOCKED
 		LIMIT 1

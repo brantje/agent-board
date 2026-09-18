@@ -642,3 +642,83 @@ func TestCancelDelegatedChildrenPropagatesLookupErrors(t *testing.T) {
 		t.Fatalf("child lookup error=%v want ErrNotFound", err)
 	}
 }
+
+
+type failingCancellationEventAppender struct {
+	err error
+}
+
+func (s *failingCancellationEventAppender) AppendEvent(context.Context, store.Event) (store.Event, error) {
+	return store.Event{}, s.err
+}
+
+func TestCancelRunContinuesDelegatedCleanupWhenCancellationEvidenceFails(t *testing.T) {
+	recordErr := errors.New("record cancellation evidence")
+	base := &delegationCancelStore{
+		runs: map[string]store.Run{
+			"parent": {ID: "parent", ProjectID: "project-1", Status: "RUNNING"},
+			"child":  {ID: "child", ProjectID: "project-1", Status: "QUEUED"},
+		},
+		delegations: []store.Delegation{{
+			ID: "delegation-1", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "child",
+		}},
+	}
+	admission := &store.SchedulerAdmission{
+		Job:   store.SchedulerJob{ID: "parent-job", ProjectID: "project-1", RunID: "parent", Kind: "START", State: "CLAIMED"},
+		Lease: store.SchedulerLease{JobID: "parent-job", LeaseToken: "lease-1"},
+		Run:   base.runs["parent"],
+	}
+	schedulerStore := &activeDelegationSchedulerStore{admission: admission, transition: make(chan store.SchedulerTransition, 1)}
+	processor := &blockingCancellationProcessor{started: make(chan struct{})}
+	coordinator, err := scheduler.New(schedulerStore, processor, noOpCancellationReconciler{}, scheduler.Config{
+		OwnerID: "test-owner", PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second,
+		HeartbeatInterval: 100 * time.Millisecond, CapacityBackoff: 5 * time.Millisecond, MaxInFlight: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- coordinator.Run(ctx) }()
+	select {
+	case <-processor.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduler did not start parent")
+	}
+
+	eventStore := &failingCancellationEventAppender{err: recordErr}
+	recorder, err := evidence.NewRecorder(eventStore, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := &Services{ControlPlane: New(base), Scheduler: coordinator, Events: recorder}
+	cancelErr := services.CancelRun(t.Context(), "project-1", "parent")
+	if !errors.Is(cancelErr, recordErr) {
+		t.Fatalf("CancelRun error=%v want evidence error", cancelErr)
+	}
+	if got := base.runs["child"].Status; got != "CANCELLED" {
+		t.Fatalf("child status=%s want CANCELLED despite evidence failure", got)
+	}
+	if len(base.cancelled) != 1 || base.cancelled[0] != "child" {
+		t.Fatalf("delegated cancellation attempts=%v want child", base.cancelled)
+	}
+	select {
+	case transition := <-schedulerStore.transition:
+		if transition.RunID != "parent" || transition.RunStatus != "CANCELLED" {
+			t.Fatalf("parent transition=%+v want CANCELLED", transition)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("parent cancellation did not reach scheduler transition")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduler did not stop")
+	}
+}
