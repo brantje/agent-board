@@ -3,6 +3,7 @@ package runexec
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
@@ -13,10 +14,13 @@ import (
 
 type delegationRecoveryStore struct {
 	processTestStore
-	delegations []store.Delegation
-	marks       []delegationHandoffMark
-	current     string
-	persisted   string
+	delegations       []store.Delegation
+	marks             []delegationHandoffMark
+	listDelegationsErr error
+	listEventsErr      error
+	markErr            error
+	current            string
+	persisted          string
 }
 
 func (s *delegationRecoveryStore) RequestDelegation(context.Context, store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
@@ -33,6 +37,9 @@ func (s *delegationRecoveryStore) GetDelegationByRun(_ context.Context, projectI
 }
 
 func (s *delegationRecoveryStore) ListDelegationsByParentRun(_ context.Context, projectID, parentRunID string) ([]store.Delegation, error) {
+	if s.listDelegationsErr != nil {
+		return nil, s.listDelegationsErr
+	}
 	var result []store.Delegation
 	for _, delegation := range s.delegations {
 		if delegation.ProjectID == projectID && delegation.ParentRunID == parentRunID {
@@ -43,6 +50,9 @@ func (s *delegationRecoveryStore) ListDelegationsByParentRun(_ context.Context, 
 }
 
 func (s *delegationRecoveryStore) MarkDelegationWorkspaceHandoffReady(_ context.Context, projectID, parentRunID, delegationID, delegatedRunID string) error {
+	if s.markErr != nil {
+		return s.markErr
+	}
 	for _, mark := range s.marks {
 		if mark.projectID == projectID && mark.parentRunID == parentRunID && mark.delegationID == delegationID && mark.delegatedRunID == delegatedRunID {
 			return nil
@@ -53,6 +63,9 @@ func (s *delegationRecoveryStore) MarkDelegationWorkspaceHandoffReady(_ context.
 }
 
 func (s *delegationRecoveryStore) ListRunEvents(_ context.Context, projectID, runID string, afterSequence int64, limit int) ([]store.Event, error) {
+	if s.listEventsErr != nil {
+		return nil, s.listEventsErr
+	}
 	if limit <= 0 {
 		limit = len(s.events)
 	}
@@ -423,4 +436,90 @@ func TestDelegationRecoveryContextRejectsIdentitySubstitution(t *testing.T) {
 			t.Fatal("unsupported provenance schema was accepted")
 		}
 	})
+}
+
+
+func TestRecoverDelegationWorkspaceHandoffPropagatesDurableStoreFailures(t *testing.T) {
+	sentinel := errors.New("durable store unavailable")
+
+	t.Run("list delegations", func(t *testing.T) {
+		storeFake, run, _, _ := delegationRecoveryFixture(t)
+		storeFake.listDelegationsErr = sentinel
+		processor := &Processor{store: storeFake}
+		if err := processor.recoverDelegationWorkspaceHandoff(t.Context(), run, nil); !errors.Is(err, sentinel) {
+			t.Fatalf("error=%v want sentinel", err)
+		}
+	})
+
+	t.Run("list events", func(t *testing.T) {
+		storeFake, run, _, _ := delegationRecoveryFixture(t)
+		storeFake.listEventsErr = sentinel
+		processor := &Processor{store: storeFake}
+		if err := processor.recoverDelegationWorkspaceHandoff(t.Context(), run, nil); !errors.Is(err, sentinel) {
+			t.Fatalf("error=%v want sentinel", err)
+		}
+	})
+
+	t.Run("mark ready", func(t *testing.T) {
+		storeFake, run, delegation, _ := delegationRecoveryFixture(t)
+		storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "COMPLETED", RunnerID: "runner-1"}}
+		storeFake.events = []store.Event{
+			delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "tool.completed", evidence.ToolPayload{
+				Name: "delegate_task",
+				ToolCallID: delegation.RequestKey,
+				Input: map[string]any{"targetAgentId": delegation.TargetAgentID, "task": delegation.Task},
+			}),
+			delegationRecoveryEvent(t, run.ProjectID, run.ID, 2, "workspace.transfer.completed", map[string]any{"direction": "from_runner"}),
+		}
+		storeFake.markErr = sentinel
+		processor := &Processor{store: storeFake}
+		if err := processor.recoverDelegationWorkspaceHandoff(t.Context(), run, storeFake.sessions); !errors.Is(err, sentinel) {
+			t.Fatalf("error=%v want sentinel", err)
+		}
+	})
+
+	t.Run("no delegations", func(t *testing.T) {
+		storeFake, run, _, _ := delegationRecoveryFixture(t)
+		storeFake.delegations = nil
+		processor := &Processor{store: storeFake}
+		if err := processor.recoverDelegationWorkspaceHandoff(t.Context(), run, nil); err != nil {
+			t.Fatalf("error=%v want nil", err)
+		}
+	})
+}
+
+func TestDelegationRecoveryEvidenceIgnoresMalformedAndUnsequencedCompletion(t *testing.T) {
+	_, run, delegation, _ := delegationRecoveryFixture(t)
+	runID := run.ID
+	sequence := int64(2)
+	events := []store.Event{
+		{ProjectID: run.ProjectID, RunID: &runID, Type: "tool.completed", Payload: json.RawMessage(`{"name":`)},
+		{ProjectID: run.ProjectID, RunID: &runID, Type: "tool.completed", Sequence: &sequence, Payload: json.RawMessage(`{"name":`)},
+	}
+	completed, synchronized := delegationRecoveryEvidence(events, delegation)
+	if completed || synchronized {
+		t.Fatalf("malformed/unsequenced evidence recovered handoff: completed=%v synchronized=%v", completed, synchronized)
+	}
+}
+
+func TestDelegationRecoveryContextRejectsMissingProvenanceAndAgent(t *testing.T) {
+	storeFake, run, _, safe := delegationRecoveryFixture(t)
+	processor := &Processor{store: storeFake}
+
+	if _, err := processor.delegationRecoveryContext(t.Context(), run); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing provenance error=%v want ErrNotFound", err)
+	}
+
+	encoded, err := json.Marshal(executioncontext.Provenance{
+		SchemaVersion: executioncontext.ProvenanceSchemaVersion,
+		Context: safe,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeFake.provenance = encoded
+	run.AgentID = nil
+	if _, err := processor.delegationRecoveryContext(t.Context(), run); err == nil {
+		t.Fatal("Run without authoritative Agent was accepted for recovery")
+	}
 }
