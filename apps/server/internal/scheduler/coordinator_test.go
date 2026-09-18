@@ -334,6 +334,129 @@ func (f reconcilerFunc) Reconcile(ctx context.Context, admission *store.Schedule
 	return f(ctx, admission)
 }
 
+
+type admissionBarrierStore struct {
+	*fakeSchedulerStore
+	admitted         chan struct{}
+	releaseAdmission chan struct{}
+	cancelled        bool
+	cancelMu          sync.Mutex
+	runningAttempted chan struct{}
+	runningOnce      sync.Once
+}
+
+func (s *admissionBarrierStore) AdmitNextJob(ctx context.Context, owner string, leaseDuration, capacityBackoff time.Duration) (*store.SchedulerAdmission, error) {
+	claim, err := s.fakeSchedulerStore.AdmitNextJob(ctx, owner, leaseDuration, capacityBackoff)
+	if err != nil || claim == nil {
+		return claim, err
+	}
+	close(s.admitted)
+	select {
+	case <-s.releaseAdmission:
+		return claim, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (s *admissionBarrierStore) cancelClaim() {
+	s.cancelMu.Lock()
+	s.cancelled = true
+	s.cancelMu.Unlock()
+}
+
+func (s *admissionBarrierStore) TransitionAdmittedJob(ctx context.Context, input store.SchedulerTransition) (store.Run, error) {
+	if input.RunStatus == "RUNNING" {
+		s.runningOnce.Do(func() { close(s.runningAttempted) })
+		s.cancelMu.Lock()
+		cancelled := s.cancelled
+		s.cancelMu.Unlock()
+		if cancelled {
+			return store.Run{}, store.ErrConflict
+		}
+	}
+	return s.fakeSchedulerStore.TransitionAdmittedJob(ctx, input)
+}
+
+func TestCoordinatorClaimedResumeCancelledBeforeRegistrationNeverEntersExecution(t *testing.T) {
+	claim := fakeAdmission("resume-cancel-race")
+	claim.Job.Kind = "RESUME"
+	base := &fakeSchedulerStore{admissions: []*store.SchedulerAdmission{claim}}
+	barrier := &admissionBarrierStore{
+		fakeSchedulerStore: base,
+		admitted:           make(chan struct{}),
+		releaseAdmission:   make(chan struct{}),
+		runningAttempted:   make(chan struct{}),
+	}
+	engineEntered := make(chan struct{}, 1)
+	processor := processorFunc(func(ctx context.Context, got *store.SchedulerAdmission, lifecycle Lifecycle) (Result, error) {
+		if got.Job.Kind != "RESUME" {
+			t.Fatalf("job kind=%s want RESUME", got.Job.Kind)
+		}
+		if _, err := lifecycle.Running(ctx); err != nil {
+			return Result{}, err
+		}
+		engineEntered <- struct{}{}
+		return Result{RunStatus: "COMPLETED"}, nil
+	})
+	cfg := testConfig()
+	reported := make(chan error, 1)
+	cfg.ReportError = func(err error) {
+		select {
+		case reported <- err:
+		default:
+		}
+	}
+	coordinator, err := New(barrier, processor, testReconciler(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- coordinator.Run(ctx) }()
+
+	select {
+	case <-barrier.admitted:
+	case <-time.After(time.Second):
+		t.Fatal("scheduler did not reach post-admission barrier")
+	}
+	if coordinator.CancelRun(claim.Run.ProjectID, claim.Run.ID) {
+		t.Fatal("claim was process-locally active before registration barrier released")
+	}
+	barrier.cancelClaim()
+	close(barrier.releaseAdmission)
+
+	select {
+	case <-barrier.runningAttempted:
+	case <-time.After(time.Second):
+		t.Fatal("stale worker did not attempt fenced RUNNING transition")
+	}
+	select {
+	case <-engineEntered:
+		t.Fatal("cancelled claimed RESUME entered execution")
+	default:
+	}
+	select {
+	case err := <-reported:
+		if !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("reported error=%v want durable cancellation conflict", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("stale worker transition failure was not reported")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("scheduler did not stop")
+	}
+}
+
 type fakeSchedulerStore struct {
 	mu                   sync.Mutex
 	admissions           []*store.SchedulerAdmission
