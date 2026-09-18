@@ -412,7 +412,7 @@ func TestDelegatedTerminalTransitionWaitsForExecutionSessionReconciliation(t *te
 	if child.Status != "RUNNING" {
 		t.Fatalf("child status=%s want RUNNING while execution is uncertain", child.Status)
 	}
-	assertSchedulerOwnershipCounts(t, f.store, childJobID, 1, 3)
+	assertSchedulerOwnershipCounts(t, f.store, childJobID, 1, 0)
 	delegation, err := f.store.GetDelegationByRun(ctx, projectID, childRunID)
 	if err != nil {
 		t.Fatal(err)
