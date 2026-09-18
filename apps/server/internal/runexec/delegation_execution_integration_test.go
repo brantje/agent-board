@@ -40,9 +40,10 @@ const (
 	delegationExecutionTask         = "inspect scheduler ownership"
 	delegationParentBoundaryFile    = "parent-before-delegation.txt"
 	delegationChildBoundaryFile     = "delegate-change.txt"
-	delegationExecutionRoleParent   = "parent"
-	delegationExecutionRoleDelegate = "delegate"
-	delegationExecutionRoleDenied   = "denied"
+	delegationExecutionRoleParent       = "parent"
+	delegationExecutionRoleDelegate     = "delegate"
+	delegationExecutionRoleContinuation = "continuation"
+	delegationExecutionRoleDenied       = "denied"
 )
 
 type delegationExecutionRunnerClient struct {
@@ -54,10 +55,11 @@ type delegationExecutionRunnerClient struct {
 	servers       map[string]*httptest.Server
 	processes     map[string]*launcherDialTransport
 	roles         map[string]string
-	allowedStarts int
-	deniedStarts  int
-	onceReplies   int
-	rejectReplies int
+	allowedStarts      int
+	deniedStarts       int
+	continuationStarts int
+	onceReplies        int
+	rejectReplies      int
 }
 
 func newDelegationExecutionRunnerClient(targetAgentID string) *delegationExecutionRunnerClient {
@@ -78,29 +80,54 @@ func (c *delegationExecutionRunnerClient) Start(_ context.Context, sessionID str
 	delegationEnabled := strings.TrimSpace(request.Command[7]) != ""
 
 	c.mu.Lock()
+	payload := append([]byte(nil), c.payloads[sessionID]...)
+	c.mu.Unlock()
+
 	role := delegationExecutionRoleDenied
 	emitDelegation := false
-	if delegationEnabled {
+	continuation := false
+	if !delegationEnabled && len(payload) != 0 {
+		hasDelegatedState, err := delegationExecutionBundleHasFile(payload, delegationChildBoundaryFile)
+		if err != nil {
+			return nil, fmt.Errorf("inspect ordinary continuation inbound Workspace: %w", err)
+		}
+		continuation = hasDelegatedState
+	}
+
+	c.mu.Lock()
+	switch {
+	case delegationEnabled:
 		role = delegationExecutionRoleParent
 		emitDelegation = true
 		c.allowedStarts++
-	} else {
+	case continuation:
+		role = delegationExecutionRoleContinuation
+		c.continuationStarts++
+	default:
 		if c.deniedStarts == 0 {
 			role = delegationExecutionRoleDelegate
 		}
 		c.deniedStarts++
 	}
-	payload := append([]byte(nil), c.payloads[sessionID]...)
 	c.roles[sessionID] = role
 	c.mu.Unlock()
 
-	if role == delegationExecutionRoleDelegate {
+	switch role {
+	case delegationExecutionRoleDelegate:
 		hasParentState, err := delegationExecutionBundleHasFile(payload, delegationParentBoundaryFile)
 		if err != nil {
 			return nil, fmt.Errorf("inspect delegated inbound Workspace: %w", err)
 		}
 		if !hasParentState {
 			return nil, fmt.Errorf("delegated execution did not inherit parent Workspace state")
+		}
+	case delegationExecutionRoleContinuation:
+		hasDelegatedState, err := delegationExecutionBundleHasFile(payload, delegationChildBoundaryFile)
+		if err != nil {
+			return nil, fmt.Errorf("inspect ordinary continuation inbound Workspace: %w", err)
+		}
+		if !hasDelegatedState {
+			return nil, fmt.Errorf("ordinary continuation did not receive delegated Workspace state")
 		}
 	}
 
@@ -221,10 +248,10 @@ func (c *delegationExecutionRunnerClient) recordPermissionReply(reply string) {
 	}
 }
 
-func (c *delegationExecutionRunnerClient) stats() (int, int, int, int) {
+func (c *delegationExecutionRunnerClient) stats() (int, int, int, int, int) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.allowedStarts, c.deniedStarts, c.onceReplies, c.rejectReplies
+	return c.allowedStarts, c.deniedStarts, c.continuationStarts, c.onceReplies, c.rejectReplies
 }
 
 type delegationExecutionNativeOpenCode struct {
@@ -594,9 +621,9 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	if parentTerminal.WorkspaceID != childTerminal.WorkspaceID || parentTerminal.CurrentBranch == nil || childTerminal.CurrentBranch == nil || *parentTerminal.CurrentBranch != *childTerminal.CurrentBranch {
 		t.Fatalf("delegated Workspace continuity parent=%+v child=%+v", parentTerminal, childTerminal)
 	}
-	allowedStarts, deniedStarts, onceReplies, rejectReplies := runnerClient.stats()
-	if allowedStarts != 1 || deniedStarts != 1 || onceReplies < 2 || rejectReplies != 1 {
-		t.Fatalf("unexpected OpenCode tool-path stats allowed=%d denied=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, onceReplies, rejectReplies)
+	allowedStarts, deniedStarts, continuationStarts, onceReplies, rejectReplies := runnerClient.stats()
+	if allowedStarts != 1 || deniedStarts != 1 || continuationStarts != 0 || onceReplies < 2 || rejectReplies != 1 {
+		t.Fatalf("unexpected OpenCode tool-path stats allowed=%d denied=%d continuation=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, continuationStarts, onceReplies, rejectReplies)
 	}
 
 	var runs []httpapi.RunDTO
@@ -636,6 +663,18 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 		t.Fatalf("delegation execution changed Issue authority: before=%+v after=%+v", before, afterSchedule)
 	}
 
+	assertDelegatedWorkspaceFeedsLaterNormalRun(
+		t,
+		ctx,
+		router,
+		database,
+		project.ID,
+		issue.ID,
+		parentRun.WorkspaceID,
+		model.ID,
+		runnerClient,
+	)
+
 	parent.AllowDelegation = false
 	delegationExecutionJSON(t, router, http.MethodPut, "/api/projects/"+project.ID+"/agents/"+parent.ID, fmt.Sprintf(`{"name":%q,"roleInstructions":%q,"engine":%q,"modelProfileId":"%s","engineSettings":{},"concurrencyLimit":%d,"allowDelegation":false,"state":%q}`, parent.Name, parent.RoleInstructions, parent.Engine, parent.ModelProfileID, parent.ConcurrencyLimit, parent.State), http.StatusOK, &parent)
 	if parent.AllowDelegation {
@@ -653,9 +692,9 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	if deniedTerminal.Status != "READY_FOR_REVIEW" {
 		t.Fatalf("disabled-policy parent status=%s failure=%v want READY_FOR_REVIEW", deniedTerminal.Status, deniedTerminal.FailureReason)
 	}
-	allowedStarts, deniedStarts, onceReplies, rejectReplies = runnerClient.stats()
-	if allowedStarts != 1 || deniedStarts != 2 || onceReplies < 2 || rejectReplies != 2 {
-		t.Fatalf("disabled execution did not reject forged delegate_task path: allowed=%d denied=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, onceReplies, rejectReplies)
+	allowedStarts, deniedStarts, continuationStarts, onceReplies, rejectReplies = runnerClient.stats()
+	if allowedStarts != 1 || deniedStarts != 2 || continuationStarts != 1 || onceReplies < 2 || rejectReplies != 3 {
+		t.Fatalf("disabled execution did not reject forged delegate_task path: allowed=%d denied=%d continuation=%d onceReplies=%d rejectReplies=%d", allowedStarts, deniedStarts, continuationStarts, onceReplies, rejectReplies)
 	}
 	var denied []httpapi.DelegationDTO
 	delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+project.ID+"/runs/"+deniedExecution.ActiveRun.ID+"/delegations", "", http.StatusOK, &denied)
