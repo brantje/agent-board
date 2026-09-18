@@ -319,17 +319,6 @@ func (p *Processor) runEngineWithContinuation(ctx context.Context, run store.Run
 			return scheduler.Result{}, uncertaintyErr
 		}
 	}
-	if engineErr == nil || handoffRequested {
-		boundary := "completed"
-		if handoffRequested {
-			boundary = "delegation_handoff"
-		}
-		if err := p.record(ctx, safe, "engine.execution.completed", map[string]any{"boundary": boundary}, &instance.ID, nil); err != nil {
-			cleanupErr := p.cleanupRuntime(ctx, safe, instance)
-			return p.failExecution(ctx, safe, errors.Join(err, cleanupErr), &instance.ID)
-		}
-	}
-
 	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	_, finalizeErr := p.finalizeServerWorkspace(finalizeCtx, safe)
 	if finalizeErr == nil {
@@ -1361,16 +1350,6 @@ func (p *Processor) runEngineOnRunnerWithContinuation(ctx context.Context, run s
 			return scheduler.Result{}, uncertaintyErr
 		}
 	}
-	if engineErr == nil || handoffRequested {
-		boundary := "completed"
-		if handoffRequested {
-			boundary = "delegation_handoff"
-		}
-		if err := p.record(ctx, safe, "engine.execution.completed", map[string]any{"boundary": boundary}, nil, nil); err != nil {
-			return p.failExecution(ctx, safe, err, nil)
-		}
-	}
-
 	syncCtx, cancelSync := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	syncErr := p.syncWorkspaceFromRunner(syncCtx, safe, runnerID, attachSessionID)
 	if syncErr == nil {

@@ -8,7 +8,8 @@ import (
 )
 
 var engineActivityTypes = map[string]struct{}{
-	"agent.message":   {},
+	"engine.execution.completed": {},
+	"agent.message":               {},
 	"tool.started":    {},
 	"tool.completed":  {},
 	"tool.failed":     {},

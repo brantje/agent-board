@@ -111,8 +111,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	}()
 
 	stopped := false
+	preserveServiceForReconciliation := false
 	defer func() {
-		if !stopped {
+		if !stopped && !preserveServiceForReconciliation {
 			stopped = true
 			_ = stopService(ctx, process)
 		}
@@ -153,6 +154,10 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	completeDelegationHandoff := func(err error) error {
 		if !errors.Is(err, engine.ErrDelegationHandoff) {
 			return err
+		}
+		if boundaryErr := recordExecutionBoundary(ctx, state.activity, "delegation_handoff"); boundaryErr != nil {
+			preserveServiceForReconciliation = true
+			return fmt.Errorf("opencode engine: persist delegation handoff execution boundary: %w", boundaryErr)
 		}
 		_ = stream.Close()
 		stopped = true
@@ -213,6 +218,10 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		}
 		if failed {
 			return engine.Result{}, fmt.Errorf("opencode engine: native session error: %s", message)
+		}
+		if boundaryErr := recordExecutionBoundary(ctx, state.activity, "completed"); boundaryErr != nil {
+			preserveServiceForReconciliation = true
+			return engine.Result{}, fmt.Errorf("opencode engine: persist completed execution boundary: %w", boundaryErr)
 		}
 		return finish()
 	}
@@ -361,6 +370,16 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	}
 }
 
+
+func recordExecutionBoundary(ctx context.Context, activity engine.ActivitySink, boundary string) error {
+	if activity == nil {
+		return nil
+	}
+	return activity.RecordActivity(ctx, engine.ActivityEvent{
+		Type:    "engine.execution.completed",
+		Payload: map[string]any{"boundary": boundary},
+	})
+}
 
 func stopServiceForDelegationHandoff(ctx context.Context, process engine.Process) error {
 	if err := stopService(ctx, process); err != nil {
