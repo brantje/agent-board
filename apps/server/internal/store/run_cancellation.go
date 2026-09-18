@@ -10,6 +10,7 @@ type InactiveRunCancellationStore interface {
 }
 
 type RunCancellationResult struct {
-	Run   Run
-	Event Event
+	Run    Run
+	Event  Event
+	Events []Event
 }

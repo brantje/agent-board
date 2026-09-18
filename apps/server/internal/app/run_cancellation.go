@@ -41,9 +41,11 @@ func (s *Services) CancelRun(ctx context.Context, projectID, runID string) error
 			return cancelErr
 		}
 		cancelled = true
-		if s.Events != nil {
-			s.Events.PublishPersisted(ctx, result.Event)
+		events := result.Events
+		if len(events) == 0 && result.Event.ID != "" {
+			events = []store.Event{result.Event}
 		}
+		publishPersistedEvents(ctx, s.Events, events)
 	}
 	if cancelled {
 		if err := s.cancelDelegatedChildren(ctx, projectID, runID); err != nil {
