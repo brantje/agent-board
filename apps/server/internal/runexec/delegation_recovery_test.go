@@ -622,6 +622,21 @@ func TestReconcileRecoversCancelledOpenCodeServiceAsSuccessfulDelegatedExecution
 	}
 }
 
+func TestReconcileRecoversCancelledOpenCodeServiceWithDurableFailureAsFailed(t *testing.T) {
+	storeFake, run, delegation, _ := delegatedChildRecoveryFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "CANCELLED", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "engine.execution.completed", map[string]any{"boundary": "completed"}),
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 2, "run.failed", map[string]any{"reason": "Workspace synchronization failed"}),
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 3, "delegation.workspace_accepted", map[string]any{"delegationId": delegation.ID}),
+	}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil || outcome != store.SchedulerReconciliationFailed || reason == nil || *reason != "Workspace synchronization failed" {
+		t.Fatalf("outcome=%s reason=%v err=%v want FAILED with durable reason", outcome, reason, err)
+	}
+}
+
 func TestReconcileLeavesAmbiguousCancelledDelegatedExecutionUnknown(t *testing.T) {
 	storeFake, run, delegation, _ := delegatedChildRecoveryFixture(t)
 	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "CANCELLED", RunnerID: "runner-1"}}
