@@ -266,7 +266,7 @@ type delegationExecutionNativeOpenCode struct {
 	mu             sync.Mutex
 	prompted       bool
 	settled        bool
-	completionSent bool
+	terminalSent   bool
 	activeUntil    time.Time
 }
 
@@ -349,16 +349,16 @@ func (h *delegationExecutionNativeOpenCode) handler() http.Handler {
 			return
 		}
 		h.client.recordPermissionReply(payload.Reply)
-		emitCompletion := false
+		emitTerminal := false
 		h.mu.Lock()
-		if payload.Reply == "once" && h.emitDelegation && !h.completionSent {
-			h.completionSent = true
-			emitCompletion = true
+		if payload.Reply == "once" && h.emitDelegation && !h.terminalSent {
+			h.terminalSent = true
+			emitTerminal = true
 		}
 		h.settled = true
 		h.mu.Unlock()
-		if emitCompletion {
-			h.events <- h.completedDelegationEvent()
+		if emitTerminal {
+			h.events <- h.terminalDelegationEvent()
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
@@ -393,9 +393,9 @@ func (h *delegationExecutionNativeOpenCode) permissionEvent() string {
 	return string(event)
 }
 
-func (h *delegationExecutionNativeOpenCode) completedDelegationEvent() string {
+func (h *delegationExecutionNativeOpenCode) terminalDelegationEvent() string {
 	event, _ := json.Marshal(map[string]any{
-		"id":   "evt_delegation_e2e_completed",
+		"id":   "evt_delegation_e2e_error",
 		"type": "message.part.updated",
 		"properties": map[string]any{
 			"sessionID": delegationExecutionSessionID,
@@ -406,16 +406,47 @@ func (h *delegationExecutionNativeOpenCode) completedDelegationEvent() string {
 				"type":      "tool",
 				"tool":      "delegate_task",
 				"state": map[string]any{
-					"status": "completed",
+					"status": "error",
 					"input": map[string]any{
 						"targetAgentId": h.targetAgentID,
 						"task":          delegationExecutionTask,
 					},
+					"error": "native delegate_task failed after canonical acceptance",
 				},
 			},
 		},
 	})
 	return string(event)
+}
+
+func assertDelegationExecutionAcceptedToolErrorEvidence(t *testing.T, ctx context.Context, database *postgres.Store, projectID, parentRunID string) {
+	t.Helper()
+	events, err := database.ListRunEvents(ctx, projectID, parentRunID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var failed, completed int
+	for _, event := range events {
+		if event.Type != "tool.failed" && event.Type != "tool.completed" {
+			continue
+		}
+		var payload evidence.ToolPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode delegation tool evidence: %v", err)
+		}
+		if payload.Name != "delegate_task" || payload.ToolCallID != delegationExecutionCallID {
+			continue
+		}
+		switch event.Type {
+		case "tool.failed":
+			failed++
+		case "tool.completed":
+			completed++
+		}
+	}
+	if failed != 1 || completed != 0 {
+		t.Fatalf("accepted native delegation terminal evidence failed=%d completed=%d want 1/0", failed, completed)
+	}
 }
 
 func delegationExecutionNativeJSON(w http.ResponseWriter, value any) {
@@ -608,6 +639,7 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	if parentTerminal.Status != "PAUSED" {
 		t.Fatalf("parent Run status=%s failure=%v want PAUSED", parentTerminal.Status, parentTerminal.FailureReason)
 	}
+	assertDelegationExecutionAcceptedToolErrorEvidence(t, ctx, database, project.ID, parentRun.ID)
 
 	var listed []httpapi.DelegationDTO
 	delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+project.ID+"/runs/"+parentRun.ID+"/delegations", "", http.StatusOK, &listed)

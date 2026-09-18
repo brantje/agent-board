@@ -74,7 +74,7 @@ Reusable Project-scoped Squads are already implemented independently of delegati
 - leader changes reconcile eligible Squad-owned work through the existing Run/scheduler/Workspace lifecycle
 - Project configuration and Issue/Run UX distinguish Squad ownership, mixed collaboration membership and the executing leader Agent
 
-This Squad foundation does not implicitly delegate or fan work out to members. Canonical Agent delegation and serialized Workspace handoff are implemented independently; Squad-aware target selection, human handoff and notifications remain later work.
+Squad ownership does not implicitly delegate or fan work out to members. Canonical Agent delegation, serialized Workspace handoff, and trusted Squad-aware target/member context are implemented on the same normal execution path. Human handoff and notifications remain later work.
 
 ## Phase 2 — delivery automation and Agent collaboration
 
@@ -84,7 +84,7 @@ This Squad foundation does not implicitly delegate or fan work out to members. C
 - canonical Agent delegation with per-Agent `Allow delegation` [implemented]
 - serialized same-Workspace/same-branch delegation handoff [implemented]
 - delegated outcome/result lifecycle and automatic parent continuation [implemented]
-- Squad-aware delegation/member collaboration built on the existing Squad ownership model [later]
+- Squad-aware delegation target/member context built on the existing Squad ownership model [implemented]
 - broader Agent messaging/wake semantics where useful
 
 The default delivery policy remains human-gated. Creating/updating a PR/MR does not imply auto-merge or deployment; those require separate explicit policy.

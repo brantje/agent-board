@@ -34,7 +34,7 @@ Changing the leader does not rewrite Issue ownership and does not create a Squad
 
 The web UI reads ownership and execution context from shared backend read models. Squad updates publish durable Project events so open Issue views re-read backend truth after leader changes.
 
-Current Squad behavior does **not** automatically fan work out to members. Canonical Agent delegation is explicit: the authoritative executing Agent chooses a target Agent for a bounded task. Squad-aware member targeting and human handoff remain separate future behavior.
+Squad ownership does **not** automatically fan work out to members. Canonical Agent delegation remains explicit: the authoritative executing leader chooses a target Agent for a bounded task through the same command used by directly Agent-owned Issues. When delegation is effectively available, the trusted Engine request includes the current usable Agent target IDs/names plus the owning Squad's leader and Agent-member names/optional descriptive roles. Human User members remain visible collaboration context but are not `delegate_task` targets. Squad membership is not authorization: the canonical delegation command still revalidates the chosen Agent and no member Run exists until the leader explicitly delegates. Human handoff remains separate future behavior.
 
 ## Canonical delegation and phase-2 Workspace handoff
 
@@ -141,7 +141,7 @@ Parent cancellation propagates to pending/running delegated work through the can
 
 Restart reconciliation uses durable Run/scheduler/Execution Session evidence and the same terminalization transaction. A delegated terminal outcome is recovered only when Workspace hand-back is trustworthy; disconnected or ambiguous Runner/Workspace authority remains `UNKNOWN` and fail-closed rather than releasing another writer. This preserves the single authoritative Workspace writer and prevents orphan leases/reservations after terminal paths.
 
-Once Squad-aware delegation is implemented, a Squad leader may use the same canonical request command with suitable Agent members. Human User members remain collaboration identities unless a separate human-handoff/notification feature explicitly defines behavior for them.
+A Squad leader uses the same canonical request command as any other authoritative Agent. Server-owned prompt context gives the leader real usable target identities and identifies configured Squad Agent members/roles without restricting delegation to the roster or granting permission through membership. Human User members remain collaboration identities unless a separate human-handoff/notification feature explicitly defines behavior for them.
 
 ## Agent-created follow-up work
 
@@ -191,7 +191,7 @@ Additional recursion/delegation-depth and rate/budget policies may be added when
 
 ## Ordering
 
-The reusable mixed-membership Squad/ownership foundation, canonical delegation request/lineage layer, serialized Workspace handoff, and delegated outcome/parent-continuation lifecycle are implemented independently of later Squad-aware collaboration work.
+The reusable mixed-membership Squad/ownership foundation, canonical delegation request/lineage layer, serialized Workspace handoff, delegated outcome/parent-continuation lifecycle, and Squad-aware trusted target context are implemented on the same execution model.
 
 ```text
 complete v0.1 coding flow
@@ -199,7 +199,7 @@ complete v0.1 coding flow
  -> canonical delegation request/lineage [implemented]
  -> serialized Workspace handoff [implemented]
  -> delegated outcomes + durable parent continuation/recovery [implemented]
- -> Squad-aware delegation/member collaboration [later]
+ -> Squad-aware delegation/member context [implemented]
  -> broader messaging/wake policy if needed
  -> worker registry/pools
  -> warm/spot optimizations

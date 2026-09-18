@@ -112,6 +112,8 @@ function provenanceText() {
             <ActivityTimeline :items="activityItems" />
           </UCard>
 
+          <RunDelegationCard :project-id="projectId" :run-id="runId" />
+
           <QuestionPanel :project-id="projectId" :run-id="runId" :can-mutate="canMutate" />
 
           <details class="border border-default bg-default/40">

@@ -78,3 +78,20 @@ func inactiveRunExecutionOccupiedTx(ctx context.Context, tx pgx.Tx, projectID, r
 	}
 	return claimed, nil
 }
+
+func unfinishedParentDelegationTx(ctx context.Context, tx pgx.Tx, parent store.Run) (bool, error) {
+	var unfinished bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM delegations
+			WHERE project_id=$1
+			  AND parent_run_id=$2
+			  AND issue_id=$3
+			  AND outcome IS NULL
+		)
+	`, parent.ProjectID, parent.ID, parent.IssueID).Scan(&unfinished); err != nil {
+		return false, err
+	}
+	return unfinished, nil
+}

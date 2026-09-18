@@ -37,6 +37,13 @@ func (p *Processor) engineRequestWithDelegationContinuation(ctx context.Context,
 		}
 		if safe.Agent.AllowDelegation {
 			request.Delegation = newDelegationRequester(p.store, p.events, safe)
+			if request.Delegation != nil {
+				var err error
+				request.DelegationContext, err = resolveDelegationToolContext(ctx, p.store, safe)
+				if err != nil {
+					return engine.Request{}, err
+				}
+			}
 		}
 	}
 	if !store.SupportsQuestionStore(p.store) {

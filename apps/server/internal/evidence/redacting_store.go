@@ -224,6 +224,14 @@ func (s *RedactingStore) GetRunner(ctx context.Context, id string) (store.Runner
 	return base.GetRunner(ctx, id)
 }
 
+func (s *RedactingStore) ListDelegationTargets(ctx context.Context, projectID, parentAgentID string) ([]store.DelegationTarget, error) {
+	base, ok := s.ControlPlaneStore.(store.DelegationTargetStore)
+	if !ok {
+		return nil, fmt.Errorf("redacting store base does not support delegation targets")
+	}
+	return base.ListDelegationTargets(ctx, projectID, parentAgentID)
+}
+
 func (s *RedactingStore) RequestDelegation(ctx context.Context, input store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
 	base, ok := s.ControlPlaneStore.(store.DelegationStore)
 	if !ok {
@@ -274,4 +282,5 @@ var _ store.IssueMutationActorStore = (*RedactingStore)(nil)
 var _ store.IssuePlacementStore = (*RedactingStore)(nil)
 var _ store.WorkspaceRevisionStore = (*RedactingStore)(nil)
 var _ store.DelegationStore = (*RedactingStore)(nil)
+var _ store.DelegationTargetStore = (*RedactingStore)(nil)
 var _ store.DelegationContinuationStore = (*RedactingStore)(nil)

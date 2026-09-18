@@ -56,6 +56,103 @@ func TestDelegationHandoffWaitsForCompletedToolPart(t *testing.T) {
 	}
 }
 
+func TestDelegationHandoffAcceptedNativeErrorConvergesWithoutSecondRequest(t *testing.T) {
+	var replies []permissionReply
+	native := delegationPermissionClient(t, nil, &replies)
+	tracker := newDelegationToolTracker()
+	requester := &recordingDelegationRequester{}
+	permission := delegationPermissionEvent(t, delegationPermissionRequest(t, "per_1", "ses_1", "call_1", "agent-2", "inspect scheduler ownership"))
+	if err := tracker.Handle(t.Context(), permission, native, "ses_1", requester); err != nil {
+		t.Fatal(err)
+	}
+	if len(requester.requests) != 1 {
+		t.Fatalf("canonical requests after permission=%d want 1", len(requester.requests))
+	}
+
+	errored := terminalDelegationToolEvent(t, "ses_1", "part_1", "call_1", "agent-2", "inspect scheduler ownership", "error")
+	if err := tracker.Handle(t.Context(), errored, native, "ses_1", requester); err != nil {
+		t.Fatal(err)
+	}
+	if len(requester.requests) != 1 {
+		t.Fatalf("accepted native error replayed canonical request: %d", len(requester.requests))
+	}
+	if tracker.handoff == nil || tracker.handoff.ID != "delegation-1" || tracker.handoff.RunID != "run-2" {
+		t.Fatalf("accepted native error did not arm existing handoff: %+v", tracker.handoff)
+	}
+}
+
+func TestDelegationHandoffRecoveryUsesDurableAcceptedNativeError(t *testing.T) {
+	part := map[string]any{
+		"id": "part_1", "callID": "call_1", "sessionID": "ses_1", "type": "tool", "tool": delegationToolName,
+		"state": map[string]any{
+			"status": "error",
+			"input":  map[string]any{"targetAgentId": "agent-2", "task": "recover handoff"},
+		},
+	}
+	native := delegationRecoveryClient(t, []any{part})
+	tracker := newDelegationToolTracker()
+	request := engine.DelegationRequest{TargetAgentID: "agent-2", Task: "recover handoff", RequestKey: "call_1"}
+	requester := &recordingDelegationRequester{accepted: map[string]acceptedDelegation{
+		"call_1": {request: request, delegation: engine.Delegation{ID: "delegation-1", RunID: "run-2"}},
+	}}
+
+	err := tracker.Reconcile(t.Context(), native, "ses_1", requester)
+	if !errors.Is(err, engine.ErrDelegationHandoff) {
+		t.Fatalf("recovery err=%v want handoff", err)
+	}
+	if len(requester.requests) != 0 {
+		t.Fatalf("errored history invoked Delegate directly: %+v", requester.requests)
+	}
+	if len(requester.resolved) != 1 || !sameDelegationRequest(requester.resolved[0], request) {
+		t.Fatalf("durable acceptance resolutions=%+v", requester.resolved)
+	}
+}
+
+func TestDelegationHandoffRecoveryKeepsRejectedNativeErrorRejected(t *testing.T) {
+	part := map[string]any{
+		"id": "part_1", "callID": "call_1", "sessionID": "ses_1", "type": "tool", "tool": delegationToolName,
+		"state": map[string]any{
+			"status": "error",
+			"input":  map[string]any{"targetAgentId": "agent-2", "task": "rejected handoff"},
+		},
+	}
+	native := delegationRecoveryClient(t, []any{part})
+	tracker := newDelegationToolTracker()
+	requester := &recordingDelegationRequester{}
+
+	if err := tracker.Reconcile(t.Context(), native, "ses_1", requester); err != nil {
+		t.Fatalf("rejected error history should remain non-authoritative: %v", err)
+	}
+	if len(requester.requests) != 0 || len(requester.resolved) != 1 || tracker.handoff != nil {
+		t.Fatalf("rejected history created authority: requests=%+v resolved=%+v handoff=%+v", requester.requests, requester.resolved, tracker.handoff)
+	}
+}
+
+func TestDelegationHandoffRecoveryFailsClosedOnAcceptedNativeErrorIdentityMismatch(t *testing.T) {
+	part := map[string]any{
+		"id": "part_1", "callID": "call_1", "sessionID": "ses_1", "type": "tool", "tool": delegationToolName,
+		"state": map[string]any{
+			"status": "error",
+			"input":  map[string]any{"targetAgentId": "agent-2", "task": "native task"},
+		},
+	}
+	native := delegationRecoveryClient(t, []any{part})
+	tracker := newDelegationToolTracker()
+	requester := &recordingDelegationRequester{accepted: map[string]acceptedDelegation{
+		"call_1": {
+			request: engine.DelegationRequest{TargetAgentID: "agent-2", Task: "different task", RequestKey: "call_1"},
+			delegation: engine.Delegation{ID: "delegation-1", RunID: "run-2"},
+		},
+	}}
+
+	if err := tracker.Reconcile(t.Context(), native, "ses_1", requester); err == nil {
+		t.Fatal("mismatched accepted native error was not rejected")
+	}
+	if len(requester.requests) != 0 || tracker.handoff != nil {
+		t.Fatalf("mismatched error created handoff: requests=%+v handoff=%+v", requester.requests, tracker.handoff)
+	}
+}
+
 func TestDelegationHandoffRecoveryUsesDurableCompletedToolPart(t *testing.T) {
 	part := map[string]any{
 		"id": "part_1", "callID": "call_1", "sessionID": "ses_1", "type": "tool", "tool": delegationToolName,
@@ -179,12 +276,17 @@ func TestDelegationHandoffRejectsChangedCompletedInput(t *testing.T) {
 
 func completedDelegationToolEvent(t *testing.T, sessionID, partID, callID, targetAgentID, task string) client.Event {
 	t.Helper()
+	return terminalDelegationToolEvent(t, sessionID, partID, callID, targetAgentID, task, "completed")
+}
+
+func terminalDelegationToolEvent(t *testing.T, sessionID, partID, callID, targetAgentID, task, status string) client.Event {
+	t.Helper()
 	return client.Event{Type: "message.part.updated", Properties: mustJSON(t, map[string]any{
 		"sessionID": sessionID,
 		"part": map[string]any{
 			"id": partID, "callID": callID, "sessionID": sessionID, "type": "tool", "tool": delegationToolName,
 			"state": map[string]any{
-				"status": "completed",
+				"status": status,
 				"input":  map[string]any{"targetAgentId": targetAgentID, "task": task},
 			},
 		},

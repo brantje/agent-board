@@ -164,6 +164,33 @@ func TestReconcileRecoversSynchronizedDelegationWithoutEngineReplay(t *testing.T
 	}
 }
 
+func TestReconcileRecoversAcceptedErroredDelegationWithoutEngineReplay(t *testing.T) {
+	storeFake, run, delegation, _ := delegationRecoveryFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "COMPLETED", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "tool.failed", evidence.ToolPayload{
+			Name:       "delegate_task",
+			ToolCallID: delegation.RequestKey,
+			Input:      map[string]any{"targetAgentId": delegation.TargetAgentID, "task": delegation.Task},
+			Reason:     "native delegate_task failed after canonical acceptance",
+		}),
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 2, "engine.execution.completed", map[string]any{"boundary": "delegation_handoff"}),
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 3, "workspace.transfer.completed", map[string]any{"direction": "from_runner"}),
+	}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+
+	outcome, _, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != store.SchedulerReconciliationUnknown {
+		t.Fatalf("outcome=%s want UNKNOWN", outcome)
+	}
+	if len(storeFake.marks) != 1 {
+		t.Fatalf("accepted errored delegation was stranded: handoff marks=%+v", storeFake.marks)
+	}
+}
+
 func TestReconcileRecoversDelegationFromRetainedRunnerWorkspace(t *testing.T) {
 	repository := initProcessTestRepository(t)
 	storeFake, run, delegation, safe := delegationRecoveryFixture(t)
@@ -317,6 +344,22 @@ func TestDelegationRecoveryEvidenceRequiresCanonicalIdentityAndOrdering(t *testi
 		gotCompleted, synchronized := delegationRecoveryEvidence(events, delegation)
 		if !gotCompleted || synchronized {
 			t.Fatalf("completed=%v synchronized=%v want true,false", gotCompleted, synchronized)
+		}
+	})
+
+	t.Run("matching failed tool is terminal evidence only for canonical delegation", func(t *testing.T) {
+		failedEvent := delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "tool.failed", completed)
+		gotTerminal, synchronized := delegationRecoveryEvidence([]store.Event{failedEvent}, delegation)
+		if !gotTerminal || synchronized {
+			t.Fatalf("terminal=%v synchronized=%v want true,false", gotTerminal, synchronized)
+		}
+
+		mismatched := completed
+		mismatched.ToolCallID = "rejected-call"
+		failedEvent = delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "tool.failed", mismatched)
+		gotTerminal, synchronized = delegationRecoveryEvidence([]store.Event{failedEvent}, delegation)
+		if gotTerminal || synchronized {
+			t.Fatalf("non-canonical failed tool recovered handoff: terminal=%v synchronized=%v", gotTerminal, synchronized)
 		}
 	})
 

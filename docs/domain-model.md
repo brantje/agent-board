@@ -274,7 +274,7 @@ See `authorization.md` for the complete fixed human authentication and authoriza
 
 Planning, Automations, Agent-created Issues, delegation, Squads and worker topology reuse the same Issue/Run/scheduler/Workspace/Git-branch model rather than creating parallel execution systems.
 
-Delegation is a subtask within the current Issue; Agent-created follow-up work creates a real new Issue. Squads provide reusable mixed Agent/User collaboration context around one authoritative leader Agent; Squad membership does not itself delegate, execute or grant access. Human Groups remain a separate deployment-global access concept.
+Delegation is a subtask within the current Issue; Agent-created follow-up work creates a real new Issue. Squads provide reusable mixed Agent/User collaboration context around one authoritative leader Agent; Squad membership does not itself delegate, execute or grant access. For a Squad-owned Issue, the leader remains the authoritative executing Agent and receives trusted server-owned delegation context containing currently usable Agent target IDs/names plus Squad Agent member names/optional roles. Choosing a member still invokes the same canonical delegation command and preserves the Squad as Issue owner. Human Squad members are collaboration identities rather than execution targets. Human Groups remain a separate deployment-global access concept.
 
 The fixed local Users/Groups/Project authorization foundation is documented in `authorization.md`. External identity providers, custom permissions and broader administration are later extensions; they must not silently change the fixed roles or shared authorization boundary.
 

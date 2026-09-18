@@ -49,6 +49,12 @@ func TestDelegationOpenAPIPathsAndSchemas(t *testing.T) {
 		"Delegation:",
 		"allowDelegation:",
 		"default: false",
+		"parentRunStatus:",
+		"delegatedRunStatus:",
+		"resultSummary:",
+		"workspaceChangesAccepted:",
+		"workspaceRevision:",
+		"continuationJobId:",
 	} {
 		if !strings.Contains(schemaDoc, fragment) {
 			t.Fatalf("delegation schema contract missing %q", fragment)

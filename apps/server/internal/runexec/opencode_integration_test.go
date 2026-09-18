@@ -415,7 +415,13 @@ func (f *openCodeIntegrationFixture) startScheduler(t *testing.T) {
 	})
 }
 
-func (f *openCodeIntegrationFixture) createRun(t *testing.T, spec openCodeRunSpec) (store.Project, store.Run) {
+type openCodeRunSetup struct {
+	Project store.Project
+	Agent   store.Agent
+	Issue   store.Issue
+}
+
+func (f *openCodeIntegrationFixture) createRunSetup(t *testing.T, spec openCodeRunSpec) openCodeRunSetup {
 	t.Helper()
 	apiKey := spec.apiKey
 	if apiKey == "" {
@@ -465,16 +471,22 @@ func (f *openCodeIntegrationFixture) createRun(t *testing.T, spec openCodeRunSpe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.services.ControlPlane.SetIssueAssignee(f.ctx, project.ID, issue.ID, &store.Assignee{Type: "AGENT", ID: agent.ID}, store.EmptyObject); err != nil {
+	return openCodeRunSetup{Project: project, Agent: agent, Issue: issue}
+}
+
+func (f *openCodeIntegrationFixture) createRun(t *testing.T, spec openCodeRunSpec) (store.Project, store.Run) {
+	t.Helper()
+	setup := f.createRunSetup(t, spec)
+	if _, err := f.services.ControlPlane.SetIssueAssignee(f.ctx, setup.Project.ID, setup.Issue.ID, &store.Assignee{Type: "AGENT", ID: setup.Agent.ID}, store.EmptyObject); err != nil {
 		t.Fatal(err)
 	}
-	runs, err := f.services.ControlPlane.ListRuns(f.ctx, project.ID)
+	runs, err := f.services.ControlPlane.ListRuns(f.ctx, setup.Project.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, run := range runs {
-		if run.IssueID == issue.ID && run.AgentID != nil && *run.AgentID == agent.ID {
-			return project, run
+		if run.IssueID == setup.Issue.ID && run.AgentID != nil && *run.AgentID == setup.Agent.ID {
+			return setup.Project, run
 		}
 	}
 	t.Fatal("automatic assignment did not create a Run")

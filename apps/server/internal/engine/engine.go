@@ -136,6 +136,30 @@ type Delegation struct {
 	RunID string
 }
 
+type DelegationTargetContext struct {
+	ID   string
+	Name string
+}
+
+type SquadDelegationMemberContext struct {
+	ID   string
+	Name string
+	Role *string
+}
+
+type SquadDelegationContext struct {
+	ID              string
+	Name            string
+	LeaderAgentID   string
+	LeaderAgentName string
+	Members         []SquadDelegationMemberContext
+}
+
+type DelegationToolContext struct {
+	Targets []DelegationTargetContext
+	Squad   *SquadDelegationContext
+}
+
 // DelegationContinuation is bounded server-owned input for resuming a parent
 // Run after one delegated child reaches a durable terminal outcome. It is
 // execution-time state, not immutable Run provenance.
@@ -158,6 +182,14 @@ type DelegationRequester interface {
 	Delegate(context.Context, DelegationRequest) (Delegation, error)
 }
 
+// AcceptedDelegationResolver proves that a delegation request was already
+// durably accepted without treating native Engine history as authority to
+// create new work. Recovery callers must still supply the exact request
+// identity observed from the native tool.
+type AcceptedDelegationResolver interface {
+	ResolveAcceptedDelegation(context.Context, DelegationRequest) (Delegation, bool, error)
+}
+
 type Request struct {
 	Context                executioncontext.SafeContext
 	Launcher               ProcessLauncher
@@ -165,6 +197,7 @@ type Request struct {
 	InteractiveQuestions   InteractiveQuestioner
 	IssueStatus            IssueStatusUpdater
 	Delegation             DelegationRequester
+	DelegationContext      *DelegationToolContext
 	Continuation           *Continuation
 	DelegationContinuation *DelegationContinuation
 }

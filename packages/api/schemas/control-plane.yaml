@@ -362,7 +362,7 @@ Run:
 Delegation:
   type: object
   additionalProperties: false
-  required: [id, projectId, issueId, parentRunId, parentAgentId, targetAgentId, task, delegatedRunId, workspaceAccess, requestKey, createdAt, updatedAt]
+  required: [id, projectId, issueId, parentRunId, parentAgentId, targetAgentId, task, delegatedRunId, workspaceAccess, requestKey, parentRunStatus, delegatedRunStatus, outcome, resultSummary, resultEventId, workspaceChangesAccepted, workspaceRevision, continuationJobId, completedAt, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
@@ -377,6 +377,19 @@ Delegation:
       enum: [WRITE]
       description: Effective delegated access to the shared Issue Workspace. v0.1 supports serialized WRITE only.
     requestKey: {type: string}
+    parentRunStatus: {type: string}
+    delegatedRunStatus: {type: string}
+    outcome:
+      type: [string, 'null']
+      enum: [SUCCEEDED, FAILED, CANCELLED, null]
+    resultSummary: {type: [string, 'null']}
+    resultEventId: {type: [string, 'null'], format: uuid}
+    workspaceChangesAccepted: {type: [boolean, 'null']}
+    workspaceRevision:
+      type: string
+      description: Current authoritative Issue Workspace revision at inspection time.
+    continuationJobId: {type: [string, 'null'], format: uuid}
+    completedAt: {type: [string, 'null'], format: date-time}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
 Assignee:

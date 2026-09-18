@@ -790,12 +790,12 @@ func listDelegationRecoveryEvents(ctx context.Context, recovery delegationRecove
 }
 
 func delegationRecoveryEvidence(events []store.Event, delegation store.Delegation) (bool, bool) {
-	completedSequence := int64(0)
+	terminalSequence := int64(0)
 	for _, event := range events {
 		if event.Sequence == nil {
 			continue
 		}
-		if event.Type == "tool.completed" {
+		if event.Type == "tool.completed" || event.Type == "tool.failed" {
 			var payload evidence.ToolPayload
 			if err := json.Unmarshal(event.Payload, &payload); err != nil {
 				continue
@@ -806,18 +806,18 @@ func delegationRecoveryEvidence(events []store.Event, delegation store.Delegatio
 				payload.ToolCallID == delegation.RequestKey &&
 				targetAgentID == delegation.TargetAgentID &&
 				task == delegation.Task {
-				completedSequence = *event.Sequence
+				terminalSequence = *event.Sequence
 			}
 			continue
 		}
-		if completedSequence == 0 || *event.Sequence <= completedSequence {
+		if terminalSequence == 0 || *event.Sequence <= terminalSequence {
 			continue
 		}
 		if authoritativeWorkspaceHandbackEvent(event) {
 			return true, true
 		}
 	}
-	return completedSequence != 0, false
+	return terminalSequence != 0, false
 }
 
 func (p *Processor) delegationRecoveryContext(ctx context.Context, run store.Run) (executioncontext.SafeContext, error) {

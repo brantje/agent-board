@@ -14,10 +14,45 @@ type delegationCapabilityStore struct {
 	store.ControlPlaneStore
 	got      store.RequestDelegationCommand
 	result   store.RequestDelegationResult
-	appended []store.Event
+	appended               []store.Event
+	delegations            []store.Delegation
+	requestDelegationCalls int
+	targets                []store.DelegationTarget
+	issue    *store.Issue
+	squad    *store.Squad
+	agents   map[string]store.Agent
+}
+
+func (s *delegationCapabilityStore) ListDelegationTargets(context.Context, string, string) ([]store.DelegationTarget, error) {
+	if s.targets == nil {
+		return []store.DelegationTarget{{ID: "target-agent-1", Name: "Target agent"}}, nil
+	}
+	return append([]store.DelegationTarget(nil), s.targets...), nil
+}
+
+func (s *delegationCapabilityStore) GetIssue(_ context.Context, _, _ string) (store.Issue, error) {
+	if s.issue == nil {
+		return store.Issue{}, store.ErrNotFound
+	}
+	return *s.issue, nil
+}
+
+func (s *delegationCapabilityStore) GetSquad(_ context.Context, _, _ string) (store.Squad, error) {
+	if s.squad == nil {
+		return store.Squad{}, store.ErrNotFound
+	}
+	return *s.squad, nil
+}
+
+func (s *delegationCapabilityStore) GetAgentInScope(_ context.Context, _ *string, id string) (store.Agent, error) {
+	if agent, ok := s.agents[id]; ok {
+		return agent, nil
+	}
+	return store.Agent{}, store.ErrNotFound
 }
 
 func (s *delegationCapabilityStore) RequestDelegation(_ context.Context, input store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
+	s.requestDelegationCalls++
 	s.got = input
 	return s.result, nil
 }
@@ -26,8 +61,14 @@ func (s *delegationCapabilityStore) GetDelegationByRun(context.Context, string, 
 	return store.Delegation{}, store.ErrNotFound
 }
 
-func (s *delegationCapabilityStore) ListDelegationsByParentRun(context.Context, string, string) ([]store.Delegation, error) {
-	return nil, nil
+func (s *delegationCapabilityStore) ListDelegationsByParentRun(_ context.Context, projectID, parentRunID string) ([]store.Delegation, error) {
+	values := make([]store.Delegation, 0, len(s.delegations))
+	for _, delegation := range s.delegations {
+		if delegation.ProjectID == projectID && delegation.ParentRunID == parentRunID {
+			values = append(values, delegation)
+		}
+	}
+	return values, nil
 }
 
 func (s *delegationCapabilityStore) SetIssueStatus(context.Context, store.IssueStatusMutation) (store.IssueMutationResult, error) {
@@ -83,6 +124,144 @@ func TestEngineRequestDelegationCapabilityDerivesParentIdentity(t *testing.T) {
 	}
 }
 
+func TestDelegationRecoveryResolverRequiresDurableRequestBeforeCanonicalReplay(t *testing.T) {
+	safe := executioncontext.SafeContext{
+		Project: executioncontext.ProjectContext{ID: "project-1"},
+		Run:     executioncontext.RunContext{ID: "parent-run-1"},
+		Agent:   executioncontext.AgentContext{ID: "parent-agent-1", AllowDelegation: true},
+	}
+	storage := &delegationCapabilityStore{result: store.RequestDelegationResult{
+		Delegation:   store.Delegation{ID: "delegation-1"},
+		DelegatedRun: store.Run{ID: "delegated-run-1"},
+	}}
+	requester := newDelegationRequester(storage, nil, safe)
+	resolver, ok := requester.(engine.AcceptedDelegationResolver)
+	if !ok {
+		t.Fatal("delegation requester does not expose accepted-delegation recovery")
+	}
+	request := engine.DelegationRequest{
+		TargetAgentID: "target-agent-1",
+		Task:          "bounded task",
+		RequestKey:    "call-1",
+	}
+
+	if _, found, err := resolver.ResolveAcceptedDelegation(t.Context(), request); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("native error history without durable delegation was treated as accepted")
+	}
+	if storage.requestDelegationCalls != 0 {
+		t.Fatalf("canonical RequestDelegation calls=%d want 0 without durable authority", storage.requestDelegationCalls)
+	}
+
+	storage.delegations = []store.Delegation{{
+		ID:            "delegation-1",
+		ProjectID:     safe.Project.ID,
+		ParentRunID:   safe.Run.ID,
+		TargetAgentID: request.TargetAgentID,
+		Task:          request.Task,
+		DelegatedRunID:"delegated-run-1",
+		RequestKey:    request.RequestKey,
+	}}
+	delegation, found, err := resolver.ResolveAcceptedDelegation(t.Context(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || delegation.ID != "delegation-1" || delegation.RunID != "delegated-run-1" {
+		t.Fatalf("resolved delegation=%+v found=%v", delegation, found)
+	}
+	if storage.requestDelegationCalls != 1 {
+		t.Fatalf("canonical RequestDelegation calls=%d want 1 after durable proof", storage.requestDelegationCalls)
+	}
+	if storage.got.ProjectID != safe.Project.ID || storage.got.ParentRunID != safe.Run.ID ||
+		storage.got.TargetAgentID != request.TargetAgentID || storage.got.Task != request.Task ||
+		storage.got.RequestKey != request.RequestKey {
+		t.Fatalf("canonical replay=%+v", storage.got)
+	}
+
+	outcome := store.DelegationOutcomeFailed
+	storage.delegations[0].Outcome = &outcome
+	if _, found, err := resolver.ResolveAcceptedDelegation(t.Context(), request); err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("terminal durable delegation requested another handoff")
+	}
+	if storage.requestDelegationCalls != 1 {
+		t.Fatalf("terminal delegation replayed canonical command: calls=%d", storage.requestDelegationCalls)
+	}
+}
+
+func TestEngineRequestDelegationContextIncludesTargetsAndSquadMembers(t *testing.T) {
+	role := "implementation"
+	issueType, squadID := "SQUAD", "squad-1"
+	storage := &delegationCapabilityStore{
+		targets: []store.DelegationTarget{
+			{ID: "other-agent", Name: "Other agent"},
+		},
+		issue: &store.Issue{ID: "issue-1", ProjectID: "project-1", AssigneeType: &issueType, AssigneeID: &squadID},
+		squad: &store.Squad{
+			ID: "squad-1", ProjectID: "project-1", Name: "Backend", LeaderAgentID: "parent-agent-1",
+			Members: []store.SquadMember{
+				{Type: store.SquadMemberTypeAgent, ID: "member-agent", Role: &role},
+				{Type: store.SquadMemberTypeUser, ID: "user-1"},
+			},
+		},
+		agents: map[string]store.Agent{
+			"parent-agent-1": {ID: "parent-agent-1", Name: "Leader"},
+			"member-agent":   {ID: "member-agent", Name: "Member agent"},
+		},
+	}
+	processor := &Processor{store: storage}
+	request, err := processor.engineRequest(t.Context(), executioncontext.SafeContext{
+		Project: executioncontext.ProjectContext{ID: "project-1"},
+		Issue:   executioncontext.IssueContext{ID: "issue-1"},
+		Run:     executioncontext.RunContext{ID: "parent-run-1"},
+		Agent:   executioncontext.AgentContext{ID: "parent-agent-1", AllowDelegation: true},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Delegation == nil || request.DelegationContext == nil {
+		t.Fatal("authoritative delegating Run did not receive delegation tool context")
+	}
+	if len(request.DelegationContext.Targets) != 1 || request.DelegationContext.Targets[0].ID != "other-agent" {
+		t.Fatalf("targets=%+v", request.DelegationContext.Targets)
+	}
+	squad := request.DelegationContext.Squad
+	if squad == nil || squad.ID != "squad-1" || squad.LeaderAgentID != "parent-agent-1" || squad.LeaderAgentName != "Leader" {
+		t.Fatalf("squad context=%+v", squad)
+	}
+	if len(squad.Members) != 1 || squad.Members[0].ID != "member-agent" || squad.Members[0].Role == nil || *squad.Members[0].Role != role {
+		t.Fatalf("squad members=%+v", squad.Members)
+	}
+	if squad.Members[0].ID == request.DelegationContext.Targets[0].ID {
+		t.Fatal("Squad membership was incorrectly treated as delegation target authorization")
+	}
+}
+
+func TestEngineRequestDelegationContextKeepsDirectAgentOwnershipOutOfSquadContext(t *testing.T) {
+	issueType, agentID := "AGENT", "parent-agent-1"
+	storage := &delegationCapabilityStore{
+		targets: []store.DelegationTarget{{ID: "target-agent-1", Name: "Target agent"}},
+		issue:   &store.Issue{ID: "issue-1", ProjectID: "project-1", AssigneeType: &issueType, AssigneeID: &agentID},
+	}
+	request, err := (&Processor{store: storage}).engineRequest(t.Context(), executioncontext.SafeContext{
+		Project: executioncontext.ProjectContext{ID: "project-1"},
+		Issue:   executioncontext.IssueContext{ID: "issue-1"},
+		Run:     executioncontext.RunContext{ID: "parent-run-1"},
+		Agent:   executioncontext.AgentContext{ID: "parent-agent-1", AllowDelegation: true},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.DelegationContext == nil || len(request.DelegationContext.Targets) != 1 {
+		t.Fatalf("delegation context=%+v", request.DelegationContext)
+	}
+	if request.DelegationContext.Squad != nil {
+		t.Fatalf("direct Agent-owned Issue exposed Squad context: %+v", request.DelegationContext.Squad)
+	}
+}
+
 func TestEngineRequestDelegationPublishesPersistedEvent(t *testing.T) {
 	persisted := store.Event{ID: "event-1", Type: "delegation.created", ProjectID: "project-1"}
 	storage := &delegationCapabilityStore{result: store.RequestDelegationResult{
@@ -134,8 +313,8 @@ func TestEngineRequestDelegationCapabilityIsPolicyAndAuthorityGated(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.Delegation != nil {
-		t.Fatal("allowDelegation=false exposed delegation capability")
+	if request.Delegation != nil || request.DelegationContext != nil {
+		t.Fatal("allowDelegation=false exposed delegation capability or context")
 	}
 	if request.IssueStatus == nil {
 		t.Fatal("normal Run should retain Issue status capability")
@@ -151,8 +330,8 @@ func TestEngineRequestDelegationCapabilityIsPolicyAndAuthorityGated(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if request.Delegation != nil {
-		t.Fatal("delegated Run exposed nested delegation capability")
+	if request.Delegation != nil || request.DelegationContext != nil {
+		t.Fatal("delegated Run exposed nested delegation capability or context")
 	}
 	if request.IssueStatus != nil {
 		t.Fatal("delegated Run exposed authoritative Issue status capability")

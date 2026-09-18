@@ -16,19 +16,14 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Skip("OpenRouter provider is required for the delegation E2E")
 	}
 
-	project, parentRun := fixture.createRun(t, openCodeRunSpec{
+	setup := fixture.createRunSetup(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Do not change Issue status. Do not edit files before the requested delegation.",
 		title:            "Prove OpenCode delegation",
 		description:      "Use the delegation capability exactly as directed by your role instructions. Do not perform the delegated file task yourself.",
 	})
-	if parentRun.AgentID == nil {
-		t.Fatal("parent Run has no Agent")
-	}
+	project := setup.Project
+	parentAgent := setup.Agent
 	scope := project.ID
-	parentAgent, err := fixture.services.ControlPlane.GetAgent(fixture.ctx, &scope, *parentRun.AgentID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	target, err := fixture.services.ControlPlane.CreateAgent(fixture.ctx, store.Agent{
 		ProjectID: &scope,
 		Name: "OpenCode delegation target",
@@ -43,9 +38,55 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	parentAgent.AllowDelegation = true
-	parentAgent.RoleInstructions = "If the prompt contains 'Delegation result returned to this parent Run:', do not call delegate_task again. Verify delegated-result.txt contains exactly delegated-run-ok, then create parent-resumed.txt containing exactly parent-resumed-ok with no trailing newline and finish normally without changing Issue status. Otherwise immediately call delegate_task with targetAgentId " + target.ID + " and task 'Create delegated-result.txt containing exactly delegated-run-ok with no trailing newline. Do not modify any other file.' Do not change Issue status or perform that file task yourself. After the delegation tool completes, stop; do not ask a Question or perform additional work."
+	parentAgent.RoleInstructions = "If the prompt contains 'Delegation result returned to this parent Run:', do not call delegate_task again. Verify delegated-result.txt contains exactly delegated-run-ok, then create parent-resumed.txt containing exactly parent-resumed-ok with no trailing newline and finish normally without changing Issue status. Otherwise delegate exactly once to the Squad Agent member with role implementation. Choose that member's exact targetAgentId from the trusted Available delegation targets and Squad context in this prompt; do not guess an Agent ID. Use task 'Create delegated-result.txt containing exactly delegated-run-ok with no trailing newline. Do not modify any other file.' Do not change Issue status or perform that file task yourself. After the delegation tool completes, stop; do not ask a Question or perform additional work."
 	if _, err := fixture.services.ControlPlane.UpdateAgent(fixture.ctx, &scope, parentAgent); err != nil {
 		t.Fatal(err)
+	}
+	memberRole := "implementation"
+	squad, err := fixture.services.ControlPlane.CreateSquad(fixture.ctx, store.Squad{
+		ProjectID: project.ID,
+		Name: "OpenCode delegation Squad",
+		LeaderAgentID: parentAgent.ID,
+		Members: []store.SquadMember{{Type: store.SquadMemberTypeAgent, ID: target.ID, Role: &memberRole}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assigned, err := fixture.services.ControlPlane.SetIssueAssignee(
+		fixture.ctx,
+		project.ID,
+		setup.Issue.ID,
+		&store.Assignee{Type: "SQUAD", ID: squad.ID},
+		store.EmptyObject,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assignedOwner := assigned.AssignedTo()
+	if assignedOwner == nil || assignedOwner.Type != "SQUAD" || assignedOwner.ID != squad.ID {
+		t.Fatalf("Squad assignment=%+v", assignedOwner)
+	}
+	runsBeforeDelegation, err := fixture.services.ControlPlane.ListRuns(fixture.ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parentRun store.Run
+	for _, run := range runsBeforeDelegation {
+		if run.IssueID != setup.Issue.ID || run.AgentID == nil {
+			continue
+		}
+		switch *run.AgentID {
+		case target.ID:
+			t.Fatalf("Squad membership automatically fanned out target Run before delegate_task: %+v", run)
+		case parentAgent.ID:
+			if parentRun.ID != "" {
+				t.Fatalf("Squad assignment created duplicate leader Runs: first=%+v second=%+v", parentRun, run)
+			}
+			parentRun = run
+		}
+	}
+	if parentRun.ID == "" {
+		t.Fatal("Squad assignment did not create the authoritative leader Run")
 	}
 
 	fixture.startScheduler(t)
@@ -64,8 +105,8 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	owner := beforeChild.AssignedTo()
-	if owner == nil || owner.Type != "AGENT" || owner.ID != parentAgent.ID {
-		t.Fatalf("delegation changed Issue owner before child execution: %+v", owner)
+	if owner == nil || owner.Type != "SQUAD" || owner.ID != squad.ID {
+		t.Fatalf("delegation changed Squad Issue owner before child execution: %+v", owner)
 	}
 	statusBeforeChild := beforeChild.Status
 
@@ -137,8 +178,8 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	afterOwner := afterChild.AssignedTo()
-	if afterOwner == nil || afterOwner.Type != "AGENT" || afterOwner.ID != parentAgent.ID {
-		t.Fatalf("delegation lifecycle changed Issue owner: %+v", afterOwner)
+	if afterOwner == nil || afterOwner.Type != "SQUAD" || afterOwner.ID != squad.ID {
+		t.Fatalf("delegation lifecycle changed Squad Issue owner: %+v", afterOwner)
 	}
 	if afterChild.Status != statusBeforeChild {
 		t.Fatalf("delegation lifecycle changed Issue status from %s to %s", statusBeforeChild, afterChild.Status)

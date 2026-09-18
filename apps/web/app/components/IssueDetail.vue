@@ -232,6 +232,11 @@ async function saved(savedIssue: Issue) {
         </section>
 
         <aside class="space-y-4">
+          <SquadContextCard
+            v-if="issue.assignedTo?.type === 'SQUAD'"
+            :project-id="projectId"
+            :squad-id="issue.assignedTo.id"
+          />
           <UCard>
             <h2 class="section-label mb-3">Properties</h2>
             <dl class="space-y-3 text-sm">

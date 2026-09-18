@@ -104,6 +104,15 @@ export interface Delegation {
   delegatedRunId: string
   workspaceAccess: 'WRITE'
   requestKey: string
+  parentRunStatus: string
+  delegatedRunStatus: string
+  outcome: 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | null
+  resultSummary: string | null
+  resultEventId: string | null
+  workspaceChangesAccepted: boolean | null
+  workspaceRevision: string
+  continuationJobId: string | null
+  completedAt: string | null
   createdAt: string
   updatedAt: string
 }

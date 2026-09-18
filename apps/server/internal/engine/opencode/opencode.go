@@ -134,7 +134,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, err
 	}
 
-	initialPrompt := initialTaskPromptWithDelegationContinuation(request.Context, request.DelegationContinuation)
+	initialPrompt := initialTaskPromptForRequest(request)
 	admissionPrompt := initialPrompt
 	if admissions, ok := request.Launcher.(engine.ExecutionAdmissionPromptStore); ok {
 		admissionPrompt, err = admissions.GetOrCreateAdmissionPrompt(ctx, process.ID(), initialPrompt)
@@ -354,10 +354,10 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				return engine.Result{}, err
 			}
 			if err := delegationTools.Handle(ctx, eventRead.event, native, session.ID, request.Delegation); err != nil {
-				// A completed native delegate_task is durable recovery evidence. Persist
-				// its ordinary tool.completed activity before returning the handoff
-				// signal so a crash after Engine shutdown can still correlate the
-				// canonical delegation request without replaying uncertain execution.
+				// A terminal native delegate_task that matches a canonically accepted
+				// request is durable handoff evidence. Persist its ordinary tool
+				// terminal activity before returning the handoff signal so recovery can
+				// correlate native history with the canonical delegation.
 				if errors.Is(err, engine.ErrDelegationHandoff) {
 					if activityErr := state.handleEvent(ctx, native, eventRead.event); activityErr != nil {
 						return engine.Result{}, activityErr
@@ -570,13 +570,29 @@ func nativeWorkingDirectory(process engine.Process) string {
 
 const issueStatusPromptGuidance = "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When implementation or other work is complete and ready for human review or handoff, use REVIEW. Completing the requested implementation does not by itself mean DONE. For normal coding or implementation work, a successful final handoff should therefore normally leave the Issue in REVIEW, not DONE. Use DONE only when the Issue is fully finished and no human review, approval, or handoff remains. Before your final response, compare the final work outcome with the persisted Issue Board status and call set_issue_status(status) if the Board state should now be different. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required."
 
-const delegationPromptGuidance = "This Run may request bounded help from another Agent with delegate_task(targetAgentId, task). Use an explicit target Agent ID supplied by your instructions or trusted context; do not guess Agent identifiers. Delegation does not transfer Issue ownership or Review authority."
+const delegationPromptGuidance = "This Run may request bounded help from another Agent with delegate_task(targetAgentId, task). Choose targetAgentId only from the server-provided available delegation targets; never guess Agent identifiers. Delegation does not transfer Issue ownership or Review authority."
+
+func initialTaskPromptForRequest(request engine.Request) string {
+	var delegationContext *engine.DelegationToolContext
+	if request.Delegation != nil {
+		delegationContext = request.DelegationContext
+	}
+	return initialTaskPromptWithDelegationToolContext(request.Context, delegationContext, request.DelegationContinuation)
+}
 
 func initialTaskPrompt(safe executioncontext.SafeContext) string {
 	return initialTaskPromptWithDelegationContinuation(safe, nil)
 }
 
 func initialTaskPromptWithDelegationContinuation(safe executioncontext.SafeContext, continuation *engine.DelegationContinuation) string {
+	var delegationContext *engine.DelegationToolContext
+	if safe.Delegation == nil && safe.Agent.AllowDelegation {
+		delegationContext = &engine.DelegationToolContext{}
+	}
+	return initialTaskPromptWithDelegationToolContext(safe, delegationContext, continuation)
+}
+
+func initialTaskPromptWithDelegationToolContext(safe executioncontext.SafeContext, delegationContext *engine.DelegationToolContext, continuation *engine.DelegationContinuation) string {
 	var sections []string
 	if role := strings.TrimSpace(safe.Agent.RoleInstructions); role != "" {
 		sections = append(sections, "Agent role instructions:\n"+role)
@@ -612,14 +628,62 @@ func initialTaskPromptWithDelegationContinuation(safe executioncontext.SafeConte
 	}
 	if safe.Delegation == nil {
 		sections = append(sections, "Current persisted Issue Board status: "+strings.TrimSpace(safe.Issue.Status)+".\n"+issueStatusPromptGuidance)
-		if safe.Agent.AllowDelegation {
-			sections = append(sections, delegationPromptGuidance)
+		if delegationContext != nil {
+			sections = append(sections, delegationPromptGuidance+"\n\n"+delegationToolContextPrompt(delegationContext))
 		}
 	} else {
 		sections = append(sections, "This is delegated execution. Work only on the bounded delegated task. The parent Run remains authoritative for Issue ownership and Board/Review outcome; do not attempt to change Issue status or delegate further work.")
 	}
 	sections = append(sections, "Work directly in the current project directory and implement the requested issue. Treat /workspace as the logical workspace root: use project-relative paths for workspace files rather than absolute /workspace paths. If human input is required, use OpenCode's native Question capability rather than guessing.")
 	return strings.Join(sections, "\n\n")
+}
+
+func delegationToolContextPrompt(context *engine.DelegationToolContext) string {
+	if context == nil {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("Available delegation targets:")
+	if len(context.Targets) == 0 {
+		builder.WriteString("\n- none")
+	} else {
+		for _, target := range context.Targets {
+			builder.WriteString("\n- ")
+			builder.WriteString(strings.TrimSpace(target.ID))
+			builder.WriteString(" — ")
+			builder.WriteString(strings.TrimSpace(target.Name))
+		}
+	}
+	if context.Squad == nil {
+		return builder.String()
+	}
+	builder.WriteString("\n\nCurrent Issue Squad: ")
+	builder.WriteString(strings.TrimSpace(context.Squad.Name))
+	builder.WriteString(" (")
+	builder.WriteString(strings.TrimSpace(context.Squad.ID))
+	builder.WriteString(")")
+	builder.WriteString("\nAuthoritative Squad leader: ")
+	builder.WriteString(strings.TrimSpace(context.Squad.LeaderAgentName))
+	builder.WriteString(" (")
+	builder.WriteString(strings.TrimSpace(context.Squad.LeaderAgentID))
+	builder.WriteString(")")
+	builder.WriteString("\nSquad Agent members:")
+	if len(context.Squad.Members) == 0 {
+		builder.WriteString("\n- none")
+	} else {
+		for _, member := range context.Squad.Members {
+			builder.WriteString("\n- ")
+			builder.WriteString(strings.TrimSpace(member.ID))
+			builder.WriteString(" — ")
+			builder.WriteString(strings.TrimSpace(member.Name))
+			if member.Role != nil && strings.TrimSpace(*member.Role) != "" {
+				builder.WriteString(" — role: ")
+				builder.WriteString(strings.TrimSpace(*member.Role))
+			}
+		}
+	}
+	builder.WriteString("\nSquad membership is collaboration context only. It does not grant delegation permission or make an Agent a valid target unless that Agent is also listed under Available delegation targets.")
+	return builder.String()
 }
 
 func activitySink(launcher engine.ProcessLauncher) engine.ActivitySink {
