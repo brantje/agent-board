@@ -33,15 +33,11 @@ func (s *Store) CancelInactiveRun(ctx context.Context, projectID, runID string) 
 		return store.RunCancellationResult{}, store.ErrConflict
 	}
 
-	var activeSessions, claimedJobs int
-	if err := tx.QueryRow(ctx, `
-		SELECT
-		  (SELECT count(*) FROM execution_sessions WHERE project_id=$1 AND run_id=$2 AND status IN ('PENDING','STARTING','RUNNING')),
-		  (SELECT count(*) FROM scheduler_jobs WHERE project_id=$1 AND run_id=$2 AND state='CLAIMED')
-	`, projectID, runID).Scan(&activeSessions, &claimedJobs); err != nil {
+	occupied, err := inactiveRunExecutionOccupiedTx(ctx, tx, projectID, runID)
+	if err != nil {
 		return store.RunCancellationResult{}, err
 	}
-	if activeSessions != 0 || claimedJobs != 0 {
+	if occupied {
 		return store.RunCancellationResult{}, store.ErrConflict
 	}
 

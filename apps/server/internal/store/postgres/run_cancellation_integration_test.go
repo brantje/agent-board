@@ -3,6 +3,7 @@ package postgres
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -173,4 +174,85 @@ func prepareQueuedDelegatedChildForCancellation(t *testing.T, requestKey string)
 		t.Fatalf("child status=%s want QUEUED", child.Status)
 	}
 	return f, created
+}
+
+func TestSchedulerAdmissionCancelsQueuedDelegateAfterParentCancellationAcrossRestart(t *testing.T) {
+	f, created := prepareQueuedDelegatedChildForCancellation(t, "restart-admission-fence")
+	ctx := t.Context()
+	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	admission, err := f.store.AdmitNextJob(ctx, "worker-after-restart", time.Minute, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admission != nil {
+		t.Fatalf("cancelled-parent delegate was admitted: %+v", admission)
+	}
+	child, err := f.store.GetRun(ctx, f.project.ID, created.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != "CANCELLED" {
+		t.Fatalf("child status=%s want CANCELLED", child.Status)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeCancelled || delegation.ContinuationJobID != nil {
+		t.Fatalf("delegation after admission fence=%+v", delegation)
+	}
+	var queuedStarts int
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT count(*) FROM scheduler_jobs
+		WHERE project_id=$1 AND run_id=$2 AND kind='START' AND state='QUEUED'
+	`, f.project.ID, child.ID).Scan(&queuedStarts); err != nil {
+		t.Fatal(err)
+	}
+	if queuedStarts != 0 {
+		t.Fatalf("queued delegated START jobs=%d want 0", queuedStarts)
+	}
+}
+
+func TestReconciliationRetryCancelsDelegateWhenParentBecameTerminal(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "restart-reconciliation-fence")
+	ctx := t.Context()
+	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	expireDelegationSchedulerLease(t, f.store, childJobID, childLease)
+	claim, err := f.store.ClaimExpiredJobForReconciliation(ctx, "worker-after-restart", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claim == nil || claim.Run.ID != created.DelegatedRun.ID {
+		t.Fatalf("reconciliation claim=%+v", claim)
+	}
+
+	mutation, err := f.store.ResolveReconciliationMutation(ctx, store.SchedulerReconciliation{
+		ProjectID: f.project.ID, JobID: claim.Job.ID, RunID: claim.Run.ID, LeaseToken: claim.Lease.LeaseToken,
+		Outcome: store.SchedulerReconciliationRetry,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation.Run.Status != "CANCELLED" {
+		t.Fatalf("reconciled child status=%s want CANCELLED", mutation.Run.Status)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, claim.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeCancelled || delegation.ContinuationJobID != nil {
+		t.Fatalf("reconciled delegation=%+v", delegation)
+	}
+	var state string
+	if err := f.store.pool.QueryRow(ctx, `SELECT state FROM scheduler_jobs WHERE project_id=$1 AND id=$2`, f.project.ID, claim.Job.ID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if state != "CANCELLED" {
+		t.Fatalf("reconciled scheduler job state=%s want CANCELLED", state)
+	}
 }

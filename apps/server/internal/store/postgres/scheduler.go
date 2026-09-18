@@ -101,6 +101,27 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 		return nil, err
 	}
 
+	parentTerminal, err := delegatedParentTerminalTx(ctx, tx, run)
+	if err != nil {
+		return nil, err
+	}
+	if parentTerminal {
+		occupied, err := inactiveRunExecutionOccupiedTx(ctx, tx, run.ProjectID, run.ID)
+		if err != nil {
+			return nil, err
+		}
+		if occupied {
+			return nil, store.ErrConflict
+		}
+		if _, err := cancelInactiveRunTx(ctx, tx, run); err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+
 	occupied, err := workspaceAdmissionOccupied(ctx, tx, run)
 	if err != nil {
 		return nil, err

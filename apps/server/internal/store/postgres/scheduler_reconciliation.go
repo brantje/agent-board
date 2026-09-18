@@ -172,6 +172,13 @@ func (s *Store) resolveReconciliation(ctx context.Context, input store.Scheduler
 	if err != nil {
 		return store.SchedulerMutationResult{}, err
 	}
+	parentTerminal, err := delegatedParentTerminalTx(ctx, tx, current)
+	if err != nil {
+		return store.SchedulerMutationResult{}, err
+	}
+	if parentTerminal && input.Outcome == store.SchedulerReconciliationRetry {
+		input.Outcome = store.SchedulerReconciliationCancelled
+	}
 
 	switch input.Outcome {
 	case store.SchedulerReconciliationActive:

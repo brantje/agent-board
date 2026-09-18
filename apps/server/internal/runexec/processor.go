@@ -53,6 +53,15 @@ type delegatedTerminalRecoveryStore interface {
 	delegationRecoveryEventStore
 }
 
+type delegatedParentRunStore interface {
+	store.DelegationStore
+	GetRun(context.Context, string, string) (store.Run, error)
+}
+
+type executionSessionCanceller interface {
+	Cancel(context.Context, string, string, time.Duration) error
+}
+
 type SessionService interface {
 	Start(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error)
 	Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error)
@@ -355,6 +364,13 @@ func (p *Processor) Reconcile(ctx context.Context, claim *store.SchedulerAdmissi
 	if err != nil {
 		return store.SchedulerReconciliationUnknown, nil, err
 	}
+	parentTerminal, err := p.delegatedParentTerminal(ctx, claim.Run)
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, err
+	}
+	if parentTerminal {
+		return p.reconcileDelegatedRunWithTerminalParent(ctx, claim.Run, sessions)
+	}
 	seen := false
 	for _, session := range sessions {
 		if session.RunID != claim.Run.ID {
@@ -386,6 +402,97 @@ func (p *Processor) Reconcile(ctx context.Context, claim *store.SchedulerAdmissi
 		return store.SchedulerReconciliationUnknown, nil, err
 	}
 	return store.SchedulerReconciliationUnknown, nil, nil
+}
+
+func (p *Processor) delegatedParentTerminal(ctx context.Context, child store.Run) (bool, error) {
+	lineage, ok := p.store.(delegatedParentRunStore)
+	if !ok {
+		return false, nil
+	}
+	delegation, err := lineage.GetDelegationByRun(ctx, child.ProjectID, child.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	parent, err := lineage.GetRun(ctx, child.ProjectID, delegation.ParentRunID)
+	if err != nil {
+		return false, err
+	}
+	if delegation.IssueID != child.IssueID || parent.IssueID != child.IssueID || parent.WorkspaceID != child.WorkspaceID || parent.AgentID == nil || *parent.AgentID != delegation.ParentAgentID {
+		return false, fmt.Errorf("run execution: delegated parent lineage does not match authoritative Runs")
+	}
+	switch parent.Status {
+	case "COMPLETED", "FAILED", "CANCELLED":
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+func (p *Processor) reconcileDelegatedRunWithTerminalParent(ctx context.Context, run store.Run, sessions []store.ExecutionSession) (store.SchedulerReconciliationOutcome, *string, error) {
+	live := liveExecutionSessionsForRun(sessions, run.ID)
+	if len(live) > 1 {
+		return store.SchedulerReconciliationUnknown, nil, nil
+	}
+	if len(live) == 1 {
+		canceller, ok := p.sessions.(executionSessionCanceller)
+		if !ok {
+			return store.SchedulerReconciliationUnknown, nil, fmt.Errorf("run execution: execution session cancellation is unavailable")
+		}
+		if err := canceller.Cancel(ctx, run.ProjectID, live[0].ID, processCancellationCleanupTimeout); err != nil {
+			return store.SchedulerReconciliationUnknown, nil, err
+		}
+		if err := p.sessions.ReconcileAll(ctx); err != nil {
+			return store.SchedulerReconciliationUnknown, nil, err
+		}
+		var err error
+		sessions, err = p.store.ListExecutionSessions(ctx, run.ProjectID, []string{"PENDING", "STARTING", "RUNNING", "COMPLETED", "FAILED", "CANCELLED"})
+		if err != nil {
+			return store.SchedulerReconciliationUnknown, nil, err
+		}
+	}
+
+	matching := executionSessionsForRun(sessions, run.ID)
+	if len(matching) == 0 {
+		return store.SchedulerReconciliationCancelled, nil, nil
+	}
+	if len(liveExecutionSessionsForRun(matching, run.ID)) != 0 {
+		return store.SchedulerReconciliationUnknown, nil, nil
+	}
+	outcome, reason, recovered, err := p.recoverDelegatedTerminalRun(ctx, run, matching)
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, err
+	}
+	if recovered {
+		return outcome, reason, nil
+	}
+	return store.SchedulerReconciliationUnknown, nil, nil
+}
+
+func executionSessionsForRun(sessions []store.ExecutionSession, runID string) []store.ExecutionSession {
+	matching := make([]store.ExecutionSession, 0, len(sessions))
+	for _, session := range sessions {
+		if session.RunID == runID {
+			matching = append(matching, session)
+		}
+	}
+	return matching
+}
+
+func liveExecutionSessionsForRun(sessions []store.ExecutionSession, runID string) []store.ExecutionSession {
+	matching := make([]store.ExecutionSession, 0, 1)
+	for _, session := range sessions {
+		if session.RunID != runID {
+			continue
+		}
+		switch session.Status {
+		case "PENDING", "STARTING", "RUNNING":
+			matching = append(matching, session)
+		}
+	}
+	return matching
 }
 
 const delegationRecoveryEventPageSize = 500

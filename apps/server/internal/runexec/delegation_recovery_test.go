@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
@@ -653,5 +654,105 @@ func TestReconcileRecoversDelegatedChildFromRetainedRunnerWorkspace(t *testing.T
 	}
 	if !delegationWorkspaceAcceptedEvidence(storeFake.events, delegation.ID) {
 		t.Fatalf("delegation Workspace acceptance was not persisted: %+v", storeFake.events)
+	}
+}
+
+type terminalParentDelegationRecoveryStore struct {
+	*delegationRecoveryStore
+	parent store.Run
+}
+
+func (s *terminalParentDelegationRecoveryStore) GetRun(_ context.Context, projectID, runID string) (store.Run, error) {
+	if s.parent.ProjectID == projectID && s.parent.ID == runID {
+		return s.parent, nil
+	}
+	return store.Run{}, store.ErrNotFound
+}
+
+type cancellingReconcileSessions struct {
+	reconcileSessions
+	store *delegationRecoveryStore
+	err   error
+	calls int
+}
+
+func (s *cancellingReconcileSessions) Cancel(_ context.Context, projectID, sessionID string, _ time.Duration) error {
+	s.calls++
+	if s.err != nil {
+		return s.err
+	}
+	for index := range s.store.sessions {
+		if s.store.sessions[index].ID == sessionID {
+			s.store.sessions[index].Status = "CANCELLED"
+			return nil
+		}
+	}
+	return store.ErrNotFound
+}
+
+func terminalParentDelegatedChildFixture(t *testing.T) (*terminalParentDelegationRecoveryStore, store.Run, store.Delegation) {
+	t.Helper()
+	base, child, delegation, _ := delegatedChildRecoveryFixture(t)
+	parentAgentID := delegation.ParentAgentID
+	wrapped := &terminalParentDelegationRecoveryStore{
+		delegationRecoveryStore: base,
+		parent: store.Run{
+			ID: delegation.ParentRunID, ProjectID: child.ProjectID, IssueID: child.IssueID,
+			WorkspaceID: child.WorkspaceID, AgentID: &parentAgentID, Status: "CANCELLED",
+		},
+	}
+	return wrapped, child, delegation
+}
+
+func TestReconcileCancelsRunningDelegatedChildWhenParentIsDurablyTerminal(t *testing.T) {
+	storeFake, child, delegation := terminalParentDelegatedChildFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: child.ID, Status: "RUNNING", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, child.ProjectID, child.ID, 1, "workspace.transfer.completed", map[string]any{"direction": "from_runner"}),
+	}
+	sessions := &cancellingReconcileSessions{store: storeFake.delegationRecoveryStore}
+	processor := &Processor{store: storeFake, sessions: sessions}
+
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: child})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != store.SchedulerReconciliationCancelled || reason != nil {
+		t.Fatalf("outcome=%s reason=%v want CANCELLED", outcome, reason)
+	}
+	if sessions.calls != 1 || storeFake.sessions[0].Status != "CANCELLED" {
+		t.Fatalf("cancel calls=%d sessions=%+v", sessions.calls, storeFake.sessions)
+	}
+	if delegation.ID == "" {
+		t.Fatal("delegation fixture unexpectedly empty")
+	}
+}
+
+func TestReconcileKeepsRunningDelegatedChildFencedWhenRestartCancellationIsUncertain(t *testing.T) {
+	storeFake, child, _ := terminalParentDelegatedChildFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: child.ID, Status: "RUNNING", RunnerID: "runner-1"}}
+	sentinel := errors.New("runner disconnected")
+	sessions := &cancellingReconcileSessions{store: storeFake.delegationRecoveryStore, err: sentinel}
+	processor := &Processor{store: storeFake, sessions: sessions}
+
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: child})
+	if outcome != store.SchedulerReconciliationUnknown || reason != nil || !errors.Is(err, sentinel) {
+		t.Fatalf("outcome=%s reason=%v err=%v want UNKNOWN sentinel", outcome, reason, err)
+	}
+	if sessions.calls != 1 || storeFake.sessions[0].Status != "RUNNING" {
+		t.Fatalf("uncertain cancellation calls=%d sessions=%+v", sessions.calls, storeFake.sessions)
+	}
+}
+
+func TestReconcileCancelsUnstartedDelegatedChildWhenParentIsDurablyTerminal(t *testing.T) {
+	storeFake, child, _ := terminalParentDelegatedChildFixture(t)
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: child})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != store.SchedulerReconciliationCancelled || reason != nil {
+		t.Fatalf("outcome=%s reason=%v want CANCELLED", outcome, reason)
 	}
 }
