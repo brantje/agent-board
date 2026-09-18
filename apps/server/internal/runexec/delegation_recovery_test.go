@@ -8,12 +8,12 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/evidence"
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
 type delegationRecoveryStore struct {
 	processTestStore
 	delegations []store.Delegation
-	events      []store.Event
 	marks       []delegationHandoffMark
 	current     string
 	persisted   string
@@ -67,6 +67,10 @@ func (s *delegationRecoveryStore) ListRunEvents(_ context.Context, projectID, ru
 		}
 	}
 	return result, nil
+}
+
+func (s *delegationRecoveryStore) AcquireWorkspaceExecutionLock(context.Context, string, string) (store.WorkspaceBootstrapLock, error) {
+	return noopWorkspaceLock{}, nil
 }
 
 func (s *delegationRecoveryStore) GetWorkspaceCurrentRevision(context.Context, string, string) (string, error) {
@@ -143,6 +147,65 @@ func TestReconcileRecoversSynchronizedDelegationWithoutEngineReplay(t *testing.T
 	outcome, _, err = processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
 	if err != nil || outcome != store.SchedulerReconciliationUnknown || len(storeFake.marks) != 1 {
 		t.Fatalf("repeated recovery outcome=%s err=%v marks=%+v", outcome, err, storeFake.marks)
+	}
+}
+
+func TestReconcileRecoversDelegationFromRetainedRunnerWorkspace(t *testing.T) {
+	repository := initProcessTestRepository(t)
+	storeFake, run, delegation, safe := delegationRecoveryFixture(t)
+	safe.Workspace.Path = repository
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "COMPLETED", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "tool.completed", evidence.ToolPayload{
+			Name: "delegate_task",
+			ToolCallID: delegation.RequestKey,
+			Input: map[string]any{"targetAgentId": delegation.TargetAgentID, "task": delegation.Task},
+		}),
+	}
+	provenance, err := json.Marshal(executioncontext.Provenance{SchemaVersion: executioncontext.ProvenanceSchemaVersion, Context: safe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeFake.provenance = provenance
+
+	git, err := workspace.NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &successfulSyncClient{payload: runnerTransferPayload(t, repository)}
+	recorder, err := evidence.NewRecorder(storeFake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor := &Processor{
+		store: storeFake,
+		sessions: reconcileSessions{},
+		git: git,
+		events: recorder,
+		runners: runnerSyncConnector{client: client},
+	}
+
+	outcome, _, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != store.SchedulerReconciliationUnknown {
+		t.Fatalf("outcome=%s want UNKNOWN", outcome)
+	}
+	if len(storeFake.marks) != 1 || !client.confirmed {
+		t.Fatalf("marks=%+v runnerConfirmed=%v", storeFake.marks, client.confirmed)
+	}
+	if len(client.directions) != 1 || client.directions[0] != "from_runner" {
+		t.Fatalf("runner recovery directions=%v", client.directions)
+	}
+
+	eventsBefore := len(storeFake.events)
+	outcome, _, err = processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil || outcome != store.SchedulerReconciliationUnknown {
+		t.Fatalf("repeated outcome=%s err=%v", outcome, err)
+	}
+	if len(storeFake.marks) != 1 || len(client.directions) != 1 || len(storeFake.events) != eventsBefore {
+		t.Fatalf("repeated recovery was not idempotent: marks=%+v directions=%v events=%d->%d", storeFake.marks, client.directions, eventsBefore, len(storeFake.events))
 	}
 }
 
