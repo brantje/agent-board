@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -155,6 +156,177 @@ func TestSchedulerReadyForReviewPreservesDoneIssueAndReleasesOwnership(t *testin
 	}
 	if reviewStatus != "PENDING" {
 		t.Fatalf("review status=%s want PENDING", reviewStatus)
+	}
+}
+
+func TestSchedulerReadyForReviewRejectsUnfinishedDelegationUntilContinuation(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	parentJobID, parentLease := claimDelegationParentJob(t, f)
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE workspaces
+		SET base_revision='base-review-guard', current_revision='current-review-guard'
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, f.parentRun.WorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "complete before parent review", RequestKey: "ready-review-guard",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: parentJobID, RunID: f.parentRun.ID,
+		LeaseToken: parentLease, RunStatus: "READY_FOR_REVIEW",
+	}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("READY_FOR_REVIEW with unfinished delegation error=%v want ErrConflict", err)
+	}
+	parent, err := f.store.GetRun(ctx, f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != "RUNNING" {
+		t.Fatalf("guard partially transitioned parent status=%s want RUNNING", parent.Status)
+	}
+	var reviews int
+	if err := f.store.pool.QueryRow(ctx, `SELECT count(*) FROM reviews WHERE run_id=$1`, f.parentRun.ID).Scan(&reviews); err != nil {
+		t.Fatal(err)
+	}
+	if reviews != 0 {
+		t.Fatalf("premature Review count=%d want 0", reviews)
+	}
+
+	if err := f.store.MarkDelegationWorkspaceHandoffReady(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: parentJobID, RunID: f.parentRun.ID,
+		LeaseToken: parentLease, RunStatus: "PAUSED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	childAdmission, err := f.store.AdmitNextJob(ctx, "review-guard-child", time.Minute, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if childAdmission == nil || childAdmission.Run.ID != created.DelegatedRun.ID {
+		t.Fatalf("child admission=%+v want %s", childAdmission, created.DelegatedRun.ID)
+	}
+	if _, err := f.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: childAdmission.Job.ID, RunID: childAdmission.Run.ID,
+		LeaseToken: childAdmission.Lease.LeaseToken, RunStatus: "RUNNING",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: childAdmission.Job.ID, RunID: childAdmission.Run.ID,
+		LeaseToken: childAdmission.Lease.LeaseToken, RunStatus: "COMPLETED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := f.store.GetDelegationByRun(ctx, f.project.ID, created.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Outcome == nil || *persisted.Outcome != store.DelegationOutcomeSucceeded || persisted.ContinuationJobID == nil {
+		t.Fatalf("delegation did not terminalize normally: %+v", persisted)
+	}
+
+	parentAdmission, err := f.store.AdmitNextJob(ctx, "review-guard-parent", time.Minute, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentAdmission == nil || parentAdmission.Run.ID != f.parentRun.ID || parentAdmission.Job.Kind != "RESUME" {
+		t.Fatalf("parent continuation admission=%+v", parentAdmission)
+	}
+	if _, err := f.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: parentAdmission.Job.ID, RunID: parentAdmission.Run.ID,
+		LeaseToken: parentAdmission.Lease.LeaseToken, RunStatus: "RUNNING",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	final, err := f.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: parentAdmission.Job.ID, RunID: parentAdmission.Run.ID,
+		LeaseToken: parentAdmission.Lease.LeaseToken, RunStatus: "READY_FOR_REVIEW",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if final.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("final parent status=%s want READY_FOR_REVIEW", final.Status)
+	}
+	if err := f.store.pool.QueryRow(ctx, `SELECT count(*) FROM reviews WHERE run_id=$1`, f.parentRun.ID).Scan(&reviews); err != nil {
+		t.Fatal(err)
+	}
+	if reviews != 1 {
+		t.Fatalf("final Review count=%d want 1", reviews)
+	}
+}
+
+func TestSchedulerReadyForReviewRaceWithDelegationRequestCannotCommitBoth(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	parentJobID, parentLease := claimDelegationParentJob(t, f)
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE workspaces
+		SET base_revision='base-review-race', current_revision='current-review-race'
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, f.parentRun.WorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var readyErr, delegationErr error
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		_, readyErr = f.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+			ProjectID: f.project.ID, JobID: parentJobID, RunID: f.parentRun.ID,
+			LeaseToken: parentLease, RunStatus: "READY_FOR_REVIEW",
+		})
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		_, delegationErr = f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+			ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+			Task: "race parent review", RequestKey: "ready-review-race",
+		})
+	}()
+	close(start)
+	wg.Wait()
+
+	if (readyErr == nil) == (delegationErr == nil) {
+		t.Fatalf("race results readyErr=%v delegationErr=%v want exactly one success", readyErr, delegationErr)
+	}
+	if readyErr != nil && !errors.Is(readyErr, store.ErrConflict) {
+		t.Fatalf("READY_FOR_REVIEW race error=%v want ErrConflict or nil", readyErr)
+	}
+	if delegationErr != nil && !errors.Is(delegationErr, store.ErrConflict) {
+		t.Fatalf("delegation race error=%v want ErrConflict or nil", delegationErr)
+	}
+
+	var reviews, unfinished int
+	if err := f.store.pool.QueryRow(ctx, `SELECT count(*) FROM reviews WHERE run_id=$1`, f.parentRun.ID).Scan(&reviews); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT count(*) FROM delegations
+		WHERE project_id=$1 AND parent_run_id=$2 AND outcome IS NULL
+	`, f.project.ID, f.parentRun.ID).Scan(&unfinished); err != nil {
+		t.Fatal(err)
+	}
+	if reviews == 1 && unfinished != 0 {
+		t.Fatalf("race committed Review with unfinished delegation: reviews=%d unfinished=%d", reviews, unfinished)
+	}
+	if unfinished == 1 && reviews != 0 {
+		t.Fatalf("race committed unfinished delegation with Review: reviews=%d unfinished=%d", reviews, unfinished)
 	}
 }
 
