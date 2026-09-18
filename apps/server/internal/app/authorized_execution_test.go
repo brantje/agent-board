@@ -324,3 +324,26 @@ func (c *requestCapturingClient) Start(ctx context.Context, sessionID string, re
 	c.request = request
 	return c.fakeExecutionClient.Start(ctx, sessionID, request)
 }
+
+func TestAuthorizedExecutionAdmissionPromptUsesDurableSessionIdentity(t *testing.T) {
+	lowLevel, storeFake, _ := executionServiceFixture(t)
+	service, err := NewAuthorizedExecutionSessionService(lowLevel, &fakeExecutionPreparer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	original, err := service.GetOrCreateAdmissionPrompt(t.Context(), "project-1", "session-1", "prompt from TODO / R1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original != "prompt from TODO / R1" {
+		t.Fatalf("first admission prompt=%q", original)
+	}
+	recovered, err := service.GetOrCreateAdmissionPrompt(t.Context(), "project-1", "session-1", "prompt from IN_PROGRESS / R2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recovered != original || storeFake.admissionPrompt != original {
+		t.Fatalf("recovered prompt=%q durable=%q want original=%q", recovered, storeFake.admissionPrompt, original)
+	}
+}

@@ -678,3 +678,36 @@ func TestProcessLauncherAttachFailureBoundaries(t *testing.T) {
 		}
 	})
 }
+
+type admissionLauncherSessions struct {
+	failingLauncherSessions
+	projectID string
+	sessionID string
+	candidate string
+	admitted  string
+}
+
+func (s *admissionLauncherSessions) GetOrCreateAdmissionPrompt(_ context.Context, projectID, sessionID, candidate string) (string, error) {
+	s.projectID = projectID
+	s.sessionID = sessionID
+	s.candidate = candidate
+	return s.admitted, nil
+}
+
+func TestProcessLauncherForwardsExecutionAdmissionPrompt(t *testing.T) {
+	sessions := &admissionLauncherSessions{admitted: "original prompt"}
+	launcher := &processLauncher{
+		sessions: sessions,
+		scope: evidence.RunScope{ProjectID: "project-1", IssueID: "issue-1", RunID: "run-1"},
+	}
+	got, err := launcher.GetOrCreateAdmissionPrompt(t.Context(), "session-1", "current prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "original prompt" {
+		t.Fatalf("admission prompt=%q want original prompt", got)
+	}
+	if sessions.projectID != "project-1" || sessions.sessionID != "session-1" || sessions.candidate != "current prompt" {
+		t.Fatalf("forwarded admission identity project=%q session=%q candidate=%q", sessions.projectID, sessions.sessionID, sessions.candidate)
+	}
+}
