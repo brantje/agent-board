@@ -321,6 +321,15 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				return engine.Result{}, err
 			}
 			if err := delegationTools.Handle(ctx, eventRead.event, native, session.ID, request.Delegation); err != nil {
+				// A completed native delegate_task is durable recovery evidence. Persist
+				// its ordinary tool.completed activity before returning the handoff
+				// signal so a crash after Engine shutdown can still correlate the
+				// canonical delegation request without replaying uncertain execution.
+				if errors.Is(err, engine.ErrDelegationHandoff) {
+					if activityErr := state.handleEvent(ctx, native, eventRead.event); activityErr != nil {
+						return engine.Result{}, activityErr
+					}
+				}
 				return engine.Result{}, err
 			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {

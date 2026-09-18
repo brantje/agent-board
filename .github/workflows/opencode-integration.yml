@@ -134,7 +134,7 @@ jobs:
         run: |
           set -euo pipefail
           if timeout --signal=TERM --kill-after=10s 600s \
-            go test -count=1 -failfast -run '^(TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion)|TestOpenCodeExternalRunnerGoldenPath)$' -v ./internal/runexec; then
+            go test -count=1 -failfast -run '^(TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion|OpenRouterDelegationEndToEnd)|TestOpenCodeExternalRunnerGoldenPath)$' -v ./internal/runexec; then
             exit 0
           fi
 

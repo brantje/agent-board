@@ -359,25 +359,10 @@ Run:
     currentBranch:
       type: [string, 'null']
       description: Live Issue Workspace Git checkout for this Run.
-DelegationCreate:
-  type: object
-  additionalProperties: false
-  required: [targetAgentId, task, requestKey]
-  properties:
-    targetAgentId: {type: string, format: uuid}
-    task:
-      type: string
-      minLength: 1
-      maxLength: 16384
-      description: Explicit bounded task for the delegated Run.
-    requestKey:
-      type: string
-      minLength: 1
-      description: Caller-stable idempotency key scoped to the parent Run.
 Delegation:
   type: object
   additionalProperties: false
-  required: [id, projectId, issueId, parentRunId, parentAgentId, targetAgentId, task, delegatedRunId, requestKey, createdAt, updatedAt]
+  required: [id, projectId, issueId, parentRunId, parentAgentId, targetAgentId, task, delegatedRunId, workspaceAccess, requestKey, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
@@ -387,6 +372,10 @@ Delegation:
     targetAgentId: {type: string, format: uuid}
     task: {type: string}
     delegatedRunId: {type: string, format: uuid}
+    workspaceAccess:
+      type: string
+      enum: [WRITE]
+      description: Effective delegated access to the shared Issue Workspace. v0.1 supports serialized WRITE only.
     requestKey: {type: string}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}

@@ -43,7 +43,7 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	parentAgent.AllowDelegation = true
-	parentAgent.RoleInstructions = "Immediately call delegate_task with targetAgentId " + target.ID + " and task 'Create delegated-result.txt containing exactly delegated-run-ok with no trailing newline. Do not modify any other file.' Do not change Issue status or perform that file task yourself. After the delegation call succeeds, use OpenCode's native Question capability to ask one blocking single-choice Question 'May the parent stop now?' with the only option 'yes', then wait."
+	parentAgent.RoleInstructions = "Immediately call delegate_task with targetAgentId " + target.ID + " and task 'Create delegated-result.txt containing exactly delegated-run-ok with no trailing newline. Do not modify any other file.' Do not change Issue status or perform that file task yourself. After the delegation tool completes, stop; do not ask a Question or perform additional work."
 	if _, err := fixture.services.ControlPlane.UpdateAgent(fixture.ctx, &scope, parentAgent); err != nil {
 		t.Fatal(err)
 	}
@@ -53,18 +53,11 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	if delegation.ParentAgentID != parentAgent.ID || delegation.TargetAgentID != target.ID || delegation.DelegatedRunID == "" {
 		t.Fatalf("delegation=%+v", delegation)
 	}
+	parentPaused := waitForOpenCodeRunStatus(t, fixture, project.ID, parentRun.ID, "PAUSED")
 	assertOpenCodeDelegationToolEvidence(t, fixture, project.ID, parentRun.ID)
-
-	// #139 owns explicit Workspace handoff. Phase 1 deliberately reuses the
-	// Issue Workspace, so release the parent after its durable request and let
-	// the normal scheduler admit the child without a test-only execution path.
-	if err := fixture.services.CancelRun(fixture.ctx, project.ID, parentRun.ID); err != nil {
-		parent, getErr := fixture.database.GetRun(fixture.ctx, project.ID, parentRun.ID)
-		if getErr != nil || parent.Status != "CANCELLED" {
-			t.Fatalf("cancel parent after delegation: %v (run=%+v getErr=%v)", err, parent, getErr)
-		}
+	if parentPaused.WorkspaceID != parentRun.WorkspaceID {
+		t.Fatalf("paused parent Workspace=%s want %s", parentPaused.WorkspaceID, parentRun.WorkspaceID)
 	}
-	waitForOpenCodeRunStatus(t, fixture, project.ID, parentRun.ID, "CANCELLED")
 
 	beforeChild, err := fixture.services.ControlPlane.GetIssue(fixture.ctx, project.ID, parentRun.IssueID)
 	if err != nil {
@@ -88,6 +81,7 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	}
 	assertOpenCodeWorkspaceFile(t, fixture.ctx, fixture.database, project.ID, child.WorkspaceID, "delegated-result.txt", "delegated-run-ok")
 	assertOpenCodeServerSession(t, fixture.ctx, fixture.database, project.ID, child.ID, false)
+	assertOpenCodeDelegationHandoffOrder(t, fixture, project.ID, parentRun.ID, child.ID)
 
 	persisted, err := fixture.database.GetDelegationByRun(fixture.ctx, project.ID, child.ID)
 	if err != nil {
@@ -199,6 +193,66 @@ func assertOpenCodeDelegationToolEvidence(t *testing.T, fixture *openCodeIntegra
 		}
 	}
 	t.Fatalf("parent Run has no durable delegate_task completion evidence: %v", eventTypes(events))
+}
+
+func assertOpenCodeDelegationHandoffOrder(t *testing.T, fixture *openCodeIntegrationFixture, projectID, parentRunID, childRunID string) {
+	t.Helper()
+	parentEvents, err := fixture.database.ListRunEvents(fixture.ctx, projectID, parentRunID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var delegateCompleted, workspaceReturned, paused *store.Event
+	for index := range parentEvents {
+		event := &parentEvents[index]
+		switch event.Type {
+		case "tool.completed":
+			var payload struct {
+				Name string `json:"name"`
+			}
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.Name == "delegate_task" {
+				delegateCompleted = event
+			}
+		case "workspace.transfer.completed":
+			var payload struct {
+				Direction string `json:"direction"`
+			}
+			if json.Unmarshal(event.Payload, &payload) == nil && (payload.Direction == "from_runner" || payload.Direction == "git_publish") {
+				workspaceReturned = event
+			}
+		case "run.paused":
+			paused = event
+		}
+	}
+	if delegateCompleted == nil || workspaceReturned == nil || paused == nil ||
+		delegateCompleted.Sequence == nil || workspaceReturned.Sequence == nil || paused.Sequence == nil {
+		t.Fatalf("missing durable phase-2 handoff evidence: %v", eventTypes(parentEvents))
+	}
+	if !(*delegateCompleted.Sequence < *workspaceReturned.Sequence && *workspaceReturned.Sequence < *paused.Sequence) {
+		t.Fatalf(
+			"phase-2 parent event order delegate=%d workspace=%d paused=%d",
+			*delegateCompleted.Sequence,
+			*workspaceReturned.Sequence,
+			*paused.Sequence,
+		)
+	}
+
+	childEvents, err := fixture.database.ListRunEvents(fixture.ctx, projectID, childRunID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var childStarted *store.Event
+	for index := range childEvents {
+		if childEvents[index].Type == "run.started" {
+			childStarted = &childEvents[index]
+			break
+		}
+	}
+	if childStarted == nil {
+		t.Fatalf("delegated child has no run.started event: %v", eventTypes(childEvents))
+	}
+	if childStarted.OccurredAt.Before(paused.OccurredAt) {
+		t.Fatalf("delegated child started before parent PAUSED handoff: child=%s parent=%s", childStarted.OccurredAt, paused.OccurredAt)
+	}
 }
 
 func assertNoAuthoritativeDelegationTools(t *testing.T, fixture *openCodeIntegrationFixture, projectID, runID string) {

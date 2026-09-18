@@ -61,6 +61,11 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 			return store.SchedulerMutationResult{}, err
 		}
 	}
+	if input.RunStatus == "PAUSED" {
+		if err := releaseReadyDelegationWorkspaceHandoffs(ctx, tx, run); err != nil {
+			return store.SchedulerMutationResult{}, err
+		}
+	}
 
 	if release {
 		if _, err := tx.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE project_id=$1 AND job_id=$2`, input.ProjectID, input.JobID); err != nil {
@@ -82,6 +87,44 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 		return store.SchedulerMutationResult{}, err
 	}
 	return store.SchedulerMutationResult{Run: run}, nil
+}
+
+func releaseReadyDelegationWorkspaceHandoffs(ctx context.Context, tx pgx.Tx, parent store.Run) error {
+	if _, err := tx.Exec(ctx, `
+		UPDATE scheduler_jobs AS job
+		SET wait_reason=NULL, available_at=now(), updated_at=now()
+		FROM delegations AS delegation, runs AS child
+		WHERE delegation.project_id=$1
+		  AND delegation.parent_run_id=$2
+		  AND delegation.issue_id=$3
+		  AND child.project_id=delegation.project_id
+		  AND child.id=delegation.delegated_run_id
+		  AND child.issue_id=$3
+		  AND child.workspace_id=$4
+		  AND child.status='QUEUED'
+		  AND job.project_id=delegation.project_id
+		  AND job.run_id=delegation.delegated_run_id
+		  AND job.kind='START'
+		  AND job.state='QUEUED'
+		  AND job.wait_reason=$5
+	`, parent.ProjectID, parent.ID, parent.IssueID, parent.WorkspaceID, store.DelegationWorkspaceHandoffReadyReason); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `
+		UPDATE runs AS child
+		SET queue_reason=NULL, updated_at=now()
+		FROM delegations AS delegation
+		WHERE delegation.project_id=$1
+		  AND delegation.parent_run_id=$2
+		  AND delegation.issue_id=$3
+		  AND child.project_id=delegation.project_id
+		  AND child.id=delegation.delegated_run_id
+		  AND child.issue_id=$3
+		  AND child.workspace_id=$4
+		  AND child.status='QUEUED'
+		  AND child.queue_reason=$5
+	`, parent.ProjectID, parent.ID, parent.IssueID, parent.WorkspaceID, store.DelegationWorkspaceHandoffReadyReason)
+	return err
 }
 
 func createPendingReview(ctx context.Context, tx pgx.Tx, run store.Run) error {

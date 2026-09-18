@@ -62,7 +62,7 @@ func TestDelegationInspectionRoutesAreReadOnly(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &listed); err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || listed[0].ID != delegationFixture().ID {
+	if len(listed) != 1 || listed[0].ID != delegationFixture().ID || listed[0].WorkspaceAccess != store.DelegationWorkspaceAccessWrite {
 		t.Fatalf("listed=%+v", listed)
 	}
 
@@ -76,7 +76,7 @@ func TestDelegationInspectionRoutesAreReadOnly(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &child); err != nil {
 		t.Fatal(err)
 	}
-	if child.ParentRunID != runID || child.DelegatedRunID != delegatedRunID {
+	if child.ParentRunID != runID || child.DelegatedRunID != delegatedRunID || child.WorkspaceAccess != store.DelegationWorkspaceAccessWrite {
 		t.Fatalf("child=%+v", child)
 	}
 

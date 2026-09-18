@@ -131,6 +131,10 @@ func (s *Store) RequestDelegation(ctx context.Context, input store.RequestDelega
 	if err != nil {
 		return store.RequestDelegationResult{}, err
 	}
+	run, job, err = holdDelegatedRunForWorkspaceHandoff(ctx, tx, run, job)
+	if err != nil {
+		return store.RequestDelegationResult{}, err
+	}
 	delegation, err := scanDelegation(tx.QueryRow(ctx, `
 		INSERT INTO delegations (project_id, issue_id, parent_run_id, parent_agent_id, target_agent_id, task, delegated_run_id, request_key)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -144,6 +148,117 @@ func (s *Store) RequestDelegation(ctx context.Context, input store.RequestDelega
 		return store.RequestDelegationResult{}, err
 	}
 	return store.RequestDelegationResult{Delegation: delegation, DelegatedRun: run, SchedulerJob: job, Events: []store.Event{event}}, nil
+}
+
+func holdDelegatedRunForWorkspaceHandoff(ctx context.Context, tx pgx.Tx, run store.Run, job store.SchedulerJob) (store.Run, store.SchedulerJob, error) {
+	var err error
+	run, err = scanRun(tx.QueryRow(ctx, `
+		UPDATE runs
+		SET queue_reason=$3, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND status='QUEUED'
+		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+	`, run.ProjectID, run.ID, store.DelegationWorkspaceHandoffWaitReason))
+	if err != nil {
+		return store.Run{}, store.SchedulerJob{}, err
+	}
+	job, err = scanSchedulerJob(tx.QueryRow(ctx, `
+		UPDATE scheduler_jobs
+		SET wait_reason=$4,
+		    available_at='9999-12-31 23:59:59+00'::timestamptz,
+		    updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND run_id=$3 AND state='QUEUED'
+		RETURNING id::text, project_id::text, run_id::text, kind, state, wait_reason,
+		          idempotency_key, available_at, created_at, updated_at
+	`, job.ProjectID, job.ID, job.RunID, store.DelegationWorkspaceHandoffWaitReason))
+	if err != nil {
+		return store.Run{}, store.SchedulerJob{}, err
+	}
+	return run, job, nil
+}
+
+// MarkDelegationWorkspaceHandoffReady records that the authoritative parent
+// has safely returned its Workspace state. The delegated START job remains
+// non-runnable until the scheduler atomically transitions the parent to PAUSED.
+func (s *Store) MarkDelegationWorkspaceHandoffReady(ctx context.Context, projectID, parentRunID, delegationID, delegatedRunID string) error {
+	projectID = strings.TrimSpace(projectID)
+	parentRunID = strings.TrimSpace(parentRunID)
+	delegationID = strings.TrimSpace(delegationID)
+	delegatedRunID = strings.TrimSpace(delegatedRunID)
+	if projectID == "" || parentRunID == "" || delegationID == "" || delegatedRunID == "" {
+		return store.ErrInvalidArgument
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	delegation, err := scanDelegation(tx.QueryRow(ctx, `
+		SELECT `+delegationSelectColumns+`
+		FROM delegations
+		WHERE project_id=$1 AND id=$2 AND parent_run_id=$3 AND delegated_run_id=$4
+		FOR UPDATE
+	`, projectID, delegationID, parentRunID, delegatedRunID))
+	if err != nil {
+		return err
+	}
+	parent, err := scanRun(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		       status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+		FROM runs WHERE project_id=$1 AND id=$2 FOR UPDATE
+	`, projectID, parentRunID))
+	if err != nil {
+		return err
+	}
+	delegated, err := scanRun(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		       status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+		FROM runs WHERE project_id=$1 AND id=$2 FOR UPDATE
+	`, projectID, delegatedRunID))
+	if err != nil {
+		return err
+	}
+	if parent.IssueID != delegation.IssueID || delegated.IssueID != delegation.IssueID || parent.WorkspaceID != delegated.WorkspaceID {
+		return store.ErrConflict
+	}
+
+	job, err := scanSchedulerJob(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, run_id::text, kind, state, wait_reason,
+		       idempotency_key, available_at, created_at, updated_at
+		FROM scheduler_jobs
+		WHERE project_id=$1 AND run_id=$2 AND kind='START'
+		ORDER BY created_at, id
+		LIMIT 1
+		FOR UPDATE
+	`, projectID, delegatedRunID))
+	if err != nil {
+		return err
+	}
+	if job.WaitReason != nil && *job.WaitReason == store.DelegationWorkspaceHandoffReadyReason {
+		return tx.Commit(ctx)
+	}
+	if parent.Status != "RUNNING" || delegated.Status != "QUEUED" || job.State != "QUEUED" ||
+		job.WaitReason == nil || *job.WaitReason != store.DelegationWorkspaceHandoffWaitReason {
+		return store.ErrConflict
+	}
+
+	if _, err := tx.Exec(ctx, `
+		UPDATE scheduler_jobs
+		SET wait_reason=$4, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND run_id=$3 AND state='QUEUED' AND wait_reason=$5
+	`, projectID, job.ID, delegatedRunID, store.DelegationWorkspaceHandoffReadyReason, store.DelegationWorkspaceHandoffWaitReason); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE runs
+		SET queue_reason=$3, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND status='QUEUED' AND queue_reason=$4
+	`, projectID, delegatedRunID, store.DelegationWorkspaceHandoffReadyReason, store.DelegationWorkspaceHandoffWaitReason); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 func existingDelegationRequest(ctx context.Context, tx pgx.Tx, input store.RequestDelegationCommand) (store.RequestDelegationResult, bool, error) {

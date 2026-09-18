@@ -128,14 +128,20 @@ func (p *Processor) publishRemoteGitWorkspaceAttempt(ctx context.Context, safe e
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": err.Error()}), nil, nil)
 		return fmt.Errorf("persist published Issue revision: %w", err)
 	}
+	// The published revision is already authoritative at this point. Persist
+	// that fact before acknowledging Runner cleanup so a lost acknowledgement
+	// cannot erase the recovery boundary.
+	if err := p.record(ctx, safe, "workspace.transfer.completed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{
+		"revision": published.Revision, "bytesTransferred": len(payload), "totalBytes": len(payload),
+	}), nil, nil); err != nil {
+		return err
+	}
 	if err := client.ConfirmTransferApplied(ctx, sessionID, transferID); err != nil {
 		wrapped := fmt.Errorf("acknowledge persisted remote Git publication: %w", err)
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{"reason": wrapped.Error()}), nil, nil)
 		return wrapped
 	}
-	return p.record(ctx, safe, "workspace.transfer.completed", p.transferEventPayload(ctx, runnerID, transferID, runnerprotocol.TransferDirectionGitPublish, map[string]any{
-		"revision": published.Revision, "bytesTransferred": len(payload), "totalBytes": len(payload),
-	}), nil, nil)
+	return nil
 }
 
 func (p *Processor) ensureRemoteWorkspaceReady(ctx context.Context, safe executioncontext.SafeContext, startRevision string) error {

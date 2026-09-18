@@ -155,17 +155,18 @@ type RunDTO struct {
 }
 
 type DelegationDTO struct {
-	ID             string    `json:"id"`
-	ProjectID      string    `json:"projectId"`
-	IssueID        string    `json:"issueId"`
-	ParentRunID    string    `json:"parentRunId"`
-	ParentAgentID  string    `json:"parentAgentId"`
-	TargetAgentID  string    `json:"targetAgentId"`
-	Task           string    `json:"task"`
-	DelegatedRunID string    `json:"delegatedRunId"`
-	RequestKey     string    `json:"requestKey"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID              string    `json:"id"`
+	ProjectID       string    `json:"projectId"`
+	IssueID         string    `json:"issueId"`
+	ParentRunID     string    `json:"parentRunId"`
+	ParentAgentID   string    `json:"parentAgentId"`
+	TargetAgentID   string    `json:"targetAgentId"`
+	Task            string    `json:"task"`
+	DelegatedRunID  string    `json:"delegatedRunId"`
+	WorkspaceAccess string    `json:"workspaceAccess"`
+	RequestKey      string    `json:"requestKey"`
+	CreatedAt       time.Time `json:"createdAt"`
+	UpdatedAt       time.Time `json:"updatedAt"`
 }
 
 type CreateProjectRequest struct {
@@ -243,7 +244,7 @@ type UpdateProviderRequest struct {
 	Name          *string          `json:"name"`
 	Kind          *string          `json:"kind"`
 	BaseURL       *string          `json:"baseUrl"`
-	CredentialRef *string          `json:"credentialRef"`
+	CredentialRef *string         `json:"credentialRef"`
 	Enabled       *bool            `json:"enabled"`
 	SafeMetadata  *json.RawMessage `json:"safeMetadata"`
 }
@@ -282,12 +283,6 @@ type CreateAgentRequest struct {
 	ConcurrencyLimit int             `json:"concurrencyLimit"`
 	AllowDelegation  bool            `json:"allowDelegation"`
 	State            string          `json:"state"`
-}
-
-type CreateDelegationRequest struct {
-	TargetAgentID string `json:"targetAgentId"`
-	Task          string `json:"task"`
-	RequestKey    string `json:"requestKey"`
 }
 
 type AssignmentRequest struct {
