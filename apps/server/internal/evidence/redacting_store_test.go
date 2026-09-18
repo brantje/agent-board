@@ -203,3 +203,37 @@ func TestRedactingStoreReportsMissingRunnerFencingCapabilities(t *testing.T) {
 		t.Fatal("expected missing runner lookup capability error")
 	}
 }
+
+type inactiveCancellationCapabilityStore struct {
+	store.ControlPlaneStore
+	projectID string
+	runID     string
+	result    store.RunCancellationResult
+	err       error
+}
+
+func (s *inactiveCancellationCapabilityStore) CancelInactiveRun(_ context.Context, projectID, runID string) (store.RunCancellationResult, error) {
+	s.projectID = projectID
+	s.runID = runID
+	return s.result, s.err
+}
+
+func TestRedactingStorePreservesInactiveRunCancellationCapability(t *testing.T) {
+	want := store.RunCancellationResult{Run: store.Run{ID: "run-1", ProjectID: "project-1", Status: "CANCELLED"}}
+	base := &inactiveCancellationCapabilityStore{result: want}
+	wrapped := NewRedactingStore(base, redaction.NewRegistry())
+
+	got, err := wrapped.CancelInactiveRun(t.Context(), "project-1", "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Run.ID != want.Run.ID || got.Run.Status != "CANCELLED" || base.projectID != "project-1" || base.runID != "run-1" {
+		t.Fatalf("result=%+v forwarded project=%q run=%q", got, base.projectID, base.runID)
+	}
+
+	missing := NewRedactingStore(&captureStore{}, redaction.NewRegistry())
+	if _, err := missing.CancelInactiveRun(t.Context(), "project-1", "run-1"); err == nil {
+		t.Fatal("expected missing inactive Run cancellation capability error")
+	}
+}
+
