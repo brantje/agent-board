@@ -90,9 +90,10 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	if persisted.ID != delegation.ID || persisted.ParentRunID != parentRun.ID || persisted.Task != delegation.Task {
 		t.Fatalf("persisted child lineage=%+v want %+v", persisted, delegation)
 	}
-	if persisted.Outcome == nil || *persisted.Outcome != store.DelegationOutcomeSucceeded || persisted.ResultSummary == nil || strings.TrimSpace(*persisted.ResultSummary) == "" || persisted.WorkspaceChangesAccepted == nil || !*persisted.WorkspaceChangesAccepted || persisted.ContinuationJobID == nil || persisted.CompletedAt == nil {
+	if persisted.Outcome == nil || *persisted.Outcome != store.DelegationOutcomeSucceeded || persisted.ResultSummary == nil || strings.TrimSpace(*persisted.ResultSummary) == "" || persisted.ResultEventID == nil || persisted.WorkspaceChangesAccepted == nil || !*persisted.WorkspaceChangesAccepted || persisted.ContinuationJobID == nil || persisted.CompletedAt == nil {
 		t.Fatalf("persisted delegated result=%+v", persisted)
 	}
+	assertOpenCodeDelegationVisibleResult(t, fixture, project.ID, child.ID, persisted)
 	if _, err := fixture.database.GetReviewByRun(fixture.ctx, project.ID, child.ID); err == nil {
 		t.Fatal("delegated child unexpectedly created a Review")
 	} else if err != store.ErrNotFound {
@@ -215,6 +216,40 @@ func waitForOpenCodeTerminalRun(t *testing.T, fixture *openCodeIntegrationFixtur
 		case <-ticker.C:
 		}
 	}
+}
+
+func assertOpenCodeDelegationVisibleResult(t *testing.T, fixture *openCodeIntegrationFixture, projectID, childRunID string, delegation store.Delegation) {
+	t.Helper()
+	if delegation.ResultSummary == nil || delegation.ResultEventID == nil {
+		t.Fatalf("delegation result lacks summary/event reference: %+v", delegation)
+	}
+	events, err := fixture.database.ListRunEvents(fixture.ctx, projectID, childRunID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.ID != *delegation.ResultEventID {
+			continue
+		}
+		if event.Type != "agent.message" {
+			t.Fatalf("delegation result event type=%s want agent.message", event.Type)
+		}
+		var payload struct {
+			Message string `json:"message"`
+			Kind    string `json:"kind"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode delegation result event: %v", err)
+		}
+		if payload.Kind != "message" {
+			t.Fatalf("delegation result event kind=%q want message", payload.Kind)
+		}
+		if strings.TrimSpace(payload.Message) != strings.TrimSpace(*delegation.ResultSummary) {
+			t.Fatalf("delegation result summary=%q event message=%q", *delegation.ResultSummary, payload.Message)
+		}
+		return
+	}
+	t.Fatalf("delegation result event %s missing from child evidence", *delegation.ResultEventID)
 }
 
 func assertOpenCodeDelegationResultEvidence(t *testing.T, fixture *openCodeIntegrationFixture, projectID, parentRunID, childRunID string) {

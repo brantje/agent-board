@@ -113,6 +113,52 @@ func TestDelegatedCompletionPersistsResultAndParentContinuationAtomically(t *tes
 }
 
 
+func TestDelegatedCompletionIgnoresLaterReasoningMessageForResult(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "result-visible-message")
+	ctx := t.Context()
+	childRunID := created.DelegatedRun.ID
+	workspaceID, targetAgentID := created.DelegatedRun.WorkspaceID, f.target.ID
+
+	visible, err := f.store.AppendEvent(ctx, store.Event{
+		Type: "agent.message", ProjectID: f.project.ID, IssueID: &f.issue.ID,
+		RunID: &childRunID, AgentID: &targetAgentID, WorkspaceID: &workspaceID,
+		Actor: store.EmptyObject, Payload: []byte(`{"message":"final delegated finding","kind":"message","source":"opencode"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reasoning, err := f.store.AppendEvent(ctx, store.Event{
+		Type: "agent.message", ProjectID: f.project.ID, IssueID: &f.issue.ID,
+		RunID: &childRunID, AgentID: &targetAgentID, WorkspaceID: &workspaceID,
+		Actor: store.EmptyObject, Payload: []byte(`{"message":"later reasoning trace","kind":"reasoning","source":"opencode"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease, RunStatus: "COMPLETED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.ResultSummary == nil || *delegation.ResultSummary != "final delegated finding" {
+		t.Fatalf("delegation result summary=%v want visible message", delegation.ResultSummary)
+	}
+	if delegation.ResultEventID == nil || *delegation.ResultEventID != visible.ID {
+		t.Fatalf("delegation result event=%v want visible message event %s", delegation.ResultEventID, visible.ID)
+	}
+	if *delegation.ResultEventID == reasoning.ID {
+		t.Fatalf("delegation selected reasoning event %s as result", reasoning.ID)
+	}
+	if delegation.ContinuationJobID == nil {
+		t.Fatalf("delegated completion did not create parent continuation: %+v", delegation)
+	}
+}
+
 func TestDelegatedCompletionReconciliationCreatesParentContinuationExactlyOnce(t *testing.T) {
 	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "result-reconciliation")
 	ctx := t.Context()

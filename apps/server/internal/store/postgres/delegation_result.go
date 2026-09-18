@@ -159,10 +159,19 @@ func delegatedResultEvidence(ctx context.Context, tx pgx.Tx, child store.Run, fa
 		         ELSE ''
 		       END
 		FROM events
-		WHERE project_id=$1 AND run_id=$2 AND type IN ('agent.message', 'run.failed')
+		WHERE project_id=$1
+		  AND run_id=$2
+		  AND (
+			($3='FAILED' AND type='run.failed')
+			OR (
+				$3<>'FAILED'
+				AND type='agent.message'
+				AND COALESCE(NULLIF(BTRIM(payload->>'kind'), ''), 'message')='message'
+			)
+		  )
 		ORDER BY sequence DESC
 		LIMIT 1
-	`, child.ProjectID, child.ID).Scan(&eventID, &summary)
+	`, child.ProjectID, child.ID, child.Status).Scan(&eventID, &summary)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return "", nil, err
 	}
