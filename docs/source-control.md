@@ -107,7 +107,15 @@ The Runner retains the transferred Workspace until the server has durably import
 
 ## Remote Git Project sources
 
-A `source_type=git` Project uses the Project's `clone_url` and optional `source_ref`. The Runner reaches the repository with the Git credentials already configured on that Runner host. Agent Board does not add provider-specific source credentials or source-provider APIs as part of this architecture.
+A `source_type=git` Project uses the Project's `clone_url` and optional `source_ref`.
+
+The existing generic Git path remains provider-neutral: the selected Runner reaches the repository with Git credentials already configured on that Runner host.
+
+Tier-1 Source Provider work adds a connected remote-source path for GitHub, GitLab and Forgejo. A connected Project selects a durable Source Connection + Source Repository identity. Trusted server code resolves repository-scoped credentials and injects them ephemerally through the existing execution-context/secret boundary so any eligible Runner can clone/fetch/push without permanent machine-specific credentials.
+
+Provider credentials never become part of the durable clone URL, Runner registration, Git config, Event payloads or execution provenance. Source Provider authentication changes only the remote synchronization edge; it does not change the Issue branch, Workspace, scheduler, Run, Execution Session or Review model.
+
+See `source-providers.md`.
 
 Remote execution does not transfer the full Project Workspace from the server. The selected Runner maintains a bare repository cache and a per-Run worktree:
 
@@ -182,7 +190,13 @@ Approving one Issue must not mutate another Issue branch. Local delivery changes
 
 For a local Project, the Project Workspace is the target-branch integration truth inside Agent Board. Approval integrates the pinned reviewed commit into that target under the Project lock.
 
-For a remote Git Project, publishing `agent-board/<issue-key>` is **not** target-branch integration. PR/MR provider APIs and remote target integration are outside #72. Internal Review approval must not pretend that publishing an Issue branch merged the repository's target branch.
+For a remote Git Project, publishing `agent-board/<issue-key>` is **not** target-branch integration.
+
+For a generic Git source, Agent Board has no provider-owned delivery object and must not pretend that internal Review approval merged the remote target.
+
+For a connected GitHub, GitLab or Forgejo source, the existing Issue branch becomes the head branch of a provider Change Request (GitHub/Forgejo PR or GitLab MR). The provider target branch remains integration truth. Agent Board records/reconciles the external Change Request and merge state through the Source Provider boundary without creating a second source-state model.
+
+Internal Review approval alone never proves remote integration.
 
 ## Failure, cancellation and recovery
 
@@ -206,6 +220,14 @@ Earlier #15-era documentation described candidate filesystem snapshots, preserva
 
 The authoritative code state is now normal Git branch/commit history. Evidence remains evidence; it does not duplicate source state.
 
-## Future source-provider integrations
+## Source Provider integrations
 
-Future GitHub/GitLab/Bitbucket/Forgejo integrations may add Source Connections and PR/MR operations. They must build on the same Project source contract, durable Issue branch, Review SHA identity and execution lifecycle rather than introducing a second synchronization or code-state model.
+GitHub, GitLab and Forgejo are Tier-1 Source Providers.
+
+Their integrations build on the same Project source contract, durable Issue branch, Review SHA identity and execution lifecycle rather than introducing a second synchronization or code-state model.
+
+The Source Provider layer owns connection/repository identity, repository discovery, scoped ephemeral Git credentials, webhook verification/normalization, provider-neutral Change Request state, checks/pipeline summaries, mergeability/conflict reads and external merge reconciliation.
+
+The existing generic `git` path remains available for unsupported Git servers and Runner-managed credentials.
+
+See `source-providers.md` for the canonical Source Provider and delivery contract.
