@@ -1,38 +1,191 @@
 # Agent Board
 
-Agent Board is a genuinely free and open-source, self-hosted work board for autonomous software agents.
+Agent Board is a self-hosted work board and execution control plane for autonomous software agents.
 
-It is built around durable Issues, server-owned execution, persistent repository-backed Workspaces, Runner-based execution, structured human input, complete execution evidence, and configurable delivery policy.
-
-## Priority: reach the complete v0.1 flow first
-
-The near-term milestone is one complete real coding-agent flow using a local Git repository accessible to the backend deployment:
+It turns Issues into durable coding work: Agents execute against real Git repositories on connected Runners, can ask humans for input, produce inspectable execution evidence, collaborate through Squads and delegation, and hand completed work back for Review.
 
 ```text
-Local Project repository
+Project
   -> Issue
-  -> Agent
-       -> Engine
-       -> Model Profile -> Provider
-  -> durable scheduler
-  -> selected connected Runner
-  -> durable Issue Workspace transfer/materialization
+  -> Agent / Squad
+  -> Run
+  -> Scheduler
+  -> Runner
   -> Execution Session
-  -> coding Engine
-  -> commands / files / tests / Artifacts
-  -> Question / resume when needed
+  -> Engine
+  -> Git changes
   -> Review
-  -> human approval
-  -> Done
 ```
 
-External persistent Runners are preferred for normal execution. The server-managed internal Runner uses the same Runner/Execution Session protocol path. Runtime/Runtime Instance support remains only for legacy internal managed compute and is not normal Agent configuration.
+Agent Board is built so execution belongs to the server, not the browser. Runs, Workspaces, Questions, Reviews, scheduling state and execution evidence survive browser disconnects and process restarts.
 
-Work that does not directly prove or harden this flow must not delay it.
+> **Status:** Agent Board is under active development. The goal is a genuinely free and open-source multitasking platform without artificial Agent, Runner or seat limits. A final open-source license has not yet been selected.
 
-Authenticated remote Source Connections are added after the first complete local-repository flow is proven.
+## What Agent Board does
+
+### Durable agent execution
+
+Issues can be assigned to Agents and executed asynchronously through the durable scheduler.
+
+Agents are configured from:
+
+```text
+Provider -> Model Profile
+Engine + Model Profile -> Agent
+```
+
+The scheduler chooses where work executes. Agents do not select individual Runners.
+
+Runs have durable lifecycle state, capacity admission, execution provenance, logs, Artifacts and Git evidence.
+
+### Real Git workspaces
+
+Projects can use:
+
+- a local Git repository available to Agent Board; or
+- a remote Git repository URL.
+
+Each Issue gets its own durable branch:
+
+```text
+agent-board/<issue-key>
+```
+
+The same Issue branch continues across attempts, questions, reviews and requested changes.
+
+Execution happens against that Git state rather than against a synthetic copy of the candidate changes.
+
+### Runners
+
+Agent code executes on `agent-runner`, not inside the trusted server process.
+
+Agent Board supports persistent connected Runners and scheduler-controlled placement. Runners connect outbound to the server and may execute multiple isolated Execution Sessions up to their advertised capacity.
+
+Projects can restrict which Runners may execute their work.
+
+A server-managed internal Runner is available as a fallback when allowed by Project policy.
+
+### Questions and human input
+
+Agents can ask structured blocking Questions during execution.
+
+A blocking Question pauses the Run without implicitly changing the Issue's Board status.
+
+For Engines that support native continuation, such as OpenCode, answering a Question resumes the same live Engine session instead of starting the task over.
+
+### Review
+
+Completed coding Runs produce inspectable Git and execution evidence.
+
+Reviews are pinned to exact Git revisions, so the reviewed change remains reproducible even when later attempts continue the Issue branch.
+
+Review can include:
+
+- Git diff and revisions
+- tests and checks
+- execution timeline
+- commands and tool activity
+- raw output
+- Artifacts
+- Runner and Engine provenance
+
+Human Review is the default delivery gate.
+
+### Users and Project access
+
+Agent Board has built-in human authentication and Project authorization.
+
+Deployment roles:
+
+```text
+admin
+member
+```
+
+Project roles:
+
+```text
+admin
+member
+viewer
+```
+
+Projects are private by default.
+
+Groups can grant Project access to Users, while Project authorization remains enforced by the Go backend rather than by frontend visibility.
+
+### Squads
+
+Squads are reusable Project-scoped collaboration configurations.
+
+```text
+Squad
+├── leader Agent
+└── members
+    ├── Agent
+    └── User
+```
+
+A Squad can own an Issue while its current leader Agent performs execution.
+
+Additional Agent or User members provide collaboration context; they do not implicitly create Runs or receive Project permissions.
+
+Changing a Squad leader changes who executes future work without rewriting Issue ownership.
+
+### Agent delegation
+
+Agents can optionally be allowed to delegate bounded subtasks to other Agents.
+
+```text
+Parent Run
+   |
+   +--> delegate task
+           |
+           v
+      delegated Run
+           |
+           v
+      normal scheduler
+```
+
+Delegation deliberately reuses the normal Agent Board execution model:
+
+- ordinary Runs
+- the existing scheduler
+- normal Agent and Model capacity
+- normal Runner selection
+- the Issue Workspace
+- normal execution evidence
+
+There is no separate delegation scheduler, queue or Run type.
+
+Phase-1 delegation provides durable parent/child lineage and explicit delegation policy. More advanced delegated Workspace handoff, result continuation and Squad-aware collaboration build on that same model.
+
+### HTTP API and MCP
+
+The Go server exposes the Agent Board API and an MCP endpoint at:
+
+```text
+https://<agent-board-server>/mcp
+```
+
+MCP is another transport over the same application/domain behavior used by the normal API. It does not implement a second Issue, Run or authorization model.
+
+See [`docs/mcp.md`](./docs/mcp.md).
 
 ## Getting started
+
+### Requirements
+
+For the default deployment you need:
+
+- Docker
+- Docker Compose
+- Git
+
+For real model-backed coding Runs you also need a configured model Provider and an Engine such as OpenCode.
+
+### Start Agent Board
 
 ```bash
 git clone https://github.com/brantje/agent-board.git
@@ -40,218 +193,159 @@ cd agent-board
 docker compose up --build
 ```
 
-Open:
+Then open:
 
-- Web UI: `http://localhost:3000`
-- API: `http://localhost:3001`
+- Web UI: http://localhost:3000
+- API: http://localhost:3001
 
-On a fresh PostgreSQL volume, Compose initializes `packages/database/schema.sql`.
+On a new deployment, the first registered User becomes the deployment administrator.
 
-### Legacy Docker Runtime compatibility
+### Configure your first Agent
 
-Normal Runner-based execution does not require users to create or select a Runtime. The repository still contains Docker Runtime/Runtime Instance support for legacy internal managed compute and integration coverage.
+In the UI:
 
-Where that legacy path is used, the trusted Go backend may access Docker; Agent Runtime Instances never receive the Docker socket or equivalent daemon credentials. Runtime Workspaces must be visible to the host Docker daemon at the same absolute path used by the server.
+1. Create a **Provider**.
+2. Create a **Model Profile** for that Provider.
+3. Create and enable an **Agent** with an Engine and Model Profile.
+4. Create a **Project** and configure its Git repository.
+5. Ensure an eligible Runner is available.
+6. Create an Issue and assign the Agent.
+7. Inspect the resulting Run and answer any Questions.
+8. Review the resulting Git changes.
 
-### Provider credentials for OpenCode
+The scheduler handles execution placement and capacity automatically.
 
-OpenCode Runs require encrypted Provider credential storage. With the default Compose setup, the deployment encryption key and secret-write token are generated automatically on first startup.
+## Provider bootstrap
 
-When `OPENROUTER_API_KEY` is set in the Compose environment (for example via `.env`), the server creates a global Provider named **OpenRouter** on startup if one does not already exist. If that provider already exists but is missing its stored credential, startup completes that step. An existing provider with a credential is left unchanged. This env var is creation/resume-only; rotate an existing key from **Settings → Providers**. Recreate the server container after adding env vars so Compose injects them.
+Providers can be configured through the UI.
 
-When `OPENROUTER_MODELS` is set to a comma-separated list of OpenRouter model IDs, the server also creates global Model Profiles linked to the OpenRouter provider on startup if they do not already exist. Each profile uses the full model ID as its model field and a display name derived from the last path segment (for example `anthropic/claude-3.5-sonnet` becomes `claude-3.5-sonnet`). Existing profiles with the same name or model are left unchanged. `OPENROUTER_MODELS` requires an existing OpenRouter provider or `OPENROUTER_API_KEY` on the same startup.
+For local deployments, OpenRouter and LiteLLM can also be bootstrapped through environment variables.
 
-When `LITELLM_ENDPOINT` and `LITELLM_API_KEY` are both set, the server creates a global Provider named **LiteLLM** (`openai-compatible`) on startup if one does not already exist, using the endpoint as its base URL. If that provider already exists but is missing its stored credential or base URL, startup completes the missing step. An existing provider with a credential and base URL is left unchanged. These env vars are creation/resume-only; rotate an existing key or change the endpoint from **Settings → Providers**. Recreate the server container after adding env vars so Compose injects them.
+### OpenRouter
 
-When `LITELLM_MODELS` is set to a comma-separated list of model IDs, the server also creates global Model Profiles linked to the LiteLLM provider on startup if they do not already exist. Each profile uses the full model ID as its model field and a display name derived from the last path segment (for example `anthropic/claude-3.5-sonnet` becomes `claude-3.5-sonnet`). Existing profiles with the same name or model are left unchanged. `LITELLM_MODELS` requires an existing LiteLLM provider or `LITELLM_ENDPOINT` and `LITELLM_API_KEY` on the same startup.
+Add to `.env`:
 
-Save each Provider credential from **Settings → Providers**:
-
-1. Create or edit a Provider.
-2. Expand **Set or replace API key** and paste the Provider API key.
-3. Save the Provider.
-
-The API key is encrypted server-side and never shown again after save.
-
-### Create a runnable Agent
-
-1. In **Settings**, create a **Provider** and **Model Profile**.
-2. Create and enable an **Agent**, selecting an Engine and Model Profile.
-3. Ensure an eligible Runner is connected; the server-managed internal Runner is the fallback when allowed by policy.
-4. Create a **Project** and configure its repository/default branch.
-5. Create an Issue and assign an Agent, or assign a configured Squad to preserve Squad ownership while its current leader Agent executes; additional Squad members may be Agents or eligible human Users and do not become Run targets.
-6. Agent Board creates/reuses the Issue Workspace and schedules a Run onto an eligible Runner.
-7. Inspect the Run, answer Questions if needed, then Review the result.
-
-The scripted Engine remains a deterministic walking skeleton used by tests and development. Normal coding work uses a real coding Engine such as OpenCode through the same Runner/Execution Session boundary.
-
-## Issue flow
-
-```text
-BACKLOG / TODO
-      |
-      | assign runnable Agent
-      v
-IN_PROGRESS + QUEUED Run
-      |
-      v
-scheduler -> Runner -> Workspace materialization -> Execution Session -> Engine
-      |
-      +--> success -----------------------> REVIEW
-      |                                     |
-      |                                     +--> Approve -> DONE
-      |                                     +--> Request changes -> new attempt
-      |                                                           same Workspace
-      |
-      +--> blocking Question ------------> Run WAITING_FOR_INPUT
-      |                                     |
-      |                                     +--> answer -> resume same Run
-      |
-      +--> execution failure ------------> Run FAILED / explicit retry
-      |
-      +--> capacity/workspace wait ------> Run stays queued
+```bash
+OPENROUTER_API_KEY=...
+OPENROUTER_MODELS=anthropic/claude-sonnet-4-5,openai/gpt-5
 ```
 
-`BLOCKED` is a durable Issue state and its normal Board column. Run execution states remain separate from Board workflow states: Questions, failures and scheduler waiting do not implicitly move the Board; Agents or humans use the explicit Issue-status mutation when the workflow state should change.
+On startup Agent Board can create the OpenRouter Provider and the configured Model Profiles if they do not already exist.
 
-## Core product model
+### LiteLLM
 
-| Concept | Meaning |
+```bash
+LITELLM_ENDPOINT=http://your-litellm-host:4000
+LITELLM_API_KEY=...
+LITELLM_MODELS=anthropic/claude-sonnet-4-5,openai/gpt-5
+```
+
+Existing credentials are not silently rotated by changing these variables. Manage existing Provider credentials through **Settings → Providers**.
+
+See [`.env.example`](./.env.example) for the available deployment settings.
+
+## Core concepts
+
+| Concept | Purpose |
 | --- | --- |
-| **Project / Board** | Top-level work and repository boundary. |
-| **Issue** | Durable unit of work. |
-| **Agent** | Durable worker identity/configuration, including Engine and Model Profile. |
-| **Squad** | Reusable Project-scoped collaboration configuration with one leader Agent and optional Agent/User members; Squad-owned Issues keep Squad ownership while execution resolves only the current leader Agent. Squad membership is not a Project ACL. |
-| **Run** | One execution attempt for an Issue by an Agent. |
-| **Provider** | Configured model connection and credentials. |
-| **Model Profile** | Reusable model selection/settings and optional capacity. |
-| **Runner** | Connected execution host selected by the scheduler. |
-| **Workspace** | Durable repository state owned by an Issue. |
-| **Execution Session** | One runner-supervised process-tree execution. |
-| **Runtime** | Legacy reusable execution policy for internal managed compute only. |
-| **Runtime Instance** | Legacy disposable compute materialized from a Runtime and bound to one Workspace. |
-| **Question** | Structured request for human input. |
-| **Decision** | Durable human/product outcome. |
-| **Event** | Append-only execution/audit history. |
-| **Artifact** | First-class Run output stored outside oversized Event payloads. |
-
-Canonical Agent configuration:
-
-```text
-Provider -> Model Profile
-Engine + Model Profile -> Agent
-```
-
-Runner placement is scheduler-owned rather than Agent configuration.
+| **Project** | Board, repository and execution-policy boundary |
+| **Issue** | Durable unit of work |
+| **Agent** | Worker identity configured with an Engine and Model Profile |
+| **Squad** | Project-scoped Agent/User collaboration configuration |
+| **Run** | One execution attempt for an Issue |
+| **Delegation** | Parent/child lineage for a bounded delegated task |
+| **Provider** | Model provider connection and credentials |
+| **Model Profile** | Reusable model configuration and capacity |
+| **Runner** | Connected execution host |
+| **Workspace** | Durable Git state associated with an Issue |
+| **Execution Session** | One Runner-supervised Engine process tree |
+| **Question** | Structured request for human input |
+| **Review** | Human inspection and delivery decision |
+| **Event** | Append-only execution/activity history |
+| **Artifact** | Durable output produced by a Run |
 
 ## Architecture
 
 ```text
-Nuxt web
-   |
-   v
-Go backend (apps/server)
-   |
-   +--> PostgreSQL durable state + scheduling
-   +--> blob/output storage
-   +--> Workspace/Git services
-   +--> Runner selection / protocol-v2 transport
-             |
-             v
-        agent-runner
-             |
-             v
-      Execution Session
-             |
-             v
-           Engine
-
-Legacy compatibility only:
-Go backend -> Runtime implementation -> Runtime Instance -> agent-runner
+                    ┌──────────────┐
+                    │   Nuxt Web   │
+                    └──────┬───────┘
+                           │
+                    HTTP / SSE
+                           │
+                           v
+┌──────────────┐    ┌──────────────────────┐
+│ MCP clients  │───>│      Go server       │
+└──────────────┘    │                      │
+                    │  domain/application  │
+                    │  auth                │
+                    │  scheduler           │
+                    │  Git/Workspace       │
+                    │  Review/evidence     │
+                    └───────┬──────────────┘
+                            │
+             ┌──────────────┼──────────────┐
+             │              │              │
+             v              v              v
+       PostgreSQL      Blob/output     Runner transport
+                                            │
+                                            v
+                                      agent-runner
+                                            │
+                                            v
+                                   Execution Session
+                                            │
+                                            v
+                                          Engine
+                                            │
+                                            v
+                                           Git
 ```
 
-Runner, Execution Session and Run are separate identities. Legacy Runtime Instance identity remains separate where the compatibility path is used.
+The Go backend is the control plane.
 
-The browser never owns long-running execution. PostgreSQL is authoritative for durable state and scheduler ownership.
+PostgreSQL is authoritative for durable state and scheduling. Nuxt is the web application layer, not a second backend control plane.
 
-### Stack
+`agent-runner` is intentionally narrow and Engine-neutral. It does not own scheduler, Review or database state.
 
-```text
-Frontend         Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS + Nuxt UI v4
-Backend          Go
-Agent runner     Go
-HTTP             chi
-Database         PostgreSQL + pgvector
-Live updates     Server-Sent Events
-Execution        connected agent-runner hosts
-Legacy compute   Docker Runtime/Runtime Instance compatibility
-Runner transport WebSocket protocol v2
-API contracts    OpenAPI + intentional frontend types
-Blob storage     local filesystem first; S3-compatible later
-```
+## Stack
 
-Nuxt/Nitro is the web application layer, not a second Agent Board control plane. Durable product state, scheduling, execution and authorization remain Go-owned.
+| Area | Technology |
+| --- | --- |
+| Frontend | Nuxt 4, Vue 3, TypeScript, Tailwind CSS, Nuxt UI v4 |
+| Backend | Go |
+| Runner | Go |
+| HTTP | chi |
+| Database | PostgreSQL + pgvector |
+| Live updates | Server-Sent Events |
+| Runner transport | WebSocket protocol v2 |
+| Agent execution | `agent-runner` |
+| API contracts | OpenAPI |
+| MCP | Streamable HTTP |
+| Output storage | Local filesystem |
 
-## Repository
+Legacy Docker Runtime/Runtime Instance support remains in the backend for existing managed-compute compatibility, but it is not part of normal Agent configuration or the preferred execution path.
+
+## Repository layout
 
 ```text
 agent-board/
 ├── apps/
-│   ├── server/
-│   ├── agent-runner/
+│   ├── server/          # Go control plane
+│   ├── agent-runner/    # execution-plane Runner
 │   └── web/             # Nuxt application
 ├── packages/
-│   └── database/
+│   └── database/        # canonical pre-release schema
 ├── docs/
 ├── examples/
+├── compose.yaml
 ├── AGENTS.md
 └── README.md
 ```
 
-## Execution guarantees
-
-- request/browser lifetime does not own execution
-- scheduler claims are race-safe and restart-safe
-- Model Profile capacity and Agent concurrency are scheduler constraints
-- one durable Workspace is reused across Issue attempts
-- scheduler placement selects an eligible live Runner rather than an Agent-selected Runtime
-- one Runner may execute multiple concurrent Execution Sessions up to advertised capacity
-- one Execution Session owns one process tree
-- external persistent Runners are preferred; the server-managed internal Runner uses the same protocol path
-- Engine adapters remain server-side
-- Engine processes execute through `agent-runner`
-- runner/server transport is versioned WebSocket protocol v2
-- secrets are resolved only in trusted code and injected ephemerally
-- Events are persisted before live publication
-- large raw output and Artifacts use durable output storage
-- Runs retain immutable safe execution provenance
-- Review shows the complete candidate, including staged and new/untracked files
-- human Review is the default v0.1 delivery gate
-- legacy Runtime/Runtime Instance containment remains isolated compatibility behavior and is not exposed as normal Agent settings
-
-## Planned product depth
-
-After the complete local-repository v0.1 coding flow:
-
-- planning strategy (`Auto`, `Always plan`, `Skip planning`)
-- scheduled Project Automations
-- Agent-created follow-up Issues
-- authenticated GitHub/GitLab/Bitbucket/Forgejo Source Connections
-- explicit Project delivery policy, including optional autonomous PR/MR creation
-- Agent delegation
-- Squad-aware delegation/member collaboration; basic mixed Agent/User Squad management, ownership and leader-only execution are already implemented
-- worker pools / warm / spot execution
-- users, groups, roles/permissions and broader administration
-- additional integrations and account-level capabilities
-- Plugins and plugin ecosystem work **last**
-
-Autonomous PR/MR delivery does not imply auto-merge or deployment; stronger delivery permissions require separate explicit policy.
-
-See [`docs/roadmap.md`](./docs/roadmap.md).
-
 ## Development
 
-Backend:
+### Backend
 
 ```bash
 cd apps/server
@@ -260,7 +354,7 @@ go vet ./...
 go build ./...
 ```
 
-Runner:
+### Runner
 
 ```bash
 cd apps/agent-runner
@@ -269,7 +363,9 @@ go vet ./...
 go build ./...
 ```
 
-Frontend:
+### Frontend
+
+From the repository root:
 
 ```bash
 pnpm install
@@ -278,31 +374,85 @@ pnpm test
 pnpm build
 ```
 
-Read `AGENTS.md`, [`docs/testing.md`](./docs/testing.md), [`docs/frontend-implementation.md`](./docs/frontend-implementation.md), and [`docs/frontend-theme.md`](./docs/frontend-theme.md) before implementation.
+For local development with hot reload:
+
+```bash
+docker compose -f compose.yaml -f docker-compose.dev.yml up --build
+```
+
+See [`AGENTS.md`](./AGENTS.md) and [`docs/testing.md`](./docs/testing.md) before making implementation changes.
 
 ## Documentation
 
-- [`docs/product-v0.1.md`](./docs/product-v0.1.md) — v0.1 product behavior and critical path
-- [`docs/roadmap.md`](./docs/roadmap.md) — product ordering
+The README intentionally stays high-level. Product behavior and architectural invariants belong in the canonical documentation.
+
+Start with:
+
+- [`docs/product-v0.1.md`](./docs/product-v0.1.md) — product behavior
+- [`docs/architecture.md`](./docs/architecture.md) — control-plane and execution architecture
 - [`docs/domain-model.md`](./docs/domain-model.md) — durable concepts and invariants
-- [`docs/architecture.md`](./docs/architecture.md) — implementation architecture
-- [`docs/scheduler.md`](./docs/scheduler.md) — durable scheduling and capacity
-- [`docs/source-control.md`](./docs/source-control.md) — local v0.1 repositories and later Source Connections
-- [`docs/execution-context.md`](./docs/execution-context.md) — resolved execution context and secrets
-- [`docs/execution-evidence.md`](./docs/execution-evidence.md) — provenance, logs, Artifacts and Review evidence
-- [`docs/runtime-contract.md`](./docs/runtime-contract.md) — legacy/internal Runtime boundary and security
-- [`docs/runtime-execution.md`](./docs/runtime-execution.md) — Runner-first Engine execution with legacy Runtime compatibility
-- [`docs/agent-runner.md`](./docs/agent-runner.md) — runner identity, WebSocket protocol, session lifecycle and Workspace transfer
-- [`docs/frontend-implementation.md`](./docs/frontend-implementation.md) — clean-room Nuxt/Nuxt UI implementation rules
-- [`docs/frontend-theme.md`](./docs/frontend-theme.md) — component and theme rules
-- [`docs/automations.md`](./docs/automations.md) — scheduled work and Agent-created Issues
-- [`docs/planning.md`](./docs/planning.md) — planning strategy and Plan artifacts
-- [`docs/future-agent-collaboration.md`](./docs/future-agent-collaboration.md) — implemented Squad foundation plus future delegation and worker topology
-- [`docs/event-protocol.md`](./docs/event-protocol.md) — Event contract
-- [`docs/plugins.md`](./docs/plugins.md) — deliberately late roadmap Plugin architecture
+- [`docs/scheduler.md`](./docs/scheduler.md) — scheduling and capacity
+- [`docs/source-control.md`](./docs/source-control.md) — repository and Git behavior
+- [`docs/agent-runner.md`](./docs/agent-runner.md) — Runner protocol and execution sessions
+- [`docs/execution-evidence.md`](./docs/execution-evidence.md) — logs, provenance and Artifacts
+- [`docs/authorization.md`](./docs/authorization.md) — Users, Groups and Project roles
+- [`docs/future-agent-collaboration.md`](./docs/future-agent-collaboration.md) — Squads, delegation and collaboration
+- [`docs/mcp.md`](./docs/mcp.md) — MCP interface
+- [`docs/roadmap.md`](./docs/roadmap.md) — implementation ordering
+
+The complete documentation lives in [`docs/`](./docs/).
+
+## Project principles
+
+Agent Board is built around a few constraints:
+
+- durable product state belongs in the backend;
+- browser/request lifetime never owns execution;
+- Agents, Runs, Runners and Execution Sessions remain separate identities;
+- normal execution goes through the scheduler;
+- collaboration reuses the normal Run and Workspace lifecycle;
+- Agent-executed code is treated as untrusted;
+- secrets remain in trusted infrastructure and are injected only when needed;
+- important execution evidence is persisted before publication;
+- human Review remains the default delivery gate;
+- product behavior is not duplicated between HTTP, MCP, frontend or Runner transports.
+
+## Roadmap
+
+Agent Board is being built incrementally around the existing Issue -> Run -> Runner -> Git -> Review lifecycle.
+
+Current collaboration work builds from:
+
+```text
+Squads
+  -> canonical delegation
+  -> delegated Workspace handoff
+  -> delegated outcomes / parent continuation
+  -> Squad-aware collaboration
+```
+
+Planning, Automations, richer source-provider integrations, delivery policies, worker pools and broader integrations build on the same core model rather than introducing parallel execution systems.
+
+See [`docs/roadmap.md`](./docs/roadmap.md) for current ordering.
+
+## Contributing
+
+Contributions should preserve the existing domain and execution boundaries rather than creating transport-specific implementations of product behavior.
+
+In particular:
+
+- prefer the smallest maintainable change;
+- reuse existing domain/application behavior;
+- keep HTTP, MCP and Runner transports thin;
+- avoid duplicate schedulers, Run lifecycles and Workspace models;
+- follow DRY and YAGNI;
+- write regression tests for bug fixes;
+- maintain the repository's required test coverage.
+
+See [`AGENTS.md`](./AGENTS.md) for the full implementation rules.
 
 ## License
 
 A final license has not yet been selected.
 
-The project goal is genuinely free/open-source self-hosting without artificial agent/runtime/seat limits or a crippled community edition.
+The project intends to be genuinely free and open source, without artificial Agent, Runner or seat limits. Selecting and adding the actual open-source license is still required before the repository can make that guarantee legally.
