@@ -3,6 +3,7 @@ package runexec
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,6 +47,37 @@ func TestLoadDelegationContinuationUsesExactResumeJobAndCurrentWorkspaceRevision
 	}
 	if got.DelegationID != "delegation-1" || got.TargetAgentID != "target-agent-1" || got.Task != "Inspect the bounded component." || got.Outcome != outcome || got.ResultSummary != summary || got.DelegatedRunID != "child-run-1" || got.ResultEventID != eventID || !got.WorkspaceChangesAccepted || got.WorkspaceRevision != "revision-after-delegate" {
 		t.Fatalf("delegation continuation=%+v", got)
+	}
+}
+
+func TestLoadDelegationContinuationUsesOnlyPersistedRedactedTask(t *testing.T) {
+	outcome := store.DelegationOutcomeSucceeded
+	summary := "bounded delegated result"
+	accepted := true
+	completedAt := time.Now().UTC()
+	const secret = "delegation-secret-value"
+	evidenceStore := &processTestStore{
+		delegationContinuation: store.Delegation{
+			ID: "delegation-redacted", ProjectID: "project-1", IssueID: "issue-1",
+			ParentRunID: "parent-run-1", ParentAgentID: "parent-agent-1", TargetAgentID: "target-agent-1",
+			Task: "Inspect *** and report the bounded finding.", DelegatedRunID: "child-run-1",
+			Outcome: &outcome, ResultSummary: &summary, WorkspaceChangesAccepted: &accepted, CompletedAt: &completedAt,
+		},
+		workspaceRevision: "revision-after-delegate",
+	}
+	processor := &Processor{store: evidenceStore}
+	claim := &store.SchedulerAdmission{Job: store.SchedulerJob{ID: "resume-job-redacted", Kind: "RESUME"}}
+	run := store.Run{ID: "parent-run-1", ProjectID: "project-1", IssueID: "issue-1", WorkspaceID: "workspace-1"}
+
+	got, err := processor.loadDelegationContinuation(t.Context(), claim, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Task != evidenceStore.delegationContinuation.Task {
+		t.Fatalf("continuation task=%v want persisted redacted task", got)
+	}
+	if strings.Contains(got.Task, secret) {
+		t.Fatalf("continuation reintroduced secret: %q", got.Task)
 	}
 }
 

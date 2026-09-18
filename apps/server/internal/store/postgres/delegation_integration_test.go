@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/brantje/agent-board/apps/server/internal/evidence"
+	"github.com/brantje/agent-board/apps/server/internal/redaction"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -17,6 +19,41 @@ type delegationFixture struct {
 	parentRun store.Run
 	model     store.ModelProfile
 	provider  store.Provider
+}
+
+func TestRequestDelegationPersistsRedactedTaskAndKeepsIdempotency(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	registry := redaction.NewRegistry()
+	const secret = "delegation-secret-value"
+	registry.Register(f.parentRun.ID, []string{secret})
+	secured := evidence.NewRedactingStore(f.store, registry)
+	input := store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "Inspect " + secret + " and report the bounded finding.", RequestKey: "redacted-task",
+	}
+
+	first, err := secured.RequestDelegation(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted, err := f.store.GetDelegationByRun(t.Context(), f.project.ID, first.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(persisted.Task, secret) || persisted.Task == input.Task {
+		t.Fatalf("persisted delegation task leaked secret: %q", persisted.Task)
+	}
+	if persisted.Task == "" {
+		t.Fatal("redaction erased the complete delegation task")
+	}
+
+	retry, err := secured.RequestDelegation(t.Context(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.Delegation.ID != first.Delegation.ID || retry.DelegatedRun.ID != first.DelegatedRun.ID {
+		t.Fatalf("redacted retry lost idempotency: first=%+v retry=%+v", first.Delegation, retry.Delegation)
+	}
 }
 
 func TestRequestDelegationCreatesOneNormalRunAndIsIdempotent(t *testing.T) {
