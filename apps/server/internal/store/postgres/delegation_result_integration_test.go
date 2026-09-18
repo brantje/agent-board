@@ -94,6 +94,68 @@ func TestDelegatedCompletionPersistsResultAndParentContinuationAtomically(t *tes
 	}
 }
 
+
+func TestDelegatedCompletionReconciliationCreatesParentContinuationExactlyOnce(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "result-reconciliation")
+	ctx := t.Context()
+	workspaceID, childRunID, targetAgentID := created.DelegatedRun.WorkspaceID, created.DelegatedRun.ID, f.target.ID
+	if _, err := f.store.AppendEvent(ctx, store.Event{
+		Type: "delegation.workspace_accepted", ProjectID: f.project.ID, IssueID: &f.issue.ID,
+		RunID: &childRunID, AgentID: &targetAgentID, WorkspaceID: &workspaceID,
+		Actor: store.EmptyObject,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.AppendEvent(ctx, store.Event{
+		Type: "agent.message", ProjectID: f.project.ID, IssueID: &f.issue.ID,
+		RunID: &childRunID, AgentID: &targetAgentID, WorkspaceID: &workspaceID,
+		Actor: store.EmptyObject, Payload: []byte(`{"message":"recovered bounded result"}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mutation, err := f.store.ResolveReconciliationMutation(ctx, store.SchedulerReconciliation{
+		ProjectID: f.project.ID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease,
+		Outcome: store.SchedulerReconciliationCompleted,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation.Run.Status != "COMPLETED" || len(mutation.Events) != 1 || mutation.Events[0].Type != "delegation.completed" {
+		t.Fatalf("reconciliation mutation=%+v", mutation)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.ContinuationJobID == nil || delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeSucceeded {
+		t.Fatalf("delegation=%+v", delegation)
+	}
+	parent, err := f.store.GetRun(ctx, f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != "QUEUED" {
+		t.Fatalf("parent status=%s want QUEUED", parent.Status)
+	}
+	_, err = f.store.ResolveReconciliationMutation(ctx, store.SchedulerReconciliation{
+		ProjectID: f.project.ID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease,
+		Outcome: store.SchedulerReconciliationCompleted,
+	})
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("repeated reconciliation err=%v want not found", err)
+	}
+	var continuations int
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT count(*) FROM scheduler_jobs
+		WHERE project_id=$1 AND idempotency_key=$2
+	`, f.project.ID, "delegation:"+delegation.ID+":resume").Scan(&continuations); err != nil {
+		t.Fatal(err)
+	}
+	if continuations != 1 {
+		t.Fatalf("continuation jobs=%d want 1", continuations)
+	}
+}
+
 func TestDelegatedCompletionRollsBackWhenContinuationCannotBeRecorded(t *testing.T) {
 	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "result-rollback")
 	ctx := t.Context()

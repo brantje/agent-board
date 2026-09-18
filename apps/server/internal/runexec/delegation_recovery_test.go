@@ -523,3 +523,135 @@ func TestDelegationRecoveryContextRejectsMissingProvenanceAndAgent(t *testing.T)
 		t.Fatal("Run without authoritative Agent was accepted for recovery")
 	}
 }
+
+func delegatedChildRecoveryFixture(t *testing.T) (*delegationRecoveryStore, store.Run, store.Delegation, executioncontext.SafeContext) {
+	t.Helper()
+	safe := processTestSafeContext("/workspace")
+	safe.Run.ID = "delegated-run-1"
+	safe.Delegation = &executioncontext.DelegationContext{
+		ID:            "delegation-child-1",
+		ParentRunID:   "parent-run-1",
+		ParentAgentID: "parent-agent-1",
+		TargetAgentID: safe.Agent.ID,
+		Task:          "perform bounded delegated work",
+		RequestKey:    "delegate-call-1",
+	}
+	agentID := safe.Agent.ID
+	run := store.Run{
+		ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID,
+		WorkspaceID: safe.Workspace.ID, AgentID: &agentID, Status: "RUNNING",
+	}
+	delegation := store.Delegation{
+		ID: safe.Delegation.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID,
+		ParentRunID: safe.Delegation.ParentRunID, ParentAgentID: safe.Delegation.ParentAgentID,
+		TargetAgentID: safe.Delegation.TargetAgentID, Task: safe.Delegation.Task,
+		DelegatedRunID: run.ID, RequestKey: safe.Delegation.RequestKey,
+	}
+	return &delegationRecoveryStore{delegations: []store.Delegation{delegation}}, run, delegation, safe
+}
+
+func TestReconcileRecoversTerminalDelegatedChildWithoutEngineReplay(t *testing.T) {
+	storeFake, run, delegation, _ := delegatedChildRecoveryFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "COMPLETED", RunnerID: "runner-1"}}
+	storeFake.events = []store.Event{
+		delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "delegation.workspace_accepted", map[string]any{"delegationId": delegation.ID}),
+	}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != store.SchedulerReconciliationCompleted || reason != nil {
+		t.Fatalf("outcome=%s reason=%v want COMPLETED", outcome, reason)
+	}
+	outcome, reason, err = processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil || outcome != store.SchedulerReconciliationCompleted || reason != nil {
+		t.Fatalf("repeated outcome=%s reason=%v err=%v", outcome, reason, err)
+	}
+}
+
+func TestReconcileRecoversFailedAndCancelledDelegatedChildren(t *testing.T) {
+	tests := []struct {
+		name string
+		session string
+		want store.SchedulerReconciliationOutcome
+		wantReason string
+	}{
+		{name: "failed", session: "FAILED", want: store.SchedulerReconciliationFailed, wantReason: "delegate failed safely"},
+		{name: "cancelled", session: "CANCELLED", want: store.SchedulerReconciliationCancelled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			storeFake, run, _, _ := delegatedChildRecoveryFixture(t)
+			storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: tt.session, RunnerID: "runner-1"}}
+			if tt.wantReason != "" {
+				storeFake.events = []store.Event{delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "run.failed", map[string]any{"reason": tt.wantReason})}
+			}
+			processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+			outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if outcome != tt.want {
+				t.Fatalf("outcome=%s want %s", outcome, tt.want)
+			}
+			if tt.wantReason == "" {
+				if reason != nil {
+					t.Fatalf("reason=%v want nil", reason)
+				}
+			} else if reason == nil || *reason != tt.wantReason {
+				t.Fatalf("reason=%v want %q", reason, tt.wantReason)
+			}
+		})
+	}
+}
+
+func TestReconcileDelegatedChildRemainsUnknownWhenWorkspaceHandbackCannotBeVerified(t *testing.T) {
+	storeFake, run, _, safe := delegatedChildRecoveryFixture(t)
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "COMPLETED", RunnerID: "runner-1"}}
+	provenance, err := json.Marshal(executioncontext.Provenance{SchemaVersion: executioncontext.ProvenanceSchemaVersion, Context: safe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeFake.provenance = provenance
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if outcome != store.SchedulerReconciliationUnknown || reason != nil || err == nil {
+		t.Fatalf("outcome=%s reason=%v err=%v want UNKNOWN with recovery error", outcome, reason, err)
+	}
+}
+
+func TestReconcileRecoversDelegatedChildFromRetainedRunnerWorkspace(t *testing.T) {
+	repository := initProcessTestRepository(t)
+	storeFake, run, delegation, safe := delegatedChildRecoveryFixture(t)
+	safe.Workspace.Path = repository
+	storeFake.sessions = []store.ExecutionSession{{ID: "session-1", RunID: run.ID, Status: "COMPLETED", RunnerID: "runner-1"}}
+	provenance, err := json.Marshal(executioncontext.Provenance{SchemaVersion: executioncontext.ProvenanceSchemaVersion, Context: safe})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeFake.provenance = provenance
+	git, err := workspace.NewGitCLI("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &successfulSyncClient{payload: runnerTransferPayload(t, repository)}
+	recorder, err := evidence.NewRecorder(storeFake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	processor := &Processor{store: storeFake, sessions: reconcileSessions{}, git: git, events: recorder, runners: runnerSyncConnector{client: client}}
+	outcome, reason, err := processor.Reconcile(t.Context(), &store.SchedulerAdmission{Run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome != store.SchedulerReconciliationCompleted || reason != nil {
+		t.Fatalf("outcome=%s reason=%v want COMPLETED", outcome, reason)
+	}
+	if !client.confirmed || len(client.directions) != 1 || client.directions[0] != "from_runner" {
+		t.Fatalf("runner handback confirmed=%v directions=%v", client.confirmed, client.directions)
+	}
+	if !delegationWorkspaceAcceptedEvidence(storeFake.events, delegation.ID) {
+		t.Fatalf("delegation Workspace acceptance was not persisted: %+v", storeFake.events)
+	}
+}

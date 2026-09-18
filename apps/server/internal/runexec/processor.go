@@ -38,10 +38,19 @@ type ExecutionStore interface {
 	UpdateWorkspaceCurrentBranch(context.Context, string, string, string) (store.Workspace, error)
 }
 
+type delegationRecoveryEventStore interface {
+	ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error)
+}
+
 type delegationHandoffRecoveryStore interface {
 	store.DelegationStore
 	store.DelegationWorkspaceHandoffStore
-	ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error)
+	delegationRecoveryEventStore
+}
+
+type delegatedTerminalRecoveryStore interface {
+	store.DelegationStore
+	delegationRecoveryEventStore
 }
 
 type SessionService interface {
@@ -364,11 +373,18 @@ func (p *Processor) Reconcile(ctx context.Context, claim *store.SchedulerAdmissi
 		return store.SchedulerReconciliationRetry, nil, nil
 	}
 	// Once any external Execution Session existed, lack of a live session is not
-	// enough proof that replaying the Engine is safe. Delegation handoff recovery
-	// is the narrow exception: it may reuse a completed Runner session only when
-	// durable native tool evidence matches the canonical delegation. The Engine
-	// is never replayed, and scheduler ownership remains UNKNOWN until the store
-	// observes the durable handoff-ready marker.
+	// enough proof that replaying the Engine is safe. Delegation recovery has two
+	// narrow exceptions that never replay the Engine: a delegated child may be
+	// finalized from one authoritative terminal session, while a parent may finish
+	// a previously recorded Workspace handoff. All ambiguous ownership remains
+	// UNKNOWN.
+	outcome, reason, recovered, err := p.recoverDelegatedTerminalRun(ctx, claim.Run, sessions)
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, err
+	}
+	if recovered {
+		return outcome, reason, nil
+	}
 	if err := p.recoverDelegationWorkspaceHandoff(ctx, claim.Run, sessions); err != nil {
 		return store.SchedulerReconciliationUnknown, nil, err
 	}
@@ -376,6 +392,116 @@ func (p *Processor) Reconcile(ctx context.Context, claim *store.SchedulerAdmissi
 }
 
 const delegationRecoveryEventPageSize = 500
+
+func (p *Processor) recoverDelegatedTerminalRun(ctx context.Context, run store.Run, sessions []store.ExecutionSession) (store.SchedulerReconciliationOutcome, *string, bool, error) {
+	recovery, ok := p.store.(delegatedTerminalRecoveryStore)
+	if !ok {
+		return "", nil, false, nil
+	}
+	delegation, err := recovery.GetDelegationByRun(ctx, run.ProjectID, run.ID)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", nil, false, nil
+	}
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, true, err
+	}
+	session, ok := terminalDelegatedExecutionSession(sessions, run.ID)
+	if !ok {
+		return store.SchedulerReconciliationUnknown, nil, true, nil
+	}
+	events, err := listDelegationRecoveryEvents(ctx, recovery, run.ProjectID, run.ID)
+	if err != nil {
+		return store.SchedulerReconciliationUnknown, nil, true, err
+	}
+	switch session.Status {
+	case "COMPLETED":
+		if !delegationWorkspaceAcceptedEvidence(events, delegation.ID) {
+			safe, err := p.delegationRecoveryContext(ctx, run)
+			if err != nil {
+				return store.SchedulerReconciliationUnknown, nil, true, err
+			}
+			if safe.Delegation == nil || safe.Delegation.ID != delegation.ID || safe.Delegation.ParentRunID != delegation.ParentRunID {
+				return store.SchedulerReconciliationUnknown, nil, true, fmt.Errorf("run execution: delegated recovery provenance does not match canonical delegation")
+			}
+			syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+			switch {
+			case strings.TrimSpace(session.RunnerID) != "":
+				err = p.syncWorkspaceFromRunner(syncCtx, safe, session.RunnerID, session.ID)
+			case strings.TrimSpace(session.RuntimeInstanceID) != "":
+				_, err = p.finalizeServerWorkspace(syncCtx, safe)
+			default:
+				err = fmt.Errorf("run execution: terminal delegated session has no recoverable execution owner")
+			}
+			if err == nil {
+				err = p.recordDelegationWorkspaceAccepted(syncCtx, safe, optionalEventID(session.RuntimeInstanceID))
+			}
+			cancel()
+			if err != nil {
+				return store.SchedulerReconciliationUnknown, nil, true, err
+			}
+		}
+		return store.SchedulerReconciliationCompleted, nil, true, nil
+	case "FAILED":
+		reason := delegatedRecoveryFailureReason(events)
+		return store.SchedulerReconciliationFailed, &reason, true, nil
+	case "CANCELLED":
+		return store.SchedulerReconciliationCancelled, nil, true, nil
+	default:
+		return store.SchedulerReconciliationUnknown, nil, true, nil
+	}
+}
+
+func terminalDelegatedExecutionSession(sessions []store.ExecutionSession, runID string) (store.ExecutionSession, bool) {
+	var candidate store.ExecutionSession
+	for _, session := range sessions {
+		if session.RunID != runID {
+			continue
+		}
+		switch session.Status {
+		case "COMPLETED", "FAILED", "CANCELLED":
+		default:
+			continue
+		}
+		if strings.TrimSpace(session.RunnerID) == "" && strings.TrimSpace(session.RuntimeInstanceID) == "" {
+			return store.ExecutionSession{}, false
+		}
+		if candidate.ID != "" && candidate.ID != session.ID {
+			return store.ExecutionSession{}, false
+		}
+		candidate = session
+	}
+	return candidate, candidate.ID != ""
+}
+
+func delegationWorkspaceAcceptedEvidence(events []store.Event, delegationID string) bool {
+	for _, event := range events {
+		if event.Type != "delegation.workspace_accepted" {
+			continue
+		}
+		var payload struct {
+			DelegationID string `json:"delegationId"`
+		}
+		if json.Unmarshal(event.Payload, &payload) == nil && payload.DelegationID == delegationID {
+			return true
+		}
+	}
+	return false
+}
+
+func delegatedRecoveryFailureReason(events []store.Event) string {
+	for index := len(events) - 1; index >= 0; index-- {
+		if events[index].Type != "run.failed" {
+			continue
+		}
+		var payload struct {
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal(events[index].Payload, &payload) == nil && strings.TrimSpace(payload.Reason) != "" {
+			return safeFailure(errors.New(payload.Reason))
+		}
+	}
+	return "delegated execution failed during reconciliation"
+}
 
 func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run store.Run, sessions []store.ExecutionSession) error {
 	recovery, ok := p.store.(delegationHandoffRecoveryStore)
@@ -439,7 +565,7 @@ func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run s
 	return nil
 }
 
-func listDelegationRecoveryEvents(ctx context.Context, recovery delegationHandoffRecoveryStore, projectID, runID string) ([]store.Event, error) {
+func listDelegationRecoveryEvents(ctx context.Context, recovery delegationRecoveryEventStore, projectID, runID string) ([]store.Event, error) {
 	var result []store.Event
 	after := int64(0)
 	for {
