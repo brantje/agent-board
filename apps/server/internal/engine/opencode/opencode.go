@@ -133,7 +133,8 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, err
 	}
 
-	session, promptRequired, err := ensureNativeSession(ctx, native, request.Context, settings, recovered)
+	initialPrompt := initialTaskPromptWithDelegationContinuation(request.Context, request.DelegationContinuation)
+	session, promptRequired, err := ensureNativeSession(ctx, native, request.Context, settings, initialPrompt, recovered)
 	if err != nil {
 		return engine.Result{}, err
 	}
@@ -165,7 +166,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 		return engine.Result{}, err
 	}
 	if promptRequired {
-		if err := native.Prompt(ctx, session.ID, initialTaskPromptWithDelegationContinuation(request.Context, request.DelegationContinuation)); err != nil {
+		if err := native.Prompt(ctx, session.ID, initialPrompt); err != nil {
 			return engine.Result{}, fmt.Errorf("opencode engine: send initial task: %w", err)
 		}
 	}
@@ -444,7 +445,7 @@ func launchOpenCodeProcessWithCapabilities(ctx context.Context, launcher engine.
 	return process, false, nil
 }
 
-func ensureNativeSession(ctx context.Context, native *client.Client, safe executioncontext.SafeContext, settings settings, recovered bool) (client.Session, bool, error) {
+func ensureNativeSession(ctx context.Context, native *client.Client, safe executioncontext.SafeContext, settings settings, expectedPrompt string, recovered bool) (client.Session, bool, error) {
 	if recovered {
 		listed, err := native.ListSessions(ctx)
 		if err != nil {
@@ -455,7 +456,11 @@ func ensureNativeSession(ctx context.Context, native *client.Client, safe execut
 			return client.Session{}, false, err
 		}
 		if strings.TrimSpace(session.ID) != "" {
-			return session, false, nil
+			admitted, err := native.PromptAdmitted(ctx, session.ID, expectedPrompt)
+			if err != nil {
+				return client.Session{}, false, fmt.Errorf("opencode engine: prove recovered prompt admission: %w", err)
+			}
+			return session, !admitted, nil
 		}
 	}
 	session, err := native.CreateSession(ctx, client.CreateSessionRequest{

@@ -153,3 +153,40 @@ func TestClientListMessages(t *testing.T) {
 		}
 	})
 }
+
+func TestPromptAdmittedRequiresExactUserTurn(t *testing.T) {
+	tests := []struct {
+		name      string
+		messages  any
+		want      bool
+		wantError bool
+	}{
+		{name: "empty history means not admitted", messages: []any{}},
+		{name: "exact user prompt is admitted", messages: []any{map[string]any{
+			"info": map[string]any{"role": "user"},
+			"parts": []any{map[string]any{"type": "text", "text": "do the task"}},
+		}}, want: true},
+		{name: "assistant-only history is ambiguous", messages: []any{map[string]any{
+			"info": map[string]any{"role": "assistant"},
+			"parts": []any{map[string]any{"type": "text", "text": "working"}},
+		}}, wantError: true},
+		{name: "different user turn is ambiguous", messages: []any{map[string]any{
+			"info": map[string]any{"role": "user"},
+			"parts": []any{map[string]any{"type": "text", "text": "other task"}},
+		}}, wantError: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				writeJSON(t, w, http.StatusOK, tc.messages)
+			}))
+			defer server.Close()
+			native, err := New(server.Client(), server.URL)
+			if err != nil { t.Fatal(err) }
+			got, err := native.PromptAdmitted(t.Context(), "ses_1", "do the task")
+			if (err != nil) != tc.wantError || got != tc.want {
+				t.Fatalf("PromptAdmitted()=(%v,%v) want (%v,error=%v)", got, err, tc.want, tc.wantError)
+			}
+		})
+	}
+}

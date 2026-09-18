@@ -40,6 +40,50 @@ func (c *Client) ListMessages(ctx context.Context, sessionID string) ([]SessionM
 	return wrapped.Data, nil
 }
 
+// PromptAdmitted proves that the exact expected user turn is present in the
+// authoritative native session history. An empty history means the recovered
+// session was created before its first Prompt. Non-empty history without the
+// expected turn is ambiguous and must not be reused for a different task.
+func (c *Client) PromptAdmitted(ctx context.Context, sessionID, expected string) (bool, error) {
+	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(expected) == "" {
+		return false, fmt.Errorf("opencode: session id and expected prompt are required")
+	}
+	messages, err := c.ListMessages(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if len(messages) == 0 {
+		return false, nil
+	}
+	for _, message := range messages {
+		var info struct {
+			Role string `json:"role"`
+		}
+		if len(bytes.TrimSpace(message.Info)) == 0 {
+			return false, fmt.Errorf("opencode: native session history has message without info")
+		}
+		if err := json.Unmarshal(message.Info, &info); err != nil {
+			return false, fmt.Errorf("opencode: decode native session message info: %w", err)
+		}
+		if info.Role != "user" {
+			continue
+		}
+		for _, raw := range message.Parts {
+			var part struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if err := json.Unmarshal(raw, &part); err != nil {
+				return false, fmt.Errorf("opencode: decode native user message part: %w", err)
+			}
+			if part.Type == "text" && part.Text == expected {
+				return true, nil
+			}
+		}
+	}
+	return false, fmt.Errorf("opencode: recovered native session has history but the expected prompt cannot be proven")
+}
+
 // LatestAssistantError checks the newest native session message for a durable
 // assistant failure. OpenCode can persist a provider/API error on the assistant
 // message even when the corresponding session.error SSE event is missed.
