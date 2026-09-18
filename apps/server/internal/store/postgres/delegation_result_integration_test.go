@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -84,6 +85,23 @@ func TestDelegatedCompletionPersistsResultAndParentContinuationAtomically(t *tes
 	}
 	if childReviews != 0 {
 		t.Fatalf("delegated child review count=%d want 0", childReviews)
+	}
+	var childJobState string
+	if err := f.store.pool.QueryRow(ctx, `SELECT state FROM scheduler_jobs WHERE project_id=$1 AND id=$2`, f.project.ID, childJobID).Scan(&childJobState); err != nil {
+		t.Fatal(err)
+	}
+	if childJobState != "DONE" {
+		t.Fatalf("delegated child scheduler job state=%s want DONE", childJobState)
+	}
+	var childLeases, childReservations int
+	if err := f.store.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_leases WHERE job_id=$1`, childJobID).Scan(&childLeases); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.pool.QueryRow(ctx, `SELECT count(*) FROM scheduler_capacity_reservations WHERE project_id=$1 AND run_id=$2`, f.project.ID, childRunID).Scan(&childReservations); err != nil {
+		t.Fatal(err)
+	}
+	if childLeases != 0 || childReservations != 0 {
+		t.Fatalf("delegated child retained scheduler ownership: leases=%d reservations=%d", childLeases, childReservations)
 	}
 	issueAfter, err := f.store.GetIssue(ctx, f.project.ID, f.issue.ID)
 	if err != nil {
@@ -194,6 +212,113 @@ func TestDelegatedCompletionRollsBackWhenContinuationCannotBeRecorded(t *testing
 	if delegation.Outcome != nil || delegation.CompletedAt != nil || delegation.ContinuationJobID != nil {
 		t.Fatalf("delegation terminal state committed despite rollback: %+v", delegation)
 	}
+}
+
+func TestDelegatedFailureReturnsBoundedOutcomeAndResumesParent(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "result-failure")
+	ctx := t.Context()
+	childRunID := created.DelegatedRun.ID
+	workspaceID, targetAgentID := created.DelegatedRun.WorkspaceID, f.target.ID
+	failureReason := "delegate failed after bounded analysis"
+	failureEvent, err := f.store.AppendEvent(ctx, store.Event{
+		Type: "run.failed", ProjectID: f.project.ID, IssueID: &f.issue.ID,
+		RunID: &childRunID, AgentID: &targetAgentID, WorkspaceID: &workspaceID,
+		Actor: store.EmptyObject, Payload: []byte(`{"reason":"` + failureReason + `"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mutation, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease,
+		RunStatus: "FAILED", FailureReason: &failureReason,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation.Run.Status != "FAILED" || len(mutation.Events) != 1 || mutation.Events[0].Type != "delegation.failed" {
+		t.Fatalf("delegated failure mutation=%+v", mutation)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeFailed || delegation.ResultSummary == nil || *delegation.ResultSummary != failureReason || delegation.ResultEventID == nil || *delegation.ResultEventID != failureEvent.ID {
+		t.Fatalf("delegated failure result=%+v", delegation)
+	}
+	if delegation.ContinuationJobID == nil {
+		t.Fatalf("delegated failure did not create parent continuation: %+v", delegation)
+	}
+	parent, err := f.store.GetRun(ctx, f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != "QUEUED" {
+		t.Fatalf("parent status=%s want QUEUED after delegated failure", parent.Status)
+	}
+	if parent.FailureReason != nil {
+		t.Fatalf("delegated failure leaked failure reason onto parent: %q", *parent.FailureReason)
+	}
+}
+
+func TestDelegatedResultIsBoundedAndDoesNotCopyDetailedEvidence(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "result-bounded")
+	ctx := t.Context()
+	childRunID := created.DelegatedRun.ID
+	workspaceID, targetAgentID := created.DelegatedRun.WorkspaceID, f.target.ID
+	longSummary := strings.Repeat("x", store.MaxDelegationResultCharacters+256)
+	message, err := f.store.AppendEvent(ctx, store.Event{
+		Type: "agent.message", ProjectID: f.project.ID, IssueID: &f.issue.ID,
+		RunID: &childRunID, AgentID: &targetAgentID, WorkspaceID: &workspaceID,
+		Actor: store.EmptyObject, Payload: []byte(`{"message":"` + longSummary + `"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.CreateRawOutputChunk(ctx, store.RawOutputChunk{
+		ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: childRunID, Stream: "stdout", Sequence: 1,
+		StorageRef: "evidence://detailed-child-log", SizeBytes: 37,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease, RunStatus: "COMPLETED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.ResultSummary == nil || len([]rune(*delegation.ResultSummary)) != store.MaxDelegationResultCharacters {
+		t.Fatalf("bounded result length=%d want %d", len([]rune(valueOrEmpty(delegation.ResultSummary))), store.MaxDelegationResultCharacters)
+	}
+	if delegation.ResultEventID == nil || *delegation.ResultEventID != message.ID {
+		t.Fatalf("delegation evidence reference=%v want child message %s", delegation.ResultEventID, message.ID)
+	}
+	parentChunks, err := f.store.ListRawOutputChunks(ctx, f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(parentChunks) != 0 {
+		t.Fatalf("delegation copied raw child output to parent: %+v", parentChunks)
+	}
+	parentEvents, err := f.store.ListRunEvents(ctx, f.project.ID, f.parentRun.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range parentEvents {
+		if strings.Contains(string(event.Payload), "evidence://detailed-child-log") || strings.Contains(string(event.Payload), longSummary) {
+			t.Fatalf("delegation duplicated detailed child evidence into parent event %s", event.Type)
+		}
+	}
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func prepareDelegatedChildForTerminal(t *testing.T, requestKey string) (delegationFixture, store.RequestDelegationResult, string, string) {

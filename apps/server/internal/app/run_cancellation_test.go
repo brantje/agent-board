@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/scheduler"
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -118,5 +120,125 @@ func TestCancelRunDurablyCancelsInactiveParentAndQueuedDelegate(t *testing.T) {
 	}
 	if len(base.cancelled) != 2 || base.cancelled[0] != "parent" || base.cancelled[1] != "child" {
 		t.Fatalf("cancellation order=%v", base.cancelled)
+	}
+}
+
+
+type activeDelegationSchedulerStore struct {
+	mu         sync.Mutex
+	admission  *store.SchedulerAdmission
+	admitted   bool
+	transition chan store.SchedulerTransition
+}
+
+func (s *activeDelegationSchedulerStore) EnqueueJob(context.Context, store.SchedulerJob) (store.SchedulerJob, error) {
+	return store.SchedulerJob{}, store.ErrConflict
+}
+
+func (s *activeDelegationSchedulerStore) AdmitNextJob(context.Context, string, time.Duration, time.Duration) (*store.SchedulerAdmission, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.admitted || s.admission == nil {
+		return nil, nil
+	}
+	s.admitted = true
+	copy := *s.admission
+	return &copy, nil
+}
+
+func (s *activeDelegationSchedulerStore) RenewLease(_ context.Context, _, _, token string, _ time.Duration) (store.SchedulerLease, error) {
+	return store.SchedulerLease{LeaseToken: token}, nil
+}
+
+func (s *activeDelegationSchedulerStore) TransitionAdmittedJob(_ context.Context, input store.SchedulerTransition) (store.Run, error) {
+	s.transition <- input
+	run := s.admission.Run
+	run.Status = input.RunStatus
+	return run, nil
+}
+
+func (s *activeDelegationSchedulerStore) ClaimExpiredJobForReconciliation(context.Context, string, time.Duration) (*store.SchedulerAdmission, error) {
+	return nil, nil
+}
+
+func (s *activeDelegationSchedulerStore) ResolveReconciliation(context.Context, store.SchedulerReconciliation) (store.Run, error) {
+	return store.Run{}, store.ErrConflict
+}
+
+type blockingCancellationProcessor struct {
+	started chan struct{}
+	once    sync.Once
+}
+
+func (p *blockingCancellationProcessor) Process(ctx context.Context, _ *store.SchedulerAdmission, _ scheduler.Lifecycle) (scheduler.Result, error) {
+	p.once.Do(func() { close(p.started) })
+	<-ctx.Done()
+	return scheduler.Result{}, ctx.Err()
+}
+
+type noOpCancellationReconciler struct{}
+
+func (noOpCancellationReconciler) Reconcile(context.Context, *store.SchedulerAdmission) (store.SchedulerReconciliationOutcome, *string, error) {
+	return store.SchedulerReconciliationUnknown, nil, nil
+}
+
+func TestCancelRunCancelsRunningDelegateThroughSchedulerBoundary(t *testing.T) {
+	base := &delegationCancelStore{
+		runs: map[string]store.Run{
+			"parent": {ID: "parent", ProjectID: "project-1", Status: "PAUSED"},
+			"child":  {ID: "child", ProjectID: "project-1", Status: "RUNNING"},
+		},
+		delegations: []store.Delegation{{ID: "delegation-1", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "child"}},
+	}
+	admission := &store.SchedulerAdmission{
+		Job:   store.SchedulerJob{ID: "child-job", ProjectID: "project-1", RunID: "child", Kind: "START", State: "CLAIMED"},
+		Lease: store.SchedulerLease{JobID: "child-job", LeaseToken: "lease-1"},
+		Run:   base.runs["child"],
+	}
+	schedulerStore := &activeDelegationSchedulerStore{admission: admission, transition: make(chan store.SchedulerTransition, 1)}
+	processor := &blockingCancellationProcessor{started: make(chan struct{})}
+	coordinator, err := scheduler.New(schedulerStore, processor, noOpCancellationReconciler{}, scheduler.Config{
+		OwnerID: "test-owner", PollInterval: 5 * time.Millisecond, LeaseDuration: time.Second,
+		HeartbeatInterval: 100 * time.Millisecond, CapacityBackoff: 5 * time.Millisecond, MaxInFlight: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- coordinator.Run(ctx) }()
+	select {
+	case <-processor.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduler did not start delegated child")
+	}
+
+	services := &Services{ControlPlane: New(base), Scheduler: coordinator}
+	if err := services.CancelRun(t.Context(), "project-1", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	if got := base.runs["parent"].Status; got != "CANCELLED" {
+		t.Fatalf("parent status=%s want CANCELLED", got)
+	}
+	if len(base.cancelled) != 1 || base.cancelled[0] != "parent" {
+		t.Fatalf("inactive cancellation unexpectedly handled running child: %v", base.cancelled)
+	}
+	select {
+	case transition := <-schedulerStore.transition:
+		if transition.RunID != "child" || transition.RunStatus != "CANCELLED" {
+			t.Fatalf("child transition=%+v want CANCELLED", transition)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("running delegated child was not cancelled through scheduler")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduler did not stop")
 	}
 }
