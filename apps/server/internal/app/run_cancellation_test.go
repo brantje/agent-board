@@ -53,10 +53,12 @@ func TestCancelRunRejectsUnavailableInvalidTerminalAndUnownedRuns(t *testing.T) 
 
 type delegationCancelStore struct {
 	store.ControlPlaneStore
-	runs        map[string]store.Run
-	delegations []store.Delegation
-	cancelled   []string
-	listErr     error
+	runs         map[string]store.Run
+	delegations  []store.Delegation
+	cancelled    []string
+	listErr      error
+	getRunCalls  map[string]int
+	beforeGetRun func(string, int)
 }
 
 func (s *delegationCancelStore) GetProject(context.Context, string) (store.Project, error) {
@@ -64,6 +66,13 @@ func (s *delegationCancelStore) GetProject(context.Context, string) (store.Proje
 }
 
 func (s *delegationCancelStore) GetRun(_ context.Context, _, id string) (store.Run, error) {
+	if s.getRunCalls == nil {
+		s.getRunCalls = make(map[string]int)
+	}
+	s.getRunCalls[id]++
+	if s.beforeGetRun != nil {
+		s.beforeGetRun(id, s.getRunCalls[id])
+	}
 	run, ok := s.runs[id]
 	if !ok {
 		return store.Run{}, store.ErrNotFound
@@ -247,6 +256,69 @@ func TestCancelRunCancelsRunningDelegateThroughSchedulerBoundary(t *testing.T) {
 	}
 }
 
+
+func TestCancelRunRetriesDelegatedChildrenAfterParentIsAlreadyCancelled(t *testing.T) {
+	base := &delegationCancelStore{
+		runs: map[string]store.Run{
+			"parent": {ID: "parent", ProjectID: "project-1", Status: "PAUSED"},
+			"child":  {ID: "child", ProjectID: "project-1", Status: "RUNNING"},
+		},
+		delegations: []store.Delegation{{ID: "delegation-1", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "child"}},
+	}
+	services := &Services{ControlPlane: New(base), Scheduler: &scheduler.Coordinator{}}
+
+	if err := services.CancelRun(t.Context(), "project-1", "parent"); err == nil {
+		t.Fatal("first cancellation unexpectedly completed while delegated child was actively owned elsewhere")
+	}
+	if got := base.runs["parent"].Status; got != "CANCELLED" {
+		t.Fatalf("parent status=%s want CANCELLED after partial propagation", got)
+	}
+	if got := base.runs["child"].Status; got != "RUNNING" {
+		t.Fatalf("child status=%s want RUNNING before retry", got)
+	}
+
+	child := base.runs["child"]
+	child.Status = "QUEUED"
+	base.runs["child"] = child
+	if err := services.CancelRun(t.Context(), "project-1", "parent"); err != nil {
+		t.Fatalf("retry cancelled parent: %v", err)
+	}
+	if got := base.runs["parent"].Status; got != "CANCELLED" {
+		t.Fatalf("parent status=%s want CANCELLED", got)
+	}
+	if got := base.runs["child"].Status; got != "CANCELLED" {
+		t.Fatalf("child status=%s want CANCELLED after retry", got)
+	}
+}
+
+func TestCancelDelegatedChildrenTreatsConcurrentChildCompletionAsSuccessfulPropagation(t *testing.T) {
+	base := &delegationCancelStore{
+		runs: map[string]store.Run{
+			"parent": {ID: "parent", ProjectID: "project-1", Status: "PAUSED"},
+			"child":  {ID: "child", ProjectID: "project-1", Status: "QUEUED"},
+		},
+		delegations: []store.Delegation{{ID: "delegation-1", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "child"}},
+	}
+	base.beforeGetRun = func(id string, call int) {
+		if id != "child" || call != 2 {
+			return
+		}
+		child := base.runs[id]
+		child.Status = "COMPLETED"
+		base.runs[id] = child
+	}
+	services := &Services{ControlPlane: New(base), Scheduler: &scheduler.Coordinator{}}
+
+	if err := services.CancelRun(t.Context(), "project-1", "parent"); err != nil {
+		t.Fatalf("parent cancellation lost child completion race: %v", err)
+	}
+	if got := base.runs["parent"].Status; got != "CANCELLED" {
+		t.Fatalf("parent status=%s want CANCELLED", got)
+	}
+	if got := base.runs["child"].Status; got != "COMPLETED" {
+		t.Fatalf("child status=%s want COMPLETED", got)
+	}
+}
 
 func TestCancelRunForUserAuthorizesWorkflowMutationBeforeCanonicalCancellation(t *testing.T) {
 	if err := (&Services{}).CancelRunForUser(t.Context(), activeProjectActor("member", store.DeploymentRoleMember), "project-1", "run-1"); err == nil {

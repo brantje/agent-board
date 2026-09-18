@@ -35,6 +35,16 @@ func (s *Store) transitionAdmittedJob(ctx context.Context, input store.Scheduler
 	if input.RunStatus == "FAILED" && (input.FailureReason == nil || strings.TrimSpace(*input.FailureReason) == "") {
 		return store.SchedulerMutationResult{}, store.ErrInvalidArgument
 	}
+	switch input.RunStatus {
+	case "READY_FOR_REVIEW", "COMPLETED", "FAILED", "CANCELLED":
+		active, err := activeRunExecutionSessionTx(ctx, tx, input.ProjectID, input.RunID)
+		if err != nil {
+			return store.SchedulerMutationResult{}, err
+		}
+		if active {
+			return store.SchedulerMutationResult{}, store.ErrConflict
+		}
+	}
 
 	run, err := scanRun(tx.QueryRow(ctx, `
 		UPDATE runs

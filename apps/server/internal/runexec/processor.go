@@ -150,20 +150,27 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	}
 	resolved, err := p.resolver.Resolve(ctx, run.ProjectID, run.ID)
 	if err != nil {
-		return failed(err), nil
+		return p.checkedExecutionResult(ctx, run, failed(err))
 	}
 	delegationContinuation, err := p.loadDelegationContinuation(ctx, claim, run)
 	if err != nil {
-		return failed(err), nil
+		return p.checkedExecutionResult(ctx, run, failed(err))
 	}
 	live, err := p.liveExecutionSession(ctx, run)
 	if err != nil {
-		return failed(err), nil
+		return scheduler.Result{}, fmt.Errorf("run execution: inspect live Execution Session: %w", err)
 	}
+
+	var result scheduler.Result
 	if live != nil {
-		return p.attachExistingExecution(ctx, run, resolved.Safe, *live, delegationContinuation)
+		result, err = p.attachExistingExecution(ctx, run, resolved.Safe, *live, delegationContinuation)
+	} else {
+		result, err = p.startNewExecution(ctx, claim, run, resolved.Safe, delegationContinuation)
 	}
-	return p.startNewExecution(ctx, claim, run, resolved.Safe, delegationContinuation)
+	if err != nil {
+		return result, err
+	}
+	return p.checkedExecutionResult(ctx, run, result)
 }
 
 func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
@@ -327,6 +334,22 @@ func (p *Processor) runEngineWithContinuation(ctx context.Context, run store.Run
 		return p.failExecution(ctx, safe, combined, &instance.ID)
 	}
 	return p.finishSuccessfulExecution(ctx, safe, &instance.ID)
+}
+
+func (p *Processor) checkedExecutionResult(ctx context.Context, run store.Run, result scheduler.Result) (scheduler.Result, error) {
+	switch result.RunStatus {
+	case "READY_FOR_REVIEW", "COMPLETED", "FAILED", "CANCELLED":
+	default:
+		return result, nil
+	}
+	live, err := p.liveExecutionSession(ctx, run)
+	if err != nil {
+		return scheduler.Result{}, fmt.Errorf("run execution: confirm Execution Session state before %s: %w", result.RunStatus, err)
+	}
+	if live != nil {
+		return scheduler.Result{}, fmt.Errorf("run execution: Execution Session %s remains %s while Run result is %s; reconciliation is required", live.ID, live.Status, result.RunStatus)
+	}
+	return result, nil
 }
 
 func (p *Processor) liveExecutionSession(ctx context.Context, run store.Run) (*store.ExecutionSession, error) {

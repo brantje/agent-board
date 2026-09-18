@@ -769,8 +769,12 @@ func waitForDelegationExecutionRunStatus(t *testing.T, ctx context.Context, rout
 			if run.Status == status {
 				return run
 			}
-			if run.Status == "FAILED" || run.Status == "CANCELLED" {
-				t.Fatalf("Run %s terminated as %s while waiting for %s: failure=%v", runID, run.Status, status, run.FailureReason)
+			if run.Status == "COMPLETED" || run.Status == "FAILED" || run.Status == "CANCELLED" {
+				failure := ""
+				if run.FailureReason != nil {
+					failure = *run.FailureReason
+				}
+				t.Fatalf("Run %s reached terminal status %s while waiting for %s: failure=%q", runID, run.Status, status, failure)
 			}
 			break
 		}

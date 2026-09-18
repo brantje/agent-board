@@ -18,7 +18,7 @@ For implementation work, read the relevant canonical docs:
 - `docs/runtime-contract.md` — legacy/internal managed Runtime boundary/security
 - `docs/runtime-execution.md` — Runner execution plus legacy Runtime compatibility
 - `docs/agent-runner.md` — Runner identity, protocol-v2 session contract and Workspace transfer
-- `docs/future-agent-collaboration.md` — implemented Squad foundation and canonical delegation/Workspace handoff plus future outcome/worker topology
+- `docs/future-agent-collaboration.md` — implemented Squad foundation, canonical delegation/Workspace handoff and delegated outcome/continuation lifecycle plus future collaboration/worker topology
 - `docs/event-protocol.md` — Event contract
 - `docs/testing.md` — mandatory TDD workflow
 - `docs/frontend-implementation.md` — clean-room Nuxt/Nuxt UI implementation rules
@@ -333,7 +333,7 @@ Read `docs/future-agent-collaboration.md` before changing Squad ownership, leade
 
 ## Planned features
 
-Planning strategy, Automations, Agent-created Issues, Source Connections, delivery automation, delegated outcomes/parent continuation, Squad-aware delegation and worker pools reuse the canonical Issue/Run/scheduler/Workspace model. Squad-aware collaboration must build on the implemented Squad foundation rather than replacing it.
+Planning strategy, Automations, Agent-created Issues, Source Connections, delivery automation, Squad-aware delegation and worker pools reuse the canonical Issue/Run/scheduler/Workspace model. Delegated outcomes/parent continuation are already implemented on that model, and Squad-aware collaboration must build on the implemented Squad foundation rather than replacing it.
 
 Future Worker Pools supply/place Runner capacity but do not replace Agent, Runner or Execution Session identities. Legacy Runtime Instance identity remains separate wherever that compatibility path still exists.
 

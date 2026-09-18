@@ -23,7 +23,9 @@ func (s *Services) CancelRun(ctx context.Context, projectID, runID string) error
 		return err
 	}
 	switch run.Status {
-	case "COMPLETED", "FAILED", "CANCELLED":
+	case "CANCELLED":
+		return s.cancelDelegatedChildren(ctx, projectID, runID)
+	case "COMPLETED", "FAILED":
 		return NewError("invalid_run_transition", "Run is already terminal", store.ErrConflict)
 	}
 
@@ -73,10 +75,17 @@ func (s *Services) cancelDelegatedChildren(ctx context.Context, projectID, paren
 			return err
 		}
 		switch child.Status {
-		case "COMPLETED", "FAILED", "CANCELLED":
+		case "COMPLETED", "FAILED":
 			continue
 		}
 		if err := s.CancelRun(ctx, projectID, child.ID); err != nil {
+			latest, latestErr := s.ControlPlane.GetRun(ctx, projectID, child.ID)
+			if latestErr == nil && (latest.Status == "COMPLETED" || latest.Status == "FAILED") {
+				continue
+			}
+			if latestErr != nil {
+				return errors.Join(err, latestErr)
+			}
 			return err
 		}
 	}

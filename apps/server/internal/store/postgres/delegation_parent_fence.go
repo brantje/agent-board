@@ -45,14 +45,36 @@ func delegatedParentTerminalTx(ctx context.Context, tx pgx.Tx, child store.Run) 
 	}
 }
 
-func inactiveRunExecutionOccupiedTx(ctx context.Context, tx pgx.Tx, projectID, runID string) (bool, error) {
-	var activeSessions, claimedJobs int
+func activeRunExecutionSessionTx(ctx context.Context, tx pgx.Tx, projectID, runID string) (bool, error) {
+	var active bool
 	if err := tx.QueryRow(ctx, `
-		SELECT
-		  (SELECT count(*) FROM execution_sessions WHERE project_id=$1 AND run_id=$2 AND status IN ('PENDING','STARTING','RUNNING')),
-		  (SELECT count(*) FROM scheduler_jobs WHERE project_id=$1 AND run_id=$2 AND state='CLAIMED')
-	`, projectID, runID).Scan(&activeSessions, &claimedJobs); err != nil {
+		SELECT EXISTS (
+			SELECT 1
+			FROM execution_sessions
+			WHERE project_id=$1
+			  AND run_id=$2
+			  AND status IN ('PENDING','STARTING','RUNNING')
+		)
+	`, projectID, runID).Scan(&active); err != nil {
 		return false, err
 	}
-	return activeSessions != 0 || claimedJobs != 0, nil
+	return active, nil
+}
+
+func inactiveRunExecutionOccupiedTx(ctx context.Context, tx pgx.Tx, projectID, runID string) (bool, error) {
+	active, err := activeRunExecutionSessionTx(ctx, tx, projectID, runID)
+	if err != nil || active {
+		return active, err
+	}
+	var claimed bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM scheduler_jobs
+			WHERE project_id=$1 AND run_id=$2 AND state='CLAIMED'
+		)
+	`, projectID, runID).Scan(&claimed); err != nil {
+		return false, err
+	}
+	return claimed, nil
 }

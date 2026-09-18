@@ -370,6 +370,90 @@ func prepareDelegatedChildForTerminal(t *testing.T, requestKey string) (delegati
 	return f, created, childJobID, childLease
 }
 
+func TestDelegatedTerminalTransitionWaitsForExecutionSessionReconciliation(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "execution-session-uncertainty")
+	ctx := t.Context()
+	childRunID := created.DelegatedRun.ID
+	projectID := f.project.ID
+
+	runnerValue, err := f.store.CreateRunner(ctx, store.Runner{ProjectID: &projectID, Name: "delegation-uncertainty-runner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := f.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: projectID, RunID: childRunID, RunnerID: runnerValue.ID,
+		Status: "PENDING", CWD: "/workspace", CommandArgv: []byte(`["agent"]`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
+		ProjectID: projectID, SessionID: session.ID, FromStatuses: []string{"PENDING"}, Status: "STARTING",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
+		ProjectID: projectID, SessionID: session.ID, FromStatuses: []string{"STARTING"}, Status: "RUNNING",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	reason := "runner transport disconnected"
+	if _, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: projectID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease,
+		RunStatus: "FAILED", FailureReason: &reason,
+	}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("terminal transition with live Execution Session error=%v want ErrConflict", err)
+	}
+	child, err := f.store.GetRun(ctx, projectID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != "RUNNING" {
+		t.Fatalf("child status=%s want RUNNING while execution is uncertain", child.Status)
+	}
+	assertSchedulerOwnershipCounts(t, f.store, childJobID, 1, 3)
+	delegation, err := f.store.GetDelegationByRun(ctx, projectID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome != nil || delegation.ContinuationJobID != nil || delegation.CompletedAt != nil {
+		t.Fatalf("delegation finalized while Execution Session was live: %+v", delegation)
+	}
+	if _, err := f.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: projectID, RunID: f.parentRun.ID, RunnerID: runnerValue.ID,
+		Status: "PENDING", CWD: "/workspace", CommandArgv: []byte(`["parent"]`),
+	}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("same-Workspace writer admission error=%v want ErrConflict", err)
+	}
+
+	if _, err := f.store.TransitionExecutionSession(ctx, store.ExecutionSessionTransition{
+		ProjectID: projectID, SessionID: session.ID, FromStatuses: []string{"RUNNING"}, Status: "FAILED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	expireLease(t, f.store, childJobID)
+	reconciled := mustClaimReconciliation(t, f.store, "delegation-uncertainty-reconciler")
+	mutation, err := f.store.ResolveReconciliationMutation(ctx, store.SchedulerReconciliation{
+		ProjectID: projectID, JobID: childJobID, RunID: childRunID, LeaseToken: reconciled.Lease.LeaseToken,
+		Outcome: store.SchedulerReconciliationFailed, FailureReason: &reason,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation.Run.Status != "FAILED" {
+		t.Fatalf("reconciled child status=%s want FAILED", mutation.Run.Status)
+	}
+	delegation, err = f.store.GetDelegationByRun(ctx, projectID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeFailed || delegation.ContinuationJobID == nil {
+		t.Fatalf("trusted terminal reconciliation did not finalize delegation: %+v", delegation)
+	}
+	assertSchedulerOwnershipCounts(t, f.store, childJobID, 0, 0)
+}
+
 func TestParentCancellationBeforeLateDelegateCompletionNeverQueuesContinuation(t *testing.T) {
 	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "cancel-parent-first")
 	ctx := t.Context()

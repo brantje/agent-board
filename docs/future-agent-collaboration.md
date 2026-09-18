@@ -191,15 +191,15 @@ Additional recursion/delegation-depth and rate/budget policies may be added when
 
 ## Ordering
 
-The reusable mixed-membership Squad/ownership foundation, canonical delegation request/lineage layer and serialized Workspace handoff are implemented independently of future delegation-result lifecycle work.
+The reusable mixed-membership Squad/ownership foundation, canonical delegation request/lineage layer, serialized Workspace handoff, and delegated outcome/parent-continuation lifecycle are implemented independently of later Squad-aware collaboration work.
 
 ```text
 complete v0.1 coding flow
  -> planning/automation where useful
  -> canonical delegation request/lineage [implemented]
  -> serialized Workspace handoff [implemented]
- -> delegated outcomes + durable parent continuation/recovery
- -> Squad-aware delegation/member collaboration
+ -> delegated outcomes + durable parent continuation/recovery [implemented]
+ -> Squad-aware delegation/member collaboration [later]
  -> broader messaging/wake policy if needed
  -> worker registry/pools
  -> warm/spot optimizations
