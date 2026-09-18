@@ -2,6 +2,7 @@ package runexec
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"strings"
@@ -39,6 +40,32 @@ func TestProcessLauncherRecordActivityPersistsOnlyCanonicalEngineEvents(t *testi
 	var unavailable *processLauncher
 	if err := unavailable.RecordActivity(context.Background(), activity); err == nil {
 		t.Fatal("nil activity sink unexpectedly accepted event")
+	}
+}
+
+type failingActivityEventAppender struct {
+	err error
+}
+
+func (s failingActivityEventAppender) AppendEvent(context.Context, store.Event) (store.Event, error) {
+	return store.Event{}, s.err
+}
+
+func TestProcessLauncherRecordActivityPropagatesPersistenceFailure(t *testing.T) {
+	sentinel := errors.New("event store unavailable")
+	recorder, err := evidence.NewRecorder(failingActivityEventAppender{err: sentinel}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := &processLauncher{
+		events: recorder,
+		safe: interactiveSafeContext(),
+	}
+	if err := launcher.RecordActivity(t.Context(), engine.ActivityEvent{
+		Type: "engine.execution.completed",
+		Payload: map[string]any{"boundary": "completed"},
+	}); !errors.Is(err, sentinel) {
+		t.Fatalf("RecordActivity() error=%v want %v", err, sentinel)
 	}
 }
 
