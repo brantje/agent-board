@@ -907,7 +907,7 @@ func isolatedDelegationExecutionDatabase(t *testing.T, ctx context.Context, base
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
 		cleanup, connectErr := pgx.Connect(cleanupCtx, baseDatabaseURL)
 		if connectErr != nil {
