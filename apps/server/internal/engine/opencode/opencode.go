@@ -150,12 +150,25 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	state := newRunState(session.ID, request.InteractiveQuestions, activitySink(request.Launcher))
 	statusTools := newIssueStatusToolTracker()
 	delegationTools := newDelegationToolTracker()
+	completeDelegationHandoff := func(err error) error {
+		if !errors.Is(err, engine.ErrDelegationHandoff) {
+			return err
+		}
+		_ = stream.Close()
+		stopped = true
+		if stopErr := stopServiceForDelegationHandoff(ctx, process); stopErr != nil {
+			waitDrained(drainDone, serviceStopTimeout)
+			return stopErr
+		}
+		waitDrained(drainDone, serviceStopTimeout)
+		return err
+	}
 	if recovered && !promptRequired {
 		if err := statusTools.ReconcileAttach(ctx, native, session.ID, request.IssueStatus); err != nil {
 			return engine.Result{}, err
 		}
 		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
-			return engine.Result{}, err
+			return engine.Result{}, completeDelegationHandoff(err)
 		}
 	}
 	state.seedModelUsage(settings.ProviderID, request.Context.Model.Model, nil)
@@ -189,7 +202,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			return engine.Result{}, err
 		}
 		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
-			return engine.Result{}, err
+			return engine.Result{}, completeDelegationHandoff(err)
 		}
 		if err := state.flushPendingMessages(ctx); err != nil {
 			return engine.Result{}, err
@@ -278,6 +291,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 					)
 				}
 				if reconcileErr := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); reconcileErr != nil {
+					if errors.Is(reconcileErr, engine.ErrDelegationHandoff) {
+						return engine.Result{}, completeDelegationHandoff(reconcileErr)
+					}
 					return engine.Result{}, errors.Join(
 						fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
 						reconcileErr,
@@ -330,15 +346,8 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 					if activityErr := state.handleEvent(ctx, native, eventRead.event); activityErr != nil {
 						return engine.Result{}, activityErr
 					}
-					_ = stream.Close()
-					stopped = true
-					if stopErr := stopServiceForDelegationHandoff(ctx, process); stopErr != nil {
-						waitDrained(drainDone, serviceStopTimeout)
-						return engine.Result{}, stopErr
-					}
-					waitDrained(drainDone, serviceStopTimeout)
 				}
-				return engine.Result{}, err
+				return engine.Result{}, completeDelegationHandoff(err)
 			}
 			if err := state.handleEvent(ctx, native, eventRead.event); err != nil {
 				return engine.Result{}, err
