@@ -286,3 +286,141 @@ func TestReconcileDoesNotRecoverDelegationWithoutSafeBoundary(t *testing.T) {
 		})
 	}
 }
+
+func TestDelegationRecoveryEvidenceRequiresCanonicalIdentityAndOrdering(t *testing.T) {
+	_, run, delegation, _ := delegationRecoveryFixture(t)
+	completed := evidence.ToolPayload{
+		Name: "delegate_task",
+		ToolCallID: delegation.RequestKey,
+		Input: map[string]any{"targetAgentId": delegation.TargetAgentID, "task": delegation.Task},
+	}
+
+	t.Run("workspace return before canonical completion is insufficient", func(t *testing.T) {
+		events := []store.Event{
+			delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "workspace.transfer.completed", map[string]any{"direction": "from_runner"}),
+			delegationRecoveryEvent(t, run.ProjectID, run.ID, 2, "tool.completed", completed),
+		}
+		gotCompleted, synchronized := delegationRecoveryEvidence(events, delegation)
+		if !gotCompleted || synchronized {
+			t.Fatalf("completed=%v synchronized=%v want true,false", gotCompleted, synchronized)
+		}
+	})
+
+	t.Run("mismatched canonical fields fail closed", func(t *testing.T) {
+		for _, payload := range []evidence.ToolPayload{
+			{Name: "delegate_task", ToolCallID: "wrong-call", Input: map[string]any{"targetAgentId": delegation.TargetAgentID, "task": delegation.Task}},
+			{Name: "delegate_task", ToolCallID: delegation.RequestKey, Input: map[string]any{"targetAgentId": "wrong-agent", "task": delegation.Task}},
+			{Name: "delegate_task", ToolCallID: delegation.RequestKey, Input: map[string]any{"targetAgentId": delegation.TargetAgentID, "task": "wrong task"}},
+			{Name: "different_tool", ToolCallID: delegation.RequestKey, Input: map[string]any{"targetAgentId": delegation.TargetAgentID, "task": delegation.Task}},
+		} {
+			event := delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "tool.completed", payload)
+			gotCompleted, synchronized := delegationRecoveryEvidence([]store.Event{event}, delegation)
+			if gotCompleted || synchronized {
+				t.Fatalf("mismatched payload recovered handoff: %+v", payload)
+			}
+		}
+	})
+
+	t.Run("only authoritative handback direction after completion counts", func(t *testing.T) {
+		completedEvent := delegationRecoveryEvent(t, run.ProjectID, run.ID, 1, "tool.completed", completed)
+		for _, tc := range []struct {
+			name      string
+			payload   json.RawMessage
+			wantSync  bool
+		}{
+			{name: "malformed", payload: json.RawMessage(`{"direction":`), wantSync: false},
+			{name: "to runner", payload: json.RawMessage(`{"direction":"to_runner"}`), wantSync: false},
+			{name: "local return", payload: json.RawMessage(`{"direction":"from_runner"}`), wantSync: true},
+			{name: "remote publication", payload: json.RawMessage(`{"direction":"git_publish"}`), wantSync: true},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				seq := int64(2)
+				runID := run.ID
+				transfer := store.Event{
+					ProjectID: run.ProjectID,
+					RunID: &runID,
+					Type: "workspace.transfer.completed",
+					Sequence: &seq,
+					Payload: tc.payload,
+				}
+				gotCompleted, synchronized := delegationRecoveryEvidence([]store.Event{completedEvent, transfer}, delegation)
+				if !gotCompleted || synchronized != tc.wantSync {
+					t.Fatalf("completed=%v synchronized=%v want true,%v", gotCompleted, synchronized, tc.wantSync)
+				}
+			})
+		}
+	})
+}
+
+func TestCompletedDelegationExecutionSessionFailsClosedOnAmbiguousAuthority(t *testing.T) {
+	runID := "parent-run"
+	tests := []struct {
+		name     string
+		sessions []store.ExecutionSession
+	}{
+		{name: "no authoritative owner", sessions: []store.ExecutionSession{{ID: "one", RunID: runID, Status: "COMPLETED"}}},
+		{name: "failed runner", sessions: []store.ExecutionSession{{ID: "one", RunID: runID, Status: "FAILED", RunnerID: "runner-1"}}},
+		{name: "cancelled runtime", sessions: []store.ExecutionSession{{ID: "one", RunID: runID, Status: "CANCELLED", RuntimeInstanceID: "runtime-1"}}},
+		{name: "multiple completed owners", sessions: []store.ExecutionSession{
+			{ID: "one", RunID: runID, Status: "COMPLETED", RunnerID: "runner-1"},
+			{ID: "two", RunID: runID, Status: "COMPLETED", RunnerID: "runner-2"},
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if session, ok := completedDelegationExecutionSession(tc.sessions, runID); ok {
+				t.Fatalf("ambiguous or unsafe sessions selected authority: %+v", session)
+			}
+		})
+	}
+}
+
+func TestDelegationRecoveryContextRejectsIdentitySubstitution(t *testing.T) {
+	storeFake, run, _, safe := delegationRecoveryFixture(t)
+	processor := &Processor{store: storeFake}
+
+	t.Run("malformed provenance", func(t *testing.T) {
+		storeFake.provenance = json.RawMessage(`{"schemaVersion":`)
+		if _, err := processor.delegationRecoveryContext(t.Context(), run); err == nil {
+			t.Fatal("malformed provenance was accepted")
+		}
+	})
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*executioncontext.SafeContext)
+	}{
+		{name: "project", mutate: func(value *executioncontext.SafeContext) { value.Project.ID = "other-project" }},
+		{name: "run", mutate: func(value *executioncontext.SafeContext) { value.Run.ID = "other-run" }},
+		{name: "issue", mutate: func(value *executioncontext.SafeContext) { value.Issue.ID = "other-issue" }},
+		{name: "workspace", mutate: func(value *executioncontext.SafeContext) { value.Workspace.ID = "other-workspace" }},
+		{name: "agent", mutate: func(value *executioncontext.SafeContext) { value.Agent.ID = "other-agent" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			substituted := safe
+			tc.mutate(&substituted)
+			encoded, err := json.Marshal(executioncontext.Provenance{
+				SchemaVersion: executioncontext.ProvenanceSchemaVersion,
+				Context: substituted,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			storeFake.provenance = encoded
+			if _, err := processor.delegationRecoveryContext(t.Context(), run); err == nil {
+				t.Fatalf("%s substitution was accepted", tc.name)
+			}
+		})
+	}
+
+	t.Run("schema version", func(t *testing.T) {
+		encoded, err := json.Marshal(executioncontext.Provenance{SchemaVersion: executioncontext.ProvenanceSchemaVersion + 1, Context: safe})
+		if err != nil {
+			t.Fatal(err)
+		}
+		storeFake.provenance = encoded
+		if _, err := processor.delegationRecoveryContext(t.Context(), run); err == nil {
+			t.Fatal("unsupported provenance schema was accepted")
+		}
+	})
+}
