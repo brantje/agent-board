@@ -1087,14 +1087,20 @@ func (p *Processor) syncWorkspaceFromRunner(ctx context.Context, safe executionc
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{"reason": err.Error()}), nil, nil)
 		return err
 	}
+	// Persist the authoritative hand-back boundary before acknowledging Runner
+	// cleanup. If the acknowledgement is lost, reconciliation can trust this
+	// server-side evidence while the Runner safely retains its recovery copy.
+	if err := p.record(ctx, safe, "workspace.transfer.completed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{
+		"bytesTransferred": len(payload), "totalBytes": len(payload),
+	}), nil, nil); err != nil {
+		return err
+	}
 	if err := client.ConfirmTransferApplied(ctx, sessionID, transferID); err != nil {
 		wrapped := fmt.Errorf("acknowledge applied workspace transfer: %w", err)
 		_ = p.record(ctx, safe, "workspace.transfer.failed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{"reason": wrapped.Error()}), nil, nil)
 		return wrapped
 	}
-	return p.record(ctx, safe, "workspace.transfer.completed", p.transferEventPayload(ctx, runnerID, transferID, "from_runner", map[string]any{
-		"bytesTransferred": len(payload), "totalBytes": len(payload),
-	}), nil, nil)
+	return nil
 }
 
 func (p *Processor) finishWaitingForInputRunner(ctx context.Context, safe executioncontext.SafeContext) (scheduler.Result, error) {
