@@ -80,7 +80,7 @@ Deep GitHub integration should include:
 - installation-scoped repository discovery;
 - repository picker;
 - short-lived scoped credentials for Git/API operations;
-- signed webhooks;
+- native signature/token verification;
 - PR create/update/read;
 - PR association with Agent Board Issues;
 - checks/status rollup;
