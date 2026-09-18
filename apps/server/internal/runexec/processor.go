@@ -1161,6 +1161,9 @@ func (p *Processor) runEngineOnRunnerWithContinuation(ctx context.Context, run s
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
 	}
+	if syncErr == nil {
+		syncErr = p.recordDelegationWorkspaceAccepted(ctx, safe, nil)
+	}
 	if handoffRequested {
 		if syncErr != nil {
 			return p.failExecution(ctx, safe, syncErr, nil)
