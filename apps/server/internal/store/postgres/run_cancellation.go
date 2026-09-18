@@ -29,15 +29,31 @@ func (s *Store) CancelInactiveRun(ctx context.Context, projectID, runID string) 
 	if err != nil {
 		return store.RunCancellationResult{}, err
 	}
-	if current.Status != "QUEUED" && current.Status != "PAUSED" {
-		return store.RunCancellationResult{}, store.ErrConflict
-	}
-
-	occupied, err := inactiveRunExecutionOccupiedTx(ctx, tx, projectID, runID)
-	if err != nil {
-		return store.RunCancellationResult{}, err
-	}
-	if occupied {
+	switch current.Status {
+	case "QUEUED", "PAUSED":
+		occupied, err := inactiveRunExecutionOccupiedTx(ctx, tx, projectID, runID)
+		if err != nil {
+			return store.RunCancellationResult{}, err
+		}
+		if occupied {
+			return store.RunCancellationResult{}, store.ErrConflict
+		}
+	case "STARTING":
+		active, err := activeRunExecutionSessionTx(ctx, tx, projectID, runID)
+		if err != nil {
+			return store.RunCancellationResult{}, err
+		}
+		if active {
+			return store.RunCancellationResult{}, store.ErrConflict
+		}
+		var claimed bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM scheduler_jobs WHERE project_id=$1 AND run_id=$2 AND state='CLAIMED')`, projectID, runID).Scan(&claimed); err != nil {
+			return store.RunCancellationResult{}, err
+		}
+		if !claimed {
+			return store.RunCancellationResult{}, store.ErrConflict
+		}
+	default:
 		return store.RunCancellationResult{}, store.ErrConflict
 	}
 
@@ -55,7 +71,7 @@ func cancelInactiveRunTx(ctx context.Context, tx pgx.Tx, current store.Run) (sto
 	run, err := scanRun(tx.QueryRow(ctx, `
 		UPDATE runs
 		SET status='CANCELLED', queue_reason=NULL, completed_at=now(), updated_at=now()
-		WHERE project_id=$1 AND id=$2 AND status IN ('QUEUED','PAUSED')
+		WHERE project_id=$1 AND id=$2 AND status IN ('QUEUED','PAUSED','STARTING')
 		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
 		          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
 	`, current.ProjectID, current.ID))
@@ -65,8 +81,11 @@ func cancelInactiveRunTx(ctx context.Context, tx pgx.Tx, current store.Run) (sto
 	if _, err := tx.Exec(ctx, `
 		UPDATE scheduler_jobs
 		SET state='CANCELLED', wait_reason=NULL, updated_at=now()
-		WHERE project_id=$1 AND run_id=$2 AND state='QUEUED'
+		WHERE project_id=$1 AND run_id=$2 AND state IN ('QUEUED','CLAIMED')
 	`, run.ProjectID, run.ID); err != nil {
+		return store.RunCancellationResult{}, err
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM scheduler_leases AS lease USING scheduler_jobs AS job WHERE lease.job_id=job.id AND job.project_id=$1 AND job.run_id=$2`, run.ProjectID, run.ID); err != nil {
 		return store.RunCancellationResult{}, err
 	}
 	if _, err := tx.Exec(ctx, `DELETE FROM scheduler_capacity_reservations WHERE project_id=$1 AND run_id=$2`, run.ProjectID, run.ID); err != nil {
