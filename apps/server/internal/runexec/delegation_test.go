@@ -163,6 +163,29 @@ func TestEngineRequestDelegationContextIncludesTargetsAndSquadMembers(t *testing
 	}
 }
 
+func TestEngineRequestDelegationContextKeepsDirectAgentOwnershipOutOfSquadContext(t *testing.T) {
+	issueType, agentID := "AGENT", "parent-agent-1"
+	storage := &delegationCapabilityStore{
+		targets: []store.DelegationTarget{{ID: "target-agent-1", Name: "Target agent"}},
+		issue:   &store.Issue{ID: "issue-1", ProjectID: "project-1", AssigneeType: &issueType, AssigneeID: &agentID},
+	}
+	request, err := (&Processor{store: storage}).engineRequest(t.Context(), executioncontext.SafeContext{
+		Project: executioncontext.ProjectContext{ID: "project-1"},
+		Issue:   executioncontext.IssueContext{ID: "issue-1"},
+		Run:     executioncontext.RunContext{ID: "parent-run-1"},
+		Agent:   executioncontext.AgentContext{ID: "parent-agent-1", AllowDelegation: true},
+	}, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.DelegationContext == nil || len(request.DelegationContext.Targets) != 1 {
+		t.Fatalf("delegation context=%+v", request.DelegationContext)
+	}
+	if request.DelegationContext.Squad != nil {
+		t.Fatalf("direct Agent-owned Issue exposed Squad context: %+v", request.DelegationContext.Squad)
+	}
+}
+
 func TestEngineRequestDelegationPublishesPersistedEvent(t *testing.T) {
 	persisted := store.Event{ID: "event-1", Type: "delegation.created", ProjectID: "project-1"}
 	storage := &delegationCapabilityStore{result: store.RequestDelegationResult{
