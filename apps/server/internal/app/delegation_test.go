@@ -79,6 +79,19 @@ func (s *delegationServiceStore) GetWorkspaceCurrentRevision(context.Context, st
 	return "revision-1", nil
 }
 
+type delegationNoRevisionStore struct {
+	store.ControlPlaneStore
+	runs map[string]store.Run
+}
+
+func (s *delegationNoRevisionStore) GetRun(_ context.Context, projectID, runID string) (store.Run, error) {
+	run, ok := s.runs[runID]
+	if !ok || run.ProjectID != projectID {
+		return store.Run{}, store.ErrNotFound
+	}
+	return run, nil
+}
+
 type unsupportedDelegationStore struct {
 	store.ControlPlaneStore
 }
@@ -230,5 +243,24 @@ func TestDelegationInspectionFailsClosedOnBrokenAuthoritativeState(t *testing.T)
 			t.Fatalf("err=%v want translated conflict", err)
 		}
 	})
+}
+
+func TestDelegationInspectionRejectsMissingWorkspaceRevisionReader(t *testing.T) {
+	value := store.Delegation{ID: "delegation", ProjectID: "project", IssueID: "issue", ParentRunID: "parent", DelegatedRunID: "child"}
+	backend := &delegationNoRevisionStore{runs: map[string]store.Run{
+		"parent": {ID: "parent", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", Status: "PAUSED"},
+		"child":  {ID: "child", ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", Status: "COMPLETED"},
+	}}
+	if _, err := New(backend).inspectDelegation(t.Context(), value); err == nil {
+		t.Fatal("inspection accepted store without Workspace revision reader")
+	}
+}
+
+func TestListDelegationsPropagatesRevisionFailure(t *testing.T) {
+	value := store.Delegation{ID: "delegation", ProjectID: "project", IssueID: "issue", ParentRunID: "parent", DelegatedRunID: "child"}
+	backend := &delegationServiceStore{listResult: []store.Delegation{value}, revisionErr: store.ErrConflict}
+	if _, err := New(backend).ListDelegationsByParentRun(t.Context(), "project", "parent"); err == nil || !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("err=%v want revision conflict", err)
+	}
 }
 
