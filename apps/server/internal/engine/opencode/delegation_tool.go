@@ -36,7 +36,7 @@ export default tool({
         callID,
       },
     })
-    return "Delegation accepted for Agent " + targetAgentId
+    return JSON.stringify({ status: "accepted", targetAgentId })
   },
 })
 `
