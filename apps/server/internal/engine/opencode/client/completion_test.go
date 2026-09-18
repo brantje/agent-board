@@ -175,6 +175,18 @@ func TestPromptAdmittedRequiresExactUserTurn(t *testing.T) {
 			"parts": []any{map[string]any{"type": "text", "text": "other task"}},
 		}}, wantError: true},
 	}
+	t.Run("unavailable history is ambiguous", func(t *testing.T) {
+		server := httptest.NewServer(http.NotFoundHandler())
+		defer server.Close()
+		native, err := New(server.Client(), server.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if admitted, err := native.PromptAdmitted(t.Context(), "ses_1", "do the task"); err == nil || admitted {
+			t.Fatalf("PromptAdmitted()=(%v,%v) want false with ambiguity error", admitted, err)
+		}
+	})
+
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

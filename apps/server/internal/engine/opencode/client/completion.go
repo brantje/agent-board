@@ -16,12 +16,16 @@ type SessionMessage struct {
 }
 
 func (c *Client) ListMessages(ctx context.Context, sessionID string) ([]SessionMessage, error) {
+	return c.listMessages(ctx, sessionID, true)
+}
+
+func (c *Client) listMessages(ctx context.Context, sessionID string, notFoundIsEmpty bool) ([]SessionMessage, error) {
 	if strings.TrimSpace(sessionID) == "" {
 		return nil, fmt.Errorf("opencode: session id is required")
 	}
 	path := "/session/" + url.PathEscape(sessionID) + "/message"
 	raw, err := c.getRawJSON(ctx, path)
-	if isNotFound(err) {
+	if isNotFound(err) && notFoundIsEmpty {
 		return nil, nil
 	}
 	if err != nil {
@@ -48,7 +52,7 @@ func (c *Client) PromptAdmitted(ctx context.Context, sessionID, expected string)
 	if strings.TrimSpace(sessionID) == "" || strings.TrimSpace(expected) == "" {
 		return false, fmt.Errorf("opencode: session id and expected prompt are required")
 	}
-	messages, err := c.ListMessages(ctx, sessionID)
+	messages, err := c.listMessages(ctx, sessionID, false)
 	if err != nil {
 		return false, err
 	}
