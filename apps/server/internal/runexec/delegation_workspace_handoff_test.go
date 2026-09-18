@@ -209,3 +209,62 @@ func TestDelegationHandoffCancellationSyncsButDoesNotReleaseChild(t *testing.T) 
 		t.Fatalf("cancelled parent did not preserve hand-back: directions=%v confirmed=%v", client.directions, client.confirmed)
 	}
 }
+
+func TestDelegationHandoffRejectsIncompleteIdentity(t *testing.T) {
+	repository := initProcessTestRepository(t)
+	safe := processTestSafeContext(repository)
+	evidenceStore := &processTestStore{}
+	processor, _ := newProcessTestProcessor(t, repository, safe, evidenceStore)
+	processor.store = &localDelegationHandoffStore{processTestStore: evidenceStore}
+
+	result, err := processor.finishDelegationWorkspaceHandoff(t.Context(), safe, engine.Delegation{RunID: "delegated-run-1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RunStatus != "FAILED" || result.FailureReason == nil {
+		t.Fatalf("incomplete handoff result=%+v", result)
+	}
+	if !hasProcessTestEvent(evidenceStore.events, "run.failed") {
+		t.Fatalf("incomplete handoff events=%+v", evidenceStore.events)
+	}
+}
+
+func TestDelegationHandoffFailsClosedWithoutHandoffStore(t *testing.T) {
+	repository := initProcessTestRepository(t)
+	safe := processTestSafeContext(repository)
+	evidenceStore := &processTestStore{}
+	processor, _ := newProcessTestProcessor(t, repository, safe, evidenceStore)
+
+	result, err := processor.finishDelegationWorkspaceHandoff(t.Context(), safe, engine.Delegation{ID: "delegation-1", RunID: "delegated-run-1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RunStatus != "FAILED" || result.FailureReason == nil {
+		t.Fatalf("missing handoff store result=%+v", result)
+	}
+	if !hasProcessTestEvent(evidenceStore.events, "run.failed") {
+		t.Fatalf("missing handoff store events=%+v", evidenceStore.events)
+	}
+}
+
+func TestDelegationHandoffMarkReadyFailureFailsClosed(t *testing.T) {
+	repository := initProcessTestRepository(t)
+	safe := processTestSafeContext(repository)
+	evidenceStore := &processTestStore{}
+	processor, _ := newProcessTestProcessor(t, repository, safe, evidenceStore)
+	processor.store = &localDelegationHandoffStore{
+		processTestStore: evidenceStore,
+		markErr:          errors.New("mark failed"),
+	}
+
+	result, err := processor.finishDelegationWorkspaceHandoff(t.Context(), safe, engine.Delegation{ID: "delegation-1", RunID: "delegated-run-1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RunStatus != "FAILED" || result.FailureReason == nil {
+		t.Fatalf("mark failure result=%+v", result)
+	}
+	if !hasProcessTestEvent(evidenceStore.events, "run.failed") || hasProcessTestEvent(evidenceStore.events, "run.paused") {
+		t.Fatalf("mark failure events=%+v", evidenceStore.events)
+	}
+}
