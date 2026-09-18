@@ -206,6 +206,129 @@ func TestDelegationHandoffTransfersRunnerWorkspaceOwnershipToChild(t *testing.T)
 	}
 }
 
+
+func TestSchedulerReconciliationUnknownKeepsUnreadyDelegationHeld(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	parentJobID, leaseToken := claimDelegationParentJob(t, f)
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "remain held until workspace handoff", RequestKey: "unknown-unready",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expireDelegationSchedulerLease(t, f.store, parentJobID, leaseToken)
+
+	claim, err := f.store.ClaimExpiredJobForReconciliation(ctx, "unknown-unready-reconciler", time.Minute)
+	if err != nil || claim == nil {
+		t.Fatalf("reconciliation claim=%+v err=%v", claim, err)
+	}
+	parent, err := f.store.ResolveReconciliation(ctx, store.SchedulerReconciliation{
+		ProjectID: f.project.ID,
+		JobID: parentJobID,
+		RunID: f.parentRun.ID,
+		LeaseToken: claim.Lease.LeaseToken,
+		Outcome: store.SchedulerReconciliationUnknown,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != "RUNNING" {
+		t.Fatalf("unready UNKNOWN parent status=%s want RUNNING", parent.Status)
+	}
+	var childWait, jobWait *string
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT child.queue_reason, job.wait_reason
+		FROM runs AS child
+		JOIN scheduler_jobs AS job ON job.project_id=child.project_id AND job.run_id=child.id AND job.kind='START'
+		WHERE child.project_id=$1 AND child.id=$2
+	`, f.project.ID, created.DelegatedRun.ID).Scan(&childWait, &jobWait); err != nil {
+		t.Fatal(err)
+	}
+	if childWait == nil || *childWait != store.DelegationWorkspaceHandoffWaitReason ||
+		jobWait == nil || *jobWait != store.DelegationWorkspaceHandoffWaitReason {
+		t.Fatalf("unready child was released: runWait=%v jobWait=%v", childWait, jobWait)
+	}
+}
+
+func TestSchedulerReconciliationUnknownDoesNotYieldWhileParentSessionIsLive(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	parentJobID, leaseToken := claimDelegationParentJob(t, f)
+	created, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "wait for authoritative parent session", RequestKey: "unknown-live-parent",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.MarkDelegationWorkspaceHandoffReady(ctx, f.project.ID, f.parentRun.ID, created.Delegation.ID, created.DelegatedRun.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	runner, err := f.store.CreateRunner(ctx, store.Runner{Name: "live handoff parent runner", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentSession, err := f.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: f.project.ID,
+		RunID: f.parentRun.ID,
+		RunnerID: runner.ID,
+		Status: "PENDING",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentSession.Status != "PENDING" {
+		t.Fatalf("parent session status=%s want PENDING", parentSession.Status)
+	}
+
+	expireDelegationSchedulerLease(t, f.store, parentJobID, leaseToken)
+	claim, err := f.store.ClaimExpiredJobForReconciliation(ctx, "unknown-live-reconciler", time.Minute)
+	if err != nil || claim == nil {
+		t.Fatalf("reconciliation claim=%+v err=%v", claim, err)
+	}
+	parent, err := f.store.ResolveReconciliation(ctx, store.SchedulerReconciliation{
+		ProjectID: f.project.ID,
+		JobID: parentJobID,
+		RunID: f.parentRun.ID,
+		LeaseToken: claim.Lease.LeaseToken,
+		Outcome: store.SchedulerReconciliationUnknown,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != "RUNNING" {
+		t.Fatalf("live-parent UNKNOWN status=%s want RUNNING", parent.Status)
+	}
+	var childWait, jobWait *string
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT child.queue_reason, job.wait_reason
+		FROM runs AS child
+		JOIN scheduler_jobs AS job ON job.project_id=child.project_id AND job.run_id=child.id AND job.kind='START'
+		WHERE child.project_id=$1 AND child.id=$2
+	`, f.project.ID, created.DelegatedRun.ID).Scan(&childWait, &jobWait); err != nil {
+		t.Fatal(err)
+	}
+	if childWait == nil || *childWait != store.DelegationWorkspaceHandoffReadyReason ||
+		jobWait == nil || *jobWait != store.DelegationWorkspaceHandoffReadyReason {
+		t.Fatalf("live parent released ready child: runWait=%v jobWait=%v", childWait, jobWait)
+	}
+}
+
+func expireDelegationSchedulerLease(t *testing.T, s *Store, jobID, leaseToken string) {
+	t.Helper()
+	if _, err := s.pool.Exec(t.Context(), `
+		UPDATE scheduler_leases
+		SET acquired_at=now() - interval '2 seconds',
+		    expires_at=now() - interval '1 second'
+		WHERE job_id=$1 AND lease_token=$2
+	`, jobID, leaseToken); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func claimDelegationParentJob(t *testing.T, f delegationFixture) (string, string) {
 	t.Helper()
 	ctx := t.Context()
@@ -345,14 +468,7 @@ func TestSchedulerReconciliationRecoversReadyDelegationHandoffAfterRestart(t *te
 		t.Fatal(err)
 	}
 
-	if _, err := f.store.pool.Exec(ctx, `
-		UPDATE scheduler_leases
-		SET acquired_at=now() - interval '2 seconds',
-		    expires_at=now() - interval '1 second'
-		WHERE job_id=$1 AND lease_token=$2
-	`, claim.Job.ID, claim.Lease.LeaseToken); err != nil {
-		t.Fatal(err)
-	}
+	expireDelegationSchedulerLease(t, f.store, claim.Job.ID, claim.Lease.LeaseToken)
 
 	restarted := New(f.store.pool)
 	restarted.SetRunnerCandidates(func(string) []string { return []string{runner.ID} })
