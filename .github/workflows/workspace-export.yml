@@ -1,0 +1,19 @@
+name: Workspace export
+
+on:
+  push:
+    branches:
+      - bootstrap/issue-140-workspace-export
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive repository
+        run: git archive --format=zip --output=agent-board.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: workspace-export
+          path: agent-board.zip
+          if-no-files-found: error
