@@ -643,9 +643,6 @@ func recoveredExecutionOutcome(session store.ExecutionSession, events []store.Ev
 		if cancellationAuthoritative || hasRunEvent(events, "run.cancellation_requested") {
 			return recoveredExecutionCancelled
 		}
-		if hasRunEvent(events, "run.failed") {
-			return recoveredExecutionFailed
-		}
 		for _, event := range events {
 			if event.Type != "engine.execution.completed" {
 				continue
@@ -656,6 +653,9 @@ func recoveredExecutionOutcome(session store.ExecutionSession, events []store.Ev
 			if json.Unmarshal(event.Payload, &payload) == nil && payload.Boundary == successBoundary {
 				return recoveredExecutionSucceeded
 			}
+		}
+		if hasRunEvent(events, "run.failed") {
+			return recoveredExecutionFailed
 		}
 	}
 	return recoveredExecutionUnknown
