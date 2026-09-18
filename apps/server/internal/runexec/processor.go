@@ -388,7 +388,7 @@ func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run s
 			continue
 		}
 		if !synchronized {
-			session, ok := completedDelegationRunnerSession(sessions, run.ID)
+			session, ok := completedDelegationExecutionSession(sessions, run.ID)
 			if !ok {
 				continue
 			}
@@ -397,7 +397,14 @@ func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run s
 				return err
 			}
 			syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-			err = p.syncWorkspaceFromRunner(syncCtx, safe, session.RunnerID, session.ID)
+			switch {
+			case strings.TrimSpace(session.RunnerID) != "":
+				err = p.syncWorkspaceFromRunner(syncCtx, safe, session.RunnerID, session.ID)
+			case strings.TrimSpace(session.RuntimeInstanceID) != "":
+				_, err = p.finalizeServerWorkspace(syncCtx, safe)
+			default:
+				err = fmt.Errorf("run execution: completed delegation session has no recoverable execution owner")
+			}
 			cancel()
 			if err != nil {
 				return err
@@ -477,10 +484,13 @@ func delegationRecoveryEvidence(events []store.Event, delegation store.Delegatio
 	return completedSequence != 0, false
 }
 
-func completedDelegationRunnerSession(sessions []store.ExecutionSession, runID string) (store.ExecutionSession, bool) {
+func completedDelegationExecutionSession(sessions []store.ExecutionSession, runID string) (store.ExecutionSession, bool) {
 	var candidate store.ExecutionSession
 	for _, session := range sessions {
-		if session.RunID != runID || session.Status != "COMPLETED" || strings.TrimSpace(session.RunnerID) == "" {
+		if session.RunID != runID || session.Status != "COMPLETED" {
+			continue
+		}
+		if strings.TrimSpace(session.RunnerID) == "" && strings.TrimSpace(session.RuntimeInstanceID) == "" {
 			continue
 		}
 		if candidate.ID != "" && candidate.ID != session.ID {
