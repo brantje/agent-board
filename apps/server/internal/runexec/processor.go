@@ -193,11 +193,8 @@ func (p *Processor) startNewExecution(ctx context.Context, claim *store.Schedule
 		if err != nil {
 			return failed(err), nil
 		}
-		safe = p.attachRunnerProvenance(ctx, safe, runnerID)
-		if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
-			return failed(err), nil
-		}
-		if err := p.transferWorkspaceToRunner(ctx, safe, runnerID, session.ID); err != nil {
+		safe, err = p.prepareRunnerSessionWorkspace(ctx, run, safe, runnerID, session.ID)
+		if err != nil {
 			return failed(err), nil
 		}
 		return p.runEngineOnRunnerWithContinuation(ctx, run, safe, runnerID, session.ID, delegationContinuation)
@@ -234,7 +231,22 @@ func (p *Processor) attachExistingExecution(ctx context.Context, run store.Run, 
 	}
 	p.branches.observeIfChanged(ctx, safe, nil)
 	if session.RunnerID != "" {
-		safe = p.attachRunnerProvenance(ctx, safe, session.RunnerID)
+		if session.Status == "PENDING" {
+			if !isRemoteGitProject(safe) {
+				ready, err := p.ensureRunnerWorkspace(ctx, run, safe)
+				if err != nil {
+					return failed(err), nil
+				}
+				safe = ready
+			}
+			var err error
+			safe, err = p.prepareRunnerSessionWorkspace(ctx, run, safe, session.RunnerID, session.ID)
+			if err != nil {
+				return failed(err), nil
+			}
+		} else {
+			safe = p.attachRunnerProvenance(ctx, safe, session.RunnerID)
+		}
 		return p.runEngineOnRunnerWithContinuation(ctx, run, safe, session.RunnerID, session.ID, delegationContinuation)
 	}
 	if p.runtimes == nil {
@@ -1221,6 +1233,17 @@ func (p *Processor) ensureRunnerWorkspace(ctx context.Context, run store.Run, sa
 		return executioncontext.SafeContext{}, fmt.Errorf("run execution: workspace bindings changed during runner materialization")
 	}
 	return materialized.Safe, nil
+}
+
+func (p *Processor) prepareRunnerSessionWorkspace(ctx context.Context, run store.Run, safe executioncontext.SafeContext, runnerID, sessionID string) (executioncontext.SafeContext, error) {
+	safe = p.attachRunnerProvenance(ctx, safe, runnerID)
+	if err := executioncontext.EnsureProvenance(ctx, p.store, run.ProjectID, run.ID, safe); err != nil {
+		return executioncontext.SafeContext{}, err
+	}
+	if err := p.transferWorkspaceToRunner(ctx, safe, runnerID, sessionID); err != nil {
+		return executioncontext.SafeContext{}, err
+	}
+	return safe, nil
 }
 
 func (p *Processor) transferWorkspaceToRunner(ctx context.Context, safe executioncontext.SafeContext, runnerID, sessionID string) error {
