@@ -1,51 +1,88 @@
 package runexec
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 
-	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
+	"github.com/brantje/agent-board/apps/server/internal/engine/opencode"
+	"github.com/brantje/agent-board/apps/server/internal/httpapi"
 	"github.com/brantje/agent-board/apps/server/internal/store"
-	"github.com/brantje/agent-board/apps/server/internal/workspace"
+	"github.com/brantje/agent-board/apps/server/internal/store/postgres"
 )
 
-func TestDelegatedWorkspaceResultFeedsLaterNormalTransfer(t *testing.T) {
-	repository := initProcessTestRepository(t)
-	continuation := filepath.Join(t.TempDir(), "parent-continuation")
-	clone := exec.Command("git", "clone", "-q", repository, continuation)
-	if output, err := clone.CombinedOutput(); err != nil {
-		t.Fatalf("clone pre-delegation parent Workspace: %v: %s", err, output)
+// assertDelegatedWorkspaceFeedsLaterNormalRun proves the returned delegated
+// revision through the ordinary Issue execution path. The test deliberately
+// creates a later non-delegated Agent assignment, lets the scheduler admit its
+// normal START job, and relies on Processor/Runner workspace transfer. The
+// delegationExecutionRunnerClient rejects the execution at Start if the inbound
+// transfer does not already contain the delegated change.
+func assertDelegatedWorkspaceFeedsLaterNormalRun(
+	t *testing.T,
+	ctx context.Context,
+	router http.Handler,
+	database *postgres.Store,
+	projectID string,
+	issueID string,
+	workspaceID string,
+	modelProfileID string,
+	runnerClient *delegationExecutionRunnerClient,
+) {
+	t.Helper()
+
+	var continuation httpapi.AgentDTO
+	delegationExecutionJSON(
+		t,
+		router,
+		http.MethodPost,
+		"/api/projects/"+projectID+"/agents",
+		fmt.Sprintf(`{"name":"Ordinary continuation","roleInstructions":"Inspect the current Workspace and finish normally without delegation.","engine":%q,"modelProfileId":"%s","engineSettings":{},"concurrencyLimit":1,"allowDelegation":false,"state":"ENABLED"}`, opencode.Name, modelProfileID),
+		http.StatusCreated,
+		&continuation,
+	)
+
+	delegationExecutionJSON(
+		t,
+		router,
+		http.MethodPost,
+		"/api/projects/"+projectID+"/issues/"+issueID+"/assignment",
+		fmt.Sprintf(`{"assignedTo":{"type":"AGENT","id":"%s"}}`, continuation.ID),
+		http.StatusOK,
+		nil,
+	)
+
+	var execution httpapi.IssueExecutionStateDTO
+	delegationExecutionJSON(
+		t,
+		router,
+		http.MethodGet,
+		"/api/projects/"+projectID+"/issues/"+issueID+"/execution",
+		"",
+		http.StatusOK,
+		&execution,
+	)
+	if execution.ActiveRun == nil || execution.ActiveRun.AgentID == nil || *execution.ActiveRun.AgentID != continuation.ID {
+		t.Fatalf("ordinary continuation was not created through Issue execution: %+v", execution)
+	}
+	if execution.ActiveRun.WorkspaceID != workspaceID {
+		t.Fatalf("ordinary continuation workspace=%s want inherited Issue workspace %s", execution.ActiveRun.WorkspaceID, workspaceID)
 	}
 
-	safe := processTestSafeContext(repository)
-	safe.Runner = &executioncontext.RunnerContext{ID: "runner-1"}
-	baseStore := &runnerSyncStore{}
-	client := &successfulSyncClient{payload: runnerTransferPayload(t, repository)}
-	processor := newRunnerSyncProcessor(t, repository, safe, baseStore, client)
-	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID}
-
-	result, err := processor.runEngineOnRunner(t.Context(), run, safe, "runner-1", "delegate-session")
-	if err != nil {
-		t.Fatal(err)
+	terminal := waitForDelegationExecutionRun(t, ctx, router, projectID, execution.ActiveRun.ID)
+	if terminal.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("ordinary continuation status=%s failure=%v want READY_FOR_REVIEW", terminal.Status, terminal.FailureReason)
 	}
-	if result.RunStatus != "READY_FOR_REVIEW" {
-		t.Fatalf("delegated result=%+v", result)
+	if terminal.WorkspaceID != workspaceID {
+		t.Fatalf("ordinary continuation terminal workspace=%s want %s", terminal.WorkspaceID, workspaceID)
+	}
+	if _, err := database.GetDelegationByRun(ctx, projectID, terminal.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("ordinary continuation unexpectedly has delegation lineage: %v", err)
 	}
 
-	git, err := workspace.NewGitCLI("")
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload, err := git.TransferSnapshot(t.Context(), repository, "later-parent-transfer")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := git.ApplyTransferBundle(t.Context(), continuation, payload); err != nil {
-		t.Fatalf("apply delegated result through normal parent transfer: %v", err)
-	}
-	if body, err := os.ReadFile(filepath.Join(continuation, "returned.txt")); err != nil || string(body) != "from runner\n" {
-		t.Fatalf("later parent Workspace returned.txt=%q err=%v", body, err)
+	_, _, continuationStarts, _, _ := runnerClient.stats()
+	if continuationStarts != 1 {
+		t.Fatalf("ordinary continuation executions that observed delegated state=%d want 1", continuationStarts)
 	}
 }
