@@ -359,21 +359,6 @@ Run:
     currentBranch:
       type: [string, 'null']
       description: Live Issue Workspace Git checkout for this Run.
-DelegationCreate:
-  type: object
-  additionalProperties: false
-  required: [targetAgentId, task, requestKey]
-  properties:
-    targetAgentId: {type: string, format: uuid}
-    task:
-      type: string
-      minLength: 1
-      maxLength: 16384
-      description: Explicit bounded task for the delegated Run.
-    requestKey:
-      type: string
-      minLength: 1
-      description: Caller-stable idempotency key scoped to the parent Run.
 Delegation:
   type: object
   additionalProperties: false

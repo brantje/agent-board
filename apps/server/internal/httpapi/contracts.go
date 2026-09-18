@@ -285,12 +285,6 @@ type CreateAgentRequest struct {
 	State            string          `json:"state"`
 }
 
-type CreateDelegationRequest struct {
-	TargetAgentID string `json:"targetAgentId"`
-	Task          string `json:"task"`
-	RequestKey    string `json:"requestKey"`
-}
-
 type AssignmentRequest struct {
 	AssignedTo json.RawMessage `json:"assignedTo"`
 }
