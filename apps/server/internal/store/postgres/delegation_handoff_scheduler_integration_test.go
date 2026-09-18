@@ -347,7 +347,8 @@ func TestSchedulerReconciliationRecoversReadyDelegationHandoffAfterRestart(t *te
 
 	if _, err := f.store.pool.Exec(ctx, `
 		UPDATE scheduler_leases
-		SET expires_at=now() - interval '1 second'
+		SET acquired_at=now() - interval '2 seconds',
+		    expires_at=now() - interval '1 second'
 		WHERE job_id=$1 AND lease_token=$2
 	`, claim.Job.ID, claim.Lease.LeaseToken); err != nil {
 		t.Fatal(err)
