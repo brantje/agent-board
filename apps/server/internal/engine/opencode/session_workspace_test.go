@@ -147,7 +147,7 @@ func TestEnsureNativeSessionRecoveryCreatesWhenWorkspaceSessionMissing(t *testin
 	native := newWorkspaceTestClient(t, mux, hostRunnerWorkspace)
 	session, promptRequired, err := ensureNativeSession(context.Background(), native, executioncontext.SafeContext{
 		Model: executioncontext.ModelContext{Model: "test-model"},
-	}, settings{ProviderID: "test-provider"}, true)
+	}, settings{ProviderID: "test-provider"}, "expected prompt", true)
 	if err != nil {
 		t.Fatalf("ensureNativeSession() error=%v", err)
 	}
