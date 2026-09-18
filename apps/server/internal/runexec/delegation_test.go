@@ -120,7 +120,6 @@ func TestEngineRequestDelegationContextIncludesTargetsAndSquadMembers(t *testing
 	issueType, squadID := "SQUAD", "squad-1"
 	storage := &delegationCapabilityStore{
 		targets: []store.DelegationTarget{
-			{ID: "member-agent", Name: "Member agent"},
 			{ID: "other-agent", Name: "Other agent"},
 		},
 		issue: &store.Issue{ID: "issue-1", ProjectID: "project-1", AssigneeType: &issueType, AssigneeID: &squadID},
@@ -149,7 +148,7 @@ func TestEngineRequestDelegationContextIncludesTargetsAndSquadMembers(t *testing
 	if request.Delegation == nil || request.DelegationContext == nil {
 		t.Fatal("authoritative delegating Run did not receive delegation tool context")
 	}
-	if len(request.DelegationContext.Targets) != 2 || request.DelegationContext.Targets[0].ID != "member-agent" || request.DelegationContext.Targets[1].ID != "other-agent" {
+	if len(request.DelegationContext.Targets) != 1 || request.DelegationContext.Targets[0].ID != "other-agent" {
 		t.Fatalf("targets=%+v", request.DelegationContext.Targets)
 	}
 	squad := request.DelegationContext.Squad
@@ -158,6 +157,9 @@ func TestEngineRequestDelegationContextIncludesTargetsAndSquadMembers(t *testing
 	}
 	if len(squad.Members) != 1 || squad.Members[0].ID != "member-agent" || squad.Members[0].Role == nil || *squad.Members[0].Role != role {
 		t.Fatalf("squad members=%+v", squad.Members)
+	}
+	if squad.Members[0].ID == request.DelegationContext.Targets[0].ID {
+		t.Fatal("Squad membership was incorrectly treated as delegation target authorization")
 	}
 }
 

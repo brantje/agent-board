@@ -21,6 +21,14 @@ type delegationCapabilityStore struct {
 	continuationProject string
 	continuationParent  string
 	continuationJob     string
+	targetProject       string
+	targetParentAgent   string
+}
+
+func (s *delegationCapabilityStore) ListDelegationTargets(_ context.Context, projectID, parentAgentID string) ([]store.DelegationTarget, error) {
+	s.targetProject = projectID
+	s.targetParentAgent = parentAgentID
+	return []store.DelegationTarget{{ID: "target-agent", Name: "Target Agent"}}, nil
 }
 
 func (s *delegationCapabilityStore) RequestDelegation(_ context.Context, command store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
@@ -51,6 +59,14 @@ func TestRedactingStorePreservesDelegationCapability(t *testing.T) {
 	base := &delegationCapabilityStore{}
 	wrapped := NewRedactingStore(base, redaction.NewRegistry())
 	ctx := t.Context()
+
+	targets, err := wrapped.ListDelegationTargets(ctx, "project", "parent-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].ID != "target-agent" || base.targetProject != "project" || base.targetParentAgent != "parent-agent" {
+		t.Fatalf("delegation targets=%+v project=%q parentAgent=%q", targets, base.targetProject, base.targetParentAgent)
+	}
 
 	command := store.RequestDelegationCommand{
 		ProjectID:     "project",
@@ -156,6 +172,9 @@ func TestRedactingStoreReportsMissingDelegationCapability(t *testing.T) {
 	wrapped := NewRedactingStore(&captureStore{}, redaction.NewRegistry())
 	ctx := t.Context()
 
+	if _, err := wrapped.ListDelegationTargets(ctx, "project", "parent-agent"); err == nil {
+		t.Fatal("expected missing delegation target capability error")
+	}
 	if _, err := wrapped.RequestDelegation(ctx, store.RequestDelegationCommand{}); err == nil {
 		t.Fatal("expected missing delegation request capability error")
 	}
