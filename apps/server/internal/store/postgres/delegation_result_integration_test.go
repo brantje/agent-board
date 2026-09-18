@@ -276,7 +276,7 @@ func TestDelegatedResultIsBoundedAndDoesNotCopyDetailedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := f.store.CreateRawOutputChunk(ctx, store.RawOutputChunk{
-		ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: childRunID, Stream: "stdout", Sequence: 1,
+		ProjectID: f.project.ID, IssueID: f.issue.ID, RunID: childRunID, Stream: "STDOUT", Sequence: 1,
 		StorageRef: "evidence://detailed-child-log", SizeBytes: 37,
 	}); err != nil {
 		t.Fatal(err)

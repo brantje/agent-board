@@ -10,6 +10,9 @@ import (
 func TestCancelInactiveRunCancelsQueuedSchedulerWorkAndPersistsEvent(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
+	if _, err := f.store.pool.Exec(ctx, `UPDATE runs SET status='QUEUED', started_at=NULL, updated_at=now() WHERE project_id=$1 AND id=$2`, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
 	result, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID)
 	if err != nil {
 		t.Fatal(err)
