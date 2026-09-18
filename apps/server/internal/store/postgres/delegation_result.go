@@ -29,7 +29,7 @@ func finalizeDelegatedRunTx(ctx context.Context, tx pgx.Tx, child store.Run) ([]
 	if delegation.Outcome != nil {
 		return nil, nil
 	}
-	if delegation.IssueID != child.IssueID {
+	if delegation.IssueID != child.IssueID || child.AgentID == nil || *child.AgentID != delegation.TargetAgentID {
 		return nil, store.ErrConflict
 	}
 

@@ -454,7 +454,7 @@ func (p *Processor) delegatedParentTerminal(ctx context.Context, child store.Run
 	if err != nil {
 		return false, err
 	}
-	if delegation.IssueID != child.IssueID || parent.IssueID != child.IssueID || parent.WorkspaceID != child.WorkspaceID || parent.AgentID == nil || *parent.AgentID != delegation.ParentAgentID {
+	if delegation.IssueID != child.IssueID || parent.IssueID != child.IssueID || parent.WorkspaceID != child.WorkspaceID || parent.AgentID == nil || *parent.AgentID != delegation.ParentAgentID || child.AgentID == nil || *child.AgentID != delegation.TargetAgentID {
 		return false, fmt.Errorf("run execution: delegated parent lineage does not match authoritative Runs")
 	}
 	switch parent.Status {
@@ -542,6 +542,9 @@ func (p *Processor) recoverDelegatedTerminalRun(ctx context.Context, run store.R
 	}
 	if err != nil {
 		return store.SchedulerReconciliationUnknown, nil, true, err
+	}
+	if run.AgentID == nil || *run.AgentID != delegation.TargetAgentID {
+		return store.SchedulerReconciliationUnknown, nil, true, fmt.Errorf("run execution: delegated child Agent lineage does not match canonical delegation")
 	}
 	session, ok := terminalDelegatedExecutionSession(sessions, run.ID)
 	if !ok {

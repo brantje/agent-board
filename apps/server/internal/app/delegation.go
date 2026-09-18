@@ -84,7 +84,8 @@ func (s *Service) inspectDelegation(ctx context.Context, value store.Delegation)
 	if err != nil {
 		return DelegationInspection{}, translateStoreError(err, "delegated Run")
 	}
-	if parent.IssueID != value.IssueID || child.IssueID != value.IssueID || parent.WorkspaceID != child.WorkspaceID {
+	if parent.IssueID != value.IssueID || child.IssueID != value.IssueID || parent.WorkspaceID != child.WorkspaceID ||
+		parent.AgentID == nil || *parent.AgentID != value.ParentAgentID || child.AgentID == nil || *child.AgentID != value.TargetAgentID {
 		return DelegationInspection{}, NewError("delegation_lineage_conflict", "Delegation lineage does not match authoritative Runs", store.ErrConflict)
 	}
 	revisions, ok := any(s.store).(interface {

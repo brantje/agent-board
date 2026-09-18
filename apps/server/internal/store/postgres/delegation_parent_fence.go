@@ -21,7 +21,7 @@ func delegatedParentTerminalTx(ctx context.Context, tx pgx.Tx, child store.Run) 
 	if err != nil {
 		return false, err
 	}
-	if delegation.IssueID != child.IssueID {
+	if delegation.IssueID != child.IssueID || child.AgentID == nil || *child.AgentID != delegation.TargetAgentID {
 		return false, store.ErrConflict
 	}
 	parent, err := scanRun(tx.QueryRow(ctx, `
