@@ -173,7 +173,7 @@ Routine healthy Provider probes do not trigger assignment scans.
 
 ## Delegation / Automation compatibility
 
-Future delegated work and Automation-created Issues use this same scheduler. They do not create private queues.
+Delegated work and Automation-created Issues use this same scheduler. Phase-2 delegation creates an ordinary child START job that remains held until the parent completes the normal Workspace hand-back and atomically yields scheduler ownership; there is no private delegation queue or second scheduler.
 
 ## Invariants
 

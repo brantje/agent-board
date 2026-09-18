@@ -36,7 +36,7 @@ The web UI reads ownership and execution context from shared backend read models
 
 Current Squad behavior does **not** automatically fan work out to members. Canonical Agent delegation is explicit: the authoritative executing Agent chooses a target Agent for a bounded task. Squad-aware member targeting and human handoff remain separate future behavior.
 
-## Canonical delegation phase 1
+## Canonical delegation and phase-2 Workspace handoff
 
 Delegation is a bounded subtask inside the current Issue/Run context. It is not a new Issue and is not implied by assigning an Issue to a Squad.
 
@@ -53,7 +53,7 @@ The canonical request command is server-owned and enforces the same rules regard
 - parent Project, Issue, Run and Agent identity come from durable execution state rather than model-supplied identity;
 - the parent Agent must have `Allow delegation` enabled and the parent Run must still be authoritative and running;
 - the target must be a usable Agent in the Project/global Agent scope;
-- self-delegation and nested delegation are rejected in phase 1;
+- self-delegation and nested delegation are rejected by the current implementation;
 - an existing active Run for the same Issue + target Agent is a conflict rather than an implicit coalescing rule;
 - a stable request key makes an accepted logical request idempotent.
 

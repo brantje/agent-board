@@ -312,8 +312,8 @@ For remote Git sources, runtime Git authentication failures are explicit; Agent 
 - Agent-created follow-up Issues
 - authenticated Source Connections and provider-specific repository actions
 - Project PR/MR delivery policy
-- Agent delegation
-- Squads
+- delegated outcome/result protocol and automatic parent continuation
+- Squad-aware delegation/member collaboration
 - worker pools / warm / spot execution
 - higher concurrent Execution Session capacity where safe/useful
 - users, groups, permissions and broader multi-user administration

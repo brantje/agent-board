@@ -159,7 +159,9 @@ Delegation deliberately reuses the normal Agent Board execution model:
 
 There is no separate delegation scheduler, queue or Run type.
 
-Phase-1 delegation provides durable parent/child lineage and explicit delegation policy. More advanced delegated Workspace handoff, result continuation and Squad-aware collaboration build on that same model.
+Canonical delegation provides durable parent/child lineage, explicit delegation policy, and serialized Workspace handoff on the existing Issue Workspace and branch. Accepting a delegation request creates the ordinary child Run but keeps its START job held. After the matching native `delegate_task` completes, the parent uses the normal Workspace/Git hand-back path and yields scheduler ownership; only then does the existing child become eligible for ordinary execution. Delegate changes return through the same Workspace/Git path, so later normal execution for the Issue sees the updated authoritative branch.
+
+Delegated outcome/result handling, automatic parent continuation, parent/child cancellation propagation, and Squad-aware delegation remain later lifecycle work. Delegation does not create parallel Workspaces, delegation branches, or merge/rebase orchestration.
 
 ### HTTP API and MCP
 
@@ -424,11 +426,11 @@ Agent Board is being built incrementally around the existing Issue -> Run -> Run
 Current collaboration work builds from:
 
 ```text
-Squads
-  -> canonical delegation
-  -> delegated Workspace handoff
-  -> delegated outcomes / parent continuation
-  -> Squad-aware collaboration
+Squads [implemented]
+  -> canonical delegation [implemented]
+  -> serialized delegated Workspace handoff [implemented]
+  -> delegated outcomes / parent continuation [later]
+  -> Squad-aware collaboration [later]
 ```
 
 Planning, Automations, richer source-provider integrations, delivery policies, worker pools and broader integrations build on the same core model rather than introducing parallel execution systems.

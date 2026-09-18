@@ -287,7 +287,7 @@ secret.revoked
 
 These Events describe use and authorization only. They never contain the secret value.
 
-### Delegation (future squads)
+### Delegation
 
 ```text
 delegation.created
@@ -295,7 +295,7 @@ delegation.completed
 delegation.failed
 ```
 
-Delegation carries parent/child Run relationships so the execution tree is reconstructable.
+Canonical delegation already persists `delegation.created` and carries parent/child Run relationships so the execution tree is reconstructable. Serialized Workspace handoff is represented through the ordinary Run, scheduler and Workspace/Git lifecycle rather than a second delegation event stream. `delegation.completed` / `delegation.failed` belong to the later delegated-outcome lifecycle if that phase needs them; phase 2 does not manufacture result events merely for Workspace handoff.
 
 ## Payload contracts
 
@@ -364,7 +364,7 @@ tool.started (A)
   -> tool.completed | tool.stopped | tool.failed (parent A)
 ```
 
-For future squads:
+For delegation lineage:
 
 ```text
 delegation.created
