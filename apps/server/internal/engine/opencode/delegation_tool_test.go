@@ -15,8 +15,11 @@ import (
 )
 
 type recordingDelegationRequester struct {
-	requests []engine.DelegationRequest
-	err      error
+	requests  []engine.DelegationRequest
+	resolved  []engine.DelegationRequest
+	accepted  map[string]acceptedDelegation
+	err       error
+	resolveErr error
 }
 
 func (r *recordingDelegationRequester) Delegate(_ context.Context, request engine.DelegationRequest) (engine.Delegation, error) {
@@ -25,6 +28,21 @@ func (r *recordingDelegationRequester) Delegate(_ context.Context, request engin
 		return engine.Delegation{}, r.err
 	}
 	return engine.Delegation{ID: "delegation-1", RunID: "run-2"}, nil
+}
+
+func (r *recordingDelegationRequester) ResolveAcceptedDelegation(_ context.Context, request engine.DelegationRequest) (engine.Delegation, bool, error) {
+	r.resolved = append(r.resolved, request)
+	if r.resolveErr != nil {
+		return engine.Delegation{}, false, r.resolveErr
+	}
+	accepted, ok := r.accepted[request.RequestKey]
+	if !ok {
+		return engine.Delegation{}, false, nil
+	}
+	if !sameDelegationRequest(accepted.request, request) {
+		return engine.Delegation{}, false, errors.New("accepted delegation identity mismatch")
+	}
+	return accepted.delegation, true, nil
 }
 
 type permissionReply struct {

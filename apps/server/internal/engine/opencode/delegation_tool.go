@@ -110,7 +110,7 @@ func (t *delegationToolTracker) Handle(ctx context.Context, event client.Event, 
 		}
 		return t.applyPermission(ctx, native, sessionID, permission, requester)
 	case "message.part.updated":
-		return t.handleCompletedPart(event, sessionID)
+		return t.handleTerminalPart(event, sessionID)
 	default:
 		return nil
 	}
@@ -180,7 +180,7 @@ func (t *delegationToolTracker) Reconcile(ctx context.Context, native *client.Cl
 			return err
 		}
 	}
-	if err := t.reconcileCompletedParts(ctx, native, sessionID, requester); err != nil {
+	if err := t.reconcileTerminalParts(ctx, native, sessionID, requester); err != nil {
 		return err
 	}
 	if t.handoff != nil {
@@ -189,7 +189,7 @@ func (t *delegationToolTracker) Reconcile(ctx context.Context, native *client.Cl
 	return nil
 }
 
-func (t *delegationToolTracker) reconcileCompletedParts(ctx context.Context, native *client.Client, sessionID string, requester engine.DelegationRequester) error {
+func (t *delegationToolTracker) reconcileTerminalParts(ctx context.Context, native *client.Client, sessionID string, requester engine.DelegationRequester) error {
 	messages, err := native.ListMessages(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("opencode engine: list messages for delegation reconciliation: %w", err)
@@ -200,7 +200,7 @@ func (t *delegationToolTracker) reconcileCompletedParts(ctx context.Context, nat
 			if err := json.Unmarshal(raw, &part); err != nil {
 				return fmt.Errorf("opencode engine: decode delegation tool part: %w", err)
 			}
-			request, matched, err := delegationRequestFromCompletedPart(part, sessionID)
+			request, terminalStatus, matched, err := delegationRequestFromTerminalPart(part, sessionID)
 			if err != nil {
 				return err
 			}
@@ -209,24 +209,44 @@ func (t *delegationToolTracker) reconcileCompletedParts(ctx context.Context, nat
 			}
 			if accepted, ok := t.accepted[request.RequestKey]; ok {
 				if !sameDelegationRequest(accepted.request, request) {
-					return fmt.Errorf("opencode engine: completed delegation tool input changed after canonical acceptance")
+					return fmt.Errorf("opencode engine: terminal delegation tool input changed after canonical acceptance")
 				}
 				t.handoff = &accepted.delegation
 				return nil
 			}
-			delegation, err := requester.Delegate(ctx, request)
-			if err != nil {
-				return fmt.Errorf("opencode engine: reconcile completed delegation: %w", err)
+			switch terminalStatus {
+			case "completed":
+				delegation, err := requester.Delegate(ctx, request)
+				if err != nil {
+					return fmt.Errorf("opencode engine: reconcile completed delegation: %w", err)
+				}
+				t.accepted[request.RequestKey] = acceptedDelegation{request: request, delegation: delegation}
+				t.handoff = &delegation
+				return nil
+			case "error":
+				resolver, ok := requester.(engine.AcceptedDelegationResolver)
+				if !ok {
+					return fmt.Errorf("opencode engine: accepted delegation recovery resolver is unavailable")
+				}
+				delegation, found, err := resolver.ResolveAcceptedDelegation(ctx, request)
+				if err != nil {
+					return fmt.Errorf("opencode engine: prove accepted errored delegation: %w", err)
+				}
+				if !found {
+					// A native error is not authority to create work. Without a
+					// durable canonical request this remains a rejected tool call.
+					continue
+				}
+				t.accepted[request.RequestKey] = acceptedDelegation{request: request, delegation: delegation}
+				t.handoff = &delegation
+				return nil
 			}
-			t.accepted[request.RequestKey] = acceptedDelegation{request: request, delegation: delegation}
-			t.handoff = &delegation
-			return nil
 		}
 	}
 	return nil
 }
 
-func (t *delegationToolTracker) handleCompletedPart(event client.Event, sessionID string) error {
+func (t *delegationToolTracker) handleTerminalPart(event client.Event, sessionID string) error {
 	var update struct {
 		SessionID string          `json:"sessionID"`
 		Part      json.RawMessage `json:"part"`
@@ -247,7 +267,7 @@ func (t *delegationToolTracker) handleCompletedPart(event client.Event, sessionI
 		// the strict parser below and fails closed if identity is unavailable.
 		return nil
 	}
-	request, matched, err := delegationRequestFromCompletedPart(part, sessionID)
+	request, _, matched, err := delegationRequestFromTerminalPart(part, sessionID)
 	if err != nil || !matched {
 		return err
 	}
@@ -258,22 +278,26 @@ func (t *delegationToolTracker) handleCompletedPart(event client.Event, sessionI
 		return nil
 	}
 	if !sameDelegationRequest(accepted.request, request) {
-		return fmt.Errorf("opencode engine: completed delegation tool input changed after canonical acceptance")
+		return fmt.Errorf("opencode engine: terminal delegation tool input changed after canonical acceptance")
 	}
 	t.handoff = &accepted.delegation
 	return nil
 }
 
-func delegationRequestFromCompletedPart(part delegationToolPart, sessionID string) (engine.DelegationRequest, bool, error) {
+func delegationRequestFromTerminalPart(part delegationToolPart, sessionID string) (engine.DelegationRequest, string, bool, error) {
 	if part.SessionID != "" && part.SessionID != sessionID {
-		return engine.DelegationRequest{}, false, nil
+		return engine.DelegationRequest{}, "", false, nil
 	}
-	if part.Type != "tool" || part.Tool != delegationToolName || part.State.Status != "completed" {
-		return engine.DelegationRequest{}, false, nil
+	if part.Type != "tool" || part.Tool != delegationToolName {
+		return engine.DelegationRequest{}, "", false, nil
+	}
+	status := strings.TrimSpace(part.State.Status)
+	if status != "completed" && status != "error" {
+		return engine.DelegationRequest{}, "", false, nil
 	}
 	callID := strings.TrimSpace(part.CallID)
 	if callID == "" {
-		return engine.DelegationRequest{}, false, fmt.Errorf("opencode engine: completed delegation tool is missing call id")
+		return engine.DelegationRequest{}, "", false, fmt.Errorf("opencode engine: terminal delegation tool is missing call id")
 	}
 	input := decodeToolInput(part.State.Input)
 	targetAgentID, _ := input["targetAgentId"].(string)
@@ -281,9 +305,9 @@ func delegationRequestFromCompletedPart(part delegationToolPart, sessionID strin
 	targetAgentID = strings.TrimSpace(targetAgentID)
 	task = strings.TrimSpace(task)
 	if targetAgentID == "" || task == "" {
-		return engine.DelegationRequest{}, false, fmt.Errorf("opencode engine: completed delegation tool input is invalid")
+		return engine.DelegationRequest{}, "", false, fmt.Errorf("opencode engine: terminal delegation tool input is invalid")
 	}
-	return engine.DelegationRequest{TargetAgentID: targetAgentID, Task: task, RequestKey: callID}, true, nil
+	return engine.DelegationRequest{TargetAgentID: targetAgentID, Task: task, RequestKey: callID}, status, true, nil
 }
 
 func sameDelegationRequest(left, right engine.DelegationRequest) bool {

@@ -182,6 +182,14 @@ type DelegationRequester interface {
 	Delegate(context.Context, DelegationRequest) (Delegation, error)
 }
 
+// AcceptedDelegationResolver proves that a delegation request was already
+// durably accepted without treating native Engine history as authority to
+// create new work. Recovery callers must still supply the exact request
+// identity observed from the native tool.
+type AcceptedDelegationResolver interface {
+	ResolveAcceptedDelegation(context.Context, DelegationRequest) (Delegation, bool, error)
+}
+
 type Request struct {
 	Context                executioncontext.SafeContext
 	Launcher               ProcessLauncher
