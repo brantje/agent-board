@@ -439,3 +439,38 @@ func TestRunnerWaitingForInputKeepsRunWaitingWithoutRuntimeCleanup(t *testing.T)
 		t.Fatalf("waiting event=%+v", event)
 	}
 }
+
+func TestRunnerDelegatedSuccessReturnsSubtaskCompletionWithoutReview(t *testing.T) {
+	repo := initProcessTestRepository(t)
+	safe := processTestSafeContext(repo)
+	safe.Runtime = executioncontext.RuntimeContext{}
+	safe.Delegation = &executioncontext.DelegationContext{
+		ID:            "delegation-1",
+		ParentRunID:   "parent-run-1",
+		ParentAgentID: "parent-agent-1",
+		TargetAgentID: safe.Agent.ID,
+		Task:          "Perform the bounded delegated task.",
+		RequestKey:    "delegate-call-1",
+	}
+	storeFake := &runnerSyncStore{}
+	client := &successfulSyncClient{payload: runnerTransferPayload(t, repo)}
+	processor := newRunnerSyncProcessor(t, repo, safe, storeFake, client)
+	processor.SetWorkspaceEnsurer(staticWorkspaceEnsurer{workspace: store.Workspace{
+		ID: safe.Workspace.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, Path: repo, WorkingBranch: safe.Workspace.WorkingBranch, BootstrapStatus: "READY",
+	}})
+
+	run := store.Run{ID: safe.Run.ID, ProjectID: safe.Project.ID, IssueID: safe.Issue.ID, WorkspaceID: safe.Workspace.ID, Status: "STARTING"}
+	result, err := processor.Process(t.Context(), &store.SchedulerAdmission{Run: run, RunnerID: "runner-1"}, processTestLifecycle{run: run})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RunStatus != "COMPLETED" {
+		t.Fatalf("delegated runner result=%+v want COMPLETED", result)
+	}
+	if !hasProcessTestEvent(storeFake.events, "delegation.workspace_accepted") {
+		t.Fatalf("delegated Workspace acceptance evidence missing: %+v", storeFake.events)
+	}
+	if hasProcessTestEvent(storeFake.events, "run.ready_for_review") {
+		t.Fatalf("delegated execution created Review-ready evidence: %+v", storeFake.events)
+	}
+}

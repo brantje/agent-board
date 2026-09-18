@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	schedulerReconciliationRetryReason         = "reconciliation_retry"
+	schedulerReconciliationRetryReason          = "reconciliation_retry"
 	schedulerReconciliationConfigurationBackoff = time.Second
 )
 
@@ -345,13 +345,17 @@ func (s *Store) resolveReconciliationTerminal(ctx context.Context, tx pgx.Tx, in
 	`, input.ProjectID, input.JobID, input.RunID, jobState); err != nil {
 		return store.SchedulerMutationResult{}, err
 	}
+	delegationEvents, err := finalizeDelegatedRunTx(ctx, tx, run)
+	if err != nil {
+		return store.SchedulerMutationResult{}, err
+	}
 	if err := releaseReconciledOwnership(ctx, tx, input.ProjectID, input.JobID, input.LeaseToken); err != nil {
 		return store.SchedulerMutationResult{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return store.SchedulerMutationResult{}, err
 	}
-	return store.SchedulerMutationResult{Run: run}, nil
+	return store.SchedulerMutationResult{Run: run, Events: delegationEvents}, nil
 }
 
 func releaseReconciledOwnership(ctx context.Context, tx pgx.Tx, projectID, jobID, leaseToken string) error {

@@ -280,6 +280,9 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 	finalizeCtx, cancelFinalize := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	_, finalizeErr := p.finalizeServerWorkspace(finalizeCtx, safe)
 	cancelFinalize()
+	if finalizeErr == nil {
+		finalizeErr = p.recordDelegationWorkspaceAccepted(ctx, safe, &instance.ID)
+	}
 	if engineErr == nil && finalizeErr == nil && engineResult.Summary != "" {
 		engineErr = p.record(ctx, safe, "agent.message", map[string]any{"message": engineResult.Summary}, &instance.ID, nil)
 	}
@@ -287,6 +290,9 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 	cleanupErr := p.cleanupRuntime(ctx, safe, instance)
 	if ctx.Err() != nil {
 		return scheduler.Result{}, ctx.Err()
+	}
+	if syncErr == nil {
+		syncErr = p.recordDelegationWorkspaceAccepted(ctx, safe, nil)
 	}
 	if handoffRequested {
 		if combined := errors.Join(finalizeErr, cleanupErr); combined != nil {
@@ -297,10 +303,7 @@ func (p *Processor) runEngine(ctx context.Context, run store.Run, safe execution
 	if combined := errors.Join(engineErr, finalizeErr, cleanupErr); combined != nil {
 		return p.failExecution(ctx, safe, combined, &instance.ID)
 	}
-	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, &instance.ID, nil); err != nil {
-		return scheduler.Result{}, err
-	}
-	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
+	return p.finishSuccessfulExecution(ctx, safe, &instance.ID)
 }
 
 func (p *Processor) liveExecutionSession(ctx context.Context, run store.Run) (*store.ExecutionSession, error) {
@@ -1037,7 +1040,23 @@ func (p *Processor) runEngineOnRunner(ctx context.Context, run store.Run, safe e
 			return scheduler.Result{}, err
 		}
 	}
-	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, nil, nil); err != nil {
+	return p.finishSuccessfulExecution(ctx, safe, nil)
+}
+
+func (p *Processor) recordDelegationWorkspaceAccepted(ctx context.Context, safe executioncontext.SafeContext, runtimeInstanceID *string) error {
+	if safe.Delegation == nil {
+		return nil
+	}
+	return p.record(ctx, safe, "delegation.workspace_accepted", map[string]any{
+		"delegationId": safe.Delegation.ID,
+	}, runtimeInstanceID, nil)
+}
+
+func (p *Processor) finishSuccessfulExecution(ctx context.Context, safe executioncontext.SafeContext, runtimeInstanceID *string) (scheduler.Result, error) {
+	if safe.Delegation != nil {
+		return scheduler.Result{RunStatus: "COMPLETED"}, nil
+	}
+	if err := p.record(ctx, safe, "run.ready_for_review", map[string]any{"codeState": "git"}, runtimeInstanceID, nil); err != nil {
 		return scheduler.Result{}, err
 	}
 	return scheduler.Result{RunStatus: "READY_FOR_REVIEW"}, nil
