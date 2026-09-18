@@ -35,20 +35,71 @@ func TestCancelInactiveRunCancelsQueuedSchedulerWorkAndPersistsEvent(t *testing.
 	}
 }
 
-func TestCancelInactiveRunRefusesClaimedOrExecutingRun(t *testing.T) {
+
+func TestCancelInactiveRunCancelsClaimedRunBeforeExecutionStarts(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	jobID, leaseToken := claimDelegationParentJob(t, f)
+
+	result, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Run.Status != "CANCELLED" {
+		t.Fatalf("claimed Run status=%s want CANCELLED", result.Run.Status)
+	}
+	var state, currentStatus string
+	if err := f.store.pool.QueryRow(ctx, "SELECT state FROM scheduler_jobs WHERE id=$1", jobID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.pool.QueryRow(ctx, "SELECT status FROM runs WHERE project_id=$1 AND id=$2", f.project.ID, f.parentRun.ID).Scan(&currentStatus); err != nil {
+		t.Fatal(err)
+	}
+	if state != "CANCELLED" || currentStatus != "CANCELLED" {
+		t.Fatalf("job state=%s Run status=%s", state, currentStatus)
+	}
+	assertSchedulerOwnershipCounts(t, f.store, jobID, 0, 0)
+
+	if _, err := f.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: jobID, RunID: f.parentRun.ID,
+		LeaseToken: leaseToken, RunStatus: "RUNNING",
+	}); err == nil {
+		t.Fatal("stale admitted worker transitioned a durably cancelled Run")
+	}
+}
+
+func TestCancelInactiveRunRefusesClaimedRunWithLiveExecutionSession(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
 	jobID, _ := claimDelegationParentJob(t, f)
-	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID); !errors.Is(err, store.ErrConflict) {
-		t.Fatalf("claimed cancellation err=%v want conflict", err)
-	}
-	var state string
-	if err := f.store.pool.QueryRow(ctx, `SELECT state FROM scheduler_jobs WHERE id=$1`, jobID).Scan(&state); err != nil {
+	projectID := f.project.ID
+	runnerValue, err := f.store.CreateRunner(ctx, store.Runner{
+		ProjectID: &projectID, Name: "claimed-cancellation-runner", TokenHash: make([]byte, 32),
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if state != "CLAIMED" {
-		t.Fatalf("claimed job state=%s", state)
+	if _, err := f.store.CreateExecutionSession(ctx, store.ExecutionSession{
+		ProjectID: projectID, RunID: f.parentRun.ID, RunnerID: runnerValue.ID,
+		Status: "PENDING", CWD: "/workspace", CommandArgv: []byte("[\"agent\"]"),
+	}); err != nil {
+		t.Fatal(err)
 	}
+
+	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("claimed cancellation with external authority err=%v want conflict", err)
+	}
+	var state, runStatus string
+	if err := f.store.pool.QueryRow(ctx, "SELECT state FROM scheduler_jobs WHERE id=$1", jobID).Scan(&state); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.pool.QueryRow(ctx, "SELECT status FROM runs WHERE project_id=$1 AND id=$2", f.project.ID, f.parentRun.ID).Scan(&runStatus); err != nil {
+		t.Fatal(err)
+	}
+	if state != "CLAIMED" || runStatus != "STARTING" {
+		t.Fatalf("fail-closed ownership changed: job=%s Run=%s", state, runStatus)
+	}
+	assertSchedulerOwnershipCounts(t, f.store, jobID, 1, 3)
 }
 
 func TestCancelInactiveDelegatedChildFinalizesOutcomeAndResumesParent(t *testing.T) {
@@ -213,6 +264,54 @@ func TestSchedulerAdmissionCancelsQueuedDelegateAfterParentCancellationAcrossRes
 	}
 	if queuedStarts != 0 {
 		t.Fatalf("queued delegated START jobs=%d want 0", queuedStarts)
+	}
+}
+
+
+func TestClaimedDelegatedChildCancellationAfterParentCancellationDoesNotResumeParent(t *testing.T) {
+	f, created := prepareQueuedDelegatedChildForCancellation(t, "claimed-child-cancel-race")
+	ctx := t.Context()
+	claim, err := f.store.AdmitNextJob(ctx, "claimed-child-worker", time.Minute, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claim == nil || claim.Run.ID != created.DelegatedRun.ID || claim.Run.Status != "STARTING" {
+		t.Fatalf("delegated child admission=%+v", claim)
+	}
+
+	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, created.DelegatedRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	child, err := f.store.GetRun(ctx, f.project.ID, created.DelegatedRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Status != "CANCELLED" {
+		t.Fatalf("child status=%s want CANCELLED", child.Status)
+	}
+	parent, err := f.store.GetRun(ctx, f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parent.Status != "CANCELLED" {
+		t.Fatalf("parent status=%s want CANCELLED", parent.Status)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.Outcome == nil || *delegation.Outcome != store.DelegationOutcomeCancelled || delegation.ContinuationJobID != nil {
+		t.Fatalf("cancelled claimed delegation=%+v", delegation)
+	}
+	assertSchedulerOwnershipCounts(t, f.store, claim.Job.ID, 0, 0)
+	if _, err := f.store.TransitionAdmittedJob(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: claim.Job.ID, RunID: child.ID,
+		LeaseToken: claim.Lease.LeaseToken, RunStatus: "RUNNING",
+	}); err == nil {
+		t.Fatal("stale delegated worker entered RUNNING after cancellation")
 	}
 }
 
