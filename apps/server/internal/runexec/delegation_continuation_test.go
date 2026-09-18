@@ -1,6 +1,7 @@
 package runexec
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -98,3 +99,51 @@ func TestLoadDelegationContinuationFailsClosedOnIncompleteOrUnverifiableState(t 
 		})
 	}
 }
+
+type continuationWithoutRevisionStore struct {
+	ExecutionStore
+	delegation store.Delegation
+}
+
+func (s *continuationWithoutRevisionStore) GetDelegationByContinuationJob(context.Context, string, string, string) (store.Delegation, error) {
+	return s.delegation, nil
+}
+
+func TestLoadDelegationContinuationFailsClosedOnLookupAndCapabilityErrors(t *testing.T) {
+	outcome := store.DelegationOutcomeSucceeded
+	summary := "result"
+	accepted := true
+	completedAt := time.Now().UTC()
+	base := store.Delegation{
+		ID: "delegation-1", ProjectID: "project-1", ParentRunID: "parent-run-1", TargetAgentID: "target-agent-1",
+		Task: "task", DelegatedRunID: "child-run-1", Outcome: &outcome, ResultSummary: &summary,
+		WorkspaceChangesAccepted: &accepted, CompletedAt: &completedAt,
+	}
+	claim := &store.SchedulerAdmission{Job: store.SchedulerJob{ID: "resume-job-1", Kind: "RESUME"}}
+	run := store.Run{ID: "parent-run-1", ProjectID: "project-1", WorkspaceID: "workspace-1"}
+
+	t.Run("delegation lookup failure", func(t *testing.T) {
+		processor := &Processor{store: &processTestStore{delegationErr: errors.New("lookup failed")}}
+		if got, err := processor.loadDelegationContinuation(t.Context(), claim, run); err == nil || got != nil {
+			t.Fatalf("continuation=%+v err=%v want lookup error", got, err)
+		}
+	})
+
+	t.Run("invalid persisted outcome", func(t *testing.T) {
+		invalid := "UNKNOWN"
+		delegation := base
+		delegation.Outcome = &invalid
+		processor := &Processor{store: &processTestStore{delegationContinuation: delegation, workspaceRevision: "revision"}}
+		if got, err := processor.loadDelegationContinuation(t.Context(), claim, run); err == nil || got != nil {
+			t.Fatalf("continuation=%+v err=%v want invalid outcome error", got, err)
+		}
+	})
+
+	t.Run("Workspace revision capability missing", func(t *testing.T) {
+		processor := &Processor{store: &continuationWithoutRevisionStore{delegation: base}}
+		if got, err := processor.loadDelegationContinuation(t.Context(), claim, run); err == nil || got != nil {
+			t.Fatalf("continuation=%+v err=%v want missing revision capability error", got, err)
+		}
+	})
+}
+
