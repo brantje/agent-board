@@ -366,24 +366,22 @@ func TestDelegationRecoveryEvidenceRequiresCanonicalIdentityAndOrdering(t *testi
 	})
 }
 
-func TestCompletedDelegationExecutionSessionFailsClosedOnAmbiguousAuthority(t *testing.T) {
+func TestTerminalDelegationExecutionSessionFailsClosedOnAmbiguousAuthority(t *testing.T) {
 	runID := "parent-run"
 	tests := []struct {
 		name     string
 		sessions []store.ExecutionSession
 	}{
 		{name: "no authoritative owner", sessions: []store.ExecutionSession{{ID: "one", RunID: runID, Status: "COMPLETED"}}},
-		{name: "failed runner", sessions: []store.ExecutionSession{{ID: "one", RunID: runID, Status: "FAILED", RunnerID: "runner-1"}}},
-		{name: "cancelled runtime", sessions: []store.ExecutionSession{{ID: "one", RunID: runID, Status: "CANCELLED", RuntimeInstanceID: "runtime-1"}}},
-		{name: "multiple completed owners", sessions: []store.ExecutionSession{
+		{name: "multiple terminal owners", sessions: []store.ExecutionSession{
 			{ID: "one", RunID: runID, Status: "COMPLETED", RunnerID: "runner-1"},
-			{ID: "two", RunID: runID, Status: "COMPLETED", RunnerID: "runner-2"},
+			{ID: "two", RunID: runID, Status: "CANCELLED", RunnerID: "runner-2"},
 		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if session, ok := completedDelegationExecutionSession(tc.sessions, runID); ok {
-				t.Fatalf("ambiguous or unsafe sessions selected authority: %+v", session)
+			if session, ok := terminalDelegatedExecutionSession(tc.sessions, runID); ok {
+				t.Fatalf("ambiguous or ownerless sessions selected authority: %+v", session)
 			}
 		})
 	}
