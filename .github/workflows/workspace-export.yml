@@ -16,11 +16,10 @@ jobs:
           cache: false
       - name: Archive repository
         run: git archive --format=zip --output=agent-board.zip HEAD
-      - name: Vendor server dependencies
-        working-directory: apps/server
-        run: go mod vendor
+      - name: Vendor workspace dependencies
+        run: go work vendor
       - name: Archive vendored dependencies
-        run: tar -C apps/server -czf server-vendor.tar.gz vendor
+        run: tar -czf workspace-vendor.tar.gz vendor
       - name: Archive Go toolchain
         run: |
           GOROOT="$(go env GOROOT)"
@@ -34,6 +33,6 @@ jobs:
         with:
           name: local-test-env
           path: |
-            server-vendor.tar.gz
+            workspace-vendor.tar.gz
             go-toolchain.tar.gz
           if-no-files-found: error
