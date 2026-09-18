@@ -27,6 +27,25 @@ func (l *fakeAttachLauncher) Attach(context.Context) (engine.Process, error) {
 	return l.process, nil
 }
 
+func attachedExecutionContext() executioncontext.SafeContext {
+	return executioncontext.SafeContext{
+		Issue:    executioncontext.IssueContext{Title: "Resume after restart"},
+		Agent:    executioncontext.AgentContext{Engine: Name},
+		Model:    executioncontext.ModelContext{Model: "test-model"},
+		Provider: executioncontext.ProviderContext{Kind: "test-provider"},
+	}
+}
+
+func attachedPromptHistory(sessionID string) []any {
+	return []any{map[string]any{
+		"info": map[string]any{"sessionID": sessionID, "role": "user"},
+		"parts": []any{map[string]any{
+			"type": "text",
+			"text": initialTaskPromptWithDelegationContinuation(attachedExecutionContext(), nil),
+		}},
+	}}
+}
+
 func TestEngineAttachDoesNotPromptExistingNativeSession(t *testing.T) {
 	var statusCalls atomic.Int32
 	var promptCalls atomic.Int32
@@ -48,6 +67,9 @@ func TestEngineAttachDoesNotPromptExistingNativeSession(t *testing.T) {
 	})
 	mux.HandleFunc("GET /question", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, []any{})
+	})
+	mux.HandleFunc("GET /session/ses_existing/message", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, attachedPromptHistory("ses_existing"))
 	})
 	mux.HandleFunc("GET /api/event", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -112,6 +134,9 @@ func TestEngineAttachOpensPendingQuestions(t *testing.T) {
 				},
 			},
 		})
+	})
+	mux.HandleFunc("GET /session/ses_existing/message", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, attachedPromptHistory("ses_existing"))
 	})
 	mux.HandleFunc("POST /question/que_pending/reply", func(w http.ResponseWriter, r *http.Request) {
 		var payload struct {
@@ -197,8 +222,9 @@ func TestEngineAttachPromptsWhenNoNativeSession(t *testing.T) {
 	}
 }
 
-func TestEngineAttachUsesIdleNativeSessionWithoutPrompt(t *testing.T) {
+func TestEngineAttachPromptsIdleNativeSessionWithEmptyHistory(t *testing.T) {
 	var promptCalls atomic.Int32
+	var activeAfterPrompt atomic.Int32
 	var createCalls atomic.Int32
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -208,7 +234,18 @@ func TestEngineAttachUsesIdleNativeSessionWithoutPrompt(t *testing.T) {
 		writeNativeJSON(t, w, []any{map[string]any{"id": "", "directory": "/workspace"}, map[string]any{"id": "ses_idle", "directory": "/workspace"}})
 	})
 	mux.HandleFunc("GET /session/status", func(w http.ResponseWriter, _ *http.Request) {
+		if promptCalls.Load() == 0 {
+			writeNativeJSON(t, w, map[string]any{"ses_idle": map[string]any{"type": "idle"}})
+			return
+		}
+		if activeAfterPrompt.Add(1) <= 2 {
+			writeNativeJSON(t, w, map[string]any{"ses_idle": map[string]any{"type": "busy"}})
+			return
+		}
 		writeNativeJSON(t, w, map[string]any{"ses_idle": map[string]any{"type": "idle"}})
+	})
+	mux.HandleFunc("GET /session/ses_idle/message", func(w http.ResponseWriter, _ *http.Request) {
+		writeNativeJSON(t, w, []any{})
 	})
 	mux.HandleFunc("GET /question", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, []any{})
@@ -226,7 +263,7 @@ func TestEngineAttachUsesIdleNativeSessionWithoutPrompt(t *testing.T) {
 	})
 	mux.HandleFunc("POST /session/ses_idle/prompt_async", func(w http.ResponseWriter, _ *http.Request) {
 		promptCalls.Add(1)
-		http.Error(w, "should not prompt", http.StatusInternalServerError)
+		writeNativeJSON(t, w, true)
 	})
 	mux.HandleFunc("POST /session/ses_idle/abort", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -236,8 +273,8 @@ func TestEngineAttachUsesIdleNativeSessionWithoutPrompt(t *testing.T) {
 	if result.launcher.starts != 0 || result.launcher.attaches != 1 {
 		t.Fatalf("starts=%d attaches=%d", result.launcher.starts, result.launcher.attaches)
 	}
-	if promptCalls.Load() != 0 || createCalls.Load() != 0 {
-		t.Fatalf("promptCalls=%d createCalls=%d", promptCalls.Load(), createCalls.Load())
+	if promptCalls.Load() != 1 || createCalls.Load() != 0 {
+		t.Fatalf("promptCalls=%d createCalls=%d want 1/0", promptCalls.Load(), createCalls.Load())
 	}
 }
 
@@ -382,12 +419,7 @@ func executeAttachedRequest(t *testing.T, mux http.Handler) (*fakeAttachLauncher
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	t.Cleanup(cancel)
 	_, err = adapter.Execute(ctx, engine.Request{
-		Context: executioncontext.SafeContext{
-			Issue:    executioncontext.IssueContext{Title: "Resume after restart"},
-			Agent:    executioncontext.AgentContext{Engine: Name},
-			Model:    executioncontext.ModelContext{Model: "test-model"},
-			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
-		},
+		Context: attachedExecutionContext(),
 		Launcher:             launcher,
 		InteractiveQuestions: questions,
 	})

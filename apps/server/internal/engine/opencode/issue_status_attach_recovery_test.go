@@ -14,6 +14,12 @@ import (
 )
 
 func TestEngineAttachContinuesWhenRecoveredIssueStatusIsSuperseded(t *testing.T) {
+	safe := executioncontext.SafeContext{
+		Issue:    executioncontext.IssueContext{Title: "Resume without stale Board overwrite"},
+		Agent:    executioncontext.AgentContext{Engine: Name},
+		Model:    executioncontext.ModelContext{Model: "test-model"},
+		Provider: executioncontext.ProviderContext{Kind: "test-provider"},
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, map[string]any{"healthy": true, "version": "test"})
@@ -32,6 +38,10 @@ func TestEngineAttachContinuesWhenRecoveredIssueStatusIsSuperseded(t *testing.T)
 	})
 	mux.HandleFunc("GET /session/ses_existing/message", func(w http.ResponseWriter, _ *http.Request) {
 		writeNativeJSON(t, w, []any{
+			map[string]any{
+				"info": map[string]any{"sessionID": "ses_existing", "role": "user"},
+				"parts": []any{map[string]any{"type": "text", "text": initialTaskPromptWithDelegationContinuation(safe, nil)}},
+			},
 			map[string]any{
 				"info": map[string]any{"sessionID": "ses_existing", "role": "assistant"},
 				"parts": []any{issueStatusToolPartPayload("ses_existing", "part_stale", "REVIEW")},
@@ -63,12 +73,7 @@ func TestEngineAttachContinuesWhenRecoveredIssueStatusIsSuperseded(t *testing.T)
 	defer cancel()
 
 	_, err = adapter.Execute(ctx, engine.Request{
-		Context: executioncontext.SafeContext{
-			Issue:    executioncontext.IssueContext{Title: "Resume without stale Board overwrite"},
-			Agent:    executioncontext.AgentContext{Engine: Name},
-			Model:    executioncontext.ModelContext{Model: "test-model"},
-			Provider: executioncontext.ProviderContext{Kind: "test-provider"},
-		},
+		Context: safe,
 		Launcher:             launcher,
 		InteractiveQuestions: &fakeInteractiveQuestions{},
 		IssueStatus:          statuses,
