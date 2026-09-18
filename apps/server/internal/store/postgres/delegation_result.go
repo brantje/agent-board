@@ -175,6 +175,9 @@ func delegatedResultEvidence(ctx context.Context, tx pgx.Tx, child store.Run, fa
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return "", nil, err
 	}
+	if strings.TrimSpace(summary) == "" {
+		eventID = ""
+	}
 	if strings.TrimSpace(summary) == "" && child.Status == "FAILED" && child.FailureReason != nil {
 		summary = *child.FailureReason
 	}

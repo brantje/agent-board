@@ -159,6 +159,38 @@ func TestDelegatedCompletionIgnoresLaterReasoningMessageForResult(t *testing.T) 
 	}
 }
 
+func TestDelegatedCompletionFallsBackWhenOnlyReasoningMessageExists(t *testing.T) {
+	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "result-reasoning-only")
+	ctx := t.Context()
+	childRunID := created.DelegatedRun.ID
+	workspaceID, targetAgentID := created.DelegatedRun.WorkspaceID, f.target.ID
+
+	reasoning, err := f.store.AppendEvent(ctx, store.Event{
+		Type: "agent.message", ProjectID: f.project.ID, IssueID: &f.issue.ID,
+		RunID: &childRunID, AgentID: &targetAgentID, WorkspaceID: &workspaceID,
+		Actor: store.EmptyObject, Payload: []byte(`{"message":"reasoning is evidence, not the result","kind":"reasoning","source":"opencode"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.store.TransitionAdmittedJobMutation(ctx, store.SchedulerTransition{
+		ProjectID: f.project.ID, JobID: childJobID, RunID: childRunID, LeaseToken: childLease, RunStatus: "COMPLETED",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, childRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.ResultSummary == nil || *delegation.ResultSummary != "Delegated task completed successfully." {
+		t.Fatalf("delegation fallback summary=%v", delegation.ResultSummary)
+	}
+	if delegation.ResultEventID != nil {
+		t.Fatalf("reasoning event %s incorrectly referenced as fallback result: %v", reasoning.ID, delegation.ResultEventID)
+	}
+}
+
 func TestDelegatedCompletionReconciliationCreatesParentContinuationExactlyOnce(t *testing.T) {
 	f, created, childJobID, childLease := prepareDelegatedChildForTerminal(t, "result-reconciliation")
 	ctx := t.Context()
