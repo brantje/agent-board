@@ -182,13 +182,14 @@ func TestReconcileRecoversLocalDelegationByRefinalizingWorkspace(t *testing.T) {
 
 func TestReconcileDoesNotRecoverDelegationWithoutSafeBoundary(t *testing.T) {
 	tests := []struct {
-		name     string
-		status   string
-		runnerID string
+		name         string
+		status       string
+		runnerID     string
+		synchronized bool
 	}{
 		{name: "no completed tool", status: "COMPLETED", runnerID: "runner-1"},
-		{name: "failed execution", status: "FAILED", runnerID: "runner-1"},
-		{name: "cancelled execution", status: "CANCELLED", runnerID: "runner-1"},
+		{name: "failed execution after synchronized cleanup", status: "FAILED", runnerID: "runner-1", synchronized: true},
+		{name: "cancelled execution after synchronized cleanup", status: "CANCELLED", runnerID: "runner-1", synchronized: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -201,6 +202,11 @@ func TestReconcileDoesNotRecoverDelegationWithoutSafeBoundary(t *testing.T) {
 						ToolCallID: delegation.RequestKey,
 						Input: map[string]any{"targetAgentId": delegation.TargetAgentID, "task": delegation.Task},
 					}),
+				}
+				if tc.synchronized {
+					storeFake.events = append(storeFake.events,
+						delegationRecoveryEvent(t, run.ProjectID, run.ID, 2, "workspace.transfer.completed", map[string]any{"direction": "from_runner"}),
+					)
 				}
 			}
 			processor := &Processor{store: storeFake, sessions: reconcileSessions{}}
