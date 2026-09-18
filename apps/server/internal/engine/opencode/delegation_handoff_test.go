@@ -53,28 +53,11 @@ func TestDelegationHandoffRecoveryUsesDurableCompletedToolPart(t *testing.T) {
 			"input":  map[string]any{"targetAgentId": "agent-2", "task": "recover handoff"},
 		},
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /permission", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte("[]"))
-	})
-	mux.HandleFunc("GET /session/ses_1/message", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode([]map[string]any{{
-			"info":  map[string]any{"sessionID": "ses_1"},
-			"parts": []any{part},
-		}})
-	})
-	server := httptest.NewServer(mux)
-	defer server.Close()
-	native, err := client.New(server.Client(), server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
+	native := delegationRecoveryClient(t, []any{part})
 	tracker := newDelegationToolTracker()
 	requester := &recordingDelegationRequester{}
 
-	err = tracker.Reconcile(t.Context(), native, "ses_1", requester)
+	err := tracker.Reconcile(t.Context(), native, "ses_1", requester)
 	if !errors.Is(err, engine.ErrDelegationHandoff) {
 		t.Fatalf("recovery err=%v want handoff", err)
 	}
@@ -84,6 +67,39 @@ func TestDelegationHandoffRecoveryUsesDurableCompletedToolPart(t *testing.T) {
 	got := requester.requests[0]
 	if got.RequestKey != "call_1" || got.TargetAgentID != "agent-2" || got.Task != "recover handoff" {
 		t.Fatalf("recovered request=%+v", got)
+	}
+}
+
+
+func TestDelegationHandoffRecoveryFailsClosedOnInvalidCompletedHistory(t *testing.T) {
+	validInput := map[string]any{"targetAgentId": "agent-2", "task": "recover handoff"}
+	tests := []struct {
+		name string
+		part any
+	}{
+		{name: "malformed part", part: "not-a-tool-part"},
+		{name: "missing call id", part: map[string]any{
+			"id": "part_1", "sessionID": "ses_1", "type": "tool", "tool": delegationToolName,
+			"state": map[string]any{"status": "completed", "input": validInput},
+		}},
+		{name: "invalid input", part: map[string]any{
+			"id": "part_1", "callID": "call_1", "sessionID": "ses_1", "type": "tool", "tool": delegationToolName,
+			"state": map[string]any{"status": "completed", "input": map[string]any{"targetAgentId": "agent-2"}},
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			native := delegationRecoveryClient(t, []any{tc.part})
+			tracker := newDelegationToolTracker()
+			requester := &recordingDelegationRequester{}
+
+			if err := tracker.Reconcile(t.Context(), native, "ses_1", requester); err == nil {
+				t.Fatal("invalid durable delegation history was accepted")
+			}
+			if len(requester.requests) != 0 || tracker.handoff != nil {
+				t.Fatalf("invalid recovery created delegation: requests=%+v handoff=%+v", requester.requests, tracker.handoff)
+			}
+		})
 	}
 }
 
@@ -117,4 +133,28 @@ func completedDelegationToolEvent(t *testing.T, sessionID, partID, callID, targe
 			},
 		},
 	})}
+}
+
+
+func delegationRecoveryClient(t *testing.T, parts []any) *client.Client {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /permission", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	})
+	mux.HandleFunc("GET /session/ses_1/message", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"info":  map[string]any{"sessionID": "ses_1"},
+			"parts": parts,
+		}})
+	})
+	server := httptest.NewServer(mux)
+	t.Cleanup(server.Close)
+	native, err := client.New(server.Client(), server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return native
 }
