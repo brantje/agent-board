@@ -85,7 +85,7 @@ func (s *delegationCancelStore) CancelInactiveRun(_ context.Context, _, id strin
 	if !ok {
 		return store.RunCancellationResult{}, store.ErrNotFound
 	}
-	if run.Status != "QUEUED" && run.Status != "PAUSED" {
+	if run.Status != "QUEUED" && run.Status != "PAUSED" && run.Status != "STARTING" {
 		return store.RunCancellationResult{}, store.ErrConflict
 	}
 	run.Status = "CANCELLED"
@@ -176,6 +176,151 @@ func (s *activeDelegationSchedulerStore) ClaimExpiredJobForReconciliation(contex
 
 func (s *activeDelegationSchedulerStore) ResolveReconciliation(context.Context, store.SchedulerReconciliation) (store.Run, error) {
 	return store.Run{}, store.ErrConflict
+}
+
+
+type preRegistrationDelegationSchedulerStore struct {
+	base             *delegationCancelStore
+	admission        *store.SchedulerAdmission
+	admitted         chan struct{}
+	releaseAdmission chan struct{}
+	once             sync.Once
+}
+
+func (s *preRegistrationDelegationSchedulerStore) EnqueueJob(context.Context, store.SchedulerJob) (store.SchedulerJob, error) {
+	return store.SchedulerJob{}, store.ErrConflict
+}
+
+func (s *preRegistrationDelegationSchedulerStore) AdmitNextJob(ctx context.Context, _ string, _, _ time.Duration) (*store.SchedulerAdmission, error) {
+	var claim *store.SchedulerAdmission
+	s.once.Do(func() {
+		child := s.base.runs[s.admission.Run.ID]
+		child.Status = "STARTING"
+		s.base.runs[child.ID] = child
+		copy := *s.admission
+		copy.Run = child
+		claim = &copy
+		close(s.admitted)
+	})
+	if claim == nil {
+		return nil, nil
+	}
+	select {
+	case <-s.releaseAdmission:
+		return claim, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (*preRegistrationDelegationSchedulerStore) RenewLease(context.Context, string, string, string, time.Duration) (store.SchedulerLease, error) {
+	return store.SchedulerLease{}, nil
+}
+
+func (s *preRegistrationDelegationSchedulerStore) TransitionAdmittedJob(_ context.Context, input store.SchedulerTransition) (store.Run, error) {
+	run := s.base.runs[input.RunID]
+	if run.Status == "CANCELLED" {
+		return store.Run{}, store.ErrConflict
+	}
+	run.Status = input.RunStatus
+	s.base.runs[input.RunID] = run
+	return run, nil
+}
+
+func (*preRegistrationDelegationSchedulerStore) ClaimExpiredJobForReconciliation(context.Context, string, time.Duration) (*store.SchedulerAdmission, error) {
+	return nil, nil
+}
+
+func (*preRegistrationDelegationSchedulerStore) ResolveReconciliation(context.Context, store.SchedulerReconciliation) (store.Run, error) {
+	return store.Run{}, store.ErrConflict
+}
+
+type lifecycleBoundaryCancellationProcessor struct {
+	engineEntered chan struct{}
+}
+
+func (p *lifecycleBoundaryCancellationProcessor) Process(ctx context.Context, _ *store.SchedulerAdmission, lifecycle scheduler.Lifecycle) (scheduler.Result, error) {
+	if _, err := lifecycle.Running(ctx); err != nil {
+		return scheduler.Result{}, err
+	}
+	close(p.engineEntered)
+	return scheduler.Result{RunStatus: "COMPLETED"}, nil
+}
+
+func TestParentCancellationWinsClaimedDelegatedChildBeforeWorkerRegistration(t *testing.T) {
+	base := &delegationCancelStore{
+		runs: map[string]store.Run{
+			"parent": {ID: "parent", ProjectID: "project-1", Status: "PAUSED"},
+			"child":  {ID: "child", ProjectID: "project-1", Status: "QUEUED"},
+		},
+		delegations: []store.Delegation{{
+			ID: "delegation-1", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "child",
+		}},
+	}
+	admission := &store.SchedulerAdmission{
+		Job: store.SchedulerJob{ID: "child-job", ProjectID: "project-1", RunID: "child", Kind: "START", State: "CLAIMED"},
+		Lease: store.SchedulerLease{JobID: "child-job", LeaseToken: "lease-1"},
+		Run: base.runs["child"],
+	}
+	schedulerStore := &preRegistrationDelegationSchedulerStore{
+		base: base, admission: admission, admitted: make(chan struct{}), releaseAdmission: make(chan struct{}),
+	}
+	processor := &lifecycleBoundaryCancellationProcessor{engineEntered: make(chan struct{})}
+	config := scheduler.DefaultConfig("pre-registration-cancel")
+	config.PollInterval = 5 * time.Millisecond
+	config.LeaseDuration = time.Second
+	config.HeartbeatInterval = 100 * time.Millisecond
+	config.CapacityBackoff = 5 * time.Millisecond
+	config.MaxInFlight = 1
+	config.ReportError = func(error) {}
+	coordinator, err := scheduler.New(schedulerStore, processor, noOpCancellationReconciler{}, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- coordinator.Run(ctx) }()
+
+	select {
+	case <-schedulerStore.admitted:
+	case <-time.After(time.Second):
+		t.Fatal("scheduler did not reach claimed pre-registration barrier")
+	}
+	if got := base.runs["child"].Status; got != "STARTING" {
+		t.Fatalf("child status=%s want STARTING after durable admission", got)
+	}
+
+	services := &Services{ControlPlane: New(base), Scheduler: coordinator}
+	if err := services.CancelRun(t.Context(), "project-1", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	if base.runs["parent"].Status != "CANCELLED" || base.runs["child"].Status != "CANCELLED" {
+		t.Fatalf("cancellation statuses parent=%s child=%s", base.runs["parent"].Status, base.runs["child"].Status)
+	}
+	if base.delegations[0].ContinuationJobID != nil {
+		t.Fatalf("cancelled parent received continuation: %+v", base.delegations[0])
+	}
+
+	close(schedulerStore.releaseAdmission)
+	select {
+	case <-processor.engineEntered:
+		t.Fatal("claimed delegated child entered Engine execution after parent cancellation")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if base.runs["parent"].Status != "CANCELLED" {
+		t.Fatalf("stale worker resurrected parent to %s", base.runs["parent"].Status)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("scheduler did not stop")
+	}
 }
 
 type blockingCancellationProcessor struct {
