@@ -139,8 +139,8 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	if afterOwner == nil || afterOwner.Type != "AGENT" || afterOwner.ID != parentAgent.ID {
 		t.Fatalf("delegation lifecycle changed Issue owner: %+v", afterOwner)
 	}
-	if statusBeforeChild != beforeChild.Status {
-		t.Fatalf("test setup Issue status changed unexpectedly from %s to %s", statusBeforeChild, beforeChild.Status)
+	if afterChild.Status != statusBeforeChild {
+		t.Fatalf("delegation lifecycle changed Issue status from %s to %s", statusBeforeChild, afterChild.Status)
 	}
 	assertNoAuthoritativeDelegationTools(t, fixture, project.ID, child.ID)
 	assertOpenCodeDelegationResultEvidence(t, fixture, project.ID, parentRun.ID, child.ID)
