@@ -56,6 +56,7 @@ type delegationCancelStore struct {
 	runs        map[string]store.Run
 	delegations []store.Delegation
 	cancelled   []string
+	listErr     error
 }
 
 func (s *delegationCancelStore) GetProject(context.Context, string) (store.Project, error) {
@@ -91,6 +92,9 @@ func (s *delegationCancelStore) GetDelegationByRun(context.Context, string, stri
 	return store.Delegation{}, store.ErrNotFound
 }
 func (s *delegationCancelStore) ListDelegationsByParentRun(_ context.Context, _, parent string) ([]store.Delegation, error) {
+	if s.listErr != nil {
+		return nil, s.listErr
+	}
 	var out []store.Delegation
 	for _, d := range s.delegations {
 		if d.ParentRunID == parent {
@@ -240,5 +244,80 @@ func TestCancelRunCancelsRunningDelegateThroughSchedulerBoundary(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("scheduler did not stop")
+	}
+}
+
+
+func TestCancelRunForUserAuthorizesWorkflowMutationBeforeCanonicalCancellation(t *testing.T) {
+	if err := (&Services{}).CancelRunForUser(t.Context(), activeProjectActor("member", store.DeploymentRoleMember), "project-1", "run-1"); err == nil {
+		t.Fatal("cancellation without Project access unexpectedly succeeded")
+	}
+
+	base := &delegationCancelStore{runs: map[string]store.Run{
+		"run-1": {ID: "run-1", ProjectID: "project-1", Status: "QUEUED"},
+	}}
+	accessStore := &projectAccessServiceStore{roles: map[string]string{
+		"project-1:viewer": store.ProjectRoleViewer,
+		"project-1:member": store.ProjectRoleMember,
+	}}
+	services := &Services{
+		ControlPlane:   New(base),
+		Scheduler:      &scheduler.Coordinator{},
+		ProjectAccess: newProjectAccessServiceForTest(t, accessStore),
+	}
+	if err := services.CancelRunForUser(t.Context(), activeProjectActor("viewer", store.DeploymentRoleMember), "project-1", "run-1"); appErrorCode(err) != "forbidden" {
+		t.Fatalf("viewer cancellation error=%v", err)
+	}
+	if got := base.runs["run-1"].Status; got != "QUEUED" {
+		t.Fatalf("unauthorized cancellation changed Run to %s", got)
+	}
+	if err := services.CancelRunForUser(t.Context(), activeProjectActor("member", store.DeploymentRoleMember), "project-1", "run-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := base.runs["run-1"].Status; got != "CANCELLED" {
+		t.Fatalf("authorized cancellation status=%s want CANCELLED", got)
+	}
+}
+
+func TestCancelDelegatedChildrenSkipsHandledAndTerminalDelegations(t *testing.T) {
+	outcome := store.DelegationOutcomeSucceeded
+	base := &delegationCancelStore{
+		runs: map[string]store.Run{
+			"parent":         {ID: "parent", ProjectID: "project-1", Status: "PAUSED"},
+			"handled-child":  {ID: "handled-child", ProjectID: "project-1", Status: "RUNNING"},
+			"terminal-child": {ID: "terminal-child", ProjectID: "project-1", Status: "COMPLETED"},
+		},
+		delegations: []store.Delegation{
+			{ID: "handled", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "handled-child", Outcome: &outcome},
+			{ID: "terminal", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "terminal-child"},
+		},
+	}
+	services := &Services{ControlPlane: New(base), Scheduler: &scheduler.Coordinator{}}
+	if err := services.CancelRun(t.Context(), "project-1", "parent"); err != nil {
+		t.Fatal(err)
+	}
+	if len(base.cancelled) != 1 || base.cancelled[0] != "parent" {
+		t.Fatalf("cancelled Runs=%v want only parent", base.cancelled)
+	}
+}
+
+func TestCancelDelegatedChildrenPropagatesLookupErrors(t *testing.T) {
+	listErr := errors.New("list delegations")
+	base := &delegationCancelStore{
+		runs:    map[string]store.Run{"parent": {ID: "parent", ProjectID: "project-1", Status: "PAUSED"}},
+		listErr: listErr,
+	}
+	services := &Services{ControlPlane: New(base), Scheduler: &scheduler.Coordinator{}}
+	if err := services.CancelRun(t.Context(), "project-1", "parent"); !errors.Is(err, listErr) {
+		t.Fatalf("list error=%v want %v", err, listErr)
+	}
+
+	base = &delegationCancelStore{
+		runs: map[string]store.Run{"parent": {ID: "parent", ProjectID: "project-1", Status: "PAUSED"}},
+		delegations: []store.Delegation{{ID: "missing", ProjectID: "project-1", ParentRunID: "parent", DelegatedRunID: "missing-child"}},
+	}
+	services = &Services{ControlPlane: New(base), Scheduler: &scheduler.Coordinator{}}
+	if err := services.CancelRun(t.Context(), "project-1", "parent"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("child lookup error=%v want ErrNotFound", err)
 	}
 }
