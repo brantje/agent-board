@@ -19,6 +19,19 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/workspace"
 )
 
+type pendingRecoveryExecutionStore struct {
+	*uncertaintyExecutionStore
+	waitGate *launcherWaitGate
+}
+
+func (s *pendingRecoveryExecutionStore) TransitionExecutionSession(ctx context.Context, transition store.ExecutionSessionTransition) (store.ExecutionSession, error) {
+	session, err := s.launcherSessionStore.TransitionExecutionSession(ctx, transition)
+	if err == nil && session.Status == "RUNNING" && s.waitGate != nil {
+		s.waitGate.stop()
+	}
+	return session, err
+}
+
 type pendingRecoveryEngine struct{}
 
 func (pendingRecoveryEngine) Name() string { return "pending-recovery" }
@@ -153,10 +166,16 @@ func TestRecoveredPendingRunnerResumePreparesCurrentWorkspaceBeforeExecution(t *
 			},
 		},
 	}
-	storeFake := &uncertaintyExecutionStore{runnerSyncStore: base, launcherSessionStore: sessionStore}
+	gate := newLauncherWaitGate()
+	storeFake := &pendingRecoveryExecutionStore{
+		uncertaintyExecutionStore: &uncertaintyExecutionStore{runnerSyncStore: base, launcherSessionStore: sessionStore},
+		waitGate: gate,
+	}
 	runnerWorkspace := filepath.Join(t.TempDir(), "runner-workspace")
+	transportClient := newLauncherClient("", "", 0, nil)
+	transportClient.waitGate = gate
 	transport := &workspaceCheckingRunnerClient{
-		launcherClient: newLauncherClient("", "", 0, nil),
+		launcherClient: transportClient,
 		workspacePath:  runnerWorkspace,
 	}
 	executionSessions, err := newLauncherExecutionSessionService(storeFake, transport)
