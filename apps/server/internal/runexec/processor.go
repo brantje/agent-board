@@ -38,6 +38,12 @@ type ExecutionStore interface {
 	UpdateWorkspaceCurrentBranch(context.Context, string, string, string) (store.Workspace, error)
 }
 
+type delegationHandoffRecoveryStore interface {
+	store.DelegationStore
+	store.DelegationWorkspaceHandoffStore
+	ListRunEvents(context.Context, string, string, int64, int) ([]store.Event, error)
+}
+
 type SessionService interface {
 	Start(context.Context, string, string, string, app.AuthorizedExecutionRequest) (*app.AuthorizedExecutionProcess, error)
 	Attach(context.Context, string, string) (*app.AuthorizedExecutionProcess, error)
@@ -347,9 +353,164 @@ func (p *Processor) Reconcile(ctx context.Context, claim *store.SchedulerAdmissi
 		return store.SchedulerReconciliationRetry, nil, nil
 	}
 	// Once any external Execution Session existed, lack of a live session is not
-	// enough proof that replaying the Engine is safe. Keep ownership uncertain
-	// rather than blindly duplicating Workspace side effects.
+	// enough proof that replaying the Engine is safe. Delegation handoff recovery
+	// is the narrow exception: it may reuse a completed Runner session only when
+	// durable native tool evidence matches the canonical delegation. The Engine
+	// is never replayed, and scheduler ownership remains UNKNOWN until the store
+	// observes the durable handoff-ready marker.
+	if err := p.recoverDelegationWorkspaceHandoff(ctx, claim.Run, sessions); err != nil {
+		return store.SchedulerReconciliationUnknown, nil, err
+	}
 	return store.SchedulerReconciliationUnknown, nil, nil
+}
+
+const delegationRecoveryEventPageSize = 500
+
+func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run store.Run, sessions []store.ExecutionSession) error {
+	recovery, ok := p.store.(delegationHandoffRecoveryStore)
+	if !ok {
+		return nil
+	}
+	delegations, err := recovery.ListDelegationsByParentRun(ctx, run.ProjectID, run.ID)
+	if err != nil {
+		return err
+	}
+	if len(delegations) == 0 {
+		return nil
+	}
+	events, err := listDelegationRecoveryEvents(ctx, recovery, run.ProjectID, run.ID)
+	if err != nil {
+		return err
+	}
+	for _, delegation := range delegations {
+		completed, synchronized := delegationRecoveryEvidence(events, delegation)
+		if !completed {
+			continue
+		}
+		if !synchronized {
+			session, ok := completedDelegationRunnerSession(sessions, run.ID)
+			if !ok {
+				continue
+			}
+			safe, err := p.delegationRecoveryContext(ctx, run)
+			if err != nil {
+				return err
+			}
+			syncCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+			err = p.syncWorkspaceFromRunner(syncCtx, safe, session.RunnerID, session.ID)
+			cancel()
+			if err != nil {
+				return err
+			}
+		}
+		if err := recovery.MarkDelegationWorkspaceHandoffReady(
+			ctx,
+			delegation.ProjectID,
+			delegation.ParentRunID,
+			delegation.ID,
+			delegation.DelegatedRunID,
+		); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func listDelegationRecoveryEvents(ctx context.Context, recovery delegationHandoffRecoveryStore, projectID, runID string) ([]store.Event, error) {
+	var result []store.Event
+	after := int64(0)
+	for {
+		page, err := recovery.ListRunEvents(ctx, projectID, runID, after, delegationRecoveryEventPageSize)
+		if err != nil {
+			return nil, err
+		}
+		if len(page) == 0 {
+			return result, nil
+		}
+		for _, event := range page {
+			if event.Sequence == nil || *event.Sequence <= after {
+				return nil, fmt.Errorf("run execution: invalid delegation recovery event sequence")
+			}
+			after = *event.Sequence
+			result = append(result, event)
+		}
+		if len(page) < delegationRecoveryEventPageSize {
+			return result, nil
+		}
+	}
+}
+
+func delegationRecoveryEvidence(events []store.Event, delegation store.Delegation) (bool, bool) {
+	completedSequence := int64(0)
+	for _, event := range events {
+		if event.Sequence == nil {
+			continue
+		}
+		if event.Type == "tool.completed" {
+			var payload evidence.ToolPayload
+			if err := json.Unmarshal(event.Payload, &payload); err != nil {
+				continue
+			}
+			targetAgentID, _ := payload.Input["targetAgentId"].(string)
+			task, _ := payload.Input["task"].(string)
+			if payload.Name == "delegate_task" &&
+				payload.ToolCallID == delegation.RequestKey &&
+				targetAgentID == delegation.TargetAgentID &&
+				task == delegation.Task {
+				completedSequence = *event.Sequence
+			}
+			continue
+		}
+		if completedSequence == 0 || *event.Sequence <= completedSequence || event.Type != "workspace.transfer.completed" {
+			continue
+		}
+		var payload struct {
+			Direction string `json:"direction"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			continue
+		}
+		if payload.Direction == "from_runner" || payload.Direction == "git_publish" {
+			return true, true
+		}
+	}
+	return completedSequence != 0, false
+}
+
+func completedDelegationRunnerSession(sessions []store.ExecutionSession, runID string) (store.ExecutionSession, bool) {
+	var candidate store.ExecutionSession
+	for _, session := range sessions {
+		if session.RunID != runID || session.Status != "COMPLETED" || strings.TrimSpace(session.RunnerID) == "" {
+			continue
+		}
+		if candidate.ID != "" && candidate.ID != session.ID {
+			return store.ExecutionSession{}, false
+		}
+		candidate = session
+	}
+	return candidate, candidate.ID != ""
+}
+
+func (p *Processor) delegationRecoveryContext(ctx context.Context, run store.Run) (executioncontext.SafeContext, error) {
+	snapshot, err := p.store.GetRunProvenance(ctx, run.ProjectID, run.ID)
+	if err != nil {
+		return executioncontext.SafeContext{}, err
+	}
+	var provenance executioncontext.Provenance
+	if err := json.Unmarshal(snapshot, &provenance); err != nil {
+		return executioncontext.SafeContext{}, fmt.Errorf("run execution: decode delegation recovery provenance: %w", err)
+	}
+	safe := provenance.Context
+	if provenance.SchemaVersion != executioncontext.ProvenanceSchemaVersion ||
+		safe.Project.ID != run.ProjectID ||
+		safe.Run.ID != run.ID ||
+		safe.Issue.ID != run.IssueID ||
+		safe.Workspace.ID != run.WorkspaceID ||
+		run.AgentID == nil ||
+		safe.Agent.ID != *run.AgentID {
+		return executioncontext.SafeContext{}, fmt.Errorf("run execution: delegation recovery provenance does not match the claimed Run")
+	}
+	return safe, nil
 }
 
 func (p *Processor) cleanupRuntime(parent context.Context, safe executioncontext.SafeContext, instance store.RuntimeInstance) error {
