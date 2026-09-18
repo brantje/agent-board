@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"strings"
 	"testing"
 	"time"
 
@@ -139,3 +140,27 @@ func TestWaitDrainedReturnsBoundedly(t *testing.T) {
 }
 
 var _ engine.Process = (*serviceStopProcess)(nil)
+
+func TestDelegationHandoffRequiresConfirmedServiceShutdown(t *testing.T) {
+	process := newServiceStopProcess(true)
+	if err := stopServiceForDelegationHandoff(t.Context(), process); err != nil {
+		t.Fatalf("confirmed handoff shutdown error=%v", err)
+	}
+	if process.terminateCalls.Load() != 1 || process.killCalls.Load() != 0 {
+		t.Fatalf("confirmed shutdown terminate=%d kill=%d", process.terminateCalls.Load(), process.killCalls.Load())
+	}
+}
+
+func TestDelegationHandoffPropagatesShutdownUncertainty(t *testing.T) {
+	process := newServiceStopProcess(false)
+	process.exitOnKill = false
+	ctx, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	err := stopServiceForDelegationHandoff(ctx, process)
+	if err == nil || !strings.Contains(err.Error(), "delegation handoff service shutdown is uncertain") {
+		t.Fatalf("handoff shutdown error=%v", err)
+	}
+	if errors.Is(err, engine.ErrDelegationHandoff) {
+		t.Fatalf("shutdown uncertainty must not be exposed as completed delegation handoff: %v", err)
+	}
+}

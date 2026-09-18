@@ -330,6 +330,13 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 					if activityErr := state.handleEvent(ctx, native, eventRead.event); activityErr != nil {
 						return engine.Result{}, activityErr
 					}
+					_ = stream.Close()
+					stopped = true
+					if stopErr := stopServiceForDelegationHandoff(ctx, process); stopErr != nil {
+						waitDrained(drainDone, serviceStopTimeout)
+						return engine.Result{}, stopErr
+					}
+					waitDrained(drainDone, serviceStopTimeout)
 				}
 				return engine.Result{}, err
 			}
@@ -343,6 +350,14 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			}
 		}
 	}
+}
+
+
+func stopServiceForDelegationHandoff(ctx context.Context, process engine.Process) error {
+	if err := stopService(ctx, process); err != nil {
+		return fmt.Errorf("opencode engine: delegation handoff service shutdown is uncertain: %w", err)
+	}
+	return nil
 }
 
 type settings struct {
