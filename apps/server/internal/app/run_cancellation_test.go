@@ -184,6 +184,8 @@ type preRegistrationDelegationSchedulerStore struct {
 	admission        *store.SchedulerAdmission
 	admitted         chan struct{}
 	releaseAdmission chan struct{}
+	runningAttempted chan struct{}
+	runningOnce      sync.Once
 	once             sync.Once
 }
 
@@ -218,6 +220,9 @@ func (*preRegistrationDelegationSchedulerStore) RenewLease(context.Context, stri
 }
 
 func (s *preRegistrationDelegationSchedulerStore) TransitionAdmittedJob(_ context.Context, input store.SchedulerTransition) (store.Run, error) {
+	if input.RunStatus == "RUNNING" {
+		s.runningOnce.Do(func() { close(s.runningAttempted) })
+	}
 	run := s.base.runs[input.RunID]
 	if run.Status == "CANCELLED" {
 		return store.Run{}, store.ErrConflict
@@ -264,6 +269,7 @@ func TestParentCancellationWinsClaimedDelegatedChildBeforeWorkerRegistration(t *
 	}
 	schedulerStore := &preRegistrationDelegationSchedulerStore{
 		base: base, admission: admission, admitted: make(chan struct{}), releaseAdmission: make(chan struct{}),
+		runningAttempted: make(chan struct{}),
 	}
 	processor := &lifecycleBoundaryCancellationProcessor{engineEntered: make(chan struct{})}
 	config := scheduler.DefaultConfig("pre-registration-cancel")
@@ -304,9 +310,14 @@ func TestParentCancellationWinsClaimedDelegatedChildBeforeWorkerRegistration(t *
 
 	close(schedulerStore.releaseAdmission)
 	select {
+	case <-schedulerStore.runningAttempted:
+	case <-time.After(time.Second):
+		t.Fatal("stale claimed child did not reach the fenced RUNNING transition")
+	}
+	select {
 	case <-processor.engineEntered:
 		t.Fatal("claimed delegated child entered Engine execution after parent cancellation")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 	if base.runs["parent"].Status != "CANCELLED" {
 		t.Fatalf("stale worker resurrected parent to %s", base.runs["parent"].Status)
