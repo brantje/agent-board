@@ -10,10 +10,30 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/server/go.mod
+          cache: false
       - name: Archive repository
         run: git archive --format=zip --output=agent-board.zip HEAD
+      - name: Vendor server dependencies
+        working-directory: apps/server
+        run: go mod vendor
+      - name: Archive vendored dependencies
+        run: tar -C apps/server -czf server-vendor.tar.gz vendor
+      - name: Archive Go toolchain
+        run: |
+          GOROOT="$(go env GOROOT)"
+          tar -C "$(dirname "$GOROOT")" -czf go-toolchain.tar.gz "$(basename "$GOROOT")"
       - uses: actions/upload-artifact@v4
         with:
           name: workspace-export
           path: agent-board.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-test-env
+          path: |
+            server-vendor.tar.gz
+            go-toolchain.tar.gz
           if-no-files-found: error
