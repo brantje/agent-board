@@ -59,6 +59,50 @@ describe('delegation inspection', () => {
     wrapper.unmount()
   })
 
+  it('renders delegated child lineage back to the authoritative parent Run', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/delegations')) {
+        return new Response(JSON.stringify([]))
+      }
+      if (path.endsWith('/delegation')) {
+        return new Response(JSON.stringify({
+          id: 'delegation-2',
+          projectId: 'p',
+          issueId: 'AB-2',
+          parentRunId: 'parent-run',
+          parentAgentId: 'parent-agent',
+          targetAgentId: 'child-agent',
+          task: 'Inspect the delegated path',
+          delegatedRunId: 'child-run',
+          workspaceAccess: 'WRITE',
+          requestKey: 'call-2',
+          parentRunStatus: 'PAUSED',
+          delegatedRunStatus: 'RUNNING',
+          outcome: null,
+          resultSummary: null,
+          resultEventId: null,
+          workspaceChangesAccepted: null,
+          workspaceRevision: 'def456',
+          continuationJobId: null,
+          completedAt: null,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z'
+        }))
+      }
+      if (path.endsWith('/agents')) {
+        return new Response(JSON.stringify([{ id: 'parent-agent', name: 'Lead Agent' }]))
+      }
+      return new Response(JSON.stringify([]))
+    }))
+    const wrapper = mount(RunDelegationCard, { props: { projectId: 'p', runId: 'child-run' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Delegated subtask')
+    expect(wrapper.text()).toContain('Parent Agent: Lead Agent')
+    expect(wrapper.text()).toContain('Inspect the delegated path')
+    expect(wrapper.get('a[href="/projects/p/runs/parent-run"]').text()).toContain('Open parent Run')
+    wrapper.unmount()
+  })
+
   it('renders Squad leader and descriptive member roles without implying fan-out', async () => {
     vi.stubGlobal('fetch', vi.fn(async (path: string) => {
       if (path.endsWith('/squads/squad-1')) {
