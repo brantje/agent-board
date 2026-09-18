@@ -155,18 +155,27 @@ type RunDTO struct {
 }
 
 type DelegationDTO struct {
-	ID              string    `json:"id"`
-	ProjectID       string    `json:"projectId"`
-	IssueID         string    `json:"issueId"`
-	ParentRunID     string    `json:"parentRunId"`
-	ParentAgentID   string    `json:"parentAgentId"`
-	TargetAgentID   string    `json:"targetAgentId"`
-	Task            string    `json:"task"`
-	DelegatedRunID  string    `json:"delegatedRunId"`
-	WorkspaceAccess string    `json:"workspaceAccess"`
-	RequestKey      string    `json:"requestKey"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID                       string     `json:"id"`
+	ProjectID                string     `json:"projectId"`
+	IssueID                  string     `json:"issueId"`
+	ParentRunID              string     `json:"parentRunId"`
+	ParentAgentID            string     `json:"parentAgentId"`
+	TargetAgentID            string     `json:"targetAgentId"`
+	Task                     string     `json:"task"`
+	DelegatedRunID           string     `json:"delegatedRunId"`
+	WorkspaceAccess          string     `json:"workspaceAccess"`
+	RequestKey               string     `json:"requestKey"`
+	ParentRunStatus          string     `json:"parentRunStatus"`
+	DelegatedRunStatus       string     `json:"delegatedRunStatus"`
+	Outcome                  *string    `json:"outcome"`
+	ResultSummary            *string    `json:"resultSummary"`
+	ResultEventID            *string    `json:"resultEventId"`
+	WorkspaceChangesAccepted *bool      `json:"workspaceChangesAccepted"`
+	WorkspaceRevision        string     `json:"workspaceRevision"`
+	ContinuationJobID        *string    `json:"continuationJobId"`
+	CompletedAt              *time.Time `json:"completedAt"`
+	CreatedAt                time.Time  `json:"createdAt"`
+	UpdatedAt                time.Time  `json:"updatedAt"`
 }
 
 type CreateProjectRequest struct {

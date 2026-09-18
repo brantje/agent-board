@@ -16,18 +16,30 @@ import (
 const delegatedRunID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 func delegationFixture() store.Delegation {
+	outcome := store.DelegationOutcomeSucceeded
+	summary := "bounded result"
+	eventID := "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+	accepted := true
+	continuationJobID := "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+	completedAt := time.Unix(2, 0).UTC()
 	return store.Delegation{
-		ID:             "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-		ProjectID:      projectID,
-		IssueID:        issueID,
-		ParentRunID:    runID,
-		ParentAgentID:  agentID,
-		TargetAgentID:  otherID,
-		Task:           "inspect scheduler ownership",
-		DelegatedRunID: delegatedRunID,
-		RequestKey:     "request-1",
-		CreatedAt:      time.Unix(1, 0).UTC(),
-		UpdatedAt:      time.Unix(1, 0).UTC(),
+		ID:                       "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+		ProjectID:                projectID,
+		IssueID:                  issueID,
+		ParentRunID:              runID,
+		ParentAgentID:            agentID,
+		TargetAgentID:            otherID,
+		Task:                     "inspect scheduler ownership",
+		DelegatedRunID:           delegatedRunID,
+		RequestKey:               "request-1",
+		Outcome:                  &outcome,
+		ResultSummary:            &summary,
+		ResultEventID:            &eventID,
+		WorkspaceChangesAccepted: &accepted,
+		ContinuationJobID:        &continuationJobID,
+		CompletedAt:              &completedAt,
+		CreatedAt:                time.Unix(1, 0).UTC(),
+		UpdatedAt:                time.Unix(2, 0).UTC(),
 	}
 }
 
@@ -62,7 +74,7 @@ func TestDelegationInspectionRoutesAreReadOnly(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &listed); err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || listed[0].ID != delegationFixture().ID || listed[0].WorkspaceAccess != store.DelegationWorkspaceAccessWrite {
+	if len(listed) != 1 || listed[0].ID != delegationFixture().ID || listed[0].WorkspaceAccess != store.DelegationWorkspaceAccessWrite || listed[0].ParentRunStatus != "PAUSED" || listed[0].DelegatedRunStatus != "COMPLETED" || listed[0].Outcome == nil || *listed[0].Outcome != store.DelegationOutcomeSucceeded || listed[0].ResultSummary == nil || *listed[0].ResultSummary != "bounded result" || listed[0].ResultEventID == nil || listed[0].WorkspaceChangesAccepted == nil || !*listed[0].WorkspaceChangesAccepted || listed[0].WorkspaceRevision != "revision-1" || listed[0].ContinuationJobID == nil || listed[0].CompletedAt == nil {
 		t.Fatalf("listed=%+v", listed)
 	}
 
@@ -76,7 +88,7 @@ func TestDelegationInspectionRoutesAreReadOnly(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &child); err != nil {
 		t.Fatal(err)
 	}
-	if child.ParentRunID != runID || child.DelegatedRunID != delegatedRunID || child.WorkspaceAccess != store.DelegationWorkspaceAccessWrite {
+	if child.ParentRunID != runID || child.DelegatedRunID != delegatedRunID || child.WorkspaceAccess != store.DelegationWorkspaceAccessWrite || child.ParentRunStatus != "PAUSED" || child.DelegatedRunStatus != "COMPLETED" || child.Outcome == nil || *child.Outcome != store.DelegationOutcomeSucceeded || child.WorkspaceRevision != "revision-1" {
 		t.Fatalf("child=%+v", child)
 	}
 

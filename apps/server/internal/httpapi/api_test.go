@@ -224,10 +224,20 @@ func (f *fakeControlPlaneStore) ListRuns(_ context.Context, pid string) ([]store
 	return []store.Run{{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 1, Status: "QUEUED"}}, nil
 }
 func (f *fakeControlPlaneStore) GetRun(_ context.Context, pid, id string) (store.Run, error) {
-	if pid != projectID || id != runID {
+	if pid != projectID {
 		return store.Run{}, store.ErrNotFound
 	}
-	return store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 1, Status: "QUEUED"}, nil
+	switch id {
+	case runID:
+		return store.Run{ID: runID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(agentID), Attempt: 1, Status: "PAUSED"}, nil
+	case delegatedRunID:
+		return store.Run{ID: delegatedRunID, ProjectID: projectID, IssueID: issueID, WorkspaceID: workspaceID, AgentID: stringPtr(otherID), Attempt: 2, Status: "COMPLETED"}, nil
+	default:
+		return store.Run{}, store.ErrNotFound
+	}
+}
+func (f *fakeControlPlaneStore) GetWorkspaceCurrentRevision(context.Context, string, string) (string, error) {
+	return "revision-1", nil
 }
 func stringPtr(v string) *string { return &v }
 

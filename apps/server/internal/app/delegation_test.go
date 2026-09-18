@@ -43,6 +43,25 @@ func (s *delegationServiceStore) ListDelegationsByParentRun(_ context.Context, p
 	return s.listResult, s.listErr
 }
 
+func (s *delegationServiceStore) GetRun(_ context.Context, projectID, runID string) (store.Run, error) {
+	for _, delegation := range append([]store.Delegation{s.getResult}, s.listResult...) {
+		if delegation.ProjectID != projectID {
+			continue
+		}
+		if runID == delegation.ParentRunID {
+			return store.Run{ID: runID, ProjectID: projectID, IssueID: delegation.IssueID, WorkspaceID: "workspace-1", Status: "PAUSED"}, nil
+		}
+		if runID == delegation.DelegatedRunID {
+			return store.Run{ID: runID, ProjectID: projectID, IssueID: delegation.IssueID, WorkspaceID: "workspace-1", Status: "COMPLETED"}, nil
+		}
+	}
+	return store.Run{}, store.ErrNotFound
+}
+
+func (s *delegationServiceStore) GetWorkspaceCurrentRevision(context.Context, string, string) (string, error) {
+	return "revision-1", nil
+}
+
 type unsupportedDelegationStore struct {
 	store.ControlPlaneStore
 }
@@ -111,8 +130,11 @@ func TestRequestDelegationRejectsUnavailableStoresAndTranslatesErrors(t *testing
 
 func TestDelegationQueriesUseDelegationStoreAndTranslateErrors(t *testing.T) {
 	backend := &delegationServiceStore{
-		getResult:  store.Delegation{ID: "child-lineage"},
-		listResult: []store.Delegation{{ID: "first"}, {ID: "second"}},
+		getResult: store.Delegation{ID: "child-lineage", ProjectID: "project", IssueID: "issue", ParentRunID: "parent-run", DelegatedRunID: "child-run"},
+		listResult: []store.Delegation{
+			{ID: "first", ProjectID: "project", IssueID: "issue", ParentRunID: "parent-run", DelegatedRunID: "child-1"},
+			{ID: "second", ProjectID: "project", IssueID: "issue", ParentRunID: "parent-run", DelegatedRunID: "child-2"},
+		},
 	}
 	service := New(backend)
 
@@ -120,7 +142,7 @@ func TestDelegationQueriesUseDelegationStoreAndTranslateErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.ID != "child-lineage" || backend.getProjectID != "project" || backend.getRunID != "child-run" {
+	if got.ID != "child-lineage" || got.ParentRunStatus != "PAUSED" || got.DelegatedRunStatus != "COMPLETED" || got.WorkspaceRevision != "revision-1" || backend.getProjectID != "project" || backend.getRunID != "child-run" {
 		t.Fatalf("get delegation = %+v, project=%q run=%q", got, backend.getProjectID, backend.getRunID)
 	}
 
