@@ -387,11 +387,16 @@ func (p *Processor) recoverDelegationWorkspaceHandoff(ctx context.Context, run s
 		if !completed {
 			continue
 		}
+		// A durable tool completion and Workspace hand-back are not enough when
+		// cancellation or failure won the execution boundary. Only a uniquely
+		// completed authoritative parent Execution Session may finish handoff
+		// recovery; FAILED/CANCELLED sessions remain fail-closed even if their
+		// cleanup synchronized trustworthy partial work.
+		session, ok := completedDelegationExecutionSession(sessions, run.ID)
+		if !ok {
+			continue
+		}
 		if !synchronized {
-			session, ok := completedDelegationExecutionSession(sessions, run.ID)
-			if !ok {
-				continue
-			}
 			safe, err := p.delegationRecoveryContext(ctx, run)
 			if err != nil {
 				return err
