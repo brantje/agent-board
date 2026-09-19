@@ -542,7 +542,12 @@ func TestProjectAccessIssueCommentLifecycleAuthorizationAndExecutionNeutrality(t
 		ID: "reply", IssueID: issueID, ParentCommentID: &parentID, AuthorType: store.ActorTypeHuman,
 		AuthorID: "member", AuthorName: "Member", Body: "reply", CreatedAt: at.Add(time.Second), UpdatedAt: at.Add(time.Second),
 	}
-	fake := &issueCommentTestStore{projectWorkflowAuthorizationStore: base, comments: []store.IssueComment{root, reply}}
+	agentRunID := "agent-run"
+	agentComment := store.IssueComment{
+		ID: "agent-comment", IssueID: issueID, AuthorType: store.ActorTypeAgent, AuthorID: "agent-1",
+		AuthorName: "Agent", SourceRunID: &agentRunID, Body: "Agent-authored", CreatedAt: at.Add(2 * time.Second), UpdatedAt: at.Add(2 * time.Second),
+	}
+	fake := &issueCommentTestStore{projectWorkflowAuthorizationStore: base, comments: []store.IssueComment{root, reply, agentComment}}
 	service := New(fake)
 	publisher := &assigneePublisher{}
 	service.SetEventRecorder(publisher)
@@ -560,6 +565,16 @@ func TestProjectAccessIssueCommentLifecycleAuthorizationAndExecutionNeutrality(t
 	}
 	if err := access.DeleteIssueComment(t.Context(), member, projectID, issueID, root.ID); err == nil {
 		t.Fatal("non-author delete unexpectedly succeeded")
+	}
+	if _, err := access.UpdateIssueComment(t.Context(), author, projectID, issueID, agentComment.ID, "forged human edit"); err == nil {
+		t.Fatal("human edit of Agent-authored comment unexpectedly succeeded")
+	}
+	if err := access.DeleteIssueComment(t.Context(), author, projectID, issueID, agentComment.ID); err == nil {
+		t.Fatal("human delete of Agent-authored comment unexpectedly succeeded")
+	}
+	unchangedAgentComment, err := service.GetIssueComment(t.Context(), projectID, issueID, agentComment.ID)
+	if err != nil || unchangedAgentComment.Body != agentComment.Body || unchangedAgentComment.DeletedAt != nil {
+		t.Fatalf("Agent-authored comment changed after human mutation attempts=%+v err=%v", unchangedAgentComment, err)
 	}
 	updated, err := access.UpdateIssueComment(t.Context(), author, projectID, issueID, root.ID, "edited")
 	if err != nil || updated.Body != "edited" || !updated.UpdatedAt.After(at) {
