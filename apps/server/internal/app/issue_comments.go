@@ -77,7 +77,7 @@ func (s *Service) ListIssueTimeline(ctx context.Context, projectID, issueID stri
 	if s.issueActivity == nil {
 		return nil, errors.New("issue activity is unavailable")
 	}
-	events, err := s.issueActivity.ListIssueEvents(ctx, projectID, issueID)
+	events, err := s.issueActivity.ListIssueTimelineEvents(ctx, projectID, issueID)
 	if err != nil {
 		return nil, translateStoreError(err, "event")
 	}
@@ -94,9 +94,6 @@ func (s *Service) ListIssueTimeline(ctx context.Context, projectID, issueID stri
 	}
 	for index := range events {
 		event := events[index]
-		if !isIssueTimelineEvent(event.Type) {
-			continue
-		}
 		entries = append(entries, IssueTimelineEntry{
 			Kind:       store.IssueTimelineKindActivity,
 			ID:         event.ID,
@@ -116,15 +113,3 @@ func (s *Service) ListIssueTimeline(ctx context.Context, projectID, issueID stri
 	return entries, nil
 }
 
-func isIssueTimelineEvent(eventType string) bool {
-	if eventType == "issue.comment_created" {
-		return false
-	}
-	family, _, _ := strings.Cut(eventType, ".")
-	switch family {
-	case "issue", "run", "question", "review", "decision":
-		return true
-	default:
-		return false
-	}
-}

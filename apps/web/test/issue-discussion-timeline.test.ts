@@ -103,6 +103,41 @@ describe('IssueDiscussionTimeline', () => {
     wrapper.unmount()
   })
 
+  it('surfaces submit failures and allows cancelling a reply', async () => {
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      if (String(path).endsWith('/timeline')) {
+        return new Response(JSON.stringify([
+          { kind: 'comment', id: root.id, occurredAt: root.createdAt, comment: root, activity: null }
+        ]))
+      }
+      if (String(path).endsWith('/comments') && options.method === 'POST') {
+        return new Response(JSON.stringify({ error: { code: 'internal_error', message: 'posting failed' } }), { status: 500 })
+      }
+      throw new Error(`unexpected request ${path}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    const replyButton = wrapper.findAll('button').find(button => button.text() === 'Reply')
+    await replyButton!.trigger('click')
+    expect(wrapper.text()).toContain('Replying to Alex')
+    const cancel = wrapper.findAll('button').find(button => button.text() === 'Cancel reply')
+    await cancel!.trigger('click')
+    expect(wrapper.text()).not.toContain('Replying to Alex')
+
+    await wrapper.get('textarea').setValue('Will fail')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to post comment')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Will fail')
+    wrapper.unmount()
+  })
+
   it('shows an empty read-only state without mutation controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([]))))
     const wrapper = mount(IssueDiscussionTimeline, {

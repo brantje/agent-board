@@ -13,9 +13,13 @@ afterEach(() => {
 it('refreshes the Issue discussion projection on comment Events', async () => {
   vi.stubGlobal('EventSource', MockEventSource)
   vi.stubGlobal('fetch', vi.fn(async (path: string) => {
-    if (String(path).endsWith('/assignees')) return new Response(JSON.stringify([]))
-    if (String(path).endsWith('/runs')) return new Response(JSON.stringify([]))
-    if (String(path).endsWith('/execution')) return new Response(JSON.stringify({ state: 'NOT_AGENT_OWNED', canStart: false, executionAgent: null, activeRun: null }))
+    const url = String(path)
+    if (url.endsWith('/assignees')) return new Response(JSON.stringify([]))
+    if (url.endsWith('/runs')) return new Response(JSON.stringify([]))
+    if (url.endsWith('/execution')) return new Response(JSON.stringify({ state: 'NOT_AGENT_OWNED', canStart: false, executionAgent: null, activeRun: null }))
+    if (url.endsWith('/relationships')) return new Response(JSON.stringify([]))
+    if (url.endsWith('/timeline')) return new Response(JSON.stringify([]))
+    if (url.includes('/issues?') || url.endsWith('/issues')) return new Response(JSON.stringify([]))
     return new Response(JSON.stringify({
       id: 'AB-1', projectId: 'p', number: 1, title: 'Issue', description: '', status: 'TODO', priority: 0,
       assignedTo: null, createdBy: null, createdAt: '2026-09-19T08:00:00Z', updatedAt: '2026-09-19T08:00:00Z',

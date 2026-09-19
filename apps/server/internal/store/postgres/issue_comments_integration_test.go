@@ -50,6 +50,14 @@ func TestIssueCommentsPersistRepliesIsolationOrderingAndNoExecutionSideEffects(t
 	if err != nil {
 		t.Fatal(err)
 	}
+	var beforeExecutionEvents int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM events
+		WHERE issue_id=$1 AND type = ANY (ARRAY['run.created','run.cancelled','run.resumed'])
+	`, issue.ID).Scan(&beforeExecutionEvents); err != nil {
+		t.Fatal(err)
+	}
 
 	rootResult, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
 		IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, Body: "Root @nobody stays plain text",
@@ -109,6 +117,40 @@ func TestIssueCommentsPersistRepliesIsolationOrderingAndNoExecutionSideEffects(t
 	if len(comments) != 2 || comments[0].ID != root.ID || comments[1].ID != replyResult.Comment.ID {
 		t.Fatalf("comments after reopen=%+v", comments)
 	}
+	if comments[0].Body != "Root @nobody stays plain text" {
+		t.Fatalf("mention-looking text was not preserved literally: %q", comments[0].Body)
+	}
+
+	issueID := issue.ID
+	if _, err := s.AppendEvent(ctx, store.Event{
+		Type: "tool.completed", ProjectID: project.ID, IssueID: &issueID,
+		Actor: store.EmptyObject, Payload: json.RawMessage(`{"name":"ignored-tool"}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	includedEvent, err := s.AppendEvent(ctx, store.Event{
+		Type: "issue.updated", ProjectID: project.ID, IssueID: &issueID,
+		Actor: store.EmptyObject, Payload: json.RawMessage(`{"message":"visible activity"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	timelineEvents, err := reopened.ListIssueTimelineEvents(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundIncluded := false
+	for _, event := range timelineEvents {
+		if event.Type == "tool.completed" || event.Type == "issue.comment_created" {
+			t.Fatalf("operational/comment-notification event leaked into Issue timeline: %+v", event)
+		}
+		if event.ID == includedEvent.ID {
+			foundIncluded = true
+		}
+	}
+	if !foundIncluded {
+		t.Fatalf("expected Issue activity event %s in timeline: %+v", includedEvent.ID, timelineEvents)
+	}
 
 	foreignComments, err := reopened.ListIssueComments(ctx, otherProject.ID, issue.ID)
 	if err != nil {
@@ -140,7 +182,29 @@ func TestIssueCommentsPersistRepliesIsolationOrderingAndNoExecutionSideEffects(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if before.Status != after.Status || before.AssigneeType != nil || after.AssigneeType != nil || len(beforeRuns) != len(afterRuns) {
-		t.Fatalf("comment changed workflow: before=%+v after=%+v runs=%d/%d", before, after, len(beforeRuns), len(afterRuns))
+	var afterExecutionEvents int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM events
+		WHERE issue_id=$1 AND type = ANY (ARRAY['run.created','run.cancelled','run.resumed'])
+	`, issue.ID).Scan(&afterExecutionEvents); err != nil {
+		t.Fatal(err)
+	}
+	if before.Status != after.Status || before.AssigneeType != nil || after.AssigneeType != nil || len(beforeRuns) != len(afterRuns) ||
+		beforeExecutionEvents != afterExecutionEvents {
+		t.Fatalf("comment changed workflow: before=%+v after=%+v runs=%d/%d executionEvents=%d/%d", before, after, len(beforeRuns), len(afterRuns), beforeExecutionEvents, afterExecutionEvents)
+	}
+
+	if _, err := pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, author.ID); err != nil {
+		t.Fatal(err)
+	}
+	comments, err = reopened.ListIssueComments(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, comment := range comments {
+		if comment.AuthorName != "" {
+			t.Fatalf("deleted historical author resolved unexpectedly: %+v", comment)
+		}
 	}
 }

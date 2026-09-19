@@ -37,5 +37,5 @@ type IssueCommentStore interface {
 // IssueActivityStore exposes the existing durable Event history scoped to one
 // Issue. It does not create another activity store or timeline persistence.
 type IssueActivityStore interface {
-	ListIssueEvents(context.Context, string, string) ([]Event, error)
+	ListIssueTimelineEvents(context.Context, string, string) ([]Event, error)
 }

@@ -340,7 +340,10 @@ IssueCommentCreate:
   required: [body]
   properties:
     parentCommentId: {type: [string, 'null'], format: uuid}
-    body: {type: string, minLength: 1}
+    body:
+      type: string
+      minLength: 1
+      pattern: '\\S'
 IssueTimelineEntry:
   type: object
   additionalProperties: false

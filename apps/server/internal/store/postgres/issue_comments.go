@@ -12,11 +12,13 @@ import (
 func (s *Store) ListIssueComments(ctx context.Context, projectID, issueID string) ([]store.IssueComment, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT c.id::text, c.issue_id::text, c.parent_comment_id::text, c.author_type, c.author_id::text,
-		       CASE
-		           WHEN c.author_type = 'HUMAN' THEN (SELECT u.display_name FROM users AS u WHERE u.id = c.author_id)
-		           WHEN c.author_type = 'AGENT' THEN (SELECT a.name FROM agents AS a WHERE a.id = c.author_id AND (a.project_id IS NULL OR a.project_id = i.project_id))
-		           ELSE NULL
-		       END,
+		       COALESCE(
+		           CASE
+		               WHEN c.author_type = 'HUMAN' THEN (SELECT u.display_name FROM users AS u WHERE u.id = c.author_id)
+		               WHEN c.author_type = 'AGENT' THEN (SELECT a.name FROM agents AS a WHERE a.id = c.author_id AND (a.project_id IS NULL OR a.project_id = i.project_id))
+		           END,
+		           ''
+		       ),
 		       c.body, c.created_at, c.updated_at
 		FROM issue_comments AS c
 		JOIN issues AS i ON i.id = c.issue_id

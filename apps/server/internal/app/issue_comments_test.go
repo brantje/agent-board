@@ -41,7 +41,7 @@ func (s *issueCommentTestStore) CreateIssueComment(_ context.Context, projectID 
 	return store.IssueCommentMutationResult{Comment: input, Events: []store.Event{event}}, nil
 }
 
-func (s *issueCommentTestStore) ListIssueEvents(_ context.Context, projectID, issueID string) ([]store.Event, error) {
+func (s *issueCommentTestStore) ListIssueTimelineEvents(_ context.Context, projectID, issueID string) ([]store.Event, error) {
 	if projectID != s.project.ID {
 		return nil, store.ErrNotFound
 	}
@@ -106,6 +106,45 @@ func TestProjectAccessIssueCommentsUseAuthenticatedHumanAndMemberPolicy(t *testi
 	}
 	if len(publisher.published) != 1 || publisher.published[0].Type != "issue.comment_created" {
 		t.Fatalf("published=%+v", publisher.published)
+	}
+}
+
+func TestIssueCommentApplicationValidationAndUnavailableCapabilities(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	service := New(base)
+
+	if _, err := service.ListIssueComments(t.Context(), projectID, issueID); err == nil {
+		t.Fatal("ListIssueComments succeeded without comment capability")
+	}
+	if _, err := service.CreateIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "hello",
+	}); err == nil {
+		t.Fatal("CreateIssueComment succeeded without comment capability")
+	}
+
+	fake := &issueCommentTestStore{projectWorkflowAuthorizationStore: base}
+	service = New(fake)
+	blankParent := " "
+	cases := map[string]CreateIssueCommentInput{
+		"blank body":   {ProjectID: projectID, IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "   "},
+		"blank author": {ProjectID: projectID, IssueID: issueID, AuthorType: store.ActorTypeHuman, Body: "hello"},
+		"invalid actor": {ProjectID: projectID, IssueID: issueID, AuthorType: "OTHER", AuthorID: "user", Body: "hello"},
+		"blank parent": {ProjectID: projectID, IssueID: issueID, ParentCommentID: &blankParent, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "hello"},
+	}
+	for name, input := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := service.CreateIssueComment(t.Context(), input); err == nil {
+				t.Fatalf("CreateIssueComment(%s) unexpectedly succeeded", name)
+			}
+		})
 	}
 }
 

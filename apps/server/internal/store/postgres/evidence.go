@@ -139,13 +139,16 @@ func (s *Store) ListRunEvents(ctx context.Context, projectID, runID string, afte
 	return values, rows.Err()
 }
 
-func (s *Store) ListIssueEvents(ctx context.Context, projectID, issueID string) ([]store.Event, error) {
+func (s *Store) ListIssueTimelineEvents(ctx context.Context, projectID, issueID string) ([]store.Event, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, schema_version, type, occurred_at, project_id::text, issue_id::text,
 		       run_id::text, agent_id::text, workspace_id::text, runtime_instance_id::text,
 		       correlation_id::text, parent_event_id::text, sequence, actor, payload, created_at
 		FROM events
-		WHERE project_id = $1 AND issue_id = $2
+		WHERE project_id = $1
+		  AND issue_id = $2
+		  AND type <> 'issue.comment_created'
+		  AND split_part(type, '.', 1) = ANY (ARRAY['issue','run','question','review','decision'])
 		ORDER BY occurred_at, id
 	`, projectID, issueID)
 	if err != nil {
