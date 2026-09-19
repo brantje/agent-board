@@ -589,3 +589,69 @@ func TestIssueCommentLifecycleRejectsMissingOrDeletedTargets(t *testing.T) {
 		t.Fatal("deleted reaction unexpectedly succeeded")
 	}
 }
+
+
+func TestIssueCommentLifecycleValidationAndDeletedNoOpBranches(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	at := time.Date(2026, 9, 19, 7, 0, 0, 0, time.UTC)
+	deletedAt := at.Add(time.Second)
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+
+	withoutComments := New(base)
+	if _, err := withoutComments.GetIssueComment(t.Context(), projectID, issueID, "root"); err == nil {
+		t.Fatal("GetIssueComment unexpectedly succeeded without comment capability")
+	}
+
+	fake := &issueCommentTestStore{
+		projectWorkflowAuthorizationStore: base,
+		comments: []store.IssueComment{
+			{ID: "root", IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "author", Body: "root", CreatedAt: at, UpdatedAt: at},
+			{ID: "deleted", IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "author", DeletedAt: &deletedAt, CreatedAt: at, UpdatedAt: at},
+		},
+	}
+	service := New(fake)
+
+	if _, err := service.GetIssueComment(t.Context(), projectID, "missing", "root"); err == nil {
+		t.Fatal("comment lookup on missing Issue unexpectedly succeeded")
+	}
+	if _, err := service.UpdateIssueComment(t.Context(), projectID, issueID, "root", "author", "   "); err == nil {
+		t.Fatal("blank edit unexpectedly succeeded")
+	}
+	if _, err := service.UpdateIssueComment(t.Context(), projectID, issueID, "root", "", "edited"); err == nil {
+		t.Fatal("edit without actor unexpectedly succeeded")
+	}
+	if err := service.DeleteIssueComment(t.Context(), projectID, issueID, "root", ""); err == nil {
+		t.Fatal("delete without actor unexpectedly succeeded")
+	}
+	if err := service.DeleteIssueComment(t.Context(), projectID, issueID, "deleted", "author"); err != nil {
+		t.Fatalf("repeated tombstone delete should be idempotent: %v", err)
+	}
+	if _, err := service.ResolveIssueComment(t.Context(), projectID, issueID, "root", ""); err == nil {
+		t.Fatal("resolve without actor unexpectedly succeeded")
+	}
+	if _, err := service.ReopenIssueComment(t.Context(), projectID, issueID, "root", ""); err == nil {
+		t.Fatal("reopen without actor unexpectedly succeeded")
+	}
+	if _, err := service.ReopenIssueComment(t.Context(), projectID, issueID, "deleted", "author"); err == nil {
+		t.Fatal("reopen of deleted discussion unexpectedly succeeded")
+	}
+	if err := service.AddIssueCommentReaction(t.Context(), projectID, issueID, "root", "", store.IssueCommentReactionHeart); err == nil {
+		t.Fatal("reaction without actor unexpectedly succeeded")
+	}
+	if err := service.RemoveIssueCommentReaction(t.Context(), projectID, issueID, "root", "author", "PARTY"); err == nil {
+		t.Fatal("unsupported reaction removal unexpectedly succeeded")
+	}
+	if err := service.RemoveIssueCommentReaction(t.Context(), projectID, issueID, "deleted", "author", store.IssueCommentReactionHeart); err == nil {
+		t.Fatal("reaction removal from deleted comment unexpectedly succeeded")
+	}
+	if err := service.RemoveIssueCommentReaction(t.Context(), projectID, issueID, "missing", "author", store.IssueCommentReactionHeart); err == nil {
+		t.Fatal("reaction removal from missing comment unexpectedly succeeded")
+	}
+}

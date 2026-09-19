@@ -452,3 +452,108 @@ func TestIssueCommentLifecyclePersistenceResolutionReactionsAndDeleteRace(t *tes
 		}
 	}
 }
+
+
+func TestIssueCommentLifecycleIdempotentDeletedTargetsAndReactionAggregation(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	author, err := s.CreateUser(ctx, authUser("lifecycle-edge-author", "lifecycle-edge-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reactor, err := s.CreateUser(ctx, authUser("lifecycle-edge-reactor", "lifecycle-edge-reactor@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.CreateProject(ctx, testProjectInput("Lifecycle edge cases", "/repo/lifecycle-edge-cases", "LCE"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "Lifecycle edge cases", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootResult, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+		IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, Body: "root",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := rootResult.Comment
+	if _, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+		IssueID: issue.ID, ParentCommentID: &root.ID, AuthorType: store.ActorTypeHuman, AuthorID: reactor.ID, Body: "reply",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if events, err := s.AddIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, author.ID, store.IssueCommentReactionHeart); err != nil || len(events) != 1 {
+		t.Fatalf("first reaction events=%+v err=%v", events, err)
+	}
+	if events, err := s.AddIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, store.IssueCommentReactionHeart); err != nil || len(events) != 1 {
+		t.Fatalf("second reaction events=%+v err=%v", events, err)
+	}
+	comment, err := s.GetIssueComment(ctx, project.ID, issue.ID, root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comment.Reactions) != 1 || comment.Reactions[0].Count != 2 || len(comment.Reactions[0].ActorIDs) != 2 {
+		t.Fatalf("aggregated reactions=%+v", comment.Reactions)
+	}
+	if events, err := s.RemoveIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, author.ID, store.IssueCommentReactionHeart); err != nil || len(events) != 1 {
+		t.Fatalf("partial reaction removal events=%+v err=%v", events, err)
+	}
+	comment, err = s.GetIssueComment(ctx, project.ID, issue.ID, root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comment.Reactions) != 1 || comment.Reactions[0].Count != 1 || len(comment.Reactions[0].ActorIDs) != 1 || comment.Reactions[0].ActorIDs[0] != reactor.ID {
+		t.Fatalf("remaining reaction=%+v", comment.Reactions)
+	}
+
+	if _, err := s.DeleteIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID); err != nil {
+		t.Fatal(err)
+	}
+	repeatedDelete, err := s.DeleteIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID)
+	if err != nil || len(repeatedDelete.Events) != 0 {
+		t.Fatalf("repeated tombstone delete events=%+v err=%v", repeatedDelete.Events, err)
+	}
+	if _, err := s.UpdateIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID, "cannot edit tombstone"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("edit tombstone error=%v", err)
+	}
+	if _, err := s.ResolveIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("resolve tombstone error=%v", err)
+	}
+	if _, err := s.ReopenIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("reopen tombstone error=%v", err)
+	}
+	if _, err := s.RemoveIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, store.IssueCommentReactionHeart); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("remove reaction from tombstone error=%v", err)
+	}
+
+	if _, err := s.UpdateIssueComment(ctx, project.ID, issue.ID, "missing", author.ID, "body"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("edit missing comment error=%v", err)
+	}
+	if _, err := s.DeleteIssueComment(ctx, project.ID, issue.ID, "missing", author.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("delete missing comment error=%v", err)
+	}
+	if _, err := s.ResolveIssueComment(ctx, project.ID, issue.ID, "missing", author.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("resolve missing comment error=%v", err)
+	}
+	if _, err := s.ReopenIssueComment(ctx, project.ID, issue.ID, "missing", author.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("reopen missing comment error=%v", err)
+	}
+	if _, err := s.RemoveIssueCommentReaction(ctx, project.ID, issue.ID, "missing", reactor.ID, store.IssueCommentReactionHeart); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("remove reaction from missing comment error=%v", err)
+	}
+	if _, err := s.UpdateIssueComment(ctx, "", issue.ID, root.ID, author.ID, "body"); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("blank project edit error=%v", err)
+	}
+	if _, err := s.DeleteIssueComment(ctx, project.ID, issue.ID, root.ID, ""); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("blank actor delete error=%v", err)
+	}
+	if _, err := s.AddIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, "PARTY"); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid reaction error=%v", err)
+	}
+}
