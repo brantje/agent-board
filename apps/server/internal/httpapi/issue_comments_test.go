@@ -222,7 +222,7 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 	if err := json.Unmarshal(created.Body.Bytes(), &root); err != nil {
 		t.Fatal(err)
 	}
-	if root.ID != httpCommentID || root.IssueID != issueKey || root.ParentCommentID != nil || root.Author.Type != store.ActorTypeHuman || root.Author.ID != member.ID {
+	if root.ID != httpCommentID || root.IssueID != issueKey || root.ParentCommentID != nil || root.SourceRunID != nil || root.Author.Type != store.ActorTypeHuman || root.Author.ID != member.ID {
 		t.Fatalf("root=%+v", root)
 	}
 

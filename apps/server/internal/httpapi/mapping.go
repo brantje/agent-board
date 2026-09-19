@@ -72,6 +72,7 @@ func issueCommentDTO(v store.IssueComment, issueKey, viewerID string) IssueComme
 		ID:              v.ID,
 		IssueID:         issueKey,
 		ParentCommentID: v.ParentCommentID,
+		SourceRunID:     v.SourceRunID,
 		Author:          IssueCommentAuthorDTO{Type: v.AuthorType, ID: v.AuthorID, Name: v.AuthorName},
 		Body:            body,
 		DeletedAt:       v.DeletedAt,

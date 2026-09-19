@@ -343,11 +343,15 @@ IssueCommentReactionSummary:
 IssueComment:
   type: object
   additionalProperties: false
-  required: [id, issueId, parentCommentId, author, body, deletedAt, resolvedAt, resolvedBy, reactions, createdAt, updatedAt]
+  required: [id, issueId, parentCommentId, sourceRunId, author, body, deletedAt, resolvedAt, resolvedBy, reactions, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     issueId: {$ref: '#/IssueKey'}
     parentCommentId: {type: [string, 'null'], format: uuid}
+    sourceRunId:
+      type: [string, 'null']
+      format: uuid
+      description: Authoritative source Run for Agent-authored comments; null for human comments.
     author: {$ref: '#/IssueCommentAuthor'}
     body: {type: [string, 'null']}
     deletedAt: {type: [string, 'null'], format: date-time}

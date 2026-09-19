@@ -74,6 +74,7 @@ type IssueCommentDTO struct {
 	ID              string                           `json:"id"`
 	IssueID         string                           `json:"issueId"`
 	ParentCommentID *string                          `json:"parentCommentId"`
+	SourceRunID     *string                          `json:"sourceRunId"`
 	Author          IssueCommentAuthorDTO            `json:"author"`
 	Body            *string                          `json:"body"`
 	DeletedAt       *time.Time                       `json:"deletedAt"`
