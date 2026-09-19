@@ -21,12 +21,14 @@ func (a *api) listIssueComments(w http.ResponseWriter, r *http.Request) {
 
 	var values []store.IssueComment
 	var err error
+	viewerID := ""
 	if a.projectAccess != nil {
 		actor, ok := projectActor(r)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
 			return
 		}
+		viewerID = actor.ID
 		values, err = a.projectAccess.ListIssueComments(r.Context(), actor, projectID, issueUUID)
 	} else {
 		values, err = a.service.ListIssueComments(r.Context(), projectID, issueUUID)
@@ -37,7 +39,7 @@ func (a *api) listIssueComments(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]IssueCommentDTO, 0, len(values))
 	for _, value := range values {
-		out = append(out, issueCommentDTO(value, issueKey))
+		out = append(out, issueCommentDTO(value, issueKey, viewerID))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -60,13 +62,8 @@ func (a *api) createIssueComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "parentCommentId must be a UUID")
 		return
 	}
-	if a.projectAccess == nil {
-		writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
-		return
-	}
-	actor, ok := projectActor(r)
+	actor, ok := a.requireIssueCommentActor(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
 		return
 	}
 	value, err := a.projectAccess.CreateIssueComment(r.Context(), actor, app.CreateIssueCommentInput{
@@ -76,7 +73,112 @@ func (a *api) createIssueComment(w http.ResponseWriter, r *http.Request) {
 		writeProjectAccessError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, issueCommentDTO(value, issueKey))
+	writeJSON(w, http.StatusCreated, issueCommentDTO(value, issueKey, actor.ID))
+}
+
+func (a *api) updateIssueComment(w http.ResponseWriter, r *http.Request) {
+	projectID, issueKey, issueUUID, commentID, ok := a.issueCommentPath(w, r)
+	if !ok {
+		return
+	}
+	var req UpdateIssueCommentRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	actor, ok := a.requireIssueCommentActor(w, r)
+	if !ok {
+		return
+	}
+	value, err := a.projectAccess.UpdateIssueComment(r.Context(), actor, projectID, issueUUID, commentID, req.Body)
+	if err != nil {
+		writeProjectAccessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, issueCommentDTO(value, issueKey, actor.ID))
+}
+
+func (a *api) deleteIssueComment(w http.ResponseWriter, r *http.Request) {
+	projectID, _, issueUUID, commentID, ok := a.issueCommentPath(w, r)
+	if !ok {
+		return
+	}
+	actor, ok := a.requireIssueCommentActor(w, r)
+	if !ok {
+		return
+	}
+	if err := a.projectAccess.DeleteIssueComment(r.Context(), actor, projectID, issueUUID, commentID); err != nil {
+		writeProjectAccessError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *api) resolveIssueComment(w http.ResponseWriter, r *http.Request) {
+	a.setIssueCommentResolution(w, r, true)
+}
+
+func (a *api) reopenIssueComment(w http.ResponseWriter, r *http.Request) {
+	a.setIssueCommentResolution(w, r, false)
+}
+
+func (a *api) setIssueCommentResolution(w http.ResponseWriter, r *http.Request, resolved bool) {
+	projectID, issueKey, issueUUID, commentID, ok := a.issueCommentPath(w, r)
+	if !ok {
+		return
+	}
+	actor, ok := a.requireIssueCommentActor(w, r)
+	if !ok {
+		return
+	}
+	var (
+		value store.IssueComment
+		err   error
+	)
+	if resolved {
+		value, err = a.projectAccess.ResolveIssueComment(r.Context(), actor, projectID, issueUUID, commentID)
+	} else {
+		value, err = a.projectAccess.ReopenIssueComment(r.Context(), actor, projectID, issueUUID, commentID)
+	}
+	if err != nil {
+		writeProjectAccessError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, issueCommentDTO(value, issueKey, actor.ID))
+}
+
+func (a *api) addIssueCommentReaction(w http.ResponseWriter, r *http.Request) {
+	a.mutateIssueCommentReaction(w, r, true)
+}
+
+func (a *api) removeIssueCommentReaction(w http.ResponseWriter, r *http.Request) {
+	a.mutateIssueCommentReaction(w, r, false)
+}
+
+func (a *api) mutateIssueCommentReaction(w http.ResponseWriter, r *http.Request, add bool) {
+	projectID, _, issueUUID, commentID, ok := a.issueCommentPath(w, r)
+	if !ok {
+		return
+	}
+	reaction := chi.URLParam(r, "reaction")
+	if !store.ValidIssueCommentReaction(reaction) {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "unsupported comment reaction")
+		return
+	}
+	actor, ok := a.requireIssueCommentActor(w, r)
+	if !ok {
+		return
+	}
+	var err error
+	if add {
+		err = a.projectAccess.AddIssueCommentReaction(r.Context(), actor, projectID, issueUUID, commentID, reaction)
+	} else {
+		err = a.projectAccess.RemoveIssueCommentReaction(r.Context(), actor, projectID, issueUUID, commentID, reaction)
+	}
+	if err != nil {
+		writeProjectAccessError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *api) listIssueTimeline(w http.ResponseWriter, r *http.Request) {
@@ -92,12 +194,14 @@ func (a *api) listIssueTimeline(w http.ResponseWriter, r *http.Request) {
 
 	var values []app.IssueTimelineEntry
 	var err error
+	viewerID := ""
 	if a.projectAccess != nil {
 		actor, ok := projectActor(r)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
 			return
 		}
+		viewerID = actor.ID
 		values, err = a.projectAccess.ListIssueTimeline(r.Context(), actor, projectID, issueUUID)
 	} else {
 		values, err = a.service.ListIssueTimeline(r.Context(), projectID, issueUUID)
@@ -108,7 +212,37 @@ func (a *api) listIssueTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]IssueTimelineEntryDTO, 0, len(values))
 	for _, value := range values {
-		out = append(out, issueTimelineEntryDTO(value, issueKey))
+		out = append(out, issueTimelineEntryDTO(value, issueKey, viewerID))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (a *api) issueCommentPath(w http.ResponseWriter, r *http.Request) (projectID, issueKey, issueUUID, commentID string, ok bool) {
+	projectID, ok = pathUUID(w, r, "projectID")
+	if !ok {
+		return "", "", "", "", false
+	}
+	issueKey = chi.URLParam(r, "issueID")
+	issueUUID, ok = pathIssueKey(w, r, projectID, a.service.ResolveIssueUUID)
+	if !ok {
+		return "", "", "", "", false
+	}
+	commentID, ok = pathUUID(w, r, "commentID")
+	if !ok {
+		return "", "", "", "", false
+	}
+	return projectID, issueKey, issueUUID, commentID, true
+}
+
+func (a *api) requireIssueCommentActor(w http.ResponseWriter, r *http.Request) (app.AuthenticatedUser, bool) {
+	if a.projectAccess == nil {
+		writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+		return app.AuthenticatedUser{}, false
+	}
+	actor, ok := projectActor(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "authentication_failed", "authentication failed")
+		return app.AuthenticatedUser{}, false
+	}
+	return actor, true
 }

@@ -49,3 +49,97 @@ timeline:
               items: {$ref: ../schemas/control-plane.yaml#/IssueTimelineEntry}
       default:
         $ref: ../components/api-components.yaml#/responses/Error
+
+
+comment:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  - name: commentID
+    in: path
+    required: true
+    schema: {type: string, format: uuid}
+  patch:
+    operationId: updateIssueComment
+    description: Edits a human-authored Issue comment. Only the original human author may edit it; editing has no execution semantics.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: ../schemas/control-plane.yaml#/IssueCommentUpdate}
+    responses:
+      '200':
+        description: Updated Issue comment
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/IssueComment}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  delete:
+    operationId: deleteIssueComment
+    description: Deletes a leaf comment or tombstones a comment that has replies so discussion structure is preserved.
+    responses:
+      '204':
+        description: Comment deleted or tombstoned
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+resolution:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  - name: commentID
+    in: path
+    required: true
+    schema: {type: string, format: uuid}
+  put:
+    operationId: resolveIssueComment
+    description: Idempotently resolves a top-level Issue discussion and records the authenticated resolver.
+    responses:
+      '200':
+        description: Resolved Issue comment
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/IssueComment}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  delete:
+    operationId: reopenIssueComment
+    description: Idempotently reopens a resolved top-level Issue discussion.
+    responses:
+      '200':
+        description: Reopened Issue comment
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/IssueComment}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+reaction:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  - name: commentID
+    in: path
+    required: true
+    schema: {type: string, format: uuid}
+  - name: reaction
+    in: path
+    required: true
+    schema: {$ref: ../schemas/control-plane.yaml#/IssueCommentReactionKey}
+  put:
+    operationId: addIssueCommentReaction
+    description: Idempotently adds the authenticated User's reaction to a live comment.
+    responses:
+      '204':
+        description: Reaction present
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  delete:
+    operationId: removeIssueCommentReaction
+    description: Idempotently removes the authenticated User's reaction from a live comment.
+    responses:
+      '204':
+        description: Reaction absent
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

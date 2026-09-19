@@ -341,16 +341,39 @@ CREATE TABLE issue_comments (
     parent_comment_id uuid,
     author_type text NOT NULL CHECK (author_type IN ('HUMAN', 'AGENT')),
     author_id uuid NOT NULL,
-    body text NOT NULL CHECK (btrim(body) <> ''),
+    body text,
+    deleted_at timestamptz,
+    resolved_at timestamptz,
+    resolved_by_user_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     UNIQUE (issue_id, id),
     CONSTRAINT issue_comments_parent_fk FOREIGN KEY (issue_id, parent_comment_id)
         REFERENCES issue_comments(issue_id, id),
-    CHECK (parent_comment_id IS NULL OR parent_comment_id <> id)
+    CHECK (parent_comment_id IS NULL OR parent_comment_id <> id),
+    CHECK (
+        (deleted_at IS NULL AND body IS NOT NULL AND btrim(body) <> '')
+        OR (deleted_at IS NOT NULL AND body IS NULL)
+    ),
+    CHECK ((resolved_at IS NULL) = (resolved_by_user_id IS NULL)),
+    CHECK (parent_comment_id IS NULL OR (resolved_at IS NULL AND resolved_by_user_id IS NULL))
 );
 
 CREATE INDEX issue_comments_issue_timeline_idx ON issue_comments (issue_id, created_at, id);
+
+CREATE TABLE issue_comment_reactions (
+    issue_id uuid NOT NULL,
+    comment_id uuid NOT NULL,
+    actor_id uuid NOT NULL,
+    reaction text NOT NULL CHECK (reaction IN ('THUMBS_UP', 'THUMBS_DOWN', 'LAUGH', 'HOORAY', 'CONFUSED', 'HEART', 'ROCKET', 'EYES')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT issue_comment_reactions_comment_fk FOREIGN KEY (issue_id, comment_id)
+        REFERENCES issue_comments(issue_id, id) ON DELETE CASCADE,
+    PRIMARY KEY (issue_id, comment_id, actor_id, reaction)
+);
+
+CREATE INDEX issue_comment_reactions_comment_idx
+    ON issue_comment_reactions (issue_id, comment_id, reaction, created_at, actor_id);
 
 CREATE TABLE workspaces (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

@@ -46,22 +46,47 @@ func issueDTO(v store.Issue) IssueDTO {
 	return dto
 }
 
-func issueCommentDTO(v store.IssueComment, issueKey string) IssueCommentDTO {
+func issueCommentDTO(v store.IssueComment, issueKey, viewerID string) IssueCommentDTO {
+	var body *string
+	if v.DeletedAt == nil {
+		body = &v.Body
+	}
+	var resolvedBy *IssueCommentResolverDTO
+	if v.ResolvedByUserID != nil {
+		resolvedBy = &IssueCommentResolverDTO{ID: *v.ResolvedByUserID, Name: v.ResolvedByName}
+	}
+	reactions := make([]IssueCommentReactionSummaryDTO, 0, len(v.Reactions))
+	for _, reaction := range v.Reactions {
+		reacted := false
+		for _, actorID := range reaction.ActorIDs {
+			if actorID == viewerID {
+				reacted = true
+				break
+			}
+		}
+		reactions = append(reactions, IssueCommentReactionSummaryDTO{
+			Reaction: reaction.Reaction, Count: reaction.Count, ReactedByCurrentUser: reacted,
+		})
+	}
 	return IssueCommentDTO{
 		ID:              v.ID,
 		IssueID:         issueKey,
 		ParentCommentID: v.ParentCommentID,
 		Author:          IssueCommentAuthorDTO{Type: v.AuthorType, ID: v.AuthorID, Name: v.AuthorName},
-		Body:            v.Body,
+		Body:            body,
+		DeletedAt:       v.DeletedAt,
+		ResolvedAt:      v.ResolvedAt,
+		ResolvedBy:      resolvedBy,
+		Reactions:       reactions,
 		CreatedAt:       v.CreatedAt,
 		UpdatedAt:       v.UpdatedAt,
 	}
 }
 
-func issueTimelineEntryDTO(v app.IssueTimelineEntry, issueKey string) IssueTimelineEntryDTO {
+func issueTimelineEntryDTO(v app.IssueTimelineEntry, issueKey, viewerID string) IssueTimelineEntryDTO {
 	out := IssueTimelineEntryDTO{Kind: v.Kind, ID: v.ID, OccurredAt: v.OccurredAt}
 	if v.Comment != nil {
-		comment := issueCommentDTO(*v.Comment, issueKey)
+		comment := issueCommentDTO(*v.Comment, issueKey, viewerID)
 		out.Comment = &comment
 	}
 	if v.Event != nil {

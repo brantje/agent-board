@@ -73,12 +73,37 @@ export interface IssueCommentAuthor {
   name: string
 }
 
+export type IssueCommentReactionKey =
+  | 'THUMBS_UP'
+  | 'THUMBS_DOWN'
+  | 'LAUGH'
+  | 'HOORAY'
+  | 'CONFUSED'
+  | 'HEART'
+  | 'ROCKET'
+  | 'EYES'
+
+export interface IssueCommentResolver {
+  id: string
+  name: string
+}
+
+export interface IssueCommentReactionSummary {
+  reaction: IssueCommentReactionKey
+  count: number
+  reactedByCurrentUser: boolean
+}
+
 export interface IssueComment {
   id: string
   issueId: string
   parentCommentId: string | null
   author: IssueCommentAuthor
-  body: string
+  body: string | null
+  deletedAt: string | null
+  resolvedAt: string | null
+  resolvedBy: IssueCommentResolver | null
+  reactions: IssueCommentReactionSummary[]
   createdAt: string
   updatedAt: string
 }

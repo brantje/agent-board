@@ -147,7 +147,7 @@ func (s *Store) ListIssueTimelineEvents(ctx context.Context, projectID, issueID 
 		FROM events
 		WHERE project_id = $1
 		  AND issue_id = $2
-		  AND type <> 'issue.comment_created'
+		  AND type <> ALL (ARRAY['issue.comment_created','issue.comment_changed'])
 		  AND split_part(type, '.', 1) = ANY (ARRAY['issue','run','question','review','decision'])
 		ORDER BY occurred_at, id
 	`, projectID, issueID)

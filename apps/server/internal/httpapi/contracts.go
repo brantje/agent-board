@@ -59,19 +59,38 @@ type IssueCommentAuthorDTO struct {
 	Name string `json:"name"`
 }
 
+type IssueCommentResolverDTO struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type IssueCommentReactionSummaryDTO struct {
+	Reaction             string `json:"reaction"`
+	Count                int    `json:"count"`
+	ReactedByCurrentUser bool   `json:"reactedByCurrentUser"`
+}
+
 type IssueCommentDTO struct {
-	ID              string                `json:"id"`
-	IssueID         string                `json:"issueId"`
-	ParentCommentID *string               `json:"parentCommentId"`
-	Author          IssueCommentAuthorDTO `json:"author"`
-	Body            string                `json:"body"`
-	CreatedAt       time.Time             `json:"createdAt"`
-	UpdatedAt       time.Time             `json:"updatedAt"`
+	ID              string                           `json:"id"`
+	IssueID         string                           `json:"issueId"`
+	ParentCommentID *string                          `json:"parentCommentId"`
+	Author          IssueCommentAuthorDTO            `json:"author"`
+	Body            *string                          `json:"body"`
+	DeletedAt       *time.Time                       `json:"deletedAt"`
+	ResolvedAt      *time.Time                       `json:"resolvedAt"`
+	ResolvedBy      *IssueCommentResolverDTO         `json:"resolvedBy"`
+	Reactions       []IssueCommentReactionSummaryDTO `json:"reactions"`
+	CreatedAt       time.Time                        `json:"createdAt"`
+	UpdatedAt       time.Time                        `json:"updatedAt"`
 }
 
 type CreateIssueCommentRequest struct {
 	ParentCommentID *string `json:"parentCommentId"`
 	Body            string  `json:"body"`
+}
+
+type UpdateIssueCommentRequest struct {
+	Body string `json:"body"`
 }
 
 type IssueTimelineEntryDTO struct {

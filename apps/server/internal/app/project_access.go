@@ -172,6 +172,48 @@ func (s *ProjectAccessService) CreateIssueComment(ctx context.Context, actor Aut
 	return s.controlPlane.CreateIssueComment(ctx, input)
 }
 
+func (s *ProjectAccessService) UpdateIssueComment(ctx context.Context, actor AuthenticatedUser, projectID, issueID, commentID, body string) (store.IssueComment, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return store.IssueComment{}, err
+	}
+	return s.controlPlane.UpdateIssueComment(ctx, projectID, issueID, commentID, actor.ID, body)
+}
+
+func (s *ProjectAccessService) DeleteIssueComment(ctx context.Context, actor AuthenticatedUser, projectID, issueID, commentID string) error {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return err
+	}
+	return s.controlPlane.DeleteIssueComment(ctx, projectID, issueID, commentID, actor.ID)
+}
+
+func (s *ProjectAccessService) ResolveIssueComment(ctx context.Context, actor AuthenticatedUser, projectID, issueID, commentID string) (store.IssueComment, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return store.IssueComment{}, err
+	}
+	return s.controlPlane.ResolveIssueComment(ctx, projectID, issueID, commentID, actor.ID)
+}
+
+func (s *ProjectAccessService) ReopenIssueComment(ctx context.Context, actor AuthenticatedUser, projectID, issueID, commentID string) (store.IssueComment, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return store.IssueComment{}, err
+	}
+	return s.controlPlane.ReopenIssueComment(ctx, projectID, issueID, commentID, actor.ID)
+}
+
+func (s *ProjectAccessService) AddIssueCommentReaction(ctx context.Context, actor AuthenticatedUser, projectID, issueID, commentID, reaction string) error {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return err
+	}
+	return s.controlPlane.AddIssueCommentReaction(ctx, projectID, issueID, commentID, actor.ID, reaction)
+}
+
+func (s *ProjectAccessService) RemoveIssueCommentReaction(ctx context.Context, actor AuthenticatedUser, projectID, issueID, commentID, reaction string) error {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return err
+	}
+	return s.controlPlane.RemoveIssueCommentReaction(ctx, projectID, issueID, commentID, actor.ID, reaction)
+}
+
 func (s *ProjectAccessService) ListIssueTimeline(ctx context.Context, actor AuthenticatedUser, projectID, issueID string) ([]IssueTimelineEntry, error) {
 	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
 		return nil, err

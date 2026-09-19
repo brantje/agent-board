@@ -10,7 +10,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-it('refreshes the Issue discussion projection on comment Events', async () => {
+it('refreshes the Issue discussion projection on comment create and lifecycle Events', async () => {
   vi.stubGlobal('EventSource', MockEventSource)
   vi.stubGlobal('fetch', vi.fn(async (path: string) => {
     const url = String(path)
@@ -51,5 +51,15 @@ it('refreshes the Issue discussion projection on comment Events', async () => {
   await flushPromises()
 
   expect(refresh).toHaveBeenCalledTimes(1)
+
+  MockEventSource.instances[0]?.emit(event({
+    id: 'comment-change-event',
+    type: 'issue.comment_changed',
+    issueId: '77777777-7777-4777-8777-777777777777',
+    sequence: null
+  }))
+  await flushPromises()
+
+  expect(refresh).toHaveBeenCalledTimes(2)
   wrapper.unmount()
 })
