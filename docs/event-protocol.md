@@ -113,6 +113,8 @@ Issue ownership and Board-status Events describe those Issue mutations only. Ass
 
 `issue.comment_created` is a lightweight persist-before-publish notification for durable Issue collaboration. The comment row and Event commit atomically. Its payload contains `commentId` and optional `parentCommentId` only; comment body content is not copied into the Event store. Issue detail suppresses this causal notification from the visible unified timeline because the authoritative `IssueComment` itself is rendered there. Posting a comment emits no Run/scheduler/assignment/status Event and plain `@name` text has no execution semantics.
 
+`issue.comment_changed` is the equivalent lightweight persist-before-publish notification for an actual edit, delete/tombstone, resolve, reopen, reaction-add or reaction-remove mutation. Its payload contains `commentId`, a bounded `change` discriminator and, for reaction changes, the reaction key; comment body content is never copied into Events. Idempotent no-op requests emit no Event. Like `issue.comment_created`, it is suppressed from the visible Issue timeline and exists to drive durable Project-event revalidation. It never creates, resumes or cancels a Run and never changes Issue assignment or Board status.
+
 ### Run
 
 ```text

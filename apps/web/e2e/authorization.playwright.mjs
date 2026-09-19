@@ -183,12 +183,65 @@ try {
     await page.getByRole('button', { name: 'Post reply' }).click()
     await page.getByText('Durable reply').waitFor()
 
-    const comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
+    let comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
     assert.equal(comments.length, 2, 'comment API did not persist root + reply')
     assert.equal(comments[1].parentCommentId, comments[0].id, 'reply parent relation was not durable')
+    const rootCommentId = comments[0].id
+
+    await call('PATCH', `/api/projects/${project.id}/issues/${issue.id}/comments/${rootCommentId}`, {
+      token: creator.tokens.accessToken,
+      body: { body: 'creator must not edit this' },
+      status: 403
+    })
+    await call('DELETE', `/api/projects/${project.id}/issues/${issue.id}/comments/${rootCommentId}`, {
+      token: creator.tokens.accessToken,
+      status: 403
+    })
+
+    let rootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
+    await rootArticle.getByRole('button', { name: 'Edit' }).click()
+    await rootArticle.locator('textarea').fill('Durable edited root')
+    await rootArticle.getByRole('button', { name: 'Save edit' }).click()
+    await page.getByText('Durable edited root').waitFor()
+    await page.getByText('edited', { exact: true }).waitFor()
+
+    rootArticle = page.locator('article').filter({ hasText: 'Durable edited root' })
+    await rootArticle.getByRole('button', { name: 'Resolve' }).click()
+    await rootArticle.getByText(/Resolved by authz-collaborator/).waitFor()
+
+    await rootArticle.getByRole('button', { name: '❤️' }).click()
+    await rootArticle.getByRole('button', { name: '❤️ 1' }).waitFor()
 
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.getByText('Durable root comment').waitFor()
+    await page.getByText('Durable edited root').waitFor()
+    rootArticle = page.locator('article').filter({ hasText: 'Durable edited root' })
+    await rootArticle.getByText(/Resolved by authz-collaborator/).waitFor()
+    await rootArticle.getByRole('button', { name: '❤️ 1' }).waitFor()
+
+    comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
+    assert.equal(comments[0].body, 'Durable edited root', 'edited comment did not survive reload')
+    assert.ok(comments[0].resolvedAt, 'resolved timestamp did not persist')
+    assert.equal(comments[0].resolvedBy.id, collaborator.user.id, 'resolver identity was not durable')
+    assert.equal(comments[0].reactions.length, 1, 'reaction did not persist')
+    assert.equal(comments[0].reactions[0].count, 1, 'reaction count was not idempotent')
+    assert.equal(comments[0].reactions[0].reactedByCurrentUser, true, 'reaction actor projection was incorrect')
+
+    await rootArticle.getByRole('button', { name: '❤️ 1' }).click()
+    await rootArticle.getByRole('button', { name: 'Reopen' }).click()
+    await rootArticle.getByRole('button', { name: 'Delete' }).click()
+    await page.getByText('Comment deleted').waitFor()
+    await page.getByText('Durable reply').waitFor()
+
+    comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
+    assert.equal(comments.length, 2, 'tombstoning a parent destroyed its reply')
+    assert.equal(comments[0].body, null, 'deleted parent body remained exposed')
+    assert.ok(comments[0].deletedAt, 'deleted parent did not expose tombstone state')
+    assert.equal(comments[0].reactions.length, 0, 'tombstoned comment retained reactions')
+    assert.equal(comments[0].resolvedAt, null, 'tombstoned comment retained resolution')
+    assert.equal(comments[1].parentCommentId, rootCommentId, 'tombstoning changed reply parent identity')
+
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.getByText('Comment deleted').waitFor()
     await page.getByText('Durable reply').waitFor()
     await page.getByText('Replying to authz-collaborator').waitFor()
     await context.close()
@@ -216,6 +269,10 @@ try {
     assert.equal(await page.getByRole('button', { name: 'Assign Agent' }).count(), 0, 'viewer saw assignment control')
     assert.equal(await page.getByRole('button', { name: 'Post comment' }).count(), 0, 'viewer saw comment mutation control')
     assert.equal(await page.getByRole('button', { name: 'Reply' }).count(), 0, 'viewer saw reply mutation control')
+    assert.equal(await page.getByRole('button', { name: 'Edit' }).count(), 0, 'viewer saw comment edit control')
+    assert.equal(await page.getByRole('button', { name: 'Delete' }).count(), 0, 'viewer saw comment delete control')
+    assert.equal(await page.getByRole('button', { name: 'Resolve' }).count(), 0, 'viewer saw discussion resolution control')
+    assert.equal(await page.getByRole('button', { name: 'Reopen' }).count(), 0, 'viewer saw discussion reopen control')
     await context.close()
   }
 

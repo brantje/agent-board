@@ -77,7 +77,13 @@ A comment stores one stable ID, its Issue, an optional parent comment on the sam
 
 Top-level comments and replies share one persistence/application path. Replies retain their parent ID, while Issue detail composes comments with relevant existing durable Events into a chronological read projection. The projection is not a second durable history store. Operational tool/file/test/agent telemetry stays on Run evidence surfaces rather than being copied into comments.
 
-Plain text that resembles `@name` has no execution semantics. Comments are not Run side-input, Questions, delegation requests or scheduler work.
+Human authors may edit their own live comments; a content edit advances `updated_at` without creating revision-history storage. Deleting a leaf removes it, while deleting a comment that already has replies turns it into a tombstone with no readable body so the reply tree remains intact. Tombstones cannot be edited, replied to or reacted to, and deletion never cascades through the discussion tree.
+
+Resolution is explicit thread state on a top-level comment only. A resolved root records one resolver User ID and timestamp; reopening clears that state. New replies do not implicitly reopen a discussion. Project members may resolve/reopen, while viewers remain read-only.
+
+Reactions use the fixed lightweight vocabulary `THUMBS_UP | THUMBS_DOWN | LAUGH | HOORAY | CONFUSED | HEART | ROCKET | EYES`. Each authenticated User may hold at most one row for one reaction key on one comment. Add/remove operations are idempotent and carry no notification or execution semantics.
+
+Plain text that resembles `@name` has no execution semantics. Comment create/edit/delete/resolve/reopen/reaction mutations are Issue collaboration only: they are not Run side-input, Questions, delegation requests, scheduler work, assignment changes or Board-status changes.
 
 ### Issue Relationship
 

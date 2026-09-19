@@ -77,7 +77,7 @@ Every existing human-facing control-plane surface is intentionally classified un
 | `GET /api/projects` | authenticated User; inaccessible Projects omitted |
 | `POST /api/projects` | authenticated active deployment member/admin; creator receives direct Project admin |
 | Project and nested Project reads, including Issues, Issue comments/timeline, Runs, Questions, Reviews, execution evidence, raw logs, Artifacts and Project SSE | effective Project viewer or higher |
-| ordinary Project workflow mutations, including Issue work/relationships/comments, assignment, supported Run operations, Question answers and Review decisions | effective Project member or higher |
+| ordinary Project workflow mutations, including Issue work/relationships/comments (create/reply/edit/delete/resolve/reopen/reactions), assignment, supported Run operations, Question answers and Review decisions | effective Project member or higher |
 | Project settings/configuration mutations and Project access/directories/grants | effective Project admin |
 | Project effective-role read | effective Project viewer or higher |
 | Runner enrollment/WebSocket execution transport | machine-authenticated execution plane, not human deployment authority |
@@ -103,6 +103,8 @@ Role/grant changes are authoritative on the next request; frontend state is not 
 ## Human actor attribution
 
 Existing durable domain records that support human attribution continue using their existing `actor_type = HUMAN` shape. New authenticated human actions populate the existing `actor_id` with the durable authenticated User ID. Question answers and Review approve/request-changes paths use this identity. Human Issue comments likewise derive `HUMAN` + the authenticated User ID at the shared Project authorization boundary; caller-supplied comment author IDs are never authority.
+
+Issue-comment lifecycle mutations use the same boundary. Editing and deletion additionally require the authenticated User to be the original human author; another Project member/admin cannot rewrite or delete that author's text. Resolution/reopen and reactions require ordinary Project-member authority and record the authenticated resolver/reactor identity. Viewers may read tombstone, resolution and reaction projections but cannot mutate them. Browser visibility checks are presentation only; the shared Go application boundary is authoritative.
 
 Issues store their creator as the same durable actor reference (`HUMAN` or `AGENT` plus actor ID). Authenticated browser/API Issue creation is stamped as `HUMAN` with the authenticated User ID by the shared Project authorization application boundary; callers cannot choose a different human creator. The same Issue domain shape supports Agent-created follow-up Issues without introducing a user-only creator model.
 
