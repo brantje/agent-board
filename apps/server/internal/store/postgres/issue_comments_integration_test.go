@@ -208,3 +208,247 @@ func TestIssueCommentsPersistRepliesIsolationOrderingAndNoExecutionSideEffects(t
 		}
 	}
 }
+
+
+func TestIssueCommentLifecyclePersistenceResolutionReactionsAndDeleteRace(t *testing.T) {
+	pool := testPool(t)
+	s := New(pool)
+	ctx := context.Background()
+
+	author, err := s.CreateUser(ctx, authUser("lifecycle-author", "lifecycle-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reactor, err := s.CreateUser(ctx, authUser("lifecycle-reactor", "lifecycle-reactor@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.CreateProject(ctx, testProjectInput("Lifecycle comments", "/repo/lifecycle-comments", "LCM"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherProject, err := s.CreateProject(ctx, testProjectInput("Other lifecycle", "/repo/other-lifecycle", "OLC"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "Lifecycle", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := s.GetIssue(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeRuns, err := s.ListRuns(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootResult, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+		IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, Body: "original body",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := rootResult.Comment
+	replyResult, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+		IssueID: issue.ID, ParentCommentID: &root.ID, AuthorType: store.ActorTypeHuman, AuthorID: reactor.ID, Body: "reply survives",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(2 * time.Millisecond)
+	edited, err := s.UpdateIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID, "edited body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if edited.Comment.Body != "edited body" || !edited.Comment.UpdatedAt.After(root.UpdatedAt) || len(edited.Events) != 1 {
+		t.Fatalf("edited=%+v events=%+v", edited.Comment, edited.Events)
+	}
+	noOpEdit, err := s.UpdateIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID, "edited body")
+	if err != nil || len(noOpEdit.Events) != 0 {
+		t.Fatalf("no-op edit events=%+v err=%v", noOpEdit.Events, err)
+	}
+
+	resolved, err := s.ResolveIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Comment.ResolvedAt == nil || resolved.Comment.ResolvedByUserID == nil || *resolved.Comment.ResolvedByUserID != author.ID {
+		t.Fatalf("resolved=%+v", resolved.Comment)
+	}
+	firstResolvedAt := *resolved.Comment.ResolvedAt
+	resolvedAgain, err := s.ResolveIssueComment(ctx, project.ID, issue.ID, root.ID, reactor.ID)
+	if err != nil || len(resolvedAgain.Events) != 0 || resolvedAgain.Comment.ResolvedByUserID == nil || *resolvedAgain.Comment.ResolvedByUserID != author.ID || !resolvedAgain.Comment.ResolvedAt.Equal(firstResolvedAt) {
+		t.Fatalf("idempotent resolve=%+v events=%+v err=%v", resolvedAgain.Comment, resolvedAgain.Events, err)
+	}
+	if _, err := s.ResolveIssueComment(ctx, project.ID, issue.ID, replyResult.Comment.ID, author.ID); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("reply resolve error=%v", err)
+	}
+
+	reopened, err := s.ReopenIssueComment(ctx, project.ID, issue.ID, root.ID, reactor.ID)
+	if err != nil || reopened.Comment.ResolvedAt != nil || reopened.Comment.ResolvedByUserID != nil || len(reopened.Events) != 1 {
+		t.Fatalf("reopened=%+v events=%+v err=%v", reopened.Comment, reopened.Events, err)
+	}
+	reopenedAgain, err := s.ReopenIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID)
+	if err != nil || len(reopenedAgain.Events) != 0 {
+		t.Fatalf("idempotent reopen events=%+v err=%v", reopenedAgain.Events, err)
+	}
+
+	events, err := s.AddIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, store.IssueCommentReactionHeart)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("add reaction events=%+v err=%v", events, err)
+	}
+	events, err = s.AddIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, store.IssueCommentReactionHeart)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("duplicate reaction events=%+v err=%v", events, err)
+	}
+	comments, err := s.ListIssueComments(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 2 || len(comments[0].Reactions) != 1 || comments[0].Reactions[0].Reaction != store.IssueCommentReactionHeart ||
+		comments[0].Reactions[0].Count != 1 || len(comments[0].Reactions[0].ActorIDs) != 1 || comments[0].Reactions[0].ActorIDs[0] != reactor.ID {
+		t.Fatalf("reaction projection=%+v", comments)
+	}
+	events, err = s.RemoveIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, store.IssueCommentReactionHeart)
+	if err != nil || len(events) != 1 {
+		t.Fatalf("remove reaction events=%+v err=%v", events, err)
+	}
+	events, err = s.RemoveIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, store.IssueCommentReactionHeart)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("duplicate remove events=%+v err=%v", events, err)
+	}
+	if _, err := s.AddIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, "PARTY"); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid reaction error=%v", err)
+	}
+	if _, err := s.AddIssueCommentReaction(ctx, otherProject.ID, issue.ID, root.ID, reactor.ID, store.IssueCommentReactionHeart); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-project reaction error=%v", err)
+	}
+
+	if _, err := s.AddIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, store.IssueCommentReactionEyes); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := s.DeleteIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID)
+	if err != nil || len(deleted.Events) != 1 {
+		t.Fatalf("delete root events=%+v err=%v", deleted.Events, err)
+	}
+	tombstone, err := s.GetIssueComment(ctx, project.ID, issue.ID, root.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tombstone.DeletedAt == nil || tombstone.Body != "" || len(tombstone.Reactions) != 0 {
+		t.Fatalf("tombstone=%+v", tombstone)
+	}
+	child, err := s.GetIssueComment(ctx, project.ID, issue.ID, replyResult.Comment.ID)
+	if err != nil || child.ParentCommentID == nil || *child.ParentCommentID != root.ID || child.Body != "reply survives" {
+		t.Fatalf("child=%+v err=%v", child, err)
+	}
+	if _, err := s.AddIssueCommentReaction(ctx, project.ID, issue.ID, root.ID, reactor.ID, store.IssueCommentReactionHeart); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("reaction to tombstone error=%v", err)
+	}
+
+	leafResult, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+		IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, Body: "leaf",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DeleteIssueComment(ctx, project.ID, issue.ID, leafResult.Comment.ID, author.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetIssueComment(ctx, project.ID, issue.ID, leafResult.Comment.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("deleted leaf still readable err=%v", err)
+	}
+
+	raceRootResult, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+		IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, Body: "race root",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raceRoot := raceRootResult.Comment
+	start := make(chan struct{})
+	replyDone := make(chan error, 1)
+	deleteDone := make(chan error, 1)
+	go func() {
+		<-start
+		_, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+			IssueID: issue.ID, ParentCommentID: &raceRoot.ID, AuthorType: store.ActorTypeHuman, AuthorID: reactor.ID, Body: "racing reply",
+		})
+		replyDone <- err
+	}()
+	go func() {
+		<-start
+		_, err := s.DeleteIssueComment(ctx, project.ID, issue.ID, raceRoot.ID, author.ID)
+		deleteDone <- err
+	}()
+	close(start)
+	replyErr, deleteErr := <-replyDone, <-deleteDone
+	if deleteErr != nil {
+		t.Fatalf("racing delete failed: %v", deleteErr)
+	}
+	raceComments, err := s.ListIssueComments(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raceParent *store.IssueComment
+	var raceReply *store.IssueComment
+	for index := range raceComments {
+		comment := &raceComments[index]
+		if comment.ID == raceRoot.ID {
+			raceParent = comment
+		}
+		if comment.ParentCommentID != nil && *comment.ParentCommentID == raceRoot.ID {
+			raceReply = comment
+		}
+	}
+	if replyErr == nil {
+		if raceParent == nil || raceParent.DeletedAt == nil || raceReply == nil {
+			t.Fatalf("successful racing reply lost tree parent=%+v reply=%+v", raceParent, raceReply)
+		}
+	} else {
+		if !errors.Is(replyErr, store.ErrNotFound) || raceParent != nil || raceReply != nil {
+			t.Fatalf("racing reply error=%v parent=%+v reply=%+v", replyErr, raceParent, raceReply)
+		}
+	}
+
+	reopenedStore := New(pool)
+	reloaded, err := reopenedStore.ListIssueComments(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundTombstone := false
+	for _, comment := range reloaded {
+		if comment.ID == root.ID {
+			foundTombstone = comment.DeletedAt != nil && comment.Body == ""
+		}
+	}
+	if !foundTombstone {
+		t.Fatalf("tombstone did not survive reload: %+v", reloaded)
+	}
+
+	after, err := s.GetIssue(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRuns, err := s.ListRuns(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Status != after.Status || before.AssigneeType != after.AssigneeType || before.AssigneeID != after.AssigneeID || len(beforeRuns) != len(afterRuns) {
+		t.Fatalf("comment lifecycle changed workflow before=%+v after=%+v runs=%d/%d", before, after, len(beforeRuns), len(afterRuns))
+	}
+
+	timelineEvents, err := s.ListIssueTimelineEvents(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range timelineEvents {
+		if event.Type == "issue.comment_created" || event.Type == "issue.comment_changed" {
+			t.Fatalf("comment notification leaked into visible timeline: %+v", event)
+		}
+	}
+}

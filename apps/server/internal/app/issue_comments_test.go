@@ -49,6 +49,38 @@ func (s *issueCommentTestStore) CreateIssueComment(_ context.Context, projectID 
 	return store.IssueCommentMutationResult{Comment: input, Events: []store.Event{event}}, nil
 }
 
+
+func (s *issueCommentTestStore) GetIssueComment(_ context.Context, projectID, issueID, commentID string) (store.IssueComment, error) {
+	if projectID != s.project.ID {
+		return store.IssueComment{}, store.ErrNotFound
+	}
+	for _, comment := range s.comments {
+		if comment.IssueID == issueID && comment.ID == commentID {
+			return comment, nil
+		}
+	}
+	return store.IssueComment{}, store.ErrNotFound
+}
+
+func (s *issueCommentTestStore) UpdateIssueComment(context.Context, string, string, string, string, string) (store.IssueCommentMutationResult, error) {
+	return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
+}
+func (s *issueCommentTestStore) DeleteIssueComment(context.Context, string, string, string, string) (store.IssueCommentDeleteResult, error) {
+	return store.IssueCommentDeleteResult{}, store.ErrInvalidArgument
+}
+func (s *issueCommentTestStore) ResolveIssueComment(context.Context, string, string, string, string) (store.IssueCommentMutationResult, error) {
+	return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
+}
+func (s *issueCommentTestStore) ReopenIssueComment(context.Context, string, string, string, string) (store.IssueCommentMutationResult, error) {
+	return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
+}
+func (s *issueCommentTestStore) AddIssueCommentReaction(context.Context, string, string, string, string, string) ([]store.Event, error) {
+	return nil, store.ErrInvalidArgument
+}
+func (s *issueCommentTestStore) RemoveIssueCommentReaction(context.Context, string, string, string, string, string) ([]store.Event, error) {
+	return nil, store.ErrInvalidArgument
+}
+
 func (s *issueCommentTestStore) ListIssueTimelineEvents(_ context.Context, projectID, issueID string) ([]store.Event, error) {
 	if s.activityErr != nil {
 		return nil, s.activityErr
