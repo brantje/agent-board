@@ -82,6 +82,12 @@ func newServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	if err != nil {
 		return nil, err
 	}
+	// Issue comments and Issue-scoped activity are control-plane collaboration
+	// state, not execution evidence. Keep these optional capabilities on the
+	// authoritative base store rather than teaching the redaction decorator
+	// unrelated persistence behavior.
+	services.ControlPlane.issueComments, _ = controlPlaneStore.(store.IssueCommentStore)
+	services.ControlPlane.issueActivity, _ = controlPlaneStore.(store.IssueActivityStore)
 	// Issue ownership is a control-plane command; the evidence decorator does
 	// not expose this optional capability. Keep its transactional policy intact.
 	services.ControlPlane.assignmentStore, _ = controlPlaneStore.(store.IssueAssignmentStore)

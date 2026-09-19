@@ -1,0 +1,51 @@
+comments:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  get:
+    operationId: listIssueComments
+    description: Lists durable Issue comments and replies in deterministic chronological order.
+    responses:
+      '200':
+        description: Issue comments
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: ../schemas/control-plane.yaml#/IssueComment}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  post:
+    operationId: createIssueComment
+    description: Creates a human-authored Issue comment or reply. The authenticated User is authoritative; comment text has no execution semantics.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: ../schemas/control-plane.yaml#/IssueCommentCreate}
+    responses:
+      '201':
+        description: Created Issue comment
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/IssueComment}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+timeline:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  get:
+    operationId: listIssueTimeline
+    description: Chronological read projection combining durable Issue comments with relevant durable Issue activity while preserving entry type.
+    responses:
+      '200':
+        description: Unified Issue timeline
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: ../schemas/control-plane.yaml#/IssueTimelineEntry}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

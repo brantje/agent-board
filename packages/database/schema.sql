@@ -335,6 +335,23 @@ CREATE TABLE issue_relationships (
 
 CREATE INDEX issue_relationships_source_idx ON issue_relationships (project_id, source_issue_id, created_at, id);
 
+CREATE TABLE issue_comments (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    issue_id uuid NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
+    parent_comment_id uuid,
+    author_type text NOT NULL CHECK (author_type IN ('HUMAN', 'AGENT')),
+    author_id uuid NOT NULL,
+    body text NOT NULL CHECK (btrim(body) <> ''),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (issue_id, id),
+    CONSTRAINT issue_comments_parent_fk FOREIGN KEY (issue_id, parent_comment_id)
+        REFERENCES issue_comments(issue_id, id),
+    CHECK (parent_comment_id IS NULL OR parent_comment_id <> id)
+);
+
+CREATE INDEX issue_comments_issue_timeline_idx ON issue_comments (issue_id, created_at, id);
+
 CREATE TABLE workspaces (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL,
@@ -632,6 +649,7 @@ CREATE TABLE events (
 CREATE UNIQUE INDEX events_run_sequence_uq ON events (run_id, sequence) WHERE run_id IS NOT NULL;
 CREATE INDEX events_run_timeline_idx ON events (run_id, sequence) WHERE run_id IS NOT NULL;
 CREATE INDEX events_project_timeline_idx ON events (project_id, created_at, id);
+CREATE INDEX events_issue_timeline_idx ON events (project_id, issue_id, occurred_at, id) WHERE issue_id IS NOT NULL;
 CREATE INDEX events_correlation_idx ON events (correlation_id) WHERE correlation_id IS NOT NULL;
 CREATE INDEX events_question_id_lookup_idx ON events (project_id, run_id, type, (payload->>'questionId'));
 

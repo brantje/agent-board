@@ -8,6 +8,7 @@ import { isBoardActivityEvent, applyCurrentBranchToIssue } from '../utils/events
 import { useResource } from '../composables/useResource'
 import { useProjectEvents } from '../composables/useProjectEvents'
 import IssueRelationships from './IssueRelationships.vue'
+import IssueDiscussionTimeline from './IssueDiscussionTimeline.vue'
 
 const props = withDefaults(defineProps<{ projectId: string; issueId: string; canMutate?: boolean }>(), { canMutate: true })
 const { data: issue, pending, error, refresh } = useResource<Issue>(() => apiPath('issues', props.projectId, props.issueId))
@@ -88,9 +89,17 @@ watch(issue, current => {
 }, { immediate: true })
 
 const questionsPanel = ref<{ refresh?: () => Promise<unknown> }>()
+const discussionTimeline = ref<{ refresh?: () => Promise<unknown> }>()
 
 async function reload() {
-  await Promise.all([refresh(), assignees.refresh(), runs.refresh(), execution.refresh(), questionsPanel.value?.refresh?.()])
+  await Promise.all([
+    refresh(),
+    assignees.refresh(),
+    runs.refresh(),
+    execution.refresh(),
+    questionsPanel.value?.refresh?.(),
+    discussionTimeline.value?.refresh?.()
+  ])
 }
 
 useProjectEvents(() => props.projectId, async event => {
@@ -188,6 +197,13 @@ async function saved(savedIssue: Issue) {
           </UCard>
 
           <IssueRelationships :project-id="projectId" :issue-id="issueId" :can-mutate="canMutate" />
+
+          <IssueDiscussionTimeline
+            ref="discussionTimeline"
+            :project-id="projectId"
+            :issue-id="issueId"
+            :can-mutate="canMutate"
+          />
 
           <UCard>
             <div class="mb-3 flex flex-wrap items-center justify-between gap-3">

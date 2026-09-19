@@ -67,6 +67,30 @@ export interface Issue {
   lastEvent: EventEvidence | null
 }
 
+export interface IssueCommentAuthor {
+  type: 'HUMAN' | 'AGENT'
+  id: string
+  name: string
+}
+
+export interface IssueComment {
+  id: string
+  issueId: string
+  parentCommentId: string | null
+  author: IssueCommentAuthor
+  body: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface IssueTimelineEntry {
+  kind: 'comment' | 'activity'
+  id: string
+  occurredAt: string
+  comment: IssueComment | null
+  activity: EventEvidence | null
+}
+
 export interface IssueRelationship {
   id: string
   projectId: string

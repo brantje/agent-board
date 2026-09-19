@@ -170,6 +170,32 @@ try {
 
   {
     const { context, page } = await pageFor(collaborator.tokens)
+    await openProjectPage(page, project.id, `/projects/${project.id}/issues/${issue.id}`)
+    await page.getByRole('heading', { name: 'Discussion & activity' }).waitFor()
+
+    await page.locator('textarea').fill('Durable **root** comment')
+    await page.getByRole('button', { name: 'Post comment' }).click()
+    await page.getByText('Durable root comment').waitFor()
+
+    await page.getByRole('button', { name: 'Reply' }).first().click()
+    await page.getByText('Replying to authz-collaborator').waitFor()
+    await page.locator('textarea').fill('Durable reply')
+    await page.getByRole('button', { name: 'Post reply' }).click()
+    await page.getByText('Durable reply').waitFor()
+
+    const comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
+    assert.equal(comments.length, 2, 'comment API did not persist root + reply')
+    assert.equal(comments[1].parentCommentId, comments[0].id, 'reply parent relation was not durable')
+
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.getByText('Durable root comment').waitFor()
+    await page.getByText('Durable reply').waitFor()
+    await page.getByText('Replying to authz-collaborator').waitFor()
+    await context.close()
+  }
+
+  {
+    const { context, page } = await pageFor(collaborator.tokens)
     await openProjectPage(page, project.id, `/projects/${project.id}/board`)
     await page.getByRole('button', { name: 'New issue' }).waitFor()
     assert.equal(await page.locator(`a[href="/projects/${project.id}/settings"]`).count(), 0, 'member saw Project Settings navigation')
@@ -188,6 +214,8 @@ try {
     await page.getByText('Member-created Issue').first().waitFor()
     assert.equal(await page.getByRole('button', { name: 'Edit issue' }).count(), 0, 'viewer saw Issue edit control')
     assert.equal(await page.getByRole('button', { name: 'Assign Agent' }).count(), 0, 'viewer saw assignment control')
+    assert.equal(await page.getByRole('button', { name: 'Post comment' }).count(), 0, 'viewer saw comment mutation control')
+    assert.equal(await page.getByRole('button', { name: 'Reply' }).count(), 0, 'viewer saw reply mutation control')
     await context.close()
   }
 

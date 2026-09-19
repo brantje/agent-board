@@ -314,6 +314,52 @@ IssueUpdate:
       minimum: 0
       maximum: 4
       description: Numeric v0.1 priority. 0 is the default/base priority and larger values mean higher relative priority.
+IssueCommentAuthor:
+  type: object
+  additionalProperties: false
+  required: [type, id, name]
+  properties:
+    type: {type: string, enum: [HUMAN, AGENT]}
+    id: {type: string, format: uuid}
+    name: {type: string}
+IssueComment:
+  type: object
+  additionalProperties: false
+  required: [id, issueId, parentCommentId, author, body, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    issueId: {$ref: '#/IssueKey'}
+    parentCommentId: {type: [string, 'null'], format: uuid}
+    author: {$ref: '#/IssueCommentAuthor'}
+    body: {type: string}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+IssueCommentCreate:
+  type: object
+  additionalProperties: false
+  required: [body]
+  properties:
+    parentCommentId: {type: [string, 'null'], format: uuid}
+    body:
+      type: string
+      minLength: 1
+      pattern: '\S'
+IssueTimelineEntry:
+  type: object
+  additionalProperties: false
+  required: [kind, id, occurredAt, comment, activity]
+  properties:
+    kind: {type: string, enum: [comment, activity]}
+    id: {type: string, format: uuid}
+    occurredAt: {type: string, format: date-time}
+    comment:
+      oneOf:
+      - {$ref: '#/IssueComment'}
+      - {type: 'null'}
+    activity:
+      oneOf:
+      - {$ref: ./execution-evidence.yaml#/EventEvidence}
+      - {type: 'null'}
 IssueRelationship:
   type: object
   description: Project-scoped directed source-to-target Issue relationship. No inverse row is synthesized and the relationship does not itself mutate workflow state.

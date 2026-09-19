@@ -139,6 +139,34 @@ func (s *Store) ListRunEvents(ctx context.Context, projectID, runID string, afte
 	return values, rows.Err()
 }
 
+func (s *Store) ListIssueTimelineEvents(ctx context.Context, projectID, issueID string) ([]store.Event, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, schema_version, type, occurred_at, project_id::text, issue_id::text,
+		       run_id::text, agent_id::text, workspace_id::text, runtime_instance_id::text,
+		       correlation_id::text, parent_event_id::text, sequence, actor, payload, created_at
+		FROM events
+		WHERE project_id = $1
+		  AND issue_id = $2
+		  AND type <> 'issue.comment_created'
+		  AND split_part(type, '.', 1) = ANY (ARRAY['issue','run','question','review','decision'])
+		ORDER BY occurred_at, id
+	`, projectID, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	values := make([]store.Event, 0)
+	for rows.Next() {
+		value, err := scanEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
+	}
+	return values, rows.Err()
+}
+
 func (s *Store) ListProjectEventsAfter(ctx context.Context, projectID, afterID string, limit int) ([]store.Event, error) {
 	if afterID == "" {
 		return nil, nil

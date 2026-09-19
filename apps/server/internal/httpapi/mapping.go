@@ -46,6 +46,31 @@ func issueDTO(v store.Issue) IssueDTO {
 	return dto
 }
 
+func issueCommentDTO(v store.IssueComment, issueKey string) IssueCommentDTO {
+	return IssueCommentDTO{
+		ID:              v.ID,
+		IssueID:         issueKey,
+		ParentCommentID: v.ParentCommentID,
+		Author:          IssueCommentAuthorDTO{Type: v.AuthorType, ID: v.AuthorID, Name: v.AuthorName},
+		Body:            v.Body,
+		CreatedAt:       v.CreatedAt,
+		UpdatedAt:       v.UpdatedAt,
+	}
+}
+
+func issueTimelineEntryDTO(v app.IssueTimelineEntry, issueKey string) IssueTimelineEntryDTO {
+	out := IssueTimelineEntryDTO{Kind: v.Kind, ID: v.ID, OccurredAt: v.OccurredAt}
+	if v.Comment != nil {
+		comment := issueCommentDTO(*v.Comment, issueKey)
+		out.Comment = &comment
+	}
+	if v.Event != nil {
+		activity := eventEvidenceDTO(*v.Event)
+		out.Activity = &activity
+	}
+	return out
+}
+
 func issueRelationshipDTO(v store.IssueRelationship, issueKeys map[string]string) IssueRelationshipDTO {
 	return IssueRelationshipDTO{
 		v.ID,

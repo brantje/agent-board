@@ -150,6 +150,10 @@ paths:
     $ref: ./paths/issues-runs.yaml#/path1
   /api/projects/{projectID}/issues/{issueID}:
     $ref: ./paths/issues-runs.yaml#/path2
+  /api/projects/{projectID}/issues/{issueID}/comments:
+    $ref: ./paths/issue-comments.yaml#/comments
+  /api/projects/{projectID}/issues/{issueID}/timeline:
+    $ref: ./paths/issue-comments.yaml#/timeline
   /api/projects/{projectID}/issues/{issueID}/placement:
     $ref: ./paths/issues-runs.yaml#/placement
   /api/projects/{projectID}/issues/{issueID}/execution:
