@@ -204,7 +204,7 @@ try {
     await editingRootArticle.locator('textarea').fill('Durable edited root')
     await editingRootArticle.getByRole('button', { name: 'Save edit' }).click()
     await page.getByText('Durable edited root').waitFor()
-    await page.getByText(/edited/).waitFor()
+    await page.getByText('· edited', { exact: true }).waitFor()
 
     rootArticle = page.locator('article').filter({ hasText: 'Durable edited root' })
     await rootArticle.getByRole('button', { name: 'Resolve' }).click()

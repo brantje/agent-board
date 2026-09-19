@@ -532,19 +532,20 @@ func TestIssueCommentLifecycleIdempotentDeletedTargetsAndReactionAggregation(t *
 		t.Fatalf("remove reaction from tombstone error=%v", err)
 	}
 
-	if _, err := s.UpdateIssueComment(ctx, project.ID, issue.ID, "missing", author.ID, "body"); !errors.Is(err, store.ErrNotFound) {
+	missingCommentID := "99999999-9999-4999-8999-999999999999"
+	if _, err := s.UpdateIssueComment(ctx, project.ID, issue.ID, missingCommentID, author.ID, "body"); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("edit missing comment error=%v", err)
 	}
-	if _, err := s.DeleteIssueComment(ctx, project.ID, issue.ID, "missing", author.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.DeleteIssueComment(ctx, project.ID, issue.ID, missingCommentID, author.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("delete missing comment error=%v", err)
 	}
-	if _, err := s.ResolveIssueComment(ctx, project.ID, issue.ID, "missing", author.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.ResolveIssueComment(ctx, project.ID, issue.ID, missingCommentID, author.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("resolve missing comment error=%v", err)
 	}
-	if _, err := s.ReopenIssueComment(ctx, project.ID, issue.ID, "missing", author.ID); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.ReopenIssueComment(ctx, project.ID, issue.ID, missingCommentID, author.ID); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("reopen missing comment error=%v", err)
 	}
-	if _, err := s.RemoveIssueCommentReaction(ctx, project.ID, issue.ID, "missing", reactor.ID, store.IssueCommentReactionHeart); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.RemoveIssueCommentReaction(ctx, project.ID, issue.ID, missingCommentID, reactor.ID, store.IssueCommentReactionHeart); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("remove reaction from missing comment error=%v", err)
 	}
 	if _, err := s.UpdateIssueComment(ctx, "", issue.ID, root.ID, author.ID, "body"); !errors.Is(err, store.ErrInvalidArgument) {
