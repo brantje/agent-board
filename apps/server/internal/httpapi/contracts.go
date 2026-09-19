@@ -53,6 +53,35 @@ type IssueDTO struct {
 	LastEvent     *EventEvidenceDTO `json:"lastEvent"`
 }
 
+type IssueCommentAuthorDTO struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type IssueCommentDTO struct {
+	ID              string                `json:"id"`
+	IssueID         string                `json:"issueId"`
+	ParentCommentID *string               `json:"parentCommentId"`
+	Author          IssueCommentAuthorDTO `json:"author"`
+	Body            string                `json:"body"`
+	CreatedAt       time.Time             `json:"createdAt"`
+	UpdatedAt       time.Time             `json:"updatedAt"`
+}
+
+type CreateIssueCommentRequest struct {
+	ParentCommentID *string `json:"parentCommentId"`
+	Body            string  `json:"body"`
+}
+
+type IssueTimelineEntryDTO struct {
+	Kind       string            `json:"kind"`
+	ID         string            `json:"id"`
+	OccurredAt time.Time         `json:"occurredAt"`
+	Comment    *IssueCommentDTO  `json:"comment"`
+	Activity   *EventEvidenceDTO `json:"activity"`
+}
+
 type IssueRelationshipDTO struct {
 	ID            string    `json:"id"`
 	ProjectID     string    `json:"projectId"`
