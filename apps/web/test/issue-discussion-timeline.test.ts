@@ -7,6 +7,7 @@ const root = {
   id: '11111111-1111-4111-8111-111111111111',
   issueId: 'AB-1',
   parentCommentId: null,
+  sourceRunId: null,
   author: { type: 'HUMAN' as const, id: 'user-1', name: 'Alex' },
   body: 'Root **comment**',
   deletedAt: null,
@@ -21,6 +22,7 @@ const reply = {
   id: '22222222-2222-4222-8222-222222222222',
   issueId: 'AB-1',
   parentCommentId: root.id,
+  sourceRunId: null,
   author: { type: 'HUMAN' as const, id: 'user-2', name: 'Sam' },
   body: 'Reply with `code`',
   deletedAt: null,
@@ -116,6 +118,40 @@ describe('IssueDiscussionTimeline', () => {
     wrapper.unmount()
   })
 
+  it('renders Agent authorship and links authoritative source Run provenance', async () => {
+    stubAuth()
+    const agentComment = {
+      ...root,
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      sourceRunId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      author: { type: 'AGENT' as const, id: 'agent-1', name: 'Implementation Agent' },
+      body: 'Durable finding',
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([
+      { kind: 'comment', id: agentComment.id, occurredAt: agentComment.createdAt, comment: agentComment, activity: null }
+    ]))))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: {
+        stubs: {
+          ...uiStubs,
+          IssueDiscussionTimeline: false,
+          IdentityAvatar: { props: ['kind', 'name'], template: '<span :data-kind="kind">{{ name }}</span>' },
+          NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' }
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Implementation Agent')
+    expect(wrapper.text()).toContain('Agent')
+    expect(wrapper.text()).toContain('via Run')
+    expect(wrapper.find('[data-kind="agent"]').exists()).toBe(true)
+    expect(wrapper.find('a').attributes('href')).toBe('/projects/p/runs/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Edit' || button.text() === 'Delete')).toBe(false)
+    wrapper.unmount()
+  })
   it('surfaces submit failures and allows cancelling a reply', async () => {
     stubAuth()
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
