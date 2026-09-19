@@ -156,6 +156,29 @@ func (s *ProjectAccessService) GetIssue(ctx context.Context, actor Authenticated
 	return s.controlPlane.GetIssue(ctx, projectID, issueID)
 }
 
+func (s *ProjectAccessService) ListIssueComments(ctx context.Context, actor AuthenticatedUser, projectID, issueID string) ([]store.IssueComment, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.controlPlane.ListIssueComments(ctx, projectID, issueID)
+}
+
+func (s *ProjectAccessService) CreateIssueComment(ctx context.Context, actor AuthenticatedUser, input CreateIssueCommentInput) (store.IssueComment, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
+		return store.IssueComment{}, err
+	}
+	input.AuthorType = store.ActorTypeHuman
+	input.AuthorID = actor.ID
+	return s.controlPlane.CreateIssueComment(ctx, input)
+}
+
+func (s *ProjectAccessService) ListIssueTimeline(ctx context.Context, actor AuthenticatedUser, projectID, issueID string) ([]IssueTimelineEntry, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.controlPlane.ListIssueTimeline(ctx, projectID, issueID)
+}
+
 func (s *ProjectAccessService) CreateIssue(ctx context.Context, actor AuthenticatedUser, input store.Issue) (store.Issue, error) {
 	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
 		return store.Issue{}, err
