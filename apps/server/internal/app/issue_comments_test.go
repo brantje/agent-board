@@ -266,8 +266,6 @@ func TestProjectAccessIssueCommentsUseAuthenticatedHumanAndMemberPolicy(t *testi
 		ProjectID:       projectID,
 		IssueID:         issueID,
 		ParentCommentID: &parentID,
-		AuthorType:      store.ActorTypeAgent,
-		AuthorID:        "forged-agent",
 		Body:            "Please inspect @name literally",
 	})
 	if err != nil {
@@ -304,6 +302,56 @@ func TestProjectAccessIssueCommentsUseAuthenticatedHumanAndMemberPolicy(t *testi
 	}
 }
 
+func TestPublishAgentIssueCommentDerivesTrustedRunContext(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	const runID = "run-1"
+	agentID := "agent-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "IN_PROGRESS"},
+		},
+		runs: map[string]store.Run{
+			runID: {ID: runID, ProjectID: projectID, IssueID: issueID, AgentID: &agentID, Status: "RUNNING"},
+		},
+	}
+	fake := &issueCommentTestStore{projectWorkflowAuthorizationStore: base}
+	service := New(fake)
+	publisher := &assigneePublisher{}
+	service.SetEventRecorder(publisher)
+
+	created, err := service.PublishAgentIssueComment(t.Context(), projectID, runID, "Concise finding @name remains plain text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.AuthorType != store.ActorTypeAgent || created.AuthorID != agentID || created.SourceRunID == nil || *created.SourceRunID != runID {
+		t.Fatalf("created provenance=%+v", created)
+	}
+	if fake.lastCreate.IssueID != issueID || fake.lastCreate.AuthorType != store.ActorTypeAgent ||
+		fake.lastCreate.AuthorID != agentID || fake.lastCreate.SourceRunID == nil || *fake.lastCreate.SourceRunID != runID {
+		t.Fatalf("store input=%+v", fake.lastCreate)
+	}
+	if len(base.runs) != 1 || base.issues[issueID].Status != "IN_PROGRESS" {
+		t.Fatalf("publishing changed execution/workflow state runs=%+v issue=%+v", base.runs, base.issues[issueID])
+	}
+	if len(publisher.published) != 1 || publisher.published[0].Type != "issue.comment_created" {
+		t.Fatalf("published=%+v", publisher.published)
+	}
+
+	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, "missing", "body"); err == nil {
+		t.Fatal("missing Run unexpectedly published a comment")
+	}
+	runWithoutAgent := "run-no-agent"
+	base.runs[runWithoutAgent] = store.Run{ID: runWithoutAgent, ProjectID: projectID, IssueID: issueID, Status: "RUNNING"}
+	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runWithoutAgent, "body"); err == nil {
+		t.Fatal("Run without Agent unexpectedly published a comment")
+	}
+	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runID, "   "); err == nil {
+		t.Fatal("blank Agent comment unexpectedly succeeded")
+	}
+}
+
 func TestIssueCommentApplicationValidationAndUnavailableCapabilities(t *testing.T) {
 	const projectID = "project-1"
 	const issueID = "issue-1"
@@ -319,30 +367,31 @@ func TestIssueCommentApplicationValidationAndUnavailableCapabilities(t *testing.
 	if _, err := service.ListIssueComments(t.Context(), projectID, issueID); err == nil {
 		t.Fatal("ListIssueComments succeeded without comment capability")
 	}
-	if _, err := service.CreateIssueComment(t.Context(), CreateIssueCommentInput{
-		ProjectID: projectID, IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "hello",
-	}); err == nil {
-		t.Fatal("CreateIssueComment succeeded without comment capability")
+	if _, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "hello",
+	}, "user"); err == nil {
+		t.Fatal("CreateHumanIssueComment succeeded without comment capability")
 	}
 
 	fake := &issueCommentTestStore{projectWorkflowAuthorizationStore: base}
 	service = New(fake)
 	blankParent := " "
-	cases := map[string]CreateIssueCommentInput{
-		"blank body":   {ProjectID: projectID, IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "   "},
-		"blank author": {ProjectID: projectID, IssueID: issueID, AuthorType: store.ActorTypeHuman, Body: "hello"},
-		"invalid actor": {ProjectID: projectID, IssueID: issueID, AuthorType: "OTHER", AuthorID: "user", Body: "hello"},
-		"blank parent": {ProjectID: projectID, IssueID: issueID, ParentCommentID: &blankParent, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "hello"},
+	cases := map[string]struct {
+		input    CreateIssueCommentInput
+		authorID string
+	}{
+		"blank body":   {input: CreateIssueCommentInput{ProjectID: projectID, IssueID: issueID, Body: "   "}, authorID: "user"},
+		"blank author": {input: CreateIssueCommentInput{ProjectID: projectID, IssueID: issueID, Body: "hello"}},
+		"blank parent": {input: CreateIssueCommentInput{ProjectID: projectID, IssueID: issueID, ParentCommentID: &blankParent, Body: "hello"}, authorID: "user"},
 	}
-	for name, input := range cases {
+	for name, testCase := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := service.CreateIssueComment(t.Context(), input); err == nil {
-				t.Fatalf("CreateIssueComment(%s) unexpectedly succeeded", name)
+			if _, err := service.CreateHumanIssueComment(t.Context(), testCase.input, testCase.authorID); err == nil {
+				t.Fatalf("CreateHumanIssueComment(%s) unexpectedly succeeded", name)
 			}
 		})
 	}
 }
-
 func TestIssueCommentApplicationPropagatesReadWriteAndTimelineFailures(t *testing.T) {
 	const projectID = "project-1"
 	const issueID = "issue-1"
@@ -359,9 +408,9 @@ func TestIssueCommentApplicationPropagatesReadWriteAndTimelineFailures(t *testin
 	if _, err := service.ListIssueComments(t.Context(), projectID, "missing"); err == nil {
 		t.Fatal("missing Issue comment read unexpectedly succeeded")
 	}
-	if _, err := service.CreateIssueComment(t.Context(), CreateIssueCommentInput{
-		ProjectID: projectID, IssueID: "missing", AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "hello",
-	}); err == nil {
+	if _, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: "missing", Body: "hello",
+	}, "user"); err == nil {
 		t.Fatal("missing Issue comment creation unexpectedly succeeded")
 	}
 
@@ -369,9 +418,9 @@ func TestIssueCommentApplicationPropagatesReadWriteAndTimelineFailures(t *testin
 	if _, err := service.ListIssueComments(t.Context(), projectID, issueID); err == nil {
 		t.Fatal("comment store read failure was swallowed")
 	}
-	if _, err := service.CreateIssueComment(t.Context(), CreateIssueCommentInput{
-		ProjectID: projectID, IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "hello",
-	}); err == nil {
+	if _, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "hello",
+	}, "user"); err == nil {
 		t.Fatal("comment store write failure was swallowed")
 	}
 	if _, err := service.ListIssueTimeline(t.Context(), projectID, issueID); err == nil {
