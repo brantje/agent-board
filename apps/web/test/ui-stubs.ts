@@ -1,5 +1,6 @@
 import { defineComponent, h, reactive, ref } from 'vue'
 export const uiStubs = {
+  IssueDiscussionTimeline: {template:'<div data-issue-discussion-stub />'},
   PageFrame: {props:['title','description'],template:'<main><h1>{{title}}</h1><p>{{description}}</p><slot name="actions"/><slot/></main>'},
   AsyncState: {props:['pending','error','empty','emptyTitle','emptyDescription'],emits:['retry'],template:'<div><p v-if="pending">Loading</p><p v-else-if="error">{{error.message}}<button @click="$emit(\'retry\')">Retry</button></p><p v-else-if="empty">{{emptyTitle}} {{emptyDescription}}</p><slot v-else/></div>'},
   UCard: {template:'<section><slot name="header"/><slot/><slot name="footer"/></section>'},
