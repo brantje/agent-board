@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,5 +146,31 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 	hidden := authHTTPRequest(t, fixture.handler, http.MethodGet, base, "", bearer(outsideToken))
 	if hidden.Code != http.StatusNotFound {
 		t.Fatalf("outside status=%d body=%s", hidden.Code, hidden.Body.String())
+	}
+}
+
+
+func TestIssueCommentLowLevelRouterReadCompatibilityAndWriteFailClosed(t *testing.T) {
+	database := &issueCommentHTTPStore{fakeControlPlaneStore: &fakeControlPlaneStore{}}
+	control := app.New(database)
+	router := NewRouter(control)
+	base := "/api/projects/" + projectID + "/issues/" + issueKey
+
+	comments := httptest.NewRecorder()
+	router.ServeHTTP(comments, httptest.NewRequest(http.MethodGet, base+"/comments", nil))
+	if comments.Code != http.StatusOK {
+		t.Fatalf("low-level comments status=%d body=%s", comments.Code, comments.Body.String())
+	}
+
+	timeline := httptest.NewRecorder()
+	router.ServeHTTP(timeline, httptest.NewRequest(http.MethodGet, base+"/timeline", nil))
+	if timeline.Code != http.StatusOK {
+		t.Fatalf("low-level timeline status=%d body=%s", timeline.Code, timeline.Body.String())
+	}
+
+	create := httptest.NewRecorder()
+	router.ServeHTTP(create, httptest.NewRequest(http.MethodPost, base+"/comments", strings.NewReader(`{"body":"cannot forge unauthenticated write"}`)))
+	if create.Code != http.StatusUnauthorized {
+		t.Fatalf("low-level create status=%d body=%s", create.Code, create.Body.String())
 	}
 }

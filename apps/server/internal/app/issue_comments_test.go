@@ -107,6 +107,23 @@ func TestProjectAccessIssueCommentsUseAuthenticatedHumanAndMemberPolicy(t *testi
 	if len(publisher.published) != 1 || publisher.published[0].Type != "issue.comment_created" {
 		t.Fatalf("published=%+v", publisher.published)
 	}
+
+	comments, err := access.ListIssueComments(t.Context(), viewer, projectID, issueID)
+	if err != nil || len(comments) != 1 || comments[0].ID != created.ID {
+		t.Fatalf("viewer comments=%+v err=%v", comments, err)
+	}
+	timeline, err := access.ListIssueTimeline(t.Context(), viewer, projectID, issueID)
+	if err != nil || len(timeline) != 1 || timeline[0].Kind != store.IssueTimelineKindComment {
+		t.Fatalf("viewer timeline=%+v err=%v", timeline, err)
+	}
+
+	outside := activeProjectActor("outside", store.DeploymentRoleMember)
+	if _, err := access.ListIssueComments(t.Context(), outside, projectID, issueID); err == nil {
+		t.Fatal("outside comment read unexpectedly succeeded")
+	}
+	if _, err := access.ListIssueTimeline(t.Context(), outside, projectID, issueID); err == nil {
+		t.Fatal("outside timeline read unexpectedly succeeded")
+	}
 }
 
 func TestIssueCommentApplicationValidationAndUnavailableCapabilities(t *testing.T) {
