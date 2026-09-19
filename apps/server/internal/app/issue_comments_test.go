@@ -548,7 +548,7 @@ func TestProjectAccessIssueCommentLifecycleAuthorizationAndExecutionNeutrality(t
 	if beforeIssue.Status != afterIssue.Status || beforeIssue.AssigneeType != afterIssue.AssigneeType || beforeIssue.AssigneeID != afterIssue.AssigneeID || len(base.runs) != 0 {
 		t.Fatalf("comment lifecycle changed workflow before=%+v after=%+v runs=%+v", beforeIssue, afterIssue, base.runs)
 	}
-	if len(publisher.published) != 5 {
+	if len(publisher.published) != 6 {
 		t.Fatalf("published lifecycle events=%+v", publisher.published)
 	}
 	for _, event := range publisher.published {
