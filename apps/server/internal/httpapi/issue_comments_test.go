@@ -49,7 +49,7 @@ func (s *issueCommentHTTPStore) CreateIssueComment(_ context.Context, pid string
 	return store.IssueCommentMutationResult{Comment: input, Events: []store.Event{event}}, nil
 }
 
-func (s *issueCommentHTTPStore) ListIssueEvents(_ context.Context, pid, id string) ([]store.Event, error) {
+func (s *issueCommentHTTPStore) ListIssueTimelineEvents(_ context.Context, pid, id string) ([]store.Event, error) {
 	if pid != projectID || id != issueID {
 		return nil, store.ErrNotFound
 	}
@@ -127,8 +127,6 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 	issueIDValue := issueID
 	database.events = []store.Event{
 		{ID: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", Type: "issue.updated", ProjectID: projectID, IssueID: &issueIDValue, OccurredAt: at, Actor: store.EmptyObject, Payload: store.EmptyObject},
-		{ID: "ffffffff-ffff-4fff-8fff-ffffffffffff", Type: "tool.completed", ProjectID: projectID, IssueID: &issueIDValue, OccurredAt: at.Add(time.Minute), Actor: store.EmptyObject, Payload: store.EmptyObject},
-		{ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab", Type: "issue.comment_created", ProjectID: projectID, IssueID: &issueIDValue, OccurredAt: at.Add(2 * time.Minute), Actor: store.EmptyObject, Payload: store.EmptyObject},
 	}
 	timeline := authHTTPRequest(t, fixture.handler, http.MethodGet, "/api/projects/"+projectID+"/issues/"+issueKey+"/timeline", "", bearer(viewerToken))
 	if timeline.Code != http.StatusOK {

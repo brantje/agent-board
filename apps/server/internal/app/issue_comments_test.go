@@ -166,8 +166,6 @@ func TestIssueTimelineMergesCommentsWithRelevantDurableActivity(t *testing.T) {
 		comments:                          []store.IssueComment{comment},
 		events: []store.Event{
 			{ID: "issue-created", Type: "issue.created", ProjectID: projectID, IssueID: stringPointer(issueID), OccurredAt: at},
-			{ID: "comment-notify", Type: "issue.comment_created", ProjectID: projectID, IssueID: stringPointer(issueID), OccurredAt: at.Add(time.Second)},
-			{ID: "tool", Type: "tool.completed", ProjectID: projectID, IssueID: stringPointer(issueID), OccurredAt: at.Add(2 * time.Second)},
 			{ID: "run", Type: "run.completed", ProjectID: projectID, IssueID: stringPointer(issueID), OccurredAt: at.Add(3 * time.Second)},
 		},
 	}
@@ -181,10 +179,5 @@ func TestIssueTimelineMergesCommentsWithRelevantDurableActivity(t *testing.T) {
 	}
 	if entries[0].Kind != store.IssueTimelineKindActivity || entries[0].ID != "issue-created" || entries[1].Kind != store.IssueTimelineKindComment || entries[1].ID != comment.ID || entries[2].ID != "run" {
 		t.Fatalf("timeline order=%+v", entries)
-	}
-	for _, entry := range entries {
-		if entry.ID == "comment-notify" || entry.ID == "tool" {
-			t.Fatalf("unexpected timeline entry %+v", entry)
-		}
 	}
 }
