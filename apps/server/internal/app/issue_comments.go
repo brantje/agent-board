@@ -21,7 +21,8 @@ type issueCommentCreateInput struct {
 	CreateIssueCommentInput
 	AuthorType  string
 	AuthorID    string
-	SourceRunID *string
+	SourceRunID    *string
+	SourceActionKey *string
 }
 
 type IssueTimelineEntry struct {
@@ -65,8 +66,9 @@ func (s *Service) CreateHumanIssueComment(ctx context.Context, input CreateIssue
 	})
 }
 
-func (s *Service) PublishAgentIssueComment(ctx context.Context, projectID, runID, body string) (store.IssueComment, error) {
-	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" {
+func (s *Service) PublishAgentIssueComment(ctx context.Context, projectID, runID, requestKey, body string) (store.IssueComment, error) {
+	requestKey = strings.TrimSpace(requestKey)
+	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" || requestKey == "" {
 		return store.IssueComment{}, invalid("project and Run are required")
 	}
 	run, err := s.GetRun(ctx, projectID, runID)
@@ -77,6 +79,7 @@ func (s *Service) PublishAgentIssueComment(ctx context.Context, projectID, runID
 		return store.IssueComment{}, NewError("invalid_argument", "Run has no Agent identity", store.ErrInvalidArgument)
 	}
 	sourceRunID := run.ID
+	sourceActionKey := requestKey
 	return s.createIssueComment(ctx, issueCommentCreateInput{
 		CreateIssueCommentInput: CreateIssueCommentInput{
 			ProjectID: projectID,
@@ -85,7 +88,8 @@ func (s *Service) PublishAgentIssueComment(ctx context.Context, projectID, runID
 		},
 		AuthorType:  store.ActorTypeAgent,
 		AuthorID:    *run.AgentID,
-		SourceRunID: &sourceRunID,
+		SourceRunID:     &sourceRunID,
+		SourceActionKey: &sourceActionKey,
 	})
 }
 
@@ -108,6 +112,7 @@ func (s *Service) createIssueComment(ctx context.Context, input issueCommentCrea
 		AuthorType:      input.AuthorType,
 		AuthorID:        input.AuthorID,
 		SourceRunID:     input.SourceRunID,
+		SourceActionKey: input.SourceActionKey,
 		Body:            input.Body,
 	})
 	if err != nil {

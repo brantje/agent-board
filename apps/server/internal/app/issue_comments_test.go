@@ -321,7 +321,7 @@ func TestPublishAgentIssueCommentDerivesTrustedRunContext(t *testing.T) {
 	publisher := &assigneePublisher{}
 	service.SetEventRecorder(publisher)
 
-	created, err := service.PublishAgentIssueComment(t.Context(), projectID, runID, "Concise finding @name remains plain text")
+	created, err := service.PublishAgentIssueComment(t.Context(), projectID, runID, "tool-call-1", "Concise finding @name remains plain text")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,15 +339,15 @@ func TestPublishAgentIssueCommentDerivesTrustedRunContext(t *testing.T) {
 		t.Fatalf("published=%+v", publisher.published)
 	}
 
-	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, "missing", "body"); err == nil {
+	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, "missing", "tool-call-2", "body"); err == nil {
 		t.Fatal("missing Run unexpectedly published a comment")
 	}
 	runWithoutAgent := "run-no-agent"
 	base.runs[runWithoutAgent] = store.Run{ID: runWithoutAgent, ProjectID: projectID, IssueID: issueID, Status: "RUNNING"}
-	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runWithoutAgent, "body"); err == nil {
+	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runWithoutAgent, "tool-call-3", "body"); err == nil {
 		t.Fatal("Run without Agent unexpectedly published a comment")
 	}
-	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runID, "   "); err == nil {
+	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runID, "tool-call-4", "   "); err == nil {
 		t.Fatal("blank Agent comment unexpectedly succeeded")
 	}
 }

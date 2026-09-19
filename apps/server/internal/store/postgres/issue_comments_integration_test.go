@@ -20,14 +20,14 @@ func TestIssueCommentAgentRunProvenance(t *testing.T) {
 
 	result, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
 		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
-		SourceRunID: &runID, Body: "Agent finding @plain-text-only",
+		SourceRunID: &runID, SourceActionKey: stringPointer("tool-call-1"), Body: "Agent finding @plain-text-only",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	comment := result.Comment
 	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != fixture.agent.ID ||
-		comment.SourceRunID == nil || *comment.SourceRunID != fixture.run.ID {
+		comment.SourceRunID == nil || *comment.SourceRunID != fixture.run.ID || comment.SourceActionKey == nil || *comment.SourceActionKey != "tool-call-1" {
 		t.Fatalf("agent provenance=%+v", comment)
 	}
 	if len(result.Events) != 1 || result.Events[0].Type != "issue.comment_created" ||
@@ -40,10 +40,24 @@ func TestIssueCommentAgentRunProvenance(t *testing.T) {
 		t.Fatal(err)
 	}
 	if reloaded.AuthorName != fixture.agent.Name || reloaded.SourceRunID == nil || *reloaded.SourceRunID != fixture.run.ID ||
-		reloaded.Body != "Agent finding @plain-text-only" {
+		reloaded.SourceActionKey == nil || *reloaded.SourceActionKey != "tool-call-1" || reloaded.Body != "Agent finding @plain-text-only" {
 		t.Fatalf("reloaded agent comment=%+v", reloaded)
 	}
 
+
+	retried, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
+		SourceRunID: &runID, SourceActionKey: stringPointer("tool-call-1"), Body: "Agent finding @plain-text-only",
+	})
+	if err != nil || retried.Comment.ID != comment.ID || len(retried.Events) != 0 {
+		t.Fatalf("idempotent retry=%+v err=%v", retried, err)
+	}
+	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
+		SourceRunID: &runID, SourceActionKey: stringPointer("tool-call-1"), Body: "changed retry body",
+	}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("changed retry error=%v", err)
+	}
 	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
 		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID, Body: "missing provenance",
 	}); !errors.Is(err, store.ErrInvalidArgument) {
@@ -60,7 +74,7 @@ func TestIssueCommentAgentRunProvenance(t *testing.T) {
 	otherRunID := other.run.ID
 	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
 		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
-		SourceRunID: &otherRunID, Body: "cross-project source",
+		SourceRunID: &otherRunID, SourceActionKey: stringPointer("cross-project"), Body: "cross-project source",
 	}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-project source run error=%v", err)
 	}
@@ -71,7 +85,7 @@ func TestIssueCommentAgentRunProvenance(t *testing.T) {
 	}
 	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
 		IssueID: sibling.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
-		SourceRunID: &runID, Body: "cross-Issue source",
+		SourceRunID: &runID, SourceActionKey: stringPointer("cross-issue"), Body: "cross-Issue source",
 	}); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("cross-Issue source run error=%v", err)
 	}

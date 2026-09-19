@@ -342,6 +342,7 @@ CREATE TABLE issue_comments (
     author_type text NOT NULL CHECK (author_type IN ('HUMAN', 'AGENT')),
     author_id uuid NOT NULL,
     source_run_id uuid,
+    source_action_key text,
     body text,
     deleted_at timestamptz,
     resolved_at timestamptz,
@@ -359,12 +360,15 @@ CREATE TABLE issue_comments (
     CHECK ((resolved_at IS NULL) = (resolved_by_user_id IS NULL)),
     CHECK (parent_comment_id IS NULL OR (resolved_at IS NULL AND resolved_by_user_id IS NULL)),
     CHECK (
-        (author_type = 'HUMAN' AND source_run_id IS NULL)
-        OR (author_type = 'AGENT' AND source_run_id IS NOT NULL)
+        (author_type = 'HUMAN' AND source_run_id IS NULL AND source_action_key IS NULL)
+        OR (author_type = 'AGENT' AND source_run_id IS NOT NULL AND source_action_key IS NOT NULL AND btrim(source_action_key) <> '')
     )
 );
 
 CREATE INDEX issue_comments_issue_timeline_idx ON issue_comments (issue_id, created_at, id);
+CREATE UNIQUE INDEX issue_comments_source_action_uq
+    ON issue_comments (source_run_id, source_action_key)
+    WHERE source_run_id IS NOT NULL AND source_action_key IS NOT NULL;
 
 CREATE TABLE issue_comment_reactions (
     issue_id uuid NOT NULL,

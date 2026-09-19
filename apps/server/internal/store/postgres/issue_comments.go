@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -20,7 +21,7 @@ func (s *Store) ListIssueComments(ctx context.Context, projectID, issueID string
 		           END,
 		           ''
 		       ),
-		       c.source_run_id::text, COALESCE(c.body, ''), c.deleted_at, c.resolved_at, c.resolved_by_user_id::text,
+		       c.source_run_id::text, c.source_action_key, COALESCE(c.body, ''), c.deleted_at, c.resolved_at, c.resolved_by_user_id::text,
 		       COALESCE((SELECT u.display_name FROM users AS u WHERE u.id = c.resolved_by_user_id), ''),
 		       c.created_at, c.updated_at
 		FROM issue_comments AS c
@@ -60,7 +61,7 @@ func (s *Store) GetIssueComment(ctx context.Context, projectID, issueID, comment
 		           END,
 		           ''
 		       ),
-		       c.source_run_id::text, COALESCE(c.body, ''), c.deleted_at, c.resolved_at, c.resolved_by_user_id::text,
+		       c.source_run_id::text, c.source_action_key, COALESCE(c.body, ''), c.deleted_at, c.resolved_at, c.resolved_by_user_id::text,
 		       COALESCE((SELECT u.display_name FROM users AS u WHERE u.id = c.resolved_by_user_id), ''),
 		       c.created_at, c.updated_at
 		FROM issue_comments AS c
@@ -86,11 +87,11 @@ func (s *Store) CreateIssueComment(ctx context.Context, projectID string, input 
 	}
 	switch input.AuthorType {
 	case store.ActorTypeHuman:
-		if input.SourceRunID != nil {
+		if input.SourceRunID != nil || input.SourceActionKey != nil {
 			return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 		}
 	case store.ActorTypeAgent:
-		if input.SourceRunID == nil || strings.TrimSpace(*input.SourceRunID) == "" {
+		if input.SourceRunID == nil || strings.TrimSpace(*input.SourceRunID) == "" || input.SourceActionKey == nil || strings.TrimSpace(*input.SourceActionKey) == "" {
 			return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 		}
 	}
@@ -142,16 +143,40 @@ func (s *Store) CreateIssueComment(ctx context.Context, projectID string, input 
 	}
 
 	comment, err := scanIssueComment(tx.QueryRow(ctx, `
-		INSERT INTO issue_comments (issue_id, parent_comment_id, author_type, author_id, source_run_id, body)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO issue_comments (issue_id, parent_comment_id, author_type, author_id, source_run_id, source_action_key, body)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (source_run_id, source_action_key)
+		WHERE source_run_id IS NOT NULL AND source_action_key IS NOT NULL
+		DO NOTHING
 		RETURNING id::text, issue_id::text, parent_comment_id::text, author_type, author_id::text,
-		          $7::text, source_run_id::text, COALESCE(body, ''), deleted_at, resolved_at, resolved_by_user_id::text,
+		          $8::text, source_run_id::text, source_action_key, COALESCE(body, ''), deleted_at, resolved_at, resolved_by_user_id::text,
 		          ''::text, created_at, updated_at
-	`, issueID, input.ParentCommentID, input.AuthorType, input.AuthorID, input.SourceRunID, input.Body, authorName))
+	`, issueID, input.ParentCommentID, input.AuthorType, input.AuthorID, input.SourceRunID, input.SourceActionKey, input.Body, authorName))
+	if errors.Is(err, store.ErrNotFound) && input.AuthorType == store.ActorTypeAgent {
+		existing, lookupErr := scanIssueComment(tx.QueryRow(ctx, `
+			SELECT c.id::text, c.issue_id::text, c.parent_comment_id::text, c.author_type, c.author_id::text,
+			       COALESCE(a.name, ''), c.source_run_id::text, c.source_action_key, COALESCE(c.body, ''),
+			       c.deleted_at, c.resolved_at, c.resolved_by_user_id::text,
+			       COALESCE(u.display_name, ''), c.created_at, c.updated_at
+			FROM issue_comments AS c
+			LEFT JOIN agents AS a ON a.id = c.author_id
+			LEFT JOIN users AS u ON u.id = c.resolved_by_user_id
+			WHERE c.source_run_id = $1 AND c.source_action_key = $2
+		`, input.SourceRunID, input.SourceActionKey))
+		if lookupErr != nil {
+			return store.IssueCommentMutationResult{}, lookupErr
+		}
+		if !sameIssueCommentSourceAction(existing, input) {
+			return store.IssueCommentMutationResult{}, store.ErrConflict
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return store.IssueCommentMutationResult{}, err
+		}
+		return store.IssueCommentMutationResult{Comment: existing}, nil
+	}
 	if err != nil {
 		return store.IssueCommentMutationResult{}, err
 	}
-
 	actor, err := json.Marshal(map[string]string{"type": input.AuthorType, "id": input.AuthorID})
 	if err != nil {
 		return store.IssueCommentMutationResult{}, err
@@ -561,6 +586,20 @@ func issueCommentAuthorName(ctx context.Context, tx pgx.Tx, projectID, authorTyp
 	return name, nil
 }
 
+func sameIssueCommentSourceAction(existing, requested store.IssueComment) bool {
+	if existing.IssueID != requested.IssueID || existing.AuthorType != requested.AuthorType || existing.AuthorID != requested.AuthorID || existing.Body != requested.Body {
+		return false
+	}
+	if (existing.ParentCommentID == nil) != (requested.ParentCommentID == nil) {
+		return false
+	}
+	if existing.ParentCommentID != nil && *existing.ParentCommentID != *requested.ParentCommentID {
+		return false
+	}
+	return existing.SourceRunID != nil && requested.SourceRunID != nil && *existing.SourceRunID == *requested.SourceRunID &&
+		existing.SourceActionKey != nil && requested.SourceActionKey != nil && *existing.SourceActionKey == *requested.SourceActionKey
+}
+
 func scanIssueComment(row pgx.Row) (store.IssueComment, error) {
 	var value store.IssueComment
 	if err := row.Scan(
@@ -571,6 +610,7 @@ func scanIssueComment(row pgx.Row) (store.IssueComment, error) {
 		&value.AuthorID,
 		&value.AuthorName,
 		&value.SourceRunID,
+		&value.SourceActionKey,
 		&value.Body,
 		&value.DeletedAt,
 		&value.ResolvedAt,
