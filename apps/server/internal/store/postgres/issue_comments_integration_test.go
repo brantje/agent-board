@@ -52,6 +52,25 @@ func TestIssueCommentAgentRunProvenance(t *testing.T) {
 	if err != nil || retried.Comment.ID != comment.ID || len(retried.Events) != 0 {
 		t.Fatalf("idempotent retry=%+v err=%v", retried, err)
 	}
+	second, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
+		SourceRunID: &runID, SourceActionKey: stringPointer("tool-call-2"), Body: "Second Agent finding",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Comment.ID == comment.ID || second.Comment.SourceRunID == nil || *second.Comment.SourceRunID != runID ||
+		second.Comment.SourceActionKey == nil || *second.Comment.SourceActionKey != "tool-call-2" {
+		t.Fatalf("second same-Run comment=%+v first=%+v", second.Comment, comment)
+	}
+	comments, err := s.ListIssueComments(ctx, fixture.project.ID, fixture.issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("same Run with distinct action keys comments=%+v want two", comments)
+	}
+
 	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
 		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
 		SourceRunID: &runID, SourceActionKey: stringPointer("tool-call-1"), Body: "changed retry body",
