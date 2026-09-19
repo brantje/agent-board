@@ -1,17 +1,33 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import type { IssueComment, IssueTimelineEntry } from '../types/api'
+import type { IssueComment, IssueCommentReactionKey, IssueTimelineEntry } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { eventActivityIcon, eventDescription, eventTitle, formatActivityTime } from '../utils/events'
 import { useResource } from '../composables/useResource'
 import MarkdownContent from './MarkdownContent.vue'
 
 const props = withDefaults(defineProps<{ projectId: string; issueId: string; canMutate?: boolean }>(), { canMutate: true })
+const auth = useAuth()
 const timeline = useResource<IssueTimelineEntry[]>(() => `${apiPath('issues', props.projectId, props.issueId)}/timeline`)
 const body = ref('')
 const replyTo = ref<IssueComment>()
 const submitting = ref(false)
 const submitError = ref<Error>()
+const actionError = ref<Error>()
+const actionBusy = ref('')
+const editingCommentId = ref('')
+const editBody = ref('')
+
+const reactionOptions: Array<{ key: IssueCommentReactionKey; emoji: string; label: string }> = [
+  { key: 'THUMBS_UP', emoji: '👍', label: 'Thumbs up' },
+  { key: 'THUMBS_DOWN', emoji: '👎', label: 'Thumbs down' },
+  { key: 'LAUGH', emoji: '😄', label: 'Laugh' },
+  { key: 'HOORAY', emoji: '🎉', label: 'Hooray' },
+  { key: 'CONFUSED', emoji: '😕', label: 'Confused' },
+  { key: 'HEART', emoji: '❤️', label: 'Heart' },
+  { key: 'ROCKET', emoji: '🚀', label: 'Rocket' },
+  { key: 'EYES', emoji: '👀', label: 'Eyes' }
+]
 
 const commentsById = computed(() => new Map(
   (timeline.data.value || [])
@@ -24,12 +40,124 @@ function replyLabel(comment: IssueComment) {
   return commentsById.value.get(comment.parentCommentId)?.author.name || 'an earlier comment'
 }
 
+function isOwnComment(comment: IssueComment) {
+  return comment.author.type === 'HUMAN' && comment.author.id === auth.user.value?.id
+}
+
+function canEditComment(comment: IssueComment) {
+  return props.canMutate && !comment.deletedAt && isOwnComment(comment)
+}
+
+function wasEdited(comment: IssueComment) {
+  return comment.updatedAt !== comment.createdAt
+}
+
 function beginReply(comment: IssueComment) {
+  if (comment.deletedAt) return
   replyTo.value = comment
 }
 
 function cancelReply() {
   replyTo.value = undefined
+}
+
+function beginEdit(comment: IssueComment) {
+  if (!canEditComment(comment) || comment.body === null) return
+  editingCommentId.value = comment.id
+  editBody.value = comment.body
+  actionError.value = undefined
+}
+
+function cancelEdit() {
+  editingCommentId.value = ''
+  editBody.value = ''
+}
+
+function commentPath(comment: IssueComment) {
+  return `${apiPath('issues', props.projectId, props.issueId)}/comments/${encodeURIComponent(comment.id)}`
+}
+
+function reactionSummary(comment: IssueComment, reaction: IssueCommentReactionKey) {
+  return comment.reactions.find(item => item.reaction === reaction)
+}
+
+function reactionOption(reaction: IssueCommentReactionKey) {
+  return reactionOptions.find(option => option.key === reaction)
+}
+
+function reactionButtonLabel(comment: IssueComment, reaction: IssueCommentReactionKey) {
+  const option = reactionOption(reaction)
+  const count = reactionSummary(comment, reaction)?.count ?? 0
+  return `${option?.emoji ?? reaction}${count ? ` ${count}` : ''}`
+}
+
+async function refreshAfterAction() {
+  await timeline.refresh()
+}
+
+async function saveEdit(comment: IssueComment) {
+  const content = editBody.value.trim()
+  if (!canEditComment(comment) || !content || actionBusy.value) return
+  actionBusy.value = `edit:${comment.id}`
+  actionError.value = undefined
+  try {
+    await apiRequest<IssueComment>(commentPath(comment), { method: 'PATCH', body: { body: content } })
+    cancelEdit()
+    await refreshAfterAction()
+  } catch (failure) {
+    actionError.value = failure as Error
+  } finally {
+    actionBusy.value = ''
+  }
+}
+
+async function deleteComment(comment: IssueComment) {
+  if (!canEditComment(comment) || actionBusy.value) return
+  actionBusy.value = `delete:${comment.id}`
+  actionError.value = undefined
+  try {
+    await apiRequest<void>(commentPath(comment), { method: 'DELETE' })
+    if (replyTo.value?.id === comment.id) cancelReply()
+    if (editingCommentId.value === comment.id) cancelEdit()
+    await refreshAfterAction()
+  } catch (failure) {
+    actionError.value = failure as Error
+  } finally {
+    actionBusy.value = ''
+  }
+}
+
+async function setResolved(comment: IssueComment, resolved: boolean) {
+  if (!props.canMutate || comment.deletedAt || comment.parentCommentId || actionBusy.value) return
+  actionBusy.value = `resolution:${comment.id}`
+  actionError.value = undefined
+  try {
+    await apiRequest<IssueComment>(`${commentPath(comment)}/resolution`, {
+      method: resolved ? 'PUT' : 'DELETE'
+    })
+    await refreshAfterAction()
+  } catch (failure) {
+    actionError.value = failure as Error
+  } finally {
+    actionBusy.value = ''
+  }
+}
+
+async function toggleReaction(comment: IssueComment, reaction: IssueCommentReactionKey) {
+  if (!props.canMutate || comment.deletedAt || actionBusy.value) return
+  const existing = reactionSummary(comment, reaction)
+  actionBusy.value = `reaction:${comment.id}:${reaction}`
+  actionError.value = undefined
+  try {
+    await apiRequest<void>(`${commentPath(comment)}/reactions/${encodeURIComponent(reaction)}`, {
+      method: existing?.reactedByCurrentUser ? 'DELETE' : 'PUT'
+    })
+    await refreshAfterAction()
+  } catch (failure) {
+    actionError.value = failure as Error
+  } finally {
+    actionBusy.value = ''
+  }
 }
 
 async function submit() {
@@ -68,6 +196,8 @@ defineExpose({ refresh: timeline.refresh })
       </div>
     </div>
 
+    <UAlert v-if="actionError" class="mb-3" title="Unable to update comment" :description="actionError.message" color="error" />
+
     <AsyncState
       :pending="timeline.pending.value"
       :error="timeline.error.value"
@@ -87,19 +217,102 @@ defineExpose({ refresh: timeline.refresh })
               <IdentityAvatar kind="user" :name="entry.comment.author.name" size="xs" />
               <strong>{{ entry.comment.author.name }}</strong>
               <span class="text-muted">· {{ formatActivityTime(entry.occurredAt) }}</span>
+              <span v-if="wasEdited(entry.comment)" class="text-muted">· edited</span>
             </div>
+
             <p v-if="replyLabel(entry.comment)" class="mt-2 text-xs text-muted">
               Replying to {{ replyLabel(entry.comment) }}
             </p>
-            <MarkdownContent class="mt-2" :content="entry.comment.body" />
-            <UButton
-              v-if="canMutate"
-              class="mt-2"
-              label="Reply"
-              variant="ghost"
-              size="sm"
-              @click="beginReply(entry.comment)"
-            />
+
+            <div
+              v-if="entry.comment.resolvedAt"
+              class="mt-2 rounded-md bg-elevated px-2 py-1 text-xs text-muted"
+            >
+              Resolved by {{ entry.comment.resolvedBy?.name || 'a user' }} · {{ formatActivityTime(entry.comment.resolvedAt) }}
+            </div>
+
+            <p v-if="entry.comment.deletedAt" class="mt-2 italic text-muted">Comment deleted</p>
+            <div v-else-if="editingCommentId === entry.comment.id" class="mt-2 space-y-2">
+              <UTextarea v-model="editBody" :disabled="Boolean(actionBusy)" class="w-full" />
+              <div class="flex gap-2">
+                <UButton
+                  label="Save edit"
+                  size="sm"
+                  :loading="actionBusy === `edit:${entry.comment.id}`"
+                  :disabled="!editBody.trim()"
+                  @click="saveEdit(entry.comment)"
+                />
+                <UButton label="Cancel edit" size="sm" variant="ghost" :disabled="Boolean(actionBusy)" @click="cancelEdit" />
+              </div>
+            </div>
+            <MarkdownContent v-else-if="entry.comment.body !== null" class="mt-2" :content="entry.comment.body" />
+
+            <div v-if="!entry.comment.deletedAt" class="mt-2 flex flex-wrap gap-2">
+              <UButton
+                v-if="canMutate"
+                label="Reply"
+                variant="ghost"
+                size="sm"
+                :disabled="Boolean(actionBusy)"
+                @click="beginReply(entry.comment)"
+              />
+              <UButton
+                v-if="canEditComment(entry.comment)"
+                label="Edit"
+                variant="ghost"
+                size="sm"
+                :disabled="Boolean(actionBusy)"
+                @click="beginEdit(entry.comment)"
+              />
+              <UButton
+                v-if="canEditComment(entry.comment)"
+                label="Delete"
+                variant="ghost"
+                size="sm"
+                :loading="actionBusy === `delete:${entry.comment.id}`"
+                @click="deleteComment(entry.comment)"
+              />
+              <UButton
+                v-if="canMutate && !entry.comment.parentCommentId && !entry.comment.resolvedAt"
+                label="Resolve"
+                variant="ghost"
+                size="sm"
+                :loading="actionBusy === `resolution:${entry.comment.id}`"
+                @click="setResolved(entry.comment, true)"
+              />
+              <UButton
+                v-if="canMutate && !entry.comment.parentCommentId && entry.comment.resolvedAt"
+                label="Reopen"
+                variant="ghost"
+                size="sm"
+                :loading="actionBusy === `resolution:${entry.comment.id}`"
+                @click="setResolved(entry.comment, false)"
+              />
+            </div>
+
+            <div v-if="!entry.comment.deletedAt" class="mt-2 flex flex-wrap gap-1" aria-label="Comment reactions">
+              <template v-if="canMutate">
+                <UButton
+                  v-for="option in reactionOptions"
+                  :key="option.key"
+                  :label="reactionButtonLabel(entry.comment, option.key)"
+                  size="sm"
+                  :variant="reactionSummary(entry.comment, option.key)?.reactedByCurrentUser ? 'soft' : 'ghost'"
+                  :disabled="Boolean(actionBusy)"
+                  :title="option.label"
+                  @click="toggleReaction(entry.comment, option.key)"
+                />
+              </template>
+              <template v-else>
+                <span
+                  v-for="reaction in entry.comment.reactions"
+                  :key="reaction.reaction"
+                  class="rounded-md bg-elevated px-2 py-1 text-xs"
+                >
+                  {{ reactionButtonLabel(entry.comment, reaction.reaction) }}
+                </span>
+              </template>
+            </div>
           </article>
 
           <div v-else-if="entry.kind === 'activity' && entry.activity" class="flex gap-3 px-1 text-sm">

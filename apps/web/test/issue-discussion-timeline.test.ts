@@ -9,6 +9,10 @@ const root = {
   parentCommentId: null,
   author: { type: 'HUMAN' as const, id: 'user-1', name: 'Alex' },
   body: 'Root **comment**',
+  deletedAt: null,
+  resolvedAt: null,
+  resolvedBy: null,
+  reactions: [],
   createdAt: '2026-09-19T08:00:00Z',
   updatedAt: '2026-09-19T08:00:00Z'
 }
@@ -19,6 +23,10 @@ const reply = {
   parentCommentId: root.id,
   author: { type: 'HUMAN' as const, id: 'user-2', name: 'Sam' },
   body: 'Reply with `code`',
+  deletedAt: null,
+  resolvedAt: null,
+  resolvedBy: null,
+  reactions: [],
   createdAt: '2026-09-19T08:01:00Z',
   updatedAt: '2026-09-19T08:01:00Z'
 }
@@ -43,8 +51,13 @@ const activity = {
 
 afterEach(() => vi.unstubAllGlobals())
 
+function stubAuth(userId = 'user-1') {
+  vi.stubGlobal('useAuth', () => ({ user: { value: { id: userId } } }))
+}
+
 describe('IssueDiscussionTimeline', () => {
   it('renders activity, threaded comments, posts replies, and reloads durable state', async () => {
+    stubAuth()
     let timeline = [
       { kind: 'activity' as const, id: activity.id, occurredAt: activity.occurredAt, comment: null, activity },
       { kind: 'comment' as const, id: root.id, occurredAt: root.createdAt, comment: root, activity: null },
@@ -104,6 +117,7 @@ describe('IssueDiscussionTimeline', () => {
   })
 
   it('surfaces submit failures and allows cancelling a reply', async () => {
+    stubAuth()
     const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
       if (String(path).endsWith('/timeline')) {
         return new Response(JSON.stringify([
@@ -139,6 +153,7 @@ describe('IssueDiscussionTimeline', () => {
   })
 
   it('shows an empty read-only state without mutation controls', async () => {
+    stubAuth()
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([]))))
     const wrapper = mount(IssueDiscussionTimeline, {
       props: { projectId: 'p', issueId: 'AB-1', canMutate: false },
@@ -151,4 +166,134 @@ describe('IssueDiscussionTimeline', () => {
     expect(wrapper.findAll('button').some(button => button.text().includes('Post'))).toBe(false)
     wrapper.unmount()
   })
+  it('edits, resolves, reacts, reopens, and tombstones while preserving replies', async () => {
+    stubAuth()
+    let timeline = [
+      { kind: 'comment' as const, id: root.id, occurredAt: root.createdAt, comment: { ...root }, activity: null },
+      { kind: 'comment' as const, id: reply.id, occurredAt: reply.createdAt, comment: { ...reply }, activity: null }
+    ]
+
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      const method = options.method || 'GET'
+      const rootEntry = timeline[0]!
+      if (url.endsWith('/timeline')) return new Response(JSON.stringify(timeline))
+      if (url.endsWith('/comments/' + root.id) && method === 'PATCH') {
+        const input = JSON.parse(String(options.body)) as { body: string }
+        rootEntry.comment = { ...rootEntry.comment!, body: input.body, updatedAt: '2026-09-19T08:05:00Z' }
+        return new Response(JSON.stringify(rootEntry.comment))
+      }
+      if (url.endsWith('/comments/' + root.id + '/resolution') && method === 'PUT') {
+        rootEntry.comment = {
+          ...rootEntry.comment!,
+          resolvedAt: '2026-09-19T08:06:00Z',
+          resolvedBy: { id: 'user-1', name: 'Alex' }
+        }
+        return new Response(JSON.stringify(rootEntry.comment))
+      }
+      if (url.endsWith('/comments/' + root.id + '/resolution') && method === 'DELETE') {
+        rootEntry.comment = { ...rootEntry.comment!, resolvedAt: null, resolvedBy: null }
+        return new Response(JSON.stringify(rootEntry.comment))
+      }
+      if (url.endsWith('/comments/' + root.id + '/reactions/HEART') && method === 'PUT') {
+        rootEntry.comment = {
+          ...rootEntry.comment!,
+          reactions: [{ reaction: 'HEART' as const, count: 1, reactedByCurrentUser: true }]
+        }
+        return new Response(null, { status: 204 })
+      }
+      if (url.endsWith('/comments/' + root.id + '/reactions/HEART') && method === 'DELETE') {
+        rootEntry.comment = { ...rootEntry.comment!, reactions: [] }
+        return new Response(null, { status: 204 })
+      }
+      if (url.endsWith('/comments/' + root.id) && method === 'DELETE') {
+        rootEntry.comment = {
+          ...rootEntry.comment!,
+          body: null,
+          deletedAt: '2026-09-19T08:07:00Z',
+          resolvedAt: null,
+          resolvedBy: null,
+          reactions: []
+        }
+        return new Response(null, { status: 204 })
+      }
+      throw new Error(`unexpected request ${method} ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: {
+        stubs: {
+          ...uiStubs,
+          IssueDiscussionTimeline: false,
+          IdentityAvatar: { props: ['name'], template: '<span>{{ name }}</span>' }
+        }
+      }
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'Edit')!.trigger('click')
+    await wrapper.find('article textarea').setValue('Edited root')
+    await wrapper.findAll('button').find(button => button.text() === 'Save edit')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Edited root')
+    expect(wrapper.text()).toContain('edited')
+
+    await wrapper.findAll('button').find(button => button.text() === 'Resolve')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Resolved by Alex')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Reopen')).toBe(true)
+
+    const heart = wrapper.findAll('button').find(button => button.text() === '❤️')
+    expect(heart).toBeTruthy()
+    await heart!.trigger('click')
+    await flushPromises()
+    const reactedHeart = wrapper.findAll('button').find(button => button.text() === '❤️ 1')
+    expect(reactedHeart).toBeTruthy()
+    await reactedHeart!.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('button').some(button => button.text() === '❤️ 1')).toBe(false)
+
+    await wrapper.findAll('button').find(button => button.text() === 'Reopen')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Resolved by Alex')
+
+    await wrapper.findAll('button').find(button => button.text() === 'Delete')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Comment deleted')
+    expect(wrapper.text()).toContain('Reply with code')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Edit')).toBe(false)
+    expect(wrapper.html()).not.toContain('Edited root')
+    wrapper.unmount()
+  })
+
+  it('surfaces lifecycle mutation failures without discarding the edit', async () => {
+    stubAuth()
+    vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit = {}) => {
+      if (String(path).endsWith('/timeline')) {
+        return new Response(JSON.stringify([
+          { kind: 'comment', id: root.id, occurredAt: root.createdAt, comment: root, activity: null }
+        ]))
+      }
+      if (options.method === 'PATCH') {
+        return new Response(JSON.stringify({ error: { code: 'internal_error', message: 'edit failed' } }), { status: 500 })
+      }
+      throw new Error(`unexpected request ${path}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Edit')!.trigger('click')
+    await wrapper.find('article textarea').setValue('Keep this edit')
+    await wrapper.findAll('button').find(button => button.text() === 'Save edit')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to update comment')
+    expect((wrapper.find('article textarea').element as HTMLTextAreaElement).value).toBe('Keep this edit')
+    wrapper.unmount()
+  })
+
 })
