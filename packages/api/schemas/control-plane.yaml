@@ -322,16 +322,43 @@ IssueCommentAuthor:
     type: {type: string, enum: [HUMAN, AGENT]}
     id: {type: string, format: uuid}
     name: {type: string}
+IssueCommentResolver:
+  type: object
+  additionalProperties: false
+  required: [id, name]
+  properties:
+    id: {type: string, format: uuid}
+    name: {type: string}
+IssueCommentReactionKey:
+  type: string
+  enum: [THUMBS_UP, THUMBS_DOWN, LAUGH, HOORAY, CONFUSED, HEART, ROCKET, EYES]
+IssueCommentReactionSummary:
+  type: object
+  additionalProperties: false
+  required: [reaction, count, reactedByCurrentUser]
+  properties:
+    reaction: {$ref: '#/IssueCommentReactionKey'}
+    count: {type: integer, minimum: 1}
+    reactedByCurrentUser: {type: boolean}
 IssueComment:
   type: object
   additionalProperties: false
-  required: [id, issueId, parentCommentId, author, body, createdAt, updatedAt]
+  required: [id, issueId, parentCommentId, author, body, deletedAt, resolvedAt, resolvedBy, reactions, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     issueId: {$ref: '#/IssueKey'}
     parentCommentId: {type: [string, 'null'], format: uuid}
     author: {$ref: '#/IssueCommentAuthor'}
-    body: {type: string}
+    body: {type: [string, 'null']}
+    deletedAt: {type: [string, 'null'], format: date-time}
+    resolvedAt: {type: [string, 'null'], format: date-time}
+    resolvedBy:
+      oneOf:
+      - {$ref: '#/IssueCommentResolver'}
+      - {type: 'null'}
+    reactions:
+      type: array
+      items: {$ref: '#/IssueCommentReactionSummary'}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
 IssueCommentCreate:
@@ -340,6 +367,15 @@ IssueCommentCreate:
   required: [body]
   properties:
     parentCommentId: {type: [string, 'null'], format: uuid}
+    body:
+      type: string
+      minLength: 1
+      pattern: '\S'
+IssueCommentUpdate:
+  type: object
+  additionalProperties: false
+  required: [body]
+  properties:
     body:
       type: string
       minLength: 1
