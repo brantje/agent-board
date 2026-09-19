@@ -200,7 +200,7 @@ try {
 
     let rootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
     await rootArticle.getByRole('button', { name: 'Edit' }).click()
-    await rootArticle.locator('textarea').fill('Durable edited root')
+    await page.locator('article textarea').fill('Durable edited root')
     await rootArticle.getByRole('button', { name: 'Save edit' }).click()
     await page.getByText('Durable edited root').waitFor()
     await page.getByText('edited', { exact: true }).waitFor()
