@@ -12,11 +12,16 @@ type issueCommentTestStore struct {
 	*projectWorkflowAuthorizationStore
 	comments    []store.IssueComment
 	events      []store.Event
+	commentErr  error
+	activityErr error
 	createCalls int
 	lastCreate  store.IssueComment
 }
 
 func (s *issueCommentTestStore) ListIssueComments(_ context.Context, projectID, issueID string) ([]store.IssueComment, error) {
+	if s.commentErr != nil {
+		return nil, s.commentErr
+	}
 	if projectID != s.project.ID {
 		return nil, store.ErrNotFound
 	}
@@ -27,6 +32,9 @@ func (s *issueCommentTestStore) ListIssueComments(_ context.Context, projectID, 
 }
 
 func (s *issueCommentTestStore) CreateIssueComment(_ context.Context, projectID string, input store.IssueComment) (store.IssueCommentMutationResult, error) {
+	if s.commentErr != nil {
+		return store.IssueCommentMutationResult{}, s.commentErr
+	}
 	if projectID != s.project.ID {
 		return store.IssueCommentMutationResult{}, store.ErrNotFound
 	}
@@ -42,6 +50,9 @@ func (s *issueCommentTestStore) CreateIssueComment(_ context.Context, projectID 
 }
 
 func (s *issueCommentTestStore) ListIssueTimelineEvents(_ context.Context, projectID, issueID string) ([]store.Event, error) {
+	if s.activityErr != nil {
+		return nil, s.activityErr
+	}
 	if projectID != s.project.ID {
 		return nil, store.ErrNotFound
 	}
@@ -162,6 +173,92 @@ func TestIssueCommentApplicationValidationAndUnavailableCapabilities(t *testing.
 				t.Fatalf("CreateIssueComment(%s) unexpectedly succeeded", name)
 			}
 		})
+	}
+}
+
+func TestIssueCommentApplicationPropagatesReadWriteAndTimelineFailures(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	fake := &issueCommentTestStore{projectWorkflowAuthorizationStore: base}
+	service := New(fake)
+
+	if _, err := service.ListIssueComments(t.Context(), projectID, "missing"); err == nil {
+		t.Fatal("missing Issue comment read unexpectedly succeeded")
+	}
+	if _, err := service.CreateIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: "missing", AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "hello",
+	}); err == nil {
+		t.Fatal("missing Issue comment creation unexpectedly succeeded")
+	}
+
+	fake.commentErr = store.ErrConflict
+	if _, err := service.ListIssueComments(t.Context(), projectID, issueID); err == nil {
+		t.Fatal("comment store read failure was swallowed")
+	}
+	if _, err := service.CreateIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "hello",
+	}); err == nil {
+		t.Fatal("comment store write failure was swallowed")
+	}
+	fake.commentErr = nil
+
+	service.issueActivity = nil
+	if _, err := service.ListIssueTimeline(t.Context(), projectID, issueID); err == nil {
+		t.Fatal("timeline unexpectedly succeeded without activity capability")
+	}
+	service.issueActivity = fake
+
+	fake.activityErr = store.ErrConflict
+	if _, err := service.ListIssueTimeline(t.Context(), projectID, issueID); err == nil {
+		t.Fatal("timeline activity failure was swallowed")
+	}
+}
+
+func TestIssueTimelineTieBreaksByKindThenID(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	at := time.Date(2026, 9, 19, 2, 0, 0, 0, time.UTC)
+	fake := &issueCommentTestStore{
+		projectWorkflowAuthorizationStore: base,
+		comments: []store.IssueComment{
+			{ID: "comment-b", IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "B", CreatedAt: at, UpdatedAt: at},
+			{ID: "comment-a", IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "user", Body: "A", CreatedAt: at, UpdatedAt: at},
+		},
+		events: []store.Event{
+			{ID: "event-b", Type: "issue.updated", ProjectID: projectID, IssueID: stringPointer(issueID), OccurredAt: at},
+			{ID: "event-a", Type: "run.completed", ProjectID: projectID, IssueID: stringPointer(issueID), OccurredAt: at},
+		},
+	}
+	entries, err := New(fake).ListIssueTimeline(t.Context(), projectID, issueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		got = append(got, entry.ID)
+	}
+	want := []string{"event-a", "event-b", "comment-a", "comment-b"}
+	if len(got) != len(want) {
+		t.Fatalf("timeline=%v want=%v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("timeline=%v want=%v", got, want)
+		}
 	}
 }
 

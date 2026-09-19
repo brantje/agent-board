@@ -168,6 +168,12 @@ func TestIssueCommentLowLevelRouterReadCompatibilityAndWriteFailClosed(t *testin
 		t.Fatalf("low-level timeline status=%d body=%s", timeline.Code, timeline.Body.String())
 	}
 
+	invalidParent := httptest.NewRecorder()
+	router.ServeHTTP(invalidParent, httptest.NewRequest(http.MethodPost, base+"/comments", strings.NewReader(`{"parentCommentId":"not-a-uuid","body":"reply"}`)))
+	if invalidParent.Code != http.StatusBadRequest {
+		t.Fatalf("invalid parent status=%d body=%s", invalidParent.Code, invalidParent.Body.String())
+	}
+
 	create := httptest.NewRecorder()
 	router.ServeHTTP(create, httptest.NewRequest(http.MethodPost, base+"/comments", strings.NewReader(`{"body":"cannot forge unauthenticated write"}`)))
 	if create.Code != http.StatusUnauthorized {
