@@ -52,27 +52,33 @@ type permissionReply struct {
 
 func TestOpenCodeServeCommandInstallsOnlyAvailableTools(t *testing.T) {
 	tests := []struct {
-		name       string
-		status     bool
-		delegation bool
-		wantStatus bool
-		wantDel    bool
+		name        string
+		status      bool
+		comment     bool
+		delegation  bool
+		wantStatus  bool
+		wantComment bool
+		wantDel     bool
 	}{
 		{name: "none"},
 		{name: "status", status: true, wantStatus: true},
+		{name: "comment", comment: true, wantComment: true},
 		{name: "delegation", delegation: true, wantDel: true},
-		{name: "both", status: true, delegation: true, wantStatus: true, wantDel: true},
+		{name: "all", status: true, comment: true, delegation: true, wantStatus: true, wantComment: true, wantDel: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			command := openCodeServeCommand("127.0.0.1", "4100", tt.status, tt.delegation)
-			if len(command) != 8 || command[0] != "sh" || command[1] != "-c" {
+			command := openCodeServeCommand("127.0.0.1", "4100", tt.status, tt.comment, tt.delegation)
+			if len(command) != 9 || command[0] != "sh" || command[1] != "-c" {
 				t.Fatalf("command=%q", command)
 			}
 			if got := command[6] != ""; got != tt.wantStatus {
 				t.Fatalf("status source present=%v want=%v", got, tt.wantStatus)
 			}
-			if got := command[7] != ""; got != tt.wantDel {
+			if got := command[7] != ""; got != tt.wantComment {
+				t.Fatalf("comment source present=%v want=%v", got, tt.wantComment)
+			}
+			if got := command[8] != ""; got != tt.wantDel {
 				t.Fatalf("delegation source present=%v want=%v", got, tt.wantDel)
 			}
 			if !strings.Contains(command[2], "rm -f") {
@@ -84,7 +90,6 @@ func TestOpenCodeServeCommandInstallsOnlyAvailableTools(t *testing.T) {
 		t.Fatalf("delegation tool source does not synchronously bind to Agent Board: %s", delegationToolSource)
 	}
 }
-
 func TestDelegationPermissionSuccessCompletesOnlyAfterCanonicalRequest(t *testing.T) {
 	var replies []permissionReply
 	native := delegationPermissionClient(t, nil, &replies)

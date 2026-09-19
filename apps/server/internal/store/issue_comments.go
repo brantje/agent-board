@@ -50,6 +50,8 @@ type IssueComment struct {
 	AuthorType       string
 	AuthorID         string
 	AuthorName       string
+	SourceRunID      *string
+	SourceActionKey  *string
 	Body             string
 	DeletedAt        *time.Time
 	ResolvedAt       *time.Time

@@ -30,12 +30,12 @@ func (l *capabilityAttachLauncher) Start(_ context.Context, request engine.Proce
 }
 
 func TestRecoveredOpenCodeProcessIsReusedWhenCapabilitiesMatch(t *testing.T) {
-	server, host := capabilityServer(t, []string{issueStatusToolName, delegationToolName})
+	server, host := capabilityServer(t, []string{issueStatusToolName, issueCommentToolName, delegationToolName})
 	defer server.Close()
 	attached := newFakeOpenCodeProcess(host)
 	fresh := newFakeOpenCodeProcess(host)
 	launcher := &capabilityAttachLauncher{attached: attached, fresh: fresh}
-	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", serverPort(t, server.URL), map[string]string{}, true, true)
+	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", serverPort(t, server.URL), map[string]string{}, true, true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,14 +51,14 @@ func TestRecoveredOpenCodeProcessRestartsWhenCapabilitiesDiffer(t *testing.T) {
 	attached := newFakeOpenCodeProcess(host)
 	fresh := newFakeOpenCodeProcess(host)
 	launcher := &capabilityAttachLauncher{attached: attached, fresh: fresh}
-	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", serverPort(t, server.URL), map[string]string{}, true, false)
+	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", serverPort(t, server.URL), map[string]string{}, true, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if recovered || process != fresh || launcher.starts != 1 {
 		t.Fatalf("process=%T recovered=%v starts=%d", process, recovered, launcher.starts)
 	}
-	if len(launcher.request.Command) != 8 || launcher.request.Command[6] == "" || launcher.request.Command[7] != "" {
+	if len(launcher.request.Command) != 9 || launcher.request.Command[6] == "" || launcher.request.Command[7] != "" || launcher.request.Command[8] != "" {
 		t.Fatalf("restart command=%v", launcher.request.Command)
 	}
 	select {
@@ -85,7 +85,7 @@ func TestRecoveredOpenCodeProcessRestartsWhenRequiredCapabilitiesCannotBeInspect
 	attached := newFakeOpenCodeProcess(parsed.Host)
 	fresh := newFakeOpenCodeProcess(parsed.Host)
 	launcher := &capabilityAttachLauncher{attached: attached, fresh: fresh}
-	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", parsed.Port(), map[string]string{}, true, false)
+	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", parsed.Port(), map[string]string{}, true, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestRecoveredOpenCodeProcessReusesUnknownCapabilitiesWhenNoToolsRequired(t 
 	attached := newFakeOpenCodeProcess(parsed.Host)
 	fresh := newFakeOpenCodeProcess(parsed.Host)
 	launcher := &capabilityAttachLauncher{attached: attached, fresh: fresh}
-	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", parsed.Port(), map[string]string{}, false, false)
+	process, recovered, err := launchOpenCodeProcessWithCapabilities(t.Context(), launcher, "127.0.0.1", parsed.Port(), map[string]string{}, false, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}

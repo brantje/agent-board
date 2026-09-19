@@ -98,6 +98,7 @@ export interface IssueComment {
   id: string
   issueId: string
   parentCommentId: string | null
+  sourceRunId: string | null
   author: IssueCommentAuthor
   body: string | null
   deletedAt: string | null

@@ -214,8 +214,16 @@ defineExpose({ refresh: timeline.refresh })
             :class="entry.comment.parentCommentId ? 'ms-6' : ''"
           >
             <div class="flex flex-wrap items-center gap-2 text-sm">
-              <IdentityAvatar kind="user" :name="entry.comment.author.name" size="xs" />
+              <IdentityAvatar :kind="entry.comment.author.type === 'AGENT' ? 'agent' : 'user'" :name="entry.comment.author.name" size="xs" />
               <strong>{{ entry.comment.author.name }}</strong>
+              <UBadge v-if="entry.comment.author.type === 'AGENT'" label="Agent" size="xs" variant="subtle" />
+              <NuxtLink
+                v-if="entry.comment.sourceRunId"
+                :to="`/projects/${projectId}/runs/${entry.comment.sourceRunId}`"
+                class="text-xs text-muted hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                · via Run
+              </NuxtLink>
               <span class="text-muted">· {{ formatActivityTime(entry.occurredAt) }}</span>
               <span v-if="wasEdited(entry.comment)" class="text-muted">· edited</span>
             </div>

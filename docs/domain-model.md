@@ -73,7 +73,7 @@ BACKLOG -> TODO -> IN_PROGRESS -> BLOCKED -> REVIEW -> DONE
 
 A durable Issue-domain collaboration record. Comments are separate from Run execution evidence and do not change Issue ownership, Board status or Run lifecycle.
 
-A comment stores one stable ID, its Issue, an optional parent comment on the same Issue, typed author identity (`HUMAN | AGENT`), body, and timestamps. The current human-facing create path derives `HUMAN` authorship from the authenticated User; callers cannot choose an author. Agent publishing is a later trusted capability rather than a browser-supplied identity.
+A comment stores one stable ID, its Issue, an optional parent comment on the same Issue, typed author identity (`HUMAN | AGENT`), body, and timestamps. The human-facing create path derives `HUMAN` authorship from the authenticated User; callers cannot choose an author. Deliberate Agent publication derives `AGENT` identity, Issue identity and `source_run_id` from the authoritative Run. A Run-scoped internal action key makes native Engine-tool replay idempotent without becoming public comment identity.
 
 Top-level comments and replies share one persistence/application path. Replies retain their parent ID, while Issue detail composes comments with relevant existing durable Events into a chronological read projection. The projection is not a second durable history store. Operational tool/file/test/agent telemetry stays on Run evidence surfaces rather than being copied into comments.
 

@@ -277,10 +277,10 @@ func TestEngineAnswersNativeQuestionWithoutSecondPrompt(t *testing.T) {
 		t.Fatalf("split test server address: %v", err)
 	}
 	command := launcher.request.Command
-	if len(command) != 8 || command[0] != "sh" || command[1] != "-c" || !strings.Contains(command[2], "set_issue_status.ts") || command[3] != "agent-board-opencode" || command[4] != host || command[5] != port {
+	if len(command) != 9 || command[0] != "sh" || command[1] != "-c" || !strings.Contains(command[2], "set_issue_status.ts") || !strings.Contains(command[2], "publish_issue_comment.ts") || command[3] != "agent-board-opencode" || command[4] != host || command[5] != port {
 		t.Fatalf("server command=%v want bootstrapped address %s:%s", command, host, port)
 	}
-	if command[6] != "" || command[7] != "" {
+	if command[6] != "" || command[7] != "" || command[8] != "" {
 		t.Fatalf("server command unexpectedly installed unavailable Agent Board tools: %v", command)
 	}
 	if launcher.request.CWD != "/workspace" {

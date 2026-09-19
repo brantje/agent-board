@@ -12,6 +12,85 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+func TestIssueCommentAgentRunProvenance(t *testing.T) {
+	s := New(testPool(t))
+	ctx := t.Context()
+	fixture := seedRunFixture(t, s, "agent-comment-provenance")
+	runID := fixture.run.ID
+
+	result, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
+		SourceRunID: &runID, SourceActionKey: stringPointer("tool-call-1"), Body: "Agent finding @plain-text-only",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	comment := result.Comment
+	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != fixture.agent.ID ||
+		comment.SourceRunID == nil || *comment.SourceRunID != fixture.run.ID || comment.SourceActionKey == nil || *comment.SourceActionKey != "tool-call-1" {
+		t.Fatalf("agent provenance=%+v", comment)
+	}
+	if len(result.Events) != 1 || result.Events[0].Type != "issue.comment_created" ||
+		strings.Contains(string(result.Events[0].Payload), comment.Body) {
+		t.Fatalf("agent comment events=%+v", result.Events)
+	}
+
+	reloaded, err := New(s.pool).GetIssueComment(ctx, fixture.project.ID, fixture.issue.ID, comment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.AuthorName != fixture.agent.Name || reloaded.SourceRunID == nil || *reloaded.SourceRunID != fixture.run.ID ||
+		reloaded.SourceActionKey == nil || *reloaded.SourceActionKey != "tool-call-1" || reloaded.Body != "Agent finding @plain-text-only" {
+		t.Fatalf("reloaded agent comment=%+v", reloaded)
+	}
+
+
+	retried, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
+		SourceRunID: &runID, SourceActionKey: stringPointer("tool-call-1"), Body: "Agent finding @plain-text-only",
+	})
+	if err != nil || retried.Comment.ID != comment.ID || len(retried.Events) != 0 {
+		t.Fatalf("idempotent retry=%+v err=%v", retried, err)
+	}
+	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
+		SourceRunID: &runID, SourceActionKey: stringPointer("tool-call-1"), Body: "changed retry body",
+	}); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("changed retry error=%v", err)
+	}
+	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID, Body: "missing provenance",
+	}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("agent comment without source run error=%v", err)
+	}
+	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: fixture.agent.ID,
+		SourceRunID: &runID, Body: "forged human provenance",
+	}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("human comment with source run error=%v", err)
+	}
+
+	other := seedRunFixture(t, s, "agent-comment-provenance-other")
+	otherRunID := other.run.ID
+	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: fixture.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
+		SourceRunID: &otherRunID, SourceActionKey: stringPointer("cross-project"), Body: "cross-project source",
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-project source run error=%v", err)
+	}
+
+	sibling, err := s.CreateIssue(ctx, store.Issue{ProjectID: fixture.project.ID, Title: "Sibling provenance", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateIssueComment(ctx, fixture.project.ID, store.IssueComment{
+		IssueID: sibling.ID, AuthorType: store.ActorTypeAgent, AuthorID: fixture.agent.ID,
+		SourceRunID: &runID, SourceActionKey: stringPointer("cross-issue"), Body: "cross-Issue source",
+	}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("cross-Issue source run error=%v", err)
+	}
+}
+
 func TestIssueCommentsPersistRepliesIsolationOrderingAndNoExecutionSideEffects(t *testing.T) {
 	pool := testPool(t)
 	s := New(pool)

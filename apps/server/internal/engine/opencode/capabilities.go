@@ -18,7 +18,7 @@ type attachedProcessResetter interface {
 	ResetAttachedProcess()
 }
 
-func reconcileAttachedOpenCodeCapabilities(ctx context.Context, launcher engine.ProcessLauncher, process engine.Process, host, port string, env map[string]string, issueStatusEnabled, delegationEnabled bool) (engine.Process, bool, error) {
+func reconcileAttachedOpenCodeCapabilities(ctx context.Context, launcher engine.ProcessLauncher, process engine.Process, host, port string, env map[string]string, issueStatusEnabled, issueCommentEnabled, delegationEnabled bool) (engine.Process, bool, error) {
 	connector, ok := process.(engine.SessionConnector)
 	if !ok {
 		return nil, false, fmt.Errorf("opencode engine: attached process does not support session-local connections")
@@ -41,7 +41,7 @@ func reconcileAttachedOpenCodeCapabilities(ctx context.Context, launcher engine.
 			// Older/reduced OpenCode servers may not expose tool discovery. They are
 			// safe to reuse only when this execution needs neither Agent Board tool;
 			// otherwise restart so the effective capability files are known-good.
-			if !issueStatusEnabled && !delegationEnabled {
+			if !issueStatusEnabled && !issueCommentEnabled && !delegationEnabled {
 				return process, true, nil
 			}
 			ids = nil
@@ -49,7 +49,7 @@ func reconcileAttachedOpenCodeCapabilities(ctx context.Context, launcher engine.
 			return nil, false, fmt.Errorf("opencode engine: inspect attached tool capabilities: %w", err)
 		}
 	}
-	if openCodeToolCapabilitiesMatch(ids, issueStatusEnabled, delegationEnabled) {
+	if openCodeToolCapabilitiesMatch(ids, issueStatusEnabled, issueCommentEnabled, delegationEnabled) {
 		return process, true, nil
 	}
 
@@ -62,21 +62,22 @@ func reconcileAttachedOpenCodeCapabilities(ctx context.Context, launcher engine.
 	if resetter, ok := launcher.(attachedProcessResetter); ok {
 		resetter.ResetAttachedProcess()
 	}
-	fresh, err := startOpenCodeProcess(ctx, launcher, host, port, env, issueStatusEnabled, delegationEnabled)
+	fresh, err := startOpenCodeProcess(ctx, launcher, host, port, env, issueStatusEnabled, issueCommentEnabled, delegationEnabled)
 	if err != nil {
 		return nil, false, err
 	}
 	return fresh, false, nil
 }
 
-func openCodeToolCapabilitiesMatch(ids []string, issueStatusEnabled, delegationEnabled bool) bool {
+func openCodeToolCapabilitiesMatch(ids []string, issueStatusEnabled, issueCommentEnabled, delegationEnabled bool) bool {
 	available := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		available[id] = struct{}{}
 	}
 	_, hasStatus := available[issueStatusToolName]
+	_, hasComment := available[issueCommentToolName]
 	_, hasDelegation := available[delegationToolName]
-	return hasStatus == issueStatusEnabled && hasDelegation == delegationEnabled
+	return hasStatus == issueStatusEnabled && hasComment == issueCommentEnabled && hasDelegation == delegationEnabled
 }
 
 func discardProcessStreams(process engine.Process) <-chan struct{} {
@@ -96,9 +97,9 @@ func discardProcessStreams(process engine.Process) <-chan struct{} {
 	return done
 }
 
-func startOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string, issueStatusEnabled, delegationEnabled bool) (engine.Process, error) {
+func startOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string, issueStatusEnabled, issueCommentEnabled, delegationEnabled bool) (engine.Process, error) {
 	process, err := launcher.Start(ctx, engine.ProcessRequest{
-		Command:               openCodeServeCommand(host, port, issueStatusEnabled, delegationEnabled),
+		Command:               openCodeServeCommand(host, port, issueStatusEnabled, issueCommentEnabled, delegationEnabled),
 		CWD:                   runtimepkg.WorkspaceTarget,
 		Env:                   env,
 		ProviderCredentialEnv: providerCredentialEnv,
