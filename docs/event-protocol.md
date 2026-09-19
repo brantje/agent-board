@@ -101,6 +101,7 @@ issue.updated
 issue.assigned
 issue.status_changed
 issue.comment_created
+issue.comment_changed
 ```
 
 `issue.assigned` records `{ "assignedTo": { "type": "USER" | "AGENT" | "SQUAD", "id": "uuid", "name": "display name" } }`, or `{ "assignedTo": null }` when clearing ownership. Human callers are attributed through the existing `actor` envelope (`type: HUMAN`, durable User `id`). The ownership mutation and Event commit atomically; live publication follows commit. Repeating the current assignment emits no new Event. Validation failures produce no product Event.
