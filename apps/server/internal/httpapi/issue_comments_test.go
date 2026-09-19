@@ -455,6 +455,14 @@ func TestIssueCommentHTTPLifecycleResolutionAndReactions(t *testing.T) {
 	if len(deletedComments) != 2 || deletedComments[0].Body != nil || deletedComments[0].DeletedAt == nil || deletedComments[1].ParentCommentID == nil || *deletedComments[1].ParentCommentID != httpCommentID {
 		t.Fatalf("deleted projection=%+v", deletedComments)
 	}
+	repeatedDelete := authHTTPRequest(t, fixture.handler, http.MethodDelete, base, "", bearer(authorToken))
+	if repeatedDelete.Code != http.StatusNoContent {
+		t.Fatalf("repeated author delete status=%d body=%s", repeatedDelete.Code, repeatedDelete.Body.String())
+	}
+	forbiddenTombstoneDelete := authHTTPRequest(t, fixture.handler, http.MethodDelete, base, "", bearer(memberToken))
+	if forbiddenTombstoneDelete.Code != http.StatusForbidden {
+		t.Fatalf("non-author tombstone delete status=%d body=%s", forbiddenTombstoneDelete.Code, forbiddenTombstoneDelete.Body.String())
+	}
 
 	badID := authHTTPRequest(t, fixture.handler, http.MethodPatch, "/api/projects/"+projectID+"/issues/"+issueKey+"/comments/not-a-uuid", `{"body":"bad"}`, bearer(authorToken))
 	if badID.Code != http.StatusBadRequest {

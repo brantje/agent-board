@@ -575,6 +575,25 @@ func TestProjectAccessIssueCommentLifecycleAuthorizationAndExecutionNeutrality(t
 	if err != nil || tombstone.DeletedAt == nil || tombstone.Body != "" {
 		t.Fatalf("tombstone=%+v err=%v", tombstone, err)
 	}
+	eventsAfterDelete := len(publisher.published)
+	deletedAt := *tombstone.DeletedAt
+	updatedAt := tombstone.UpdatedAt
+	if err := access.DeleteIssueComment(t.Context(), author, projectID, issueID, root.ID); err != nil {
+		t.Fatalf("repeated author delete: %v", err)
+	}
+	if len(publisher.published) != eventsAfterDelete {
+		t.Fatalf("repeated author delete published events=%+v", publisher.published[eventsAfterDelete:])
+	}
+	if err := access.DeleteIssueComment(t.Context(), member, projectID, issueID, root.ID); err == nil {
+		t.Fatal("non-author tombstone delete unexpectedly succeeded")
+	}
+	if len(publisher.published) != eventsAfterDelete {
+		t.Fatalf("non-author tombstone delete published events=%+v", publisher.published[eventsAfterDelete:])
+	}
+	unchangedTombstone, err := service.GetIssueComment(t.Context(), projectID, issueID, root.ID)
+	if err != nil || unchangedTombstone.DeletedAt == nil || !unchangedTombstone.DeletedAt.Equal(deletedAt) || !unchangedTombstone.UpdatedAt.Equal(updatedAt) || unchangedTombstone.Body != "" {
+		t.Fatalf("tombstone changed after repeated deletes=%+v err=%v", unchangedTombstone, err)
+	}
 	if err := access.AddIssueCommentReaction(t.Context(), member, projectID, issueID, root.ID, store.IssueCommentReactionEyes); err == nil {
 		t.Fatal("reaction on deleted comment unexpectedly succeeded")
 	}

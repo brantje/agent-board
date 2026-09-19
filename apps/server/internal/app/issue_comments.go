@@ -87,6 +87,9 @@ func (s *Service) UpdateIssueComment(ctx context.Context, projectID, issueID, co
 	if err != nil {
 		return store.IssueComment{}, err
 	}
+	if comment.DeletedAt != nil {
+		return store.IssueComment{}, NewError("conflict", "deleted comments cannot be changed", store.ErrConflict)
+	}
 	if err := requireIssueCommentAuthor(comment, actorID); err != nil {
 		return store.IssueComment{}, err
 	}
@@ -103,11 +106,11 @@ func (s *Service) DeleteIssueComment(ctx context.Context, projectID, issueID, co
 	if err != nil {
 		return err
 	}
-	if comment.DeletedAt != nil {
-		return nil
-	}
 	if err := requireIssueCommentAuthor(comment, actorID); err != nil {
 		return err
+	}
+	if comment.DeletedAt != nil {
+		return nil
 	}
 	result, err := s.issueComments.DeleteIssueComment(ctx, projectID, issueID, commentID, actorID)
 	if err != nil {
@@ -190,9 +193,6 @@ func (s *Service) RemoveIssueCommentReaction(ctx context.Context, projectID, iss
 func requireIssueCommentAuthor(comment store.IssueComment, actorID string) error {
 	if strings.TrimSpace(actorID) == "" {
 		return invalid("comment actor is required")
-	}
-	if comment.DeletedAt != nil {
-		return NewError("conflict", "deleted comments cannot be changed", store.ErrConflict)
 	}
 	if comment.AuthorType != store.ActorTypeHuman || comment.AuthorID != actorID {
 		return NewError("forbidden", "comment can only be changed by its original human author", store.ErrInvalidArgument)
