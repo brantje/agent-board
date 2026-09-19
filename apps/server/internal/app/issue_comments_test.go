@@ -207,6 +207,9 @@ func TestIssueCommentApplicationPropagatesReadWriteAndTimelineFailures(t *testin
 	}); err == nil {
 		t.Fatal("comment store write failure was swallowed")
 	}
+	if _, err := service.ListIssueTimeline(t.Context(), projectID, issueID); err == nil {
+		t.Fatal("timeline swallowed comment read failure")
+	}
 	fake.commentErr = nil
 
 	service.issueActivity = nil

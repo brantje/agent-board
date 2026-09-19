@@ -156,6 +156,17 @@ func TestIssueCommentLowLevelRouterReadCompatibilityAndWriteFailClosed(t *testin
 	router := NewRouter(control)
 	base := "/api/projects/" + projectID + "/issues/" + issueKey
 
+	badCommentsProject := httptest.NewRecorder()
+	router.ServeHTTP(badCommentsProject, httptest.NewRequest(http.MethodGet, "/api/projects/not-a-uuid/issues/"+issueKey+"/comments", nil))
+	if badCommentsProject.Code != http.StatusBadRequest {
+		t.Fatalf("bad comments project status=%d body=%s", badCommentsProject.Code, badCommentsProject.Body.String())
+	}
+	badTimelineProject := httptest.NewRecorder()
+	router.ServeHTTP(badTimelineProject, httptest.NewRequest(http.MethodGet, "/api/projects/not-a-uuid/issues/"+issueKey+"/timeline", nil))
+	if badTimelineProject.Code != http.StatusBadRequest {
+		t.Fatalf("bad timeline project status=%d body=%s", badTimelineProject.Code, badTimelineProject.Body.String())
+	}
+
 	comments := httptest.NewRecorder()
 	router.ServeHTTP(comments, httptest.NewRequest(http.MethodGet, base+"/comments", nil))
 	if comments.Code != http.StatusOK {
