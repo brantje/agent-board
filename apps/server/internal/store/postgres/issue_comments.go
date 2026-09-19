@@ -193,10 +193,10 @@ func (s *Store) UpdateIssueComment(ctx context.Context, projectID, issueID, comm
 	var changedAt time.Time
 	if err := tx.QueryRow(ctx, `
 		UPDATE issue_comments
-		SET body = $4, updated_at = now()
-		WHERE issue_id = $2 AND id = $3
+		SET body = $3, updated_at = now()
+		WHERE issue_id = $1 AND id = $2
 		RETURNING updated_at
-	`, projectID, issueID, commentID, body).Scan(&changedAt); err != nil {
+	`, issueID, commentID, body).Scan(&changedAt); err != nil {
 		return store.IssueCommentMutationResult{}, err
 	}
 	event, err := appendIssueCommentChangedEventTx(ctx, tx, projectID, issueID, commentID, actorID, "EDITED", nil, changedAt)
