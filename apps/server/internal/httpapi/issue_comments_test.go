@@ -167,6 +167,30 @@ func TestIssueCommentLowLevelRouterReadCompatibilityAndWriteFailClosed(t *testin
 		t.Fatalf("bad timeline project status=%d body=%s", badTimelineProject.Code, badTimelineProject.Body.String())
 	}
 
+	badCreateProject := httptest.NewRecorder()
+	router.ServeHTTP(badCreateProject, httptest.NewRequest(http.MethodPost, "/api/projects/not-a-uuid/issues/"+issueKey+"/comments", strings.NewReader(`{"body":"bad project"}`)))
+	if badCreateProject.Code != http.StatusBadRequest {
+		t.Fatalf("bad create project status=%d body=%s", badCreateProject.Code, badCreateProject.Body.String())
+	}
+	for name, suffix := range map[string]string{
+		"comments": "/comments",
+		"timeline": "/timeline",
+	} {
+		t.Run("invalid issue key "+name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/projects/"+projectID+"/issues/not-an-issue-key"+suffix, nil))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	badCreateIssueKey := httptest.NewRecorder()
+	router.ServeHTTP(badCreateIssueKey, httptest.NewRequest(http.MethodPost, "/api/projects/"+projectID+"/issues/not-an-issue-key/comments", strings.NewReader(`{"body":"bad issue"}`)))
+	if badCreateIssueKey.Code != http.StatusBadRequest {
+		t.Fatalf("bad create issue status=%d body=%s", badCreateIssueKey.Code, badCreateIssueKey.Body.String())
+	}
+
 	comments := httptest.NewRecorder()
 	router.ServeHTTP(comments, httptest.NewRequest(http.MethodGet, base+"/comments", nil))
 	if comments.Code != http.StatusOK {
