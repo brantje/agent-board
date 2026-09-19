@@ -343,7 +343,7 @@ IssueCommentCreate:
     body:
       type: string
       minLength: 1
-      pattern: '\\S'
+      pattern: '\S'
 IssueTimelineEntry:
   type: object
   additionalProperties: false
