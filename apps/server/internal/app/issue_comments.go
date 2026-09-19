@@ -41,6 +41,17 @@ func (s *Service) ListIssueComments(ctx context.Context, projectID, issueID stri
 	return values, nil
 }
 
+func (s *Service) GetIssueComment(ctx context.Context, projectID, issueID, commentID string) (store.IssueComment, error) {
+	if _, err := s.GetIssue(ctx, projectID, issueID); err != nil {
+		return store.IssueComment{}, err
+	}
+	if s.issueComments == nil {
+		return store.IssueComment{}, errors.New("issue comments are unavailable")
+	}
+	value, err := s.issueComments.GetIssueComment(ctx, projectID, issueID, commentID)
+	return value, translateStoreError(err, "issue_comment")
+}
+
 func (s *Service) CreateIssueComment(ctx context.Context, input CreateIssueCommentInput) (store.IssueComment, error) {
 	if _, err := s.GetIssue(ctx, input.ProjectID, input.IssueID); err != nil {
 		return store.IssueComment{}, err
@@ -64,9 +75,157 @@ func (s *Service) CreateIssueComment(ctx context.Context, input CreateIssueComme
 	if err != nil {
 		return store.IssueComment{}, translateStoreError(err, "issue_comment")
 	}
-	publisher, _ := s.events.(persistedEventPublisher)
-	publishPersistedEvents(ctx, publisher, result.Events)
+	s.publishIssueCommentEvents(ctx, result.Events)
 	return result.Comment, nil
+}
+
+func (s *Service) UpdateIssueComment(ctx context.Context, projectID, issueID, commentID, actorID, body string) (store.IssueComment, error) {
+	if strings.TrimSpace(body) == "" {
+		return store.IssueComment{}, invalid("comment body is required")
+	}
+	comment, err := s.GetIssueComment(ctx, projectID, issueID, commentID)
+	if err != nil {
+		return store.IssueComment{}, err
+	}
+	if err := requireIssueCommentAuthor(comment, actorID); err != nil {
+		return store.IssueComment{}, err
+	}
+	result, err := s.issueComments.UpdateIssueComment(ctx, projectID, issueID, commentID, actorID, body)
+	if err != nil {
+		return store.IssueComment{}, translateStoreError(err, "issue_comment")
+	}
+	s.publishIssueCommentEvents(ctx, result.Events)
+	return result.Comment, nil
+}
+
+func (s *Service) DeleteIssueComment(ctx context.Context, projectID, issueID, commentID, actorID string) error {
+	comment, err := s.GetIssueComment(ctx, projectID, issueID, commentID)
+	if err != nil {
+		return err
+	}
+	if comment.DeletedAt != nil {
+		return nil
+	}
+	if err := requireIssueCommentAuthor(comment, actorID); err != nil {
+		return err
+	}
+	result, err := s.issueComments.DeleteIssueComment(ctx, projectID, issueID, commentID, actorID)
+	if err != nil {
+		return translateStoreError(err, "issue_comment")
+	}
+	s.publishIssueCommentEvents(ctx, result.Events)
+	return nil
+}
+
+func (s *Service) ResolveIssueComment(ctx context.Context, projectID, issueID, commentID, actorID string) (store.IssueComment, error) {
+	comment, err := s.GetIssueComment(ctx, projectID, issueID, commentID)
+	if err != nil {
+		return store.IssueComment{}, err
+	}
+	if err := validateIssueCommentThreadMutation(comment, actorID); err != nil {
+		return store.IssueComment{}, err
+	}
+	result, err := s.issueComments.ResolveIssueComment(ctx, projectID, issueID, commentID, actorID)
+	if err != nil {
+		return store.IssueComment{}, translateStoreError(err, "issue_comment")
+	}
+	s.publishIssueCommentEvents(ctx, result.Events)
+	return result.Comment, nil
+}
+
+func (s *Service) ReopenIssueComment(ctx context.Context, projectID, issueID, commentID, actorID string) (store.IssueComment, error) {
+	comment, err := s.GetIssueComment(ctx, projectID, issueID, commentID)
+	if err != nil {
+		return store.IssueComment{}, err
+	}
+	if err := validateIssueCommentThreadMutation(comment, actorID); err != nil {
+		return store.IssueComment{}, err
+	}
+	result, err := s.issueComments.ReopenIssueComment(ctx, projectID, issueID, commentID, actorID)
+	if err != nil {
+		return store.IssueComment{}, translateStoreError(err, "issue_comment")
+	}
+	s.publishIssueCommentEvents(ctx, result.Events)
+	return result.Comment, nil
+}
+
+func (s *Service) AddIssueCommentReaction(ctx context.Context, projectID, issueID, commentID, actorID, reaction string) error {
+	if err := validateIssueCommentReactionActor(actorID, reaction); err != nil {
+		return err
+	}
+	comment, err := s.GetIssueComment(ctx, projectID, issueID, commentID)
+	if err != nil {
+		return err
+	}
+	if comment.DeletedAt != nil {
+		return NewError("conflict", "deleted comments cannot receive reactions", store.ErrConflict)
+	}
+	events, err := s.issueComments.AddIssueCommentReaction(ctx, projectID, issueID, commentID, actorID, reaction)
+	if err != nil {
+		return translateStoreError(err, "issue_comment")
+	}
+	s.publishIssueCommentEvents(ctx, events)
+	return nil
+}
+
+func (s *Service) RemoveIssueCommentReaction(ctx context.Context, projectID, issueID, commentID, actorID, reaction string) error {
+	if err := validateIssueCommentReactionActor(actorID, reaction); err != nil {
+		return err
+	}
+	comment, err := s.GetIssueComment(ctx, projectID, issueID, commentID)
+	if err != nil {
+		return err
+	}
+	if comment.DeletedAt != nil {
+		return NewError("conflict", "deleted comments cannot receive reactions", store.ErrConflict)
+	}
+	events, err := s.issueComments.RemoveIssueCommentReaction(ctx, projectID, issueID, commentID, actorID, reaction)
+	if err != nil {
+		return translateStoreError(err, "issue_comment")
+	}
+	s.publishIssueCommentEvents(ctx, events)
+	return nil
+}
+
+func requireIssueCommentAuthor(comment store.IssueComment, actorID string) error {
+	if strings.TrimSpace(actorID) == "" {
+		return invalid("comment actor is required")
+	}
+	if comment.DeletedAt != nil {
+		return NewError("conflict", "deleted comments cannot be changed", store.ErrConflict)
+	}
+	if comment.AuthorType != store.ActorTypeHuman || comment.AuthorID != actorID {
+		return NewError("forbidden", "comment can only be changed by its original human author", store.ErrInvalidArgument)
+	}
+	return nil
+}
+
+func validateIssueCommentThreadMutation(comment store.IssueComment, actorID string) error {
+	if strings.TrimSpace(actorID) == "" {
+		return invalid("comment actor is required")
+	}
+	if comment.DeletedAt != nil {
+		return NewError("conflict", "deleted discussions cannot be resolved or reopened", store.ErrConflict)
+	}
+	if comment.ParentCommentID != nil {
+		return invalid("only a top-level discussion can be resolved or reopened")
+	}
+	return nil
+}
+
+func validateIssueCommentReactionActor(actorID, reaction string) error {
+	if strings.TrimSpace(actorID) == "" {
+		return invalid("comment actor is required")
+	}
+	if !store.ValidIssueCommentReaction(reaction) {
+		return invalid("unsupported comment reaction")
+	}
+	return nil
+}
+
+func (s *Service) publishIssueCommentEvents(ctx context.Context, events []store.Event) {
+	publisher, _ := s.events.(persistedEventPublisher)
+	publishPersistedEvents(ctx, publisher, events)
 }
 
 func (s *Service) ListIssueTimeline(ctx context.Context, projectID, issueID string) ([]IssueTimelineEntry, error) {
@@ -112,4 +271,3 @@ func (s *Service) ListIssueTimeline(ctx context.Context, projectID, issueID stri
 	})
 	return entries, nil
 }
-

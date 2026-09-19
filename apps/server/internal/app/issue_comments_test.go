@@ -62,23 +62,139 @@ func (s *issueCommentTestStore) GetIssueComment(_ context.Context, projectID, is
 	return store.IssueComment{}, store.ErrNotFound
 }
 
-func (s *issueCommentTestStore) UpdateIssueComment(context.Context, string, string, string, string, string) (store.IssueCommentMutationResult, error) {
-	return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
+func (s *issueCommentTestStore) UpdateIssueComment(_ context.Context, projectID, issueID, commentID, actorID, body string) (store.IssueCommentMutationResult, error) {
+	for index := range s.comments {
+		comment := &s.comments[index]
+		if projectID == s.project.ID && comment.IssueID == issueID && comment.ID == commentID {
+			if comment.Body == body {
+				return store.IssueCommentMutationResult{Comment: *comment}, nil
+			}
+			comment.Body = body
+			comment.UpdatedAt = comment.UpdatedAt.Add(time.Second)
+			event := store.Event{ID: "comment-edited", Type: "issue.comment_changed", ProjectID: projectID, IssueID: &issueID, OccurredAt: comment.UpdatedAt}
+			return store.IssueCommentMutationResult{Comment: *comment, Events: []store.Event{event}}, nil
+		}
+	}
+	return store.IssueCommentMutationResult{}, store.ErrNotFound
 }
-func (s *issueCommentTestStore) DeleteIssueComment(context.Context, string, string, string, string) (store.IssueCommentDeleteResult, error) {
-	return store.IssueCommentDeleteResult{}, store.ErrInvalidArgument
+
+func (s *issueCommentTestStore) DeleteIssueComment(_ context.Context, projectID, issueID, commentID, actorID string) (store.IssueCommentDeleteResult, error) {
+	for index := range s.comments {
+		comment := &s.comments[index]
+		if projectID != s.project.ID || comment.IssueID != issueID || comment.ID != commentID {
+			continue
+		}
+		hasReplies := false
+		for _, candidate := range s.comments {
+			if candidate.ParentCommentID != nil && *candidate.ParentCommentID == commentID {
+				hasReplies = true
+				break
+			}
+		}
+		if hasReplies {
+			at := comment.CreatedAt.Add(2 * time.Second)
+			comment.Body = ""
+			comment.DeletedAt = &at
+			comment.ResolvedAt = nil
+			comment.ResolvedByUserID = nil
+			comment.Reactions = nil
+		} else {
+			s.comments = append(s.comments[:index], s.comments[index+1:]...)
+		}
+		event := store.Event{ID: "comment-deleted", Type: "issue.comment_changed", ProjectID: projectID, IssueID: &issueID}
+		return store.IssueCommentDeleteResult{Events: []store.Event{event}}, nil
+	}
+	return store.IssueCommentDeleteResult{}, store.ErrNotFound
 }
-func (s *issueCommentTestStore) ResolveIssueComment(context.Context, string, string, string, string) (store.IssueCommentMutationResult, error) {
-	return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
+
+func (s *issueCommentTestStore) ResolveIssueComment(_ context.Context, projectID, issueID, commentID, actorID string) (store.IssueCommentMutationResult, error) {
+	for index := range s.comments {
+		comment := &s.comments[index]
+		if projectID == s.project.ID && comment.IssueID == issueID && comment.ID == commentID {
+			if comment.ResolvedAt != nil {
+				return store.IssueCommentMutationResult{Comment: *comment}, nil
+			}
+			at := comment.CreatedAt.Add(3 * time.Second)
+			comment.ResolvedAt = &at
+			comment.ResolvedByUserID = &actorID
+			event := store.Event{ID: "comment-resolved", Type: "issue.comment_changed", ProjectID: projectID, IssueID: &issueID}
+			return store.IssueCommentMutationResult{Comment: *comment, Events: []store.Event{event}}, nil
+		}
+	}
+	return store.IssueCommentMutationResult{}, store.ErrNotFound
 }
-func (s *issueCommentTestStore) ReopenIssueComment(context.Context, string, string, string, string) (store.IssueCommentMutationResult, error) {
-	return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
+
+func (s *issueCommentTestStore) ReopenIssueComment(_ context.Context, projectID, issueID, commentID, actorID string) (store.IssueCommentMutationResult, error) {
+	for index := range s.comments {
+		comment := &s.comments[index]
+		if projectID == s.project.ID && comment.IssueID == issueID && comment.ID == commentID {
+			if comment.ResolvedAt == nil {
+				return store.IssueCommentMutationResult{Comment: *comment}, nil
+			}
+			comment.ResolvedAt = nil
+			comment.ResolvedByUserID = nil
+			event := store.Event{ID: "comment-reopened", Type: "issue.comment_changed", ProjectID: projectID, IssueID: &issueID}
+			return store.IssueCommentMutationResult{Comment: *comment, Events: []store.Event{event}}, nil
+		}
+	}
+	return store.IssueCommentMutationResult{}, store.ErrNotFound
 }
-func (s *issueCommentTestStore) AddIssueCommentReaction(context.Context, string, string, string, string, string) ([]store.Event, error) {
-	return nil, store.ErrInvalidArgument
+
+func (s *issueCommentTestStore) AddIssueCommentReaction(_ context.Context, projectID, issueID, commentID, actorID, reaction string) ([]store.Event, error) {
+	for index := range s.comments {
+		comment := &s.comments[index]
+		if projectID != s.project.ID || comment.IssueID != issueID || comment.ID != commentID {
+			continue
+		}
+		for summaryIndex := range comment.Reactions {
+			summary := &comment.Reactions[summaryIndex]
+			if summary.Reaction != reaction {
+				continue
+			}
+			for _, existing := range summary.ActorIDs {
+				if existing == actorID {
+					return nil, nil
+				}
+			}
+			summary.Count++
+			summary.ActorIDs = append(summary.ActorIDs, actorID)
+			event := store.Event{ID: "reaction-added", Type: "issue.comment_changed", ProjectID: projectID, IssueID: &issueID}
+			return []store.Event{event}, nil
+		}
+		comment.Reactions = append(comment.Reactions, store.IssueCommentReactionSummary{Reaction: reaction, Count: 1, ActorIDs: []string{actorID}})
+		event := store.Event{ID: "reaction-added", Type: "issue.comment_changed", ProjectID: projectID, IssueID: &issueID}
+		return []store.Event{event}, nil
+	}
+	return nil, store.ErrNotFound
 }
-func (s *issueCommentTestStore) RemoveIssueCommentReaction(context.Context, string, string, string, string, string) ([]store.Event, error) {
-	return nil, store.ErrInvalidArgument
+
+func (s *issueCommentTestStore) RemoveIssueCommentReaction(_ context.Context, projectID, issueID, commentID, actorID, reaction string) ([]store.Event, error) {
+	for index := range s.comments {
+		comment := &s.comments[index]
+		if projectID != s.project.ID || comment.IssueID != issueID || comment.ID != commentID {
+			continue
+		}
+		for summaryIndex := range comment.Reactions {
+			summary := &comment.Reactions[summaryIndex]
+			if summary.Reaction != reaction {
+				continue
+			}
+			for actorIndex, existing := range summary.ActorIDs {
+				if existing != actorID {
+					continue
+				}
+				summary.ActorIDs = append(summary.ActorIDs[:actorIndex], summary.ActorIDs[actorIndex+1:]...)
+				summary.Count--
+				if summary.Count == 0 {
+					comment.Reactions = append(comment.Reactions[:summaryIndex], comment.Reactions[summaryIndex+1:]...)
+				}
+				event := store.Event{ID: "reaction-removed", Type: "issue.comment_changed", ProjectID: projectID, IssueID: &issueID}
+				return []store.Event{event}, nil
+			}
+		}
+		return nil, nil
+	}
+	return nil, store.ErrNotFound
 }
 
 func (s *issueCommentTestStore) ListIssueTimelineEvents(_ context.Context, projectID, issueID string) ([]store.Event, error) {
@@ -328,5 +444,148 @@ func TestIssueTimelineMergesCommentsWithRelevantDurableActivity(t *testing.T) {
 	}
 	if entries[0].Kind != store.IssueTimelineKindActivity || entries[0].ID != "issue-created" || entries[1].Kind != store.IssueTimelineKindComment || entries[1].ID != comment.ID || entries[2].ID != "run" {
 		t.Fatalf("timeline order=%+v", entries)
+	}
+}
+
+
+func TestProjectAccessIssueCommentLifecycleAuthorizationAndExecutionNeutrality(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	at := time.Date(2026, 9, 19, 6, 0, 0, 0, time.UTC)
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, Name: "Project", IssuePrefix: "AB"},
+		roles: map[string]string{
+			"author":  store.ProjectRoleMember,
+			"member":  store.ProjectRoleMember,
+			"viewer":  store.ProjectRoleViewer,
+			"outside": store.ProjectRoleViewer,
+		},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	root := store.IssueComment{
+		ID: "root", IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "author",
+		AuthorName: "Author", Body: "original", CreatedAt: at, UpdatedAt: at,
+	}
+	parentID := root.ID
+	reply := store.IssueComment{
+		ID: "reply", IssueID: issueID, ParentCommentID: &parentID, AuthorType: store.ActorTypeHuman,
+		AuthorID: "member", AuthorName: "Member", Body: "reply", CreatedAt: at.Add(time.Second), UpdatedAt: at.Add(time.Second),
+	}
+	fake := &issueCommentTestStore{projectWorkflowAuthorizationStore: base, comments: []store.IssueComment{root, reply}}
+	service := New(fake)
+	publisher := &assigneePublisher{}
+	service.SetEventRecorder(publisher)
+	access, err := NewProjectAccessService(service, fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	author := activeProjectActor("author", store.DeploymentRoleMember)
+	member := activeProjectActor("member", store.DeploymentRoleMember)
+	viewer := activeProjectActor("viewer", store.DeploymentRoleMember)
+
+	if _, err := access.UpdateIssueComment(t.Context(), member, projectID, issueID, root.ID, "forbidden edit"); err == nil {
+		t.Fatal("non-author edit unexpectedly succeeded")
+	}
+	if err := access.DeleteIssueComment(t.Context(), member, projectID, issueID, root.ID); err == nil {
+		t.Fatal("non-author delete unexpectedly succeeded")
+	}
+	updated, err := access.UpdateIssueComment(t.Context(), author, projectID, issueID, root.ID, "edited")
+	if err != nil || updated.Body != "edited" || !updated.UpdatedAt.After(at) {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+
+	if _, err := access.ResolveIssueComment(t.Context(), viewer, projectID, issueID, root.ID); err == nil {
+		t.Fatal("viewer resolve unexpectedly succeeded")
+	}
+	resolved, err := access.ResolveIssueComment(t.Context(), member, projectID, issueID, root.ID)
+	if err != nil || resolved.ResolvedAt == nil || resolved.ResolvedByUserID == nil || *resolved.ResolvedByUserID != member.ID {
+		t.Fatalf("resolved=%+v err=%v", resolved, err)
+	}
+	if _, err := access.ResolveIssueComment(t.Context(), member, projectID, issueID, reply.ID); err == nil {
+		t.Fatal("reply resolve unexpectedly succeeded")
+	}
+	reopened, err := access.ReopenIssueComment(t.Context(), author, projectID, issueID, root.ID)
+	if err != nil || reopened.ResolvedAt != nil {
+		t.Fatalf("reopened=%+v err=%v", reopened, err)
+	}
+
+	if err := access.AddIssueCommentReaction(t.Context(), member, projectID, issueID, root.ID, store.IssueCommentReactionHeart); err != nil {
+		t.Fatal(err)
+	}
+	if err := access.AddIssueCommentReaction(t.Context(), member, projectID, issueID, root.ID, store.IssueCommentReactionHeart); err != nil {
+		t.Fatal(err)
+	}
+	reacted, err := service.GetIssueComment(t.Context(), projectID, issueID, root.ID)
+	if err != nil || len(reacted.Reactions) != 1 || reacted.Reactions[0].Count != 1 || reacted.Reactions[0].ActorIDs[0] != member.ID {
+		t.Fatalf("reacted=%+v err=%v", reacted, err)
+	}
+	if err := access.RemoveIssueCommentReaction(t.Context(), member, projectID, issueID, root.ID, store.IssueCommentReactionHeart); err != nil {
+		t.Fatal(err)
+	}
+	if err := access.RemoveIssueCommentReaction(t.Context(), member, projectID, issueID, root.ID, store.IssueCommentReactionHeart); err != nil {
+		t.Fatal(err)
+	}
+	if err := access.AddIssueCommentReaction(t.Context(), member, projectID, issueID, root.ID, "PARTY"); err == nil {
+		t.Fatal("unsupported reaction unexpectedly succeeded")
+	}
+
+	beforeIssue := base.issues[issueID]
+	if err := access.DeleteIssueComment(t.Context(), author, projectID, issueID, root.ID); err != nil {
+		t.Fatal(err)
+	}
+	tombstone, err := service.GetIssueComment(t.Context(), projectID, issueID, root.ID)
+	if err != nil || tombstone.DeletedAt == nil || tombstone.Body != "" {
+		t.Fatalf("tombstone=%+v err=%v", tombstone, err)
+	}
+	if err := access.AddIssueCommentReaction(t.Context(), member, projectID, issueID, root.ID, store.IssueCommentReactionEyes); err == nil {
+		t.Fatal("reaction on deleted comment unexpectedly succeeded")
+	}
+	afterIssue := base.issues[issueID]
+	if beforeIssue.Status != afterIssue.Status || beforeIssue.AssigneeType != afterIssue.AssigneeType || beforeIssue.AssigneeID != afterIssue.AssigneeID || len(base.runs) != 0 {
+		t.Fatalf("comment lifecycle changed workflow before=%+v after=%+v runs=%+v", beforeIssue, afterIssue, base.runs)
+	}
+	if len(publisher.published) != 5 {
+		t.Fatalf("published lifecycle events=%+v", publisher.published)
+	}
+	for _, event := range publisher.published {
+		if event.Type != "issue.comment_changed" {
+			t.Fatalf("unexpected lifecycle event %+v", event)
+		}
+	}
+}
+
+func TestIssueCommentLifecycleRejectsMissingOrDeletedTargets(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"}},
+		runs: map[string]store.Run{},
+	}
+	at := time.Now()
+	deletedAt := at.Add(time.Second)
+	fake := &issueCommentTestStore{
+		projectWorkflowAuthorizationStore: base,
+		comments: []store.IssueComment{
+			{ID: "deleted", IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "author", DeletedAt: &deletedAt, CreatedAt: at, UpdatedAt: at},
+		},
+	}
+	service := New(fake)
+
+	if _, err := service.UpdateIssueComment(t.Context(), projectID, issueID, "missing", "author", "body"); err == nil {
+		t.Fatal("missing edit unexpectedly succeeded")
+	}
+	if _, err := service.UpdateIssueComment(t.Context(), projectID, issueID, "deleted", "author", "body"); err == nil {
+		t.Fatal("deleted edit unexpectedly succeeded")
+	}
+	if _, err := service.ResolveIssueComment(t.Context(), projectID, issueID, "deleted", "author"); err == nil {
+		t.Fatal("deleted resolve unexpectedly succeeded")
+	}
+	if err := service.AddIssueCommentReaction(t.Context(), projectID, issueID, "deleted", "author", store.IssueCommentReactionHeart); err == nil {
+		t.Fatal("deleted reaction unexpectedly succeeded")
 	}
 }
