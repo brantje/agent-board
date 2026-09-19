@@ -557,3 +557,28 @@ func TestIssueCommentLifecycleIdempotentDeletedTargetsAndReactionAggregation(t *
 		t.Fatalf("invalid reaction error=%v", err)
 	}
 }
+
+
+func TestIssueCommentLifecycleStoreValidationPaths(t *testing.T) {
+	s := &Store{}
+	ctx := context.Background()
+
+	if _, err := s.UpdateIssueComment(ctx, "", "", "", "", ""); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid edit error=%v", err)
+	}
+	if _, err := s.DeleteIssueComment(ctx, "", "", "", ""); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid delete error=%v", err)
+	}
+	if _, err := s.ResolveIssueComment(ctx, "", "", "", ""); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid resolve error=%v", err)
+	}
+	if _, err := s.AddIssueCommentReaction(ctx, "", "", "", "", store.IssueCommentReactionHeart); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid reaction error=%v", err)
+	}
+	if err := s.loadIssueCommentReactions(ctx, "", "", nil); err != nil {
+		t.Fatalf("empty reaction projection error=%v", err)
+	}
+	if _, err := issueCommentAuthorName(ctx, nil, "", "OTHER", ""); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid comment author type error=%v", err)
+	}
+}

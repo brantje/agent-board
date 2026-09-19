@@ -13,6 +13,7 @@ type issueCommentTestStore struct {
 	comments    []store.IssueComment
 	events      []store.Event
 	commentErr  error
+	mutationErr error
 	activityErr error
 	createCalls int
 	lastCreate  store.IssueComment
@@ -63,6 +64,9 @@ func (s *issueCommentTestStore) GetIssueComment(_ context.Context, projectID, is
 }
 
 func (s *issueCommentTestStore) UpdateIssueComment(_ context.Context, projectID, issueID, commentID, actorID, body string) (store.IssueCommentMutationResult, error) {
+	if s.mutationErr != nil {
+		return store.IssueCommentMutationResult{}, s.mutationErr
+	}
 	for index := range s.comments {
 		comment := &s.comments[index]
 		if projectID == s.project.ID && comment.IssueID == issueID && comment.ID == commentID {
@@ -79,6 +83,9 @@ func (s *issueCommentTestStore) UpdateIssueComment(_ context.Context, projectID,
 }
 
 func (s *issueCommentTestStore) DeleteIssueComment(_ context.Context, projectID, issueID, commentID, actorID string) (store.IssueCommentDeleteResult, error) {
+	if s.mutationErr != nil {
+		return store.IssueCommentDeleteResult{}, s.mutationErr
+	}
 	for index := range s.comments {
 		comment := &s.comments[index]
 		if projectID != s.project.ID || comment.IssueID != issueID || comment.ID != commentID {
@@ -108,6 +115,9 @@ func (s *issueCommentTestStore) DeleteIssueComment(_ context.Context, projectID,
 }
 
 func (s *issueCommentTestStore) ResolveIssueComment(_ context.Context, projectID, issueID, commentID, actorID string) (store.IssueCommentMutationResult, error) {
+	if s.mutationErr != nil {
+		return store.IssueCommentMutationResult{}, s.mutationErr
+	}
 	for index := range s.comments {
 		comment := &s.comments[index]
 		if projectID == s.project.ID && comment.IssueID == issueID && comment.ID == commentID {
@@ -125,6 +135,9 @@ func (s *issueCommentTestStore) ResolveIssueComment(_ context.Context, projectID
 }
 
 func (s *issueCommentTestStore) ReopenIssueComment(_ context.Context, projectID, issueID, commentID, actorID string) (store.IssueCommentMutationResult, error) {
+	if s.mutationErr != nil {
+		return store.IssueCommentMutationResult{}, s.mutationErr
+	}
 	for index := range s.comments {
 		comment := &s.comments[index]
 		if projectID == s.project.ID && comment.IssueID == issueID && comment.ID == commentID {
@@ -141,6 +154,9 @@ func (s *issueCommentTestStore) ReopenIssueComment(_ context.Context, projectID,
 }
 
 func (s *issueCommentTestStore) AddIssueCommentReaction(_ context.Context, projectID, issueID, commentID, actorID, reaction string) ([]store.Event, error) {
+	if s.mutationErr != nil {
+		return nil, s.mutationErr
+	}
 	for index := range s.comments {
 		comment := &s.comments[index]
 		if projectID != s.project.ID || comment.IssueID != issueID || comment.ID != commentID {
@@ -169,6 +185,9 @@ func (s *issueCommentTestStore) AddIssueCommentReaction(_ context.Context, proje
 }
 
 func (s *issueCommentTestStore) RemoveIssueCommentReaction(_ context.Context, projectID, issueID, commentID, actorID, reaction string) ([]store.Event, error) {
+	if s.mutationErr != nil {
+		return nil, s.mutationErr
+	}
 	for index := range s.comments {
 		comment := &s.comments[index]
 		if projectID != s.project.ID || comment.IssueID != issueID || comment.ID != commentID {
@@ -501,6 +520,21 @@ func TestProjectAccessIssueCommentLifecycleAuthorizationAndExecutionNeutrality(t
 	if _, err := access.ResolveIssueComment(t.Context(), viewer, projectID, issueID, root.ID); err == nil {
 		t.Fatal("viewer resolve unexpectedly succeeded")
 	}
+	if _, err := access.UpdateIssueComment(t.Context(), viewer, projectID, issueID, root.ID, "viewer edit"); err == nil {
+		t.Fatal("viewer edit unexpectedly succeeded")
+	}
+	if err := access.DeleteIssueComment(t.Context(), viewer, projectID, issueID, root.ID); err == nil {
+		t.Fatal("viewer delete unexpectedly succeeded")
+	}
+	if _, err := access.ReopenIssueComment(t.Context(), viewer, projectID, issueID, root.ID); err == nil {
+		t.Fatal("viewer reopen unexpectedly succeeded")
+	}
+	if err := access.AddIssueCommentReaction(t.Context(), viewer, projectID, issueID, root.ID, store.IssueCommentReactionHeart); err == nil {
+		t.Fatal("viewer reaction add unexpectedly succeeded")
+	}
+	if err := access.RemoveIssueCommentReaction(t.Context(), viewer, projectID, issueID, root.ID, store.IssueCommentReactionHeart); err == nil {
+		t.Fatal("viewer reaction remove unexpectedly succeeded")
+	}
 	resolved, err := access.ResolveIssueComment(t.Context(), member, projectID, issueID, root.ID)
 	if err != nil || resolved.ResolvedAt == nil || resolved.ResolvedByUserID == nil || *resolved.ResolvedByUserID != member.ID {
 		t.Fatalf("resolved=%+v err=%v", resolved, err)
@@ -653,5 +687,64 @@ func TestIssueCommentLifecycleValidationAndDeletedNoOpBranches(t *testing.T) {
 	}
 	if err := service.RemoveIssueCommentReaction(t.Context(), projectID, issueID, "missing", "author", store.IssueCommentReactionHeart); err == nil {
 		t.Fatal("reaction removal from missing comment unexpectedly succeeded")
+	}
+}
+
+
+func TestIssueCommentLifecycleValidationAndMutationFailures(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	at := time.Date(2026, 9, 19, 8, 0, 0, 0, time.UTC)
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	root := store.IssueComment{
+		ID: "root", IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: "author",
+		Body: "body", CreatedAt: at, UpdatedAt: at,
+	}
+	fake := &issueCommentTestStore{projectWorkflowAuthorizationStore: base, comments: []store.IssueComment{root}}
+	service := New(fake)
+
+	if _, err := service.UpdateIssueComment(t.Context(), projectID, issueID, root.ID, "author", "   "); err == nil {
+		t.Fatal("blank edit unexpectedly succeeded")
+	}
+	if _, err := service.UpdateIssueComment(t.Context(), projectID, issueID, root.ID, "", "updated"); err == nil {
+		t.Fatal("blank edit actor unexpectedly succeeded")
+	}
+	if err := service.DeleteIssueComment(t.Context(), projectID, issueID, root.ID, ""); err == nil {
+		t.Fatal("blank delete actor unexpectedly succeeded")
+	}
+	if _, err := service.ResolveIssueComment(t.Context(), projectID, issueID, root.ID, ""); err == nil {
+		t.Fatal("blank resolver unexpectedly succeeded")
+	}
+	if err := service.AddIssueCommentReaction(t.Context(), projectID, issueID, root.ID, "", store.IssueCommentReactionHeart); err == nil {
+		t.Fatal("blank reaction actor unexpectedly succeeded")
+	}
+	if err := service.RemoveIssueCommentReaction(t.Context(), projectID, issueID, root.ID, "author", "PARTY"); err == nil {
+		t.Fatal("unsupported reaction removal unexpectedly succeeded")
+	}
+
+	fake.mutationErr = store.ErrConflict
+	if _, err := service.UpdateIssueComment(t.Context(), projectID, issueID, root.ID, "author", "updated"); err == nil {
+		t.Fatal("edit mutation failure was swallowed")
+	}
+	if err := service.DeleteIssueComment(t.Context(), projectID, issueID, root.ID, "author"); err == nil {
+		t.Fatal("delete mutation failure was swallowed")
+	}
+	if _, err := service.ResolveIssueComment(t.Context(), projectID, issueID, root.ID, "author"); err == nil {
+		t.Fatal("resolve mutation failure was swallowed")
+	}
+	if _, err := service.ReopenIssueComment(t.Context(), projectID, issueID, root.ID, "author"); err == nil {
+		t.Fatal("reopen mutation failure was swallowed")
+	}
+	if err := service.AddIssueCommentReaction(t.Context(), projectID, issueID, root.ID, "author", store.IssueCommentReactionHeart); err == nil {
+		t.Fatal("reaction add failure was swallowed")
+	}
+	if err := service.RemoveIssueCommentReaction(t.Context(), projectID, issueID, root.ID, "author", store.IssueCommentReactionHeart); err == nil {
+		t.Fatal("reaction remove failure was swallowed")
 	}
 }
