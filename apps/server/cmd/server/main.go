@@ -405,6 +405,7 @@ func configureExecutionScheduler(services *app.Services, git workspace.Git, setE
 		return err
 	}
 	processor.SetWorkspaceEnsurer(services.Workspaces)
+	processor.SetIssueCommentService(services.ControlPlane)
 	config := scheduler.DefaultConfig(configuredSchedulerOwnerID())
 	config.ReportError = func(err error) { slog.Error("scheduler execution", "error", err) }
 	config.PersistedEvents = processor

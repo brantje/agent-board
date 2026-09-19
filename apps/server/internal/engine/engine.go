@@ -119,6 +119,22 @@ type InteractiveQuestionReplyTracker interface {
 	ListReplyAccepted(context.Context) ([]AcceptedInteractiveQuestionReply, error)
 }
 
+type IssueCommentPublishRequest struct {
+	Body       string
+	RequestKey string
+}
+
+type PublishedIssueComment struct {
+	ID string
+}
+
+// IssueCommentPublisher is the narrow server-owned capability for an executing
+// Agent to deliberately publish durable collaboration on its current Issue.
+// Project, Issue, Run and Agent identity are never caller-controlled.
+type IssueCommentPublisher interface {
+	PublishIssueComment(context.Context, IssueCommentPublishRequest) (PublishedIssueComment, error)
+}
+
 // IssueStatusUpdater is the narrow server-owned capability for an executing
 // Agent to explicitly update only the Board status of its current Issue.
 type IssueStatusUpdater interface {
@@ -195,6 +211,7 @@ type Request struct {
 	Launcher               ProcessLauncher
 	Questions              Questioner
 	InteractiveQuestions   InteractiveQuestioner
+	IssueComments          IssueCommentPublisher
 	IssueStatus            IssueStatusUpdater
 	Delegation             DelegationRequester
 	DelegationContext      *DelegationToolContext
