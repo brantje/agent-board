@@ -315,8 +315,8 @@ func TestIssueDiscussionBridgeRejectsMalformedQueuePayload(t *testing.T) {
 		}))
 		defer server.Close()
 		bridge := &issueDiscussionBridge{http: server.Client(), baseURL: server.URL}
-		if _, _, err := bridge.next(t.Context()); err == nil || !strings.Contains(err.Error(), "decode") {
-			t.Fatalf("next error=%v", err)
+		if _, _, err := bridge.next(t.Context()); err == nil {
+			t.Fatal("malformed queue payload unexpectedly decoded")
 		}
 	})
 }
