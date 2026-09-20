@@ -104,7 +104,7 @@ export default tool({
     mode: tool.schema.enum(["recent", "thread", "updates"]).describe("Discussion read mode"),
     anchorCommentId: tool.schema.string().optional().describe("Comment ID anchoring thread mode"),
     cursor: tool.schema.string().optional().describe("Opaque cursor returned by an earlier updates read"),
-    limit: tool.schema.number().int().positive().optional().describe("Optional bounded result limit"),
+    limit: tool.schema.number().int().positive().max(100).optional().describe("Optional bounded result limit"),
   },
   async execute({ mode, anchorCommentId, cursor, limit }, context) {
     const callID = String(context.callID ?? "").trim()
