@@ -106,11 +106,19 @@ func TestIssueDiscussionReadsAreThreadAwareBoundedAndCursorSafe(t *testing.T) {
 	}
 
 	lateRoot := create("late root", nil)
+	lateComments := []store.IssueComment{lateRoot}
 	for index := 0; index < 4; index++ {
-		create("early sibling", &lateRoot.ID)
+		lateComments = append(lateComments, create("early sibling", &lateRoot.ID))
 	}
 	lateParent := create("late parent", &lateRoot.ID)
 	lateAnchor := create("late anchor", &lateParent.ID)
+	lateComments = append(lateComments, lateParent, lateAnchor)
+	for index, comment := range lateComments {
+		at := base.Add(3*time.Second + time.Duration(index+1)*10*time.Millisecond)
+		if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET created_at=$1, updated_at=$1 WHERE id=$2`, at, comment.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
 	lateThread, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, lateAnchor.ID, 8, 3)
 	if err != nil {
 		t.Fatal(err)
