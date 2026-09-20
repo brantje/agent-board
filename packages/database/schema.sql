@@ -462,7 +462,7 @@ CREATE TABLE delegations (
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT delegations_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
     CONSTRAINT delegations_parent_run_fk FOREIGN KEY (project_id, issue_id, parent_run_id) REFERENCES runs(project_id, issue_id, id) ON DELETE CASCADE,
-    CONSTRAINT delegations_source_comment_fk FOREIGN KEY (issue_id, source_comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE RESTRICT,
+    CONSTRAINT delegations_source_comment_fk FOREIGN KEY (issue_id, source_comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
     CONSTRAINT delegations_delegated_run_fk FOREIGN KEY (project_id, issue_id, delegated_run_id) REFERENCES runs(project_id, issue_id, id) ON DELETE CASCADE,
     CHECK (
         (parent_run_id IS NOT NULL AND parent_agent_id IS NOT NULL AND source_comment_id IS NULL)
@@ -496,8 +496,8 @@ CREATE TABLE issue_comment_mentions (
     delegation_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT issue_comment_mentions_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
-    CONSTRAINT issue_comment_mentions_comment_fk FOREIGN KEY (issue_id, comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE RESTRICT,
-    CONSTRAINT issue_comment_mentions_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
+    CONSTRAINT issue_comment_mentions_comment_fk FOREIGN KEY (issue_id, comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
+    CONSTRAINT issue_comment_mentions_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE NO ACTION DEFERRABLE INITIALLY DEFERRED,
     CHECK (
         (outcome = 'QUEUED' AND delegation_id IS NOT NULL AND reason_code IS NULL)
         OR (outcome = 'BLOCKED' AND delegation_id IS NULL AND reason_code IS NOT NULL)
