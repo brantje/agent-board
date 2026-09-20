@@ -56,8 +56,10 @@ func (s *issueCommentHTTPStore) ListIssueDiscussionUpdates(_ context.Context, pi
 		return store.IssueDiscussionUpdates{}, store.ErrNotFound
 	}
 	items := make([]store.IssueDiscussionComment, 0, len(s.comments))
-	for _, comment := range s.comments {
-		items = append(items, store.IssueDiscussionComment{Comment: comment, IsNew: true})
+	for index, comment := range s.comments {
+		items = append(items, store.IssueDiscussionComment{
+			Comment: comment, IsNew: true, ContextTruncated: len(s.comments) > 1 && index == len(s.comments)-1,
+		})
 	}
 	if len(s.comments) == 0 {
 		return store.IssueDiscussionUpdates{Comments: items}, nil
@@ -115,7 +117,8 @@ func TestIssueDiscussionHTTPReadsUseCanonicalProjection(t *testing.T) {
 	if err := json.Unmarshal(updatesResponse.Body.Bytes(), &updates); err != nil {
 		t.Fatal(err)
 	}
-	if len(updates.Comments) != 2 || updates.NextCursor == nil || *updates.NextCursor == "" || !updates.Comments[1].IsNew {
+	if len(updates.Comments) != 2 || updates.NextCursor == nil || *updates.NextCursor == "" ||
+		!updates.Comments[1].IsNew || updates.Comments[0].ContextTruncated || !updates.Comments[1].ContextTruncated {
 		t.Fatalf("updates=%+v", updates)
 	}
 
