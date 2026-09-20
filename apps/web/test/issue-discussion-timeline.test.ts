@@ -467,4 +467,134 @@ describe('IssueDiscussionTimeline', () => {
     wrapper.unmount()
   })
 
+
+  it('filters mention candidates, shows blocked preview reasons, and removes a selection', async () => {
+    stubAuth()
+    const agents = [
+      {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        projectId: 'p',
+        name: 'Verifier',
+        roleInstructions: '',
+        engine: 'opencode',
+        modelProfileId: 'model-1',
+        engineSettings: {},
+        concurrencyLimit: 1,
+        allowDelegation: true,
+        state: 'ENABLED'
+      },
+      {
+        id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        projectId: 'p',
+        name: 'Builder',
+        roleInstructions: '',
+        engine: 'opencode',
+        modelProfileId: 'model-1',
+        engineSettings: {},
+        concurrencyLimit: 1,
+        allowDelegation: true,
+        state: 'ENABLED'
+      }
+    ]
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) return new Response(JSON.stringify([]))
+      if (url.endsWith('/agents')) return new Response(JSON.stringify(agents))
+      if (url.endsWith('/comments/mention-preview') && options.method === 'POST') {
+        return new Response(JSON.stringify([{
+          targetAgentId: agents[0]!.id,
+          targetAgentName: agents[0]!.name,
+          eligible: false,
+          reasonCode: 'TARGET_BUSY'
+        }]))
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'Mention Agent')!.trigger('click')
+    await flushPromises()
+    const filter = wrapper.find('input[type="text"]')
+    await filter.setValue('ver')
+    expect(wrapper.findAll('button').some(button => button.text() === '@Verifier')).toBe(true)
+    expect(wrapper.findAll('button').some(button => button.text() === '@Builder')).toBe(false)
+
+    await wrapper.findAll('button').find(button => button.text() === '@Verifier')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Verifier · Agent already has active work on this Issue')
+
+    await wrapper.findAll('button').find(button => button.text() === 'Remove @Verifier')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Agent already has active work on this Issue')
+    wrapper.unmount()
+  })
+
+  it('surfaces Agent directory and mention-preview failures without losing the draft', async () => {
+    stubAuth()
+    let failAgents = true
+    const agent = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      projectId: 'p',
+      name: 'Verifier',
+      roleInstructions: '',
+      engine: 'opencode',
+      modelProfileId: 'model-1',
+      engineSettings: {},
+      concurrencyLimit: 1,
+      allowDelegation: true,
+      state: 'ENABLED'
+    }
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) return new Response(JSON.stringify([]))
+      if (url.endsWith('/agents')) {
+        if (failAgents) {
+          failAgents = false
+          return new Response(JSON.stringify({ error: { code: 'internal_error' } }), { status: 500 })
+        }
+        return new Response(JSON.stringify([agent]))
+      }
+      if (url.endsWith('/comments/mention-preview') && options.method === 'POST') {
+        return new Response(JSON.stringify({ error: { code: 'internal_error' } }), { status: 500 })
+      }
+      throw new Error(`unexpected request ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+    await wrapper.get('textarea').setValue('Keep this draft')
+
+    await wrapper.findAll('button').find(button => button.text() === 'Mention Agent')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unable to load Agents')
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('Keep this draft')
+
+    // Remount to exercise the preview failure independently from the lazy-load
+    // guard after a failed directory request.
+    wrapper.unmount()
+    const second = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+    await second.get('textarea').setValue('Still here')
+    await second.findAll('button').find(button => button.text() === 'Mention Agent')!.trigger('click')
+    await flushPromises()
+    await second.findAll('button').find(button => button.text() === '@Verifier')!.trigger('click')
+    await flushPromises()
+    expect(second.text()).toContain('Mention preview unavailable')
+    expect((second.get('textarea').element as HTMLTextAreaElement).value).toBe('Still here')
+    second.unmount()
+  })
+
 })
