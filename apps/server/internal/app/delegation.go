@@ -76,17 +76,25 @@ func (s *Service) ListDelegationsByParentRun(ctx context.Context, projectID, par
 }
 
 func (s *Service) inspectDelegation(ctx context.Context, value store.Delegation) (DelegationInspection, error) {
-	parent, err := s.store.GetRun(ctx, value.ProjectID, value.ParentRunID)
-	if err != nil {
-		return DelegationInspection{}, translateStoreError(err, "parent Run")
-	}
 	child, err := s.store.GetRun(ctx, value.ProjectID, value.DelegatedRunID)
 	if err != nil {
 		return DelegationInspection{}, translateStoreError(err, "delegated Run")
 	}
-	if parent.IssueID != value.IssueID || child.IssueID != value.IssueID || parent.WorkspaceID != child.WorkspaceID ||
-		parent.AgentID == nil || *parent.AgentID != value.ParentAgentID || child.AgentID == nil || *child.AgentID != value.TargetAgentID {
+	if child.IssueID != value.IssueID || child.AgentID == nil || *child.AgentID != value.TargetAgentID {
 		return DelegationInspection{}, NewError("delegation_lineage_conflict", "Delegation lineage does not match authoritative Runs", store.ErrConflict)
+	}
+	parentRunStatus := ""
+	if value.ParentRunID != "" {
+		parent, err := s.store.GetRun(ctx, value.ProjectID, value.ParentRunID)
+		if err != nil {
+			return DelegationInspection{}, translateStoreError(err, "parent Run")
+		}
+		if parent.IssueID != value.IssueID || parent.WorkspaceID != child.WorkspaceID || parent.AgentID == nil || *parent.AgentID != value.ParentAgentID || value.SourceCommentID != nil {
+			return DelegationInspection{}, NewError("delegation_lineage_conflict", "Delegation lineage does not match authoritative Runs", store.ErrConflict)
+		}
+		parentRunStatus = parent.Status
+	} else if value.ParentAgentID != "" || value.SourceCommentID == nil {
+		return DelegationInspection{}, NewError("delegation_lineage_conflict", "Delegation lineage does not match authoritative origin", store.ErrConflict)
 	}
 	revisions, ok := any(s.store).(interface {
 		GetWorkspaceCurrentRevision(context.Context, string, string) (string, error)
@@ -99,6 +107,6 @@ func (s *Service) inspectDelegation(ctx context.Context, value store.Delegation)
 		return DelegationInspection{}, translateStoreError(err, "Workspace revision")
 	}
 	return DelegationInspection{
-		Delegation: value, ParentRunStatus: parent.Status, DelegatedRunStatus: child.Status, WorkspaceRevision: revision,
+		Delegation: value, ParentRunStatus: parentRunStatus, DelegatedRunStatus: child.Status, WorkspaceRevision: revision,
 	}, nil
 }

@@ -22,6 +22,7 @@ type Delegation struct {
 	IssueID                  string
 	ParentRunID              string
 	ParentAgentID            string
+	SourceCommentID          *string
 	TargetAgentID            string
 	Task                     string
 	DelegatedRunID           string
@@ -44,11 +45,24 @@ type RequestDelegationCommand struct {
 	RequestKey    string
 }
 
+type RequestIssueDelegationCommand struct {
+	ProjectID       string
+	IssueID         string
+	SourceCommentID string
+	TargetAgentID   string
+	Task            string
+	RequestKey      string
+}
+
 type RequestDelegationResult struct {
 	Delegation   Delegation
 	DelegatedRun Run
 	SchedulerJob SchedulerJob
 	Events       []Event
+}
+
+type IssueDelegationStore interface {
+	RequestIssueDelegation(context.Context, RequestIssueDelegationCommand) (RequestDelegationResult, error)
 }
 
 type DelegationStore interface {

@@ -46,48 +46,55 @@ func finalizeDelegatedRunTx(ctx context.Context, tx pgx.Tx, child store.Run) ([]
 		return nil, err
 	}
 
-	parent, err := scanRun(tx.QueryRow(ctx, `
-		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
-		       status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-		FROM runs
-		WHERE project_id=$1 AND id=$2
-		FOR UPDATE
-	`, delegation.ProjectID, delegation.ParentRunID))
-	if err != nil {
-		return nil, err
-	}
-	if parent.IssueID != child.IssueID || parent.WorkspaceID != child.WorkspaceID || parent.AgentID == nil || *parent.AgentID != delegation.ParentAgentID {
-		return nil, store.ErrConflict
-	}
-
+	var parent *store.Run
 	var continuationJobID *string
-	switch parent.Status {
-	case "PAUSED":
-		parent, err = scanRun(tx.QueryRow(ctx, `
-			UPDATE runs
-			SET status='QUEUED', queue_reason=NULL, failure_reason=NULL, completed_at=NULL, updated_at=now()
-			WHERE project_id=$1 AND id=$2 AND status='PAUSED'
-			RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
-			          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
-		`, parent.ProjectID, parent.ID))
+	if delegation.ParentRunID != "" {
+		parentValue, err := scanRun(tx.QueryRow(ctx, `
+			SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+			       status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+			FROM runs
+			WHERE project_id=$1 AND id=$2
+			FOR UPDATE
+		`, delegation.ProjectID, delegation.ParentRunID))
 		if err != nil {
 			return nil, err
 		}
-		job, err := ensureDelegationResumeJobTx(ctx, tx, delegation, parent)
-		if err != nil {
-			return nil, err
+		if parentValue.IssueID != child.IssueID || parentValue.WorkspaceID != child.WorkspaceID || parentValue.AgentID == nil || *parentValue.AgentID != delegation.ParentAgentID {
+			return nil, store.ErrConflict
 		}
-		continuationJobID = &job.ID
-	case "QUEUED":
-		job, err := ensureDelegationResumeJobTx(ctx, tx, delegation, parent)
-		if err != nil {
-			return nil, err
+		parent = &parentValue
+
+		switch parentValue.Status {
+		case "PAUSED":
+			parentValue, err = scanRun(tx.QueryRow(ctx, `
+				UPDATE runs
+				SET status='QUEUED', queue_reason=NULL, failure_reason=NULL, completed_at=NULL, updated_at=now()
+				WHERE project_id=$1 AND id=$2 AND status='PAUSED'
+				RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+				          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+			`, parentValue.ProjectID, parentValue.ID))
+			if err != nil {
+				return nil, err
+			}
+			parent = &parentValue
+			job, err := ensureDelegationResumeJobTx(ctx, tx, delegation, parentValue)
+			if err != nil {
+				return nil, err
+			}
+			continuationJobID = &job.ID
+		case "QUEUED":
+			job, err := ensureDelegationResumeJobTx(ctx, tx, delegation, parentValue)
+			if err != nil {
+				return nil, err
+			}
+			continuationJobID = &job.ID
+		case "COMPLETED", "FAILED", "CANCELLED":
+			// A terminal parent remains authoritative. Persist the child outcome, but
+			// never resurrect parent execution with a continuation job.
+		default:
+			return nil, store.ErrConflict
 		}
-		continuationJobID = &job.ID
-	case "COMPLETED", "FAILED", "CANCELLED":
-		// A terminal parent remains authoritative. Persist the child outcome, but
-		// never resurrect parent execution with a continuation job.
-	default:
+	} else if delegation.SourceCommentID == nil || delegation.ParentAgentID != "" {
 		return nil, store.ErrConflict
 	}
 
@@ -119,13 +126,19 @@ func finalizeDelegatedRunTx(ctx context.Context, tx pgx.Tx, child store.Run) ([]
 	if err != nil {
 		return nil, err
 	}
-	issueID, runID, workspaceID := updated.IssueID, parent.ID, parent.WorkspaceID
+	issueID, runID, workspaceID := updated.IssueID, child.ID, child.WorkspaceID
+	agentID := child.AgentID
+	if parent != nil {
+		runID = parent.ID
+		workspaceID = parent.WorkspaceID
+		agentID = parent.AgentID
+	}
 	event, err := appendEventTx(ctx, tx, store.Event{
 		Type:        eventType,
 		ProjectID:   updated.ProjectID,
 		IssueID:     &issueID,
 		RunID:       &runID,
-		AgentID:     parent.AgentID,
+		AgentID:     agentID,
 		WorkspaceID: &workspaceID,
 		Actor:       store.EmptyObject,
 		Payload:     payload,

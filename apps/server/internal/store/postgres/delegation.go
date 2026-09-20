@@ -16,8 +16,9 @@ const delegationSelectColumns = `
 	id::text,
 	project_id::text,
 	issue_id::text,
-	parent_run_id::text,
-	parent_agent_id::text,
+	COALESCE(parent_run_id::text, ''),
+	COALESCE(parent_agent_id::text, ''),
+	source_comment_id::text,
 	target_agent_id::text,
 	task,
 	delegated_run_id::text,
@@ -127,34 +128,16 @@ func (s *Store) RequestDelegation(ctx context.Context, input store.RequestDelega
 	if issue.ID != parent.IssueID {
 		return store.RequestDelegationResult{}, store.ErrConflict
 	}
-	if err := s.verifyRunnableAgent(ctx, tx, input.ProjectID, input.TargetAgentID); err != nil {
-		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
-			return store.RequestDelegationResult{}, store.ErrConflict
-		}
-		return store.RequestDelegationResult{}, err
-	}
-	if _, err := activeRunForAgent(ctx, tx, input.ProjectID, parent.IssueID, input.TargetAgentID); err == nil {
-		return store.RequestDelegationResult{}, store.ErrConflict
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return store.RequestDelegationResult{}, err
-	}
-
-	attempt, err := nextIssueRunAttempt(ctx, tx, input.ProjectID, parent.IssueID)
-	if err != nil {
-		return store.RequestDelegationResult{}, err
-	}
-	run, job, event, err := createQueuedRunTx(ctx, tx, queuedRunInput{
-		ProjectID:      input.ProjectID,
-		IssueID:        parent.IssueID,
-		WorkspaceID:    parent.WorkspaceID,
-		AgentID:        input.TargetAgentID,
-		Attempt:        attempt,
-		IdempotencyKey: delegationSchedulerKey(parent.ID, input.RequestKey),
-	})
-	if err != nil {
-		return store.RequestDelegationResult{}, err
-	}
-	run, job, err = holdDelegatedRunForWorkspaceHandoff(ctx, tx, run, job)
+	run, job, event, err := s.createDelegatedTargetRunTx(
+		ctx,
+		tx,
+		input.ProjectID,
+		parent.IssueID,
+		parent.WorkspaceID,
+		input.TargetAgentID,
+		delegationSchedulerKey(parent.ID, input.RequestKey),
+		true,
+	)
 	if err != nil {
 		return store.RequestDelegationResult{}, err
 	}
@@ -171,6 +154,130 @@ func (s *Store) RequestDelegation(ctx context.Context, input store.RequestDelega
 		return store.RequestDelegationResult{}, err
 	}
 	return store.RequestDelegationResult{Delegation: delegation, DelegatedRun: run, SchedulerJob: job, Events: []store.Event{event}}, nil
+}
+
+func (s *Store) RequestIssueDelegation(ctx context.Context, input store.RequestIssueDelegationCommand) (store.RequestDelegationResult, error) {
+	input.ProjectID = strings.TrimSpace(input.ProjectID)
+	input.IssueID = strings.TrimSpace(input.IssueID)
+	input.SourceCommentID = strings.TrimSpace(input.SourceCommentID)
+	input.TargetAgentID = strings.TrimSpace(input.TargetAgentID)
+	input.Task = strings.TrimSpace(input.Task)
+	input.RequestKey = strings.TrimSpace(input.RequestKey)
+	if input.ProjectID == "" || input.IssueID == "" || input.SourceCommentID == "" || input.TargetAgentID == "" || input.Task == "" || input.RequestKey == "" || utf8.RuneCountInString(input.Task) > store.MaxDelegationTaskCharacters {
+		return store.RequestDelegationResult{}, store.ErrInvalidArgument
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if result, found, err := existingIssueDelegationRequest(ctx, tx, input); err != nil {
+		return store.RequestDelegationResult{}, err
+	} else if found {
+		if err := tx.Commit(ctx); err != nil {
+			return store.RequestDelegationResult{}, err
+		}
+		return result, nil
+	}
+
+	issue, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.IssueID)
+	if err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	var sourceCommentID string
+	if err := tx.QueryRow(ctx, `
+		SELECT id::text
+		FROM issue_comments
+		WHERE issue_id=$1 AND id=$2
+		FOR KEY SHARE
+	`, issue.ID, input.SourceCommentID).Scan(&sourceCommentID); err != nil {
+		return store.RequestDelegationResult{}, notFound(err)
+	}
+
+	if result, found, err := existingIssueDelegationRequest(ctx, tx, input); err != nil {
+		return store.RequestDelegationResult{}, err
+	} else if found {
+		if err := tx.Commit(ctx); err != nil {
+			return store.RequestDelegationResult{}, err
+		}
+		return result, nil
+	}
+
+	workspace, err := workspaceForAssignment(ctx, tx, input.ProjectID, issue.ID, issue.Key, repositoryPath, defaultBranch)
+	if err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	run, job, event, err := s.createDelegatedTargetRunTx(
+		ctx,
+		tx,
+		input.ProjectID,
+		issue.ID,
+		workspace.ID,
+		input.TargetAgentID,
+		delegationSchedulerKey(input.SourceCommentID, input.RequestKey),
+		false,
+	)
+	if err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	delegation, err := scanDelegation(tx.QueryRow(ctx, `
+		INSERT INTO delegations (project_id, issue_id, source_comment_id, target_agent_id, task, delegated_run_id, request_key)
+		VALUES ($1,$2,$3,$4,$5,$6,$7)
+		RETURNING `+delegationSelectColumns,
+		input.ProjectID, issue.ID, input.SourceCommentID, input.TargetAgentID, input.Task, run.ID, input.RequestKey,
+	))
+	if err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	return store.RequestDelegationResult{Delegation: delegation, DelegatedRun: run, SchedulerJob: job, Events: []store.Event{event}}, nil
+}
+
+func (s *Store) createDelegatedTargetRunTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	projectID, issueID, workspaceID, targetAgentID, idempotencyKey string,
+	holdForParentHandoff bool,
+) (store.Run, store.SchedulerJob, store.Event, error) {
+	if err := s.verifyRunnableAgent(ctx, tx, projectID, targetAgentID); err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
+			return store.Run{}, store.SchedulerJob{}, store.Event{}, store.ErrConflict
+		}
+		return store.Run{}, store.SchedulerJob{}, store.Event{}, err
+	}
+	if _, err := activeRunForAgent(ctx, tx, projectID, issueID, targetAgentID); err == nil {
+		return store.Run{}, store.SchedulerJob{}, store.Event{}, store.ErrConflict
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return store.Run{}, store.SchedulerJob{}, store.Event{}, err
+	}
+
+	attempt, err := nextIssueRunAttempt(ctx, tx, projectID, issueID)
+	if err != nil {
+		return store.Run{}, store.SchedulerJob{}, store.Event{}, err
+	}
+	run, job, event, err := createQueuedRunTx(ctx, tx, queuedRunInput{
+		ProjectID:      projectID,
+		IssueID:        issueID,
+		WorkspaceID:    workspaceID,
+		AgentID:        targetAgentID,
+		Attempt:        attempt,
+		IdempotencyKey: idempotencyKey,
+	})
+	if err != nil {
+		return store.Run{}, store.SchedulerJob{}, store.Event{}, err
+	}
+	if !holdForParentHandoff {
+		return run, job, event, nil
+	}
+	run, job, err = holdDelegatedRunForWorkspaceHandoff(ctx, tx, run, job)
+	if err != nil {
+		return store.Run{}, store.SchedulerJob{}, store.Event{}, err
+	}
+	return run, job, event, nil
 }
 
 func holdDelegatedRunForWorkspaceHandoff(ctx context.Context, tx pgx.Tx, run store.Run, job store.SchedulerJob) (store.Run, store.SchedulerJob, error) {
@@ -321,6 +428,43 @@ func existingDelegationRequest(ctx context.Context, tx pgx.Tx, input store.Reque
 	return store.RequestDelegationResult{Delegation: delegation, DelegatedRun: run, SchedulerJob: job}, true, nil
 }
 
+func existingIssueDelegationRequest(ctx context.Context, tx pgx.Tx, input store.RequestIssueDelegationCommand) (store.RequestDelegationResult, bool, error) {
+	delegation, err := scanDelegation(tx.QueryRow(ctx, `
+		SELECT `+delegationSelectColumns+`
+		FROM delegations
+		WHERE project_id=$1 AND source_comment_id=$2 AND request_key=$3
+	`, input.ProjectID, input.SourceCommentID, input.RequestKey))
+	if errors.Is(err, store.ErrNotFound) {
+		return store.RequestDelegationResult{}, false, nil
+	}
+	if err != nil {
+		return store.RequestDelegationResult{}, false, err
+	}
+	if delegation.SourceCommentID == nil || *delegation.SourceCommentID != input.SourceCommentID || delegation.IssueID != input.IssueID || delegation.TargetAgentID != input.TargetAgentID || delegation.Task != input.Task || delegation.ParentRunID != "" || delegation.ParentAgentID != "" {
+		return store.RequestDelegationResult{}, false, store.ErrConflict
+	}
+	run, err := scanRun(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		       status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+		FROM runs WHERE project_id=$1 AND id=$2
+	`, input.ProjectID, delegation.DelegatedRunID))
+	if err != nil {
+		return store.RequestDelegationResult{}, false, err
+	}
+	job, err := scanSchedulerJob(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, run_id::text, kind, state, wait_reason,
+		       idempotency_key, available_at, created_at, updated_at
+		FROM scheduler_jobs
+		WHERE project_id=$1 AND run_id=$2 AND kind='START'
+		ORDER BY created_at, id
+		LIMIT 1
+	`, input.ProjectID, delegation.DelegatedRunID))
+	if err != nil {
+		return store.RequestDelegationResult{}, false, err
+	}
+	return store.RequestDelegationResult{Delegation: delegation, DelegatedRun: run, SchedulerJob: job}, true, nil
+}
+
 func (s *Store) GetDelegationByRun(ctx context.Context, projectID, runID string) (store.Delegation, error) {
 	return scanDelegation(s.pool.QueryRow(ctx, `
 		SELECT `+delegationSelectColumns+`
@@ -367,6 +511,7 @@ func scanDelegation(row pgx.Row) (store.Delegation, error) {
 		&value.IssueID,
 		&value.ParentRunID,
 		&value.ParentAgentID,
+		&value.SourceCommentID,
 		&value.TargetAgentID,
 		&value.Task,
 		&value.DelegatedRunID,

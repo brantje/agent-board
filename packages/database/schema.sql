@@ -442,8 +442,9 @@ CREATE TABLE delegations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL,
     issue_id uuid NOT NULL,
-    parent_run_id uuid NOT NULL,
-    parent_agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    parent_run_id uuid,
+    parent_agent_id uuid REFERENCES agents(id) ON DELETE RESTRICT,
+    source_comment_id uuid,
     target_agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
     task text NOT NULL CHECK (btrim(task) <> ''),
     delegated_run_id uuid NOT NULL,
@@ -458,18 +459,28 @@ CREATE TABLE delegations (
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT delegations_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
     CONSTRAINT delegations_parent_run_fk FOREIGN KEY (project_id, issue_id, parent_run_id) REFERENCES runs(project_id, issue_id, id) ON DELETE CASCADE,
+    CONSTRAINT delegations_source_comment_fk FOREIGN KEY (issue_id, source_comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE RESTRICT,
     CONSTRAINT delegations_delegated_run_fk FOREIGN KEY (project_id, issue_id, delegated_run_id) REFERENCES runs(project_id, issue_id, id) ON DELETE CASCADE,
-    CHECK (parent_agent_id <> target_agent_id),
+    CHECK (
+        (parent_run_id IS NOT NULL AND parent_agent_id IS NOT NULL AND source_comment_id IS NULL)
+        OR (parent_run_id IS NULL AND parent_agent_id IS NULL AND source_comment_id IS NOT NULL)
+    ),
+    CHECK (parent_agent_id IS NULL OR parent_agent_id <> target_agent_id),
     CHECK ((outcome IS NULL) = (completed_at IS NULL)),
     CHECK (outcome IS NULL OR (result_summary IS NOT NULL AND workspace_changes_accepted IS NOT NULL)),
-    UNIQUE (parent_run_id, request_key),
     UNIQUE (delegated_run_id),
     UNIQUE (project_id, id)
 );
 
-CREATE INDEX delegations_parent_run_idx ON delegations (project_id, parent_run_id, created_at, id);
+CREATE UNIQUE INDEX delegations_parent_request_uq
+    ON delegations (parent_run_id, request_key)
+    WHERE parent_run_id IS NOT NULL;
+CREATE UNIQUE INDEX delegations_comment_request_uq
+    ON delegations (source_comment_id, request_key)
+    WHERE source_comment_id IS NOT NULL;
+CREATE INDEX delegations_parent_run_idx ON delegations (project_id, parent_run_id, created_at, id) WHERE parent_run_id IS NOT NULL;
+CREATE INDEX delegations_source_comment_idx ON delegations (project_id, source_comment_id, created_at, id) WHERE source_comment_id IS NOT NULL;
 CREATE INDEX delegations_target_agent_idx ON delegations (project_id, target_agent_id, created_at, id);
-
 CREATE TABLE scheduler_jobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL,

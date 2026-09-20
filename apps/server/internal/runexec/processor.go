@@ -458,6 +458,12 @@ func (p *Processor) delegatedParentTerminal(ctx context.Context, child store.Run
 	if err != nil {
 		return false, err
 	}
+	if delegation.ParentRunID == "" {
+		if delegation.SourceCommentID == nil || delegation.ParentAgentID != "" {
+			return false, fmt.Errorf("run execution: delegated origin lineage is invalid")
+		}
+		return false, nil
+	}
 	parent, err := lineage.GetRun(ctx, child.ProjectID, delegation.ParentRunID)
 	if err != nil {
 		return false, err

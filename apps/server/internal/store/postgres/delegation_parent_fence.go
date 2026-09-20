@@ -24,6 +24,12 @@ func delegatedParentTerminalTx(ctx context.Context, tx pgx.Tx, child store.Run) 
 	if delegation.IssueID != child.IssueID || child.AgentID == nil || *child.AgentID != delegation.TargetAgentID {
 		return false, store.ErrConflict
 	}
+	if delegation.ParentRunID == "" {
+		if delegation.SourceCommentID == nil || delegation.ParentAgentID != "" {
+			return false, store.ErrConflict
+		}
+		return false, nil
+	}
 	parent, err := scanRun(tx.QueryRow(ctx, `
 		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
 		       status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
