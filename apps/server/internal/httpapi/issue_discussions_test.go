@@ -264,3 +264,41 @@ func TestIssueDiscussionHTTPReadsWithoutProjectAccessAdapter(t *testing.T) {
 		})
 	}
 }
+
+type failingIssueDiscussionHTTPStore struct {
+	*issueCommentHTTPStore
+	err error
+}
+
+func (s *failingIssueDiscussionHTTPStore) ListIssueDiscussionRoots(context.Context, string, string, int) ([]store.IssueDiscussionRoot, error) {
+	return nil, s.err
+}
+
+func (s *failingIssueDiscussionHTTPStore) GetIssueDiscussionThread(context.Context, string, string, string, int, int) (store.IssueDiscussionThread, error) {
+	return store.IssueDiscussionThread{}, s.err
+}
+
+func (s *failingIssueDiscussionHTTPStore) ListIssueDiscussionUpdates(context.Context, string, string, *store.IssueCommentCursor, int, int, int) (store.IssueDiscussionUpdates, error) {
+	return store.IssueDiscussionUpdates{}, s.err
+}
+
+func TestIssueDiscussionHTTPDirectServicePropagatesQueryErrors(t *testing.T) {
+	fixture, database := newIssueCommentHTTPFixture(t)
+	failing := &failingIssueDiscussionHTTPStore{issueCommentHTTPStore: database, err: store.ErrNotFound}
+	fixture.handler = NewRouter(app.New(failing))
+
+	rootID := "11111111-1111-4111-8111-111111111111"
+	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
+	for name, path := range map[string]string{
+		"recent":  base + "/discussions",
+		"thread":  base + "/" + rootID + "/thread",
+		"updates": base + "/updates",
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", nil)
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
