@@ -27,8 +27,9 @@ type IssueDiscussionThreadDTO struct {
 }
 
 type IssueDiscussionUpdateDTO struct {
-	Comment IssueCommentDTO `json:"comment"`
-	IsNew   bool            `json:"isNew"`
+	Comment          IssueCommentDTO `json:"comment"`
+	IsNew            bool            `json:"isNew"`
+	ContextTruncated bool            `json:"contextTruncated"`
 }
 
 type IssueDiscussionUpdatesDTO struct {
@@ -147,7 +148,9 @@ func (a *api) listIssueDiscussionUpdates(w http.ResponseWriter, r *http.Request)
 	}
 	comments := make([]IssueDiscussionUpdateDTO, 0, len(value.Comments))
 	for _, item := range value.Comments {
-		comments = append(comments, IssueDiscussionUpdateDTO{Comment: issueCommentDTO(item.Comment, issueKey, viewerID), IsNew: item.IsNew})
+		comments = append(comments, IssueDiscussionUpdateDTO{
+			Comment: issueCommentDTO(item.Comment, issueKey, viewerID), IsNew: item.IsNew, ContextTruncated: item.ContextTruncated,
+		})
 	}
 	var nextCursor *string
 	if value.NextCursor != "" {
