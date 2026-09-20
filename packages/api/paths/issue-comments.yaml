@@ -143,3 +143,78 @@ reaction:
         description: Reaction absent
       default:
         $ref: ../components/api-components.yaml#/responses/Error
+
+
+discussions:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  get:
+    operationId: listRecentIssueDiscussions
+    description: Lists recent Issue discussions by thread last activity. Results are bounded and contain top-level roots with reply metadata.
+    parameters:
+    - name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 20}
+    responses:
+      '200':
+        description: Recent Issue discussions
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: ../schemas/control-plane.yaml#/IssueDiscussionRoot}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+thread:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  - name: commentID
+    in: path
+    required: true
+    schema: {type: string, format: uuid}
+  get:
+    operationId: getIssueDiscussionThread
+    description: Resolves any comment anchor to its top-level discussion and returns a bounded coherent thread.
+    parameters:
+    - name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 100}
+    responses:
+      '200':
+        description: Issue discussion thread
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/IssueDiscussionThread}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+updates:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  get:
+    operationId: listIssueDiscussionUpdates
+    description: Lists comments newer than an opaque durable cursor and restores required ancestor context so replies are never returned orphaned.
+    parameters:
+    - name: cursor
+      in: query
+      required: false
+      description: Opaque cursor returned by an earlier discussion update read.
+      schema: {type: string}
+    - name: limit
+      in: query
+      required: false
+      schema: {type: integer, minimum: 1, maximum: 50}
+    responses:
+      '200':
+        description: Incremental Issue discussion updates
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/IssueDiscussionUpdates}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
