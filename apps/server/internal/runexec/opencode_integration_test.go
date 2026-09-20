@@ -238,39 +238,31 @@ func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 			completedPublishes = append(completedPublishes, payload)
 		}
 	}
-	if len(completedPublishes) == 0 {
-		t.Fatalf("publish_issue_comment did not complete; events=%v", eventTypes(events))
+	if len(completedPublishes) != 1 {
+		t.Fatalf("publish_issue_comment completions=%d want exactly one; events=%v", len(completedPublishes), eventTypes(events))
+	}
+	publish := completedPublishes[0]
+	if publish.ToolCallID == "" {
+		t.Fatalf("completed publication has no tool call id: %+v", publish)
+	}
+	if body, _ := publish.Input["body"].(string); body != expectedBody {
+		t.Fatalf("publication input=%+v want body=%q", publish.Input, expectedBody)
 	}
 
 	comments, err := fixture.services.ControlPlane.ListIssueComments(fixture.ctx, project.ID, run.IssueID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(comments) != len(completedPublishes) {
-		t.Fatalf("durable Issue comments=%d completed publish actions=%d comments=%+v", len(comments), len(completedPublishes), comments)
+	if len(comments) != 1 {
+		t.Fatalf("durable Issue comments=%+v want exactly one", comments)
 	}
-	commentsByAction := make(map[string]store.IssueComment, len(comments))
-	for _, comment := range comments {
-		if comment.SourceActionKey == nil || strings.TrimSpace(*comment.SourceActionKey) == "" {
-			t.Fatalf("trusted Agent comment has no source action key: %+v", comment)
-		}
-		commentsByAction[*comment.SourceActionKey] = comment
+	comment := comments[0]
+	if comment.SourceActionKey == nil || strings.TrimSpace(*comment.SourceActionKey) == "" {
+		t.Fatalf("trusted Agent comment has no source action key: %+v", comment)
 	}
-	for _, publish := range completedPublishes {
-		if publish.ToolCallID == "" {
-			t.Fatalf("completed publication has no tool call id: %+v", publish)
-		}
-		if body, _ := publish.Input["body"].(string); body != expectedBody {
-			t.Fatalf("publication input=%+v want body=%q", publish.Input, expectedBody)
-		}
-		comment, ok := commentsByAction[publish.ToolCallID]
-		if !ok {
-			t.Fatalf("no durable comment for completed publication %q; comments=%+v", publish.ToolCallID, comments)
-		}
-		if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != *run.AgentID ||
-			comment.SourceRunID == nil || *comment.SourceRunID != run.ID || comment.Body != expectedBody {
-			t.Fatalf("trusted Agent comment=%+v run=%+v", comment, run)
-		}
+	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != *run.AgentID ||
+		comment.SourceRunID == nil || *comment.SourceRunID != run.ID || comment.Body != expectedBody {
+		t.Fatalf("trusted Agent comment=%+v run=%+v", comment, run)
 	}
 
 	reloadedDatabase, err := postgres.Open(fixture.ctx, fixture.env.databaseURL)
