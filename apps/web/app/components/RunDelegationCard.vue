@@ -12,7 +12,7 @@ const incoming = ref<Delegation>()
 const incomingError = ref<ApiError>()
 let incomingGeneration = 0
 
-const agentName = (id: string) => agents.data.value?.find(agent => agent.id === id)?.name || id
+const agentName = (id: string | null) => id ? (agents.data.value?.find(agent => agent.id === id)?.name || id) : 'Unknown'
 const hasDelegation = computed(() => Boolean(incoming.value || outgoing.data.value?.length))
 
 async function loadIncoming() {
@@ -60,14 +60,23 @@ useProjectEvents(() => props.projectId, async event => {
 
     <div v-if="incoming" class="space-y-2 text-sm">
       <p class="font-medium">Delegated subtask</p>
-      <p>Parent Agent: {{ agentName(incoming.parentAgentId) }}</p>
+      <p v-if="incoming.parentAgentId">Parent Agent: {{ agentName(incoming.parentAgentId) }}</p>
+      <p v-else-if="incoming.sourceCommentId">Triggered by structured Agent mention in the Issue discussion.</p>
       <p>Task: {{ incoming.task }}</p>
       <p>Workspace access: {{ incoming.workspaceAccess }}</p>
       <NuxtLink
+        v-if="incoming.parentRunId"
         :to="`/projects/${projectId}/runs/${incoming.parentRunId}`"
         class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
       >
         Open parent Run
+      </NuxtLink>
+      <NuxtLink
+        v-else-if="incoming.sourceCommentId"
+        :to="`/projects/${projectId}/issues/${incoming.issueId}`"
+        class="hover:text-primary focus-visible:outline-2 focus-visible:outline-primary"
+      >
+        Open source Issue discussion
       </NuxtLink>
     </div>
 

@@ -94,6 +94,30 @@ export interface IssueCommentReactionSummary {
   reactedByCurrentUser: boolean
 }
 
+export type IssueCommentMentionOutcome = 'QUEUED' | 'BLOCKED'
+
+export type IssueCommentMentionReasonCode =
+  | 'TARGET_UNAVAILABLE'
+  | 'TARGET_BUSY'
+  | 'DELEGATION_BLOCKED'
+
+export interface IssueCommentMention {
+  id: string
+  targetAgentId: string
+  targetAgentName: string
+  outcome: IssueCommentMentionOutcome
+  reasonCode: IssueCommentMentionReasonCode | null
+  delegationId: string | null
+  delegatedRunId: string | null
+}
+
+export interface IssueCommentMentionPreview {
+  targetAgentId: string
+  targetAgentName: string
+  eligible: boolean
+  reasonCode: IssueCommentMentionReasonCode | null
+}
+
 export interface IssueComment {
   id: string
   issueId: string
@@ -105,6 +129,7 @@ export interface IssueComment {
   resolvedAt: string | null
   resolvedBy: IssueCommentResolver | null
   reactions: IssueCommentReactionSummary[]
+  mentions: IssueCommentMention[]
   createdAt: string
   updatedAt: string
 }
@@ -147,14 +172,15 @@ export interface Delegation {
   id: string
   projectId: string
   issueId: string
-  parentRunId: string
-  parentAgentId: string
+  parentRunId: string | null
+  parentAgentId: string | null
+  sourceCommentId: string | null
   targetAgentId: string
   task: string
   delegatedRunId: string
   workspaceAccess: 'WRITE'
   requestKey: string
-  parentRunStatus: string
+  parentRunStatus: string | null
   delegatedRunStatus: string
   outcome: 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | null
   resultSummary: string | null
