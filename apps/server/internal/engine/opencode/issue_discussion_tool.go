@@ -51,7 +51,9 @@ function createBridge() {
           return
         }
         response.writeHead(200, { "content-type": "application/json" })
-        response.end(JSON.stringify(queued.shift()))
+        // Keep the request queued until Agent Board acknowledges it through
+        // /respond so control-plane reattachment can replay an in-flight read.
+        response.end(JSON.stringify(queued[0]))
         return
       }
       if (request.method === "POST" && request.url === "/respond") {
@@ -66,6 +68,8 @@ function createBridge() {
           return
         }
         pending.delete(id)
+        const queuedIndex = queued.findIndex((item) => item.id === id)
+        if (queuedIndex >= 0) queued.splice(queuedIndex, 1)
         if (payload.error) waiting.reject(new Error(String(payload.error)))
         else waiting.resolve(JSON.stringify(payload.result))
         response.writeHead(204)
