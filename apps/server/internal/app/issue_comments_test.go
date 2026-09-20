@@ -9,6 +9,11 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
+type issueCommentWithoutMentionsStore struct {
+	store.ControlPlaneStore
+	store.IssueCommentStore
+}
+
 type issueCommentTestStore struct {
 	*projectWorkflowAuthorizationStore
 	comments    []store.IssueComment
@@ -353,6 +358,34 @@ func TestProjectAccessIssueCommentsUseAuthenticatedHumanAndMemberPolicy(t *testi
 	}
 }
 
+
+func TestIssueCommentMentionApplicationFailsClosedWithoutMentionStore(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	full := &issueCommentTestStore{projectWorkflowAuthorizationStore: base}
+	withoutMentions := &issueCommentWithoutMentionsStore{
+		ControlPlaneStore: full,
+		IssueCommentStore: full,
+	}
+	service := New(withoutMentions)
+	if _, err := service.PreviewIssueCommentMentions(t.Context(), projectID, issueID, []string{"agent-2"}); err == nil {
+		t.Fatal("preview unexpectedly succeeded without structured mention store")
+	}
+
+	noComments := New(base)
+	if _, err := noComments.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "body",
+	}, "author"); err == nil {
+		t.Fatal("comment creation unexpectedly succeeded without Issue comment store")
+	}
+}
 
 func TestIssueCommentMentionApplicationPreviewAndCreate(t *testing.T) {
 	const projectID = "project-1"
