@@ -321,6 +321,46 @@ func TestIssueDiscussionBridgeRejectsMalformedQueuePayload(t *testing.T) {
 	})
 }
 
+
+func TestIssueDiscussionBridgeServeStopsWhileQueueIsEmpty(t *testing.T) {
+	seen := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/next" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		select {
+		case seen <- struct{}{}:
+		default:
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	bridge := &issueDiscussionBridge{
+		http:    server.Client(),
+		baseURL: server.URL,
+		reader:  &recordingIssueDiscussionReader{},
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- bridge.Serve(ctx) }()
+
+	select {
+	case <-seen:
+		cancel()
+	case <-time.After(2 * time.Second):
+		t.Fatal("bridge never polled empty queue")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("bridge shutdown error=%v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("bridge did not stop after empty-queue cancellation")
+	}
+}
+
 func TestWaitIssueDiscussionBridgeHealthyHonorsCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "not ready", http.StatusServiceUnavailable)
@@ -421,6 +461,9 @@ func TestIssueDiscussionBridgeAddressIsStableAndSeparate(t *testing.T) {
 
 func TestBoundedIssueDiscussionToolError(t *testing.T) {
 	long := strings.Repeat("x", 2048)
+	if got := boundedIssueDiscussionToolError(errors.New("")); got != "Issue discussion read failed" {
+		t.Fatalf("empty error=%q", got)
+	}
 	if got := boundedIssueDiscussionToolError(context.Canceled); got != context.Canceled.Error() {
 		t.Fatalf("error=%q", got)
 	}
