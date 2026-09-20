@@ -347,8 +347,8 @@ func TestIssueDiscussionReadsBoundWideAndDeepGraphs(t *testing.T) {
 	if _, err := s.pool.Exec(ctx, `
 		INSERT INTO issue_comments (issue_id, parent_comment_id, author_type, author_id, body, created_at, updated_at)
 		SELECT $1, $2, 'HUMAN', $3, 'wide reply ' || n::text,
-		       $4 + n * interval '1 microsecond',
-		       $4 + n * interval '1 microsecond'
+		       $4::timestamptz + n * interval '1 microsecond',
+		       $4::timestamptz + n * interval '1 microsecond'
 		FROM generate_series(1, $5) AS n
 	`, issue.ID, wideRoot.ID, author.ID, base, wideReplies); err != nil {
 		t.Fatal(err)
