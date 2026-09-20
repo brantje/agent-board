@@ -719,12 +719,15 @@ func TestIssueDiscussionProjectionHelpersRejectInvalidGraphsAndEmptyScans(t *tes
 		partialID:      {ID: partialID, ParentCommentID: &partialParentID, CreatedAt: at},
 		partialChildID: {ID: partialChildID, ParentCommentID: &partialID, CreatedAt: at.Add(time.Second)},
 	}
-	contextTruncated, err := issueDiscussionContextTruncation(partialValues)
+	contextTruncated, err := issueDiscussionContextTruncation(partialValues, map[string]struct{}{partialID: {}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !contextTruncated[partialID] || !contextTruncated[partialChildID] {
 		t.Fatalf("partial context markers=%+v", contextTruncated)
+	}
+	if _, err := issueDiscussionContextTruncation(partialValues, nil); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("unmarked partial context error=%v", err)
 	}
 	partialOrdered, err := orderIssueCommentsAncestorFirstWithPartialContext(
 		[]store.IssueComment{partialValues[partialChildID], partialValues[partialID]},
