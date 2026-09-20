@@ -194,7 +194,7 @@ func (s *Store) requestIssueDelegationTx(ctx context.Context, tx pgx.Tx, input s
 	if err := tx.QueryRow(ctx, `
 		SELECT id::text
 		FROM issue_comments
-		WHERE issue_id=$1 AND id=$2
+		WHERE issue_id=$1 AND id=$2 AND author_type='HUMAN' AND deleted_at IS NULL
 		FOR KEY SHARE
 	`, issue.ID, input.SourceCommentID).Scan(&sourceCommentID); err != nil {
 		return store.RequestDelegationResult{}, notFound(err)

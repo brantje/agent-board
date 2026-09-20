@@ -161,3 +161,31 @@ func TestIssueOriginDelegationTerminalizesWithoutParentContinuation(t *testing.T
 		t.Fatalf("terminal delegation=%+v", delegation)
 	}
 }
+
+func TestRequestIssueDelegationRejectsAgentAuthoredSourceComment(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	runID := f.parentRun.ID
+	actionKey := "agent-source-comment"
+	commentResult, err := f.store.CreateIssueComment(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: f.parent.ID,
+		SourceRunID: &runID, SourceActionKey: &actionKey, Body: "Agent-authored source must retain parent-Run policy.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.store.RequestIssueDelegation(ctx, store.RequestIssueDelegationCommand{
+		ProjectID: f.project.ID, IssueID: f.issue.ID, SourceCommentID: commentResult.Comment.ID,
+		TargetAgentID: f.target.ID, Task: "attempt parentless bypass", RequestKey: "agent-source-bypass",
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Agent-authored source error=%v want not found", err)
+	}
+	runs, err := f.store.ListRuns(ctx, f.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 {
+		t.Fatalf("Agent-authored parentless request created delegated execution: %+v", runs)
+	}
+}
