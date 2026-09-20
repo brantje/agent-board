@@ -30,6 +30,7 @@ func (s *Store) ListIssueDiscussionRoots(ctx context.Context, projectID, issueID
 			SELECT t.root_id,
 			       count(*) - 1 AS reply_count,
 			       max(t.created_at) AS last_activity_at,
+			       (array_agg(t.id ORDER BY t.created_at DESC, t.id DESC))[1] AS latest_id,
 			       bool_or(t.depth = $3 AND EXISTS (
 				   SELECT 1 FROM issue_comments AS child
 				   WHERE child.issue_id = $2 AND child.parent_comment_id = t.id
@@ -37,7 +38,7 @@ func (s *Store) ListIssueDiscussionRoots(ctx context.Context, projectID, issueID
 			FROM thread AS t
 			GROUP BY t.root_id
 		)
-		SELECT root_id::text, reply_count, last_activity_at, truncated
+		SELECT root_id::text, reply_count, last_activity_at, latest_id::text, truncated
 		FROM stats
 		ORDER BY last_activity_at DESC, root_id DESC
 		LIMIT $4
@@ -51,13 +52,14 @@ func (s *Store) ListIssueDiscussionRoots(ctx context.Context, projectID, issueID
 		id             string
 		replyCount     int
 		lastActivityAt time.Time
+		latestID       string
 		truncated      bool
 	}
 	selected := make([]metadata, 0, limit)
 	ids := make([]string, 0, limit)
 	for rows.Next() {
 		var value metadata
-		if err := rows.Scan(&value.id, &value.replyCount, &value.lastActivityAt, &value.truncated); err != nil {
+		if err := rows.Scan(&value.id, &value.replyCount, &value.lastActivityAt, &value.latestID, &value.truncated); err != nil {
 			return nil, err
 		}
 		selected = append(selected, value)
@@ -80,12 +82,35 @@ func (s *Store) ListIssueDiscussionRoots(ctx context.Context, projectID, issueID
 		if !ok {
 			return nil, store.ErrNotFound
 		}
-		result = append(result, store.IssueDiscussionRoot{
+		projection := store.IssueDiscussionRoot{
 			Root:           root,
 			ReplyCount:     item.replyCount,
 			LastActivityAt: item.lastActivityAt,
 			Truncated:      item.truncated,
-		})
+		}
+		if root.ResolvedAt != nil {
+			chainIDs, err := s.issueCommentAncestorIDs(ctx, projectID, issueID, item.latestID, issueDiscussionRootTraversalDepth)
+			if err != nil {
+				return nil, err
+			}
+			chain, err := s.listIssueCommentsByIDs(ctx, projectID, issueID, chainIDs)
+			if err != nil {
+				return nil, err
+			}
+			chainByID := make(map[string]store.IssueComment, len(chain))
+			for _, comment := range chain {
+				chainByID[comment.ID] = comment
+			}
+			projection.CompactComments = make([]store.IssueComment, 0, len(chainIDs))
+			for _, id := range chainIDs {
+				comment, ok := chainByID[id]
+				if !ok {
+					return nil, store.ErrNotFound
+				}
+				projection.CompactComments = append(projection.CompactComments, comment)
+			}
+		}
+		result = append(result, projection)
 	}
 	return result, nil
 }

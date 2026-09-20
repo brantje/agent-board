@@ -15,12 +15,14 @@ type IssueCommentCursor struct {
 
 // IssueDiscussionRoot is a bounded orientation record for one top-level
 // discussion. Root remains the canonical durable comment; the metadata is a
-// read projection only.
+// read projection only. CompactComments is populated only for resolved roots
+// and contains a bounded root-to-latest-activity path, not a durable summary.
 type IssueDiscussionRoot struct {
-	Root           IssueComment
-	ReplyCount     int
-	LastActivityAt time.Time
-	Truncated      bool
+	Root            IssueComment
+	ReplyCount      int
+	LastActivityAt  time.Time
+	CompactComments []IssueComment
+	Truncated       bool
 }
 
 // IssueDiscussionThread contains one complete bounded traversal from a resolved

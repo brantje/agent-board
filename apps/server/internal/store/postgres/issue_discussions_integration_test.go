@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,29 @@ func TestIssueDiscussionReadsAreThreadAwareBoundedAndCursorSafe(t *testing.T) {
 	}
 	if roots[1].ReplyCount != 2 || !roots[1].LastActivityAt.Equal(base.Add(2*time.Second)) || roots[1].Truncated {
 		t.Fatalf("thread metadata=%+v", roots[1])
+	}
+
+	if _, err := s.ResolveIssueComment(ctx, project.ID, issue.ID, root.ID, author.ID); err != nil {
+		t.Fatal(err)
+	}
+	resolvedRoots, err := s.ListIssueDiscussionRoots(ctx, project.ID, issue.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resolvedRoot store.IssueDiscussionRoot
+	for _, candidate := range resolvedRoots {
+		if candidate.Root.ID == root.ID {
+			resolvedRoot = candidate
+			break
+		}
+	}
+	if len(resolvedRoot.CompactComments) != 3 {
+		t.Fatalf("resolved compact=%+v", resolvedRoot)
+	}
+	for index, want := range []string{root.ID, reply.ID, grandchild.ID} {
+		if resolvedRoot.CompactComments[index].ID != want {
+			t.Fatalf("resolved compact ids=%+v", resolvedRoot.CompactComments)
+		}
 	}
 
 	thread, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, grandchild.ID, 8, 10)
@@ -136,5 +160,32 @@ func TestIssueDiscussionReadsAreThreadAwareBoundedAndCursorSafe(t *testing.T) {
 	}
 	if _, err := s.GetIssueDiscussionThread(ctx, otherProject.ID, issue.ID, root.ID, 8, 10); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross-project thread error=%v", err)
+	}
+
+	otherIssue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "Other issue", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetIssueDiscussionThread(ctx, project.ID, otherIssue.ID, root.ID, 8, 10); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-issue thread error=%v", err)
+	}
+
+	tieRoot := create("tie root", nil)
+	tieAt := base.Add(10 * time.Second)
+	for _, id := range []string{secondRoot.ID, tieRoot.ID} {
+		if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET created_at=$1, updated_at=$1 WHERE id=$2`, tieAt, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tiedRoots, err := s.ListIssueDiscussionRoots(ctx, project.ID, issue.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFirst, wantSecond := secondRoot.ID, tieRoot.ID
+	if strings.Compare(wantFirst, wantSecond) < 0 {
+		wantFirst, wantSecond = wantSecond, wantFirst
+	}
+	if len(tiedRoots) < 2 || tiedRoots[0].Root.ID != wantFirst || tiedRoots[1].Root.ID != wantSecond {
+		t.Fatalf("deterministic tied roots=%+v want first=%s second=%s", tiedRoots, wantFirst, wantSecond)
 	}
 }
