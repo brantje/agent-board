@@ -574,6 +574,12 @@ func (s *Store) issueCommentAncestorIDsBounded(ctx context.Context, projectID, i
 		return nil, false, store.ErrNotFound
 	}
 	last := chain[len(chain)-1]
+	if last.parentID != nil && last.depth < maxDepth {
+		// The scoped walk stopped before the configured depth bound, so the
+		// parent is not part of this Issue graph. Preserve the existing
+		// fail-closed isolation behavior rather than exposing it as truncation.
+		return nil, false, store.ErrInvalidArgument
+	}
 	truncated := last.parentID != nil
 	ids := make([]string, 0, len(chain))
 	for index := len(chain) - 1; index >= 0; index-- {
@@ -581,7 +587,6 @@ func (s *Store) issueCommentAncestorIDsBounded(ctx context.Context, projectID, i
 	}
 	return ids, truncated, nil
 }
-
 
 func (s *Store) listIssueCommentsByIDs(ctx context.Context, projectID, issueID string, ids []string) ([]store.IssueComment, error) {
 	if len(ids) == 0 {
