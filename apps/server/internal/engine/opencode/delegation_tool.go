@@ -43,10 +43,6 @@ export default tool({
 )
 
 func openCodeServeCommand(host, port string, issueStatusEnabled, issueCommentEnabled, delegationEnabled bool) []string {
-	return openCodeServeCommandWithDiscussion(host, port, issueStatusEnabled, issueCommentEnabled, false, delegationEnabled)
-}
-
-func openCodeServeCommandWithDiscussion(host, port string, issueStatusEnabled, issueCommentEnabled, issueDiscussionEnabled, delegationEnabled bool) []string {
 	statusSource := ""
 	if issueStatusEnabled {
 		statusSource = issueStatusToolSource
@@ -55,10 +51,35 @@ func openCodeServeCommandWithDiscussion(host, port string, issueStatusEnabled, i
 	if issueCommentEnabled {
 		commentSource = issueCommentToolSource
 	}
-	discussionSource := ""
-	if issueDiscussionEnabled {
-		discussionSource = issueDiscussionToolSource
+	delegationSource := ""
+	if delegationEnabled {
+		delegationSource = delegationToolSource
 	}
+	const script = `set -eu
+config_home="${XDG_CONFIG_HOME:?XDG_CONFIG_HOME is required}"
+tool_dir="$config_home/opencode/tools"
+mkdir -p "$tool_dir"
+rm -f "$tool_dir/set_issue_status.ts" "$tool_dir/publish_issue_comment.ts" "$tool_dir/delegate_task.ts"
+if [ -n "$3" ]; then printf '%s' "$3" > "$tool_dir/set_issue_status.ts"; fi
+if [ -n "$4" ]; then printf '%s' "$4" > "$tool_dir/publish_issue_comment.ts"; fi
+if [ -n "$5" ]; then printf '%s' "$5" > "$tool_dir/delegate_task.ts"; fi
+exec opencode serve --hostname "$1" --port "$2"`
+	return []string{"sh", "-c", script, "agent-board-opencode", host, port, statusSource, commentSource, delegationSource}
+}
+
+func openCodeServeCommandWithDiscussion(host, port string, issueStatusEnabled, issueCommentEnabled, issueDiscussionEnabled, delegationEnabled bool) []string {
+	if !issueDiscussionEnabled {
+		return openCodeServeCommand(host, port, issueStatusEnabled, issueCommentEnabled, delegationEnabled)
+	}
+	statusSource := ""
+	if issueStatusEnabled {
+		statusSource = issueStatusToolSource
+	}
+	commentSource := ""
+	if issueCommentEnabled {
+		commentSource = issueCommentToolSource
+	}
+	discussionSource := issueDiscussionToolSource
 	delegationSource := ""
 	if delegationEnabled {
 		delegationSource = delegationToolSource
@@ -70,7 +91,7 @@ mkdir -p "$tool_dir"
 rm -f "$tool_dir/set_issue_status.ts" "$tool_dir/publish_issue_comment.ts" "$tool_dir/read_issue_discussion.ts" "$tool_dir/delegate_task.ts"
 if [ -n "$3" ]; then printf '%s' "$3" > "$tool_dir/set_issue_status.ts"; fi
 if [ -n "$4" ]; then printf '%s' "$4" > "$tool_dir/publish_issue_comment.ts"; fi
-if [ -n "$5" ]; then printf '%s' "$5" > "$tool_dir/read_issue_discussion.ts"; fi
+printf '%s' "$5" > "$tool_dir/read_issue_discussion.ts"
 if [ -n "$6" ]; then printf '%s' "$6" > "$tool_dir/delegate_task.ts"; fi
 exec opencode serve --hostname "$1" --port "$2"`
 	return []string{"sh", "-c", script, "agent-board-opencode", host, port, statusSource, commentSource, discussionSource, delegationSource}
