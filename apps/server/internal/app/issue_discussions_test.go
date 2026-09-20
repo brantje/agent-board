@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,20 +22,32 @@ type issueDiscussionTestStore struct {
 	updateContext int
 	updateDepth   int
 	cursor        *store.IssueCommentCursor
+	rootErr       error
+	threadErr     error
+	updateErr     error
 }
 
 func (s *issueDiscussionTestStore) ListIssueDiscussionRoots(_ context.Context, _, _ string, limit int) ([]store.IssueDiscussionRoot, error) {
 	s.rootLimit = limit
+	if s.rootErr != nil {
+		return nil, s.rootErr
+	}
 	return append([]store.IssueDiscussionRoot(nil), s.roots...), nil
 }
 
 func (s *issueDiscussionTestStore) GetIssueDiscussionThread(_ context.Context, _, _, _ string, depth, limit int) (store.IssueDiscussionThread, error) {
 	s.threadDepth, s.threadLimit = depth, limit
+	if s.threadErr != nil {
+		return store.IssueDiscussionThread{}, s.threadErr
+	}
 	return s.thread, nil
 }
 
 func (s *issueDiscussionTestStore) ListIssueDiscussionUpdates(_ context.Context, _, _ string, cursor *store.IssueCommentCursor, limit, contextLimit, depth int) (store.IssueDiscussionUpdates, error) {
 	s.cursor, s.updateLimit, s.updateContext, s.updateDepth = cursor, limit, contextLimit, depth
+	if s.updateErr != nil {
+		return store.IssueDiscussionUpdates{}, s.updateErr
+	}
 	return s.updates, nil
 }
 
@@ -100,5 +114,60 @@ func TestIssueDiscussionApplicationBoundsReadsAndKeepsOpaqueCursor(t *testing.T)
 	}
 	if _, err := access.ListRecentIssueDiscussions(t.Context(), AuthenticatedUser{ID: "viewer", Status: store.UserStatusActive, DeploymentRole: store.DeploymentRoleMember}, projectID, issueID, 1); err != nil {
 		t.Fatalf("viewer discussion read error=%v", err)
+	}
+}
+
+func TestIssueDiscussionApplicationHandlesUnavailableAndStoreFailures(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues:  map[string]store.Issue{issueID: {ID: issueID, ProjectID: projectID, Title: "Issue"}},
+		runs:    map[string]store.Run{},
+	}
+	commentStore := &issueCommentTestStore{projectWorkflowAuthorizationStore: base}
+
+	withoutDiscussions := New(commentStore)
+	if _, err := withoutDiscussions.ListRecentIssueDiscussions(t.Context(), projectID, issueID, 1); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("recent unavailable error=%v", err)
+	}
+	if _, err := withoutDiscussions.GetIssueDiscussionThread(t.Context(), projectID, issueID, "33333333-3333-4333-8333-333333333333", 1); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("thread unavailable error=%v", err)
+	}
+	if _, err := withoutDiscussions.ListIssueDiscussionUpdates(t.Context(), projectID, issueID, "", 1); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("updates unavailable error=%v", err)
+	}
+
+	fake := &issueDiscussionTestStore{
+		issueCommentTestStore: commentStore,
+		rootErr:               store.ErrNotFound,
+		threadErr:             store.ErrInvalidArgument,
+		updateErr:             store.ErrNotFound,
+	}
+	service := New(fake)
+	if _, err := service.ListRecentIssueDiscussions(t.Context(), projectID, issueID, 1); err == nil {
+		t.Fatal("recent store failure unexpectedly succeeded")
+	}
+	if _, err := service.GetIssueDiscussionThread(t.Context(), projectID, issueID, "33333333-3333-4333-8333-333333333333", 1); err == nil {
+		t.Fatal("thread store failure unexpectedly succeeded")
+	}
+	if _, err := service.ListIssueDiscussionUpdates(t.Context(), projectID, issueID, "", 1); err == nil {
+		t.Fatal("updates store failure unexpectedly succeeded")
+	}
+	if _, err := service.ListRecentIssueDiscussions(t.Context(), projectID, "22222222-2222-4222-8222-222222222222", 1); err == nil {
+		t.Fatal("missing Issue unexpectedly produced discussion roots")
+	}
+
+	if _, err := encodeIssueDiscussionCursor(store.IssueCommentCursor{}); err == nil {
+		t.Fatal("zero cursor unexpectedly encoded")
+	}
+	if _, err := encodeIssueDiscussionCursor(store.IssueCommentCursor{CreatedAt: time.Now(), ID: "not-a-uuid"}); err == nil {
+		t.Fatal("invalid cursor id unexpectedly encoded")
+	}
+	if _, err := decodeIssueDiscussionCursor("e30"); err == nil {
+		t.Fatal("incomplete cursor payload unexpectedly decoded")
+	}
+	if !errors.Is(context.Canceled, context.Canceled) {
+		t.Fatal("context error sanity check failed")
 	}
 }
