@@ -269,6 +269,63 @@ func TestHandleToolPartOmitsIssueDiscussionResultPreview(t *testing.T) {
 	}
 }
 
+func TestIssueDiscussionResultPreviewIsStructuralOnly(t *testing.T) {
+	body := "canonical discussion body must stay out of Run evidence"
+	cursor := "opaque-cursor-must-not-be-persisted"
+	cases := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{
+			name: "recent",
+			value: map[string]any{
+				"mode": engine.IssueDiscussionReadRecent,
+				"roots": []any{
+					map[string]any{
+						"root":      map[string]any{"id": "comment-1", "body": body},
+						"truncated": true,
+					},
+				},
+			},
+			want: "mode=recent roots=1 truncated=true",
+		},
+		{
+			name:  "thread string output",
+			value: `{"mode":"thread","thread":{"rootId":"root","anchorId":"child","comments":[{"id":"root","body":"canonical discussion body must stay out of Run evidence"}],"truncated":true}}`,
+			want:  "mode=thread comments=1 truncated=true",
+		},
+		{
+			name: "updates",
+			value: map[string]any{
+				"mode": engine.IssueDiscussionReadUpdates,
+				"updates": map[string]any{
+					"comments": []any{map[string]any{"comment": map[string]any{"id": "comment-1", "body": body}, "isNew": true}},
+					"nextCursor": cursor,
+					"hasMore":    true,
+				},
+			},
+			want: "mode=updates comments=1 hasMore=true cursor=true",
+		},
+		{name: "thread without projection", value: `{"mode":"thread"}`, want: "mode=thread"},
+		{name: "updates without projection", value: `{"mode":"updates"}`, want: "mode=updates"},
+		{name: "malformed", value: "{", want: "discussion read completed"},
+		{name: "unknown mode", value: `{"mode":"future"}`, want: "discussion read completed"},
+		{name: "unserializable", value: func() {}, want: "discussion read completed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := issueDiscussionResultPreview(tc.value)
+			if got != tc.want {
+				t.Fatalf("preview=%q want=%q", got, tc.want)
+			}
+			if strings.Contains(got, body) || strings.Contains(got, cursor) {
+				t.Fatalf("unsafe discussion data leaked into preview=%q", got)
+			}
+		})
+	}
+}
+
 func TestHandleToolPartPreservesStructuredOutputAsPreview(t *testing.T) {
 	sink := &recordingActivitySink{}
 	state := newRunState("ses_1", nil, sink)
