@@ -87,6 +87,7 @@ func newServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	// authoritative base store rather than teaching the redaction decorator
 	// unrelated persistence behavior.
 	services.ControlPlane.issueComments, _ = controlPlaneStore.(store.IssueCommentStore)
+	services.ControlPlane.issueDiscussions, _ = controlPlaneStore.(store.IssueDiscussionStore)
 	services.ControlPlane.issueActivity, _ = controlPlaneStore.(store.IssueActivityStore)
 	// Issue ownership is a control-plane command; the evidence decorator does
 	// not expose this optional capability. Keep its transactional policy intact.
