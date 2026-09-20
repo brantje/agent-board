@@ -387,11 +387,15 @@ IssueCommentUpdate:
 IssueDiscussionRoot:
   type: object
   additionalProperties: false
-  required: [root, replyCount, lastActivityAt, truncated]
+  required: [root, replyCount, lastActivityAt, compactComments, truncated]
   properties:
     root: {$ref: '#/IssueComment'}
     replyCount: {type: integer, minimum: 0}
     lastActivityAt: {type: string, format: date-time}
+    compactComments:
+      type: array
+      description: For resolved discussions, a bounded root-to-latest-activity path. Empty for unresolved discussions; this is a read projection, not a durable AI summary.
+      items: {$ref: '#/IssueComment'}
     truncated:
       type: boolean
       description: True when descendants exist beyond the bounded traversal used for orientation.

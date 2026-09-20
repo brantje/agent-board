@@ -12,10 +12,11 @@ import (
 )
 
 type IssueDiscussionRootDTO struct {
-	Root           IssueCommentDTO `json:"root"`
-	ReplyCount     int             `json:"replyCount"`
-	LastActivityAt time.Time       `json:"lastActivityAt"`
-	Truncated      bool            `json:"truncated"`
+	Root            IssueCommentDTO   `json:"root"`
+	ReplyCount      int               `json:"replyCount"`
+	LastActivityAt  time.Time         `json:"lastActivityAt"`
+	CompactComments []IssueCommentDTO `json:"compactComments"`
+	Truncated       bool              `json:"truncated"`
 }
 
 type IssueDiscussionThreadDTO struct {
@@ -65,11 +66,16 @@ func (a *api) listRecentIssueDiscussions(w http.ResponseWriter, r *http.Request)
 	}
 	out := make([]IssueDiscussionRootDTO, 0, len(values))
 	for _, value := range values {
+		compact := make([]IssueCommentDTO, 0, len(value.CompactComments))
+		for _, comment := range value.CompactComments {
+			compact = append(compact, issueCommentDTO(comment, issueKey, viewerID))
+		}
 		out = append(out, IssueDiscussionRootDTO{
-			Root:           issueCommentDTO(value.Root, issueKey, viewerID),
-			ReplyCount:     value.ReplyCount,
-			LastActivityAt: value.LastActivityAt,
-			Truncated:      value.Truncated,
+			Root:            issueCommentDTO(value.Root, issueKey, viewerID),
+			ReplyCount:      value.ReplyCount,
+			LastActivityAt:  value.LastActivityAt,
+			CompactComments: compact,
+			Truncated:       value.Truncated,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)

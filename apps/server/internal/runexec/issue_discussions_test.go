@@ -22,9 +22,9 @@ type recordingIssueDiscussionService struct {
 func (s *recordingIssueDiscussionService) ListRecentIssueDiscussions(_ context.Context, projectID, issueID string, limit int) ([]store.IssueDiscussionRoot, error) {
 	s.projectID, s.issueID, s.limit = projectID, issueID, limit
 	at := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
+	root := store.IssueComment{ID: "root", AuthorType: store.ActorTypeAgent, AuthorID: "agent", AuthorName: "Agent", Body: "finding", SourceRunID: stringPointer("run-1"), SourceActionKey: stringPointer("internal-action"), CreatedAt: at, UpdatedAt: at}
 	return []store.IssueDiscussionRoot{{
-		Root: store.IssueComment{ID: "root", AuthorType: store.ActorTypeAgent, AuthorID: "agent", AuthorName: "Agent", Body: "finding", SourceRunID: stringPointer("run-1"), SourceActionKey: stringPointer("internal-action"), CreatedAt: at, UpdatedAt: at},
-		ReplyCount: 2, LastActivityAt: at,
+		Root: root, ReplyCount: 2, LastActivityAt: at, CompactComments: []store.IssueComment{root},
 	}}, nil
 }
 
@@ -51,6 +51,9 @@ func TestIssueDiscussionReaderUsesTrustedIssueScopeAndSharedQueries(t *testing.T
 	}
 	if recent.Roots[0].Root.SourceRunID == nil || *recent.Roots[0].Root.SourceRunID != "run-1" || recent.Roots[0].Root.Body == nil || *recent.Roots[0].Root.Body != "finding" {
 		t.Fatalf("mapped root=%+v", recent.Roots[0].Root)
+	}
+	if len(recent.Roots[0].CompactComments) != 1 || recent.Roots[0].CompactComments[0].Body == nil || *recent.Roots[0].CompactComments[0].Body != "finding" {
+		t.Fatalf("mapped compact discussion=%+v", recent.Roots[0].CompactComments)
 	}
 
 	thread, err := reader.ReadIssueDiscussion(t.Context(), engine.IssueDiscussionReadRequest{Mode: engine.IssueDiscussionReadThread, AnchorCommentID: "comment-1"})

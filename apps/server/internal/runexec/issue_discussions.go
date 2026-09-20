@@ -42,9 +42,13 @@ func (r *issueDiscussionReader) ReadIssueDiscussion(ctx context.Context, request
 		}
 		roots := make([]engine.IssueDiscussionRoot, 0, len(values))
 		for _, value := range values {
+			compact := make([]engine.IssueDiscussionComment, 0, len(value.CompactComments))
+			for _, comment := range value.CompactComments {
+				compact = append(compact, mapEngineIssueDiscussionComment(comment))
+			}
 			roots = append(roots, engine.IssueDiscussionRoot{
 				Root: mapEngineIssueDiscussionComment(value.Root), ReplyCount: value.ReplyCount,
-				LastActivityAt: value.LastActivityAt, Truncated: value.Truncated,
+				LastActivityAt: value.LastActivityAt, CompactComments: compact, Truncated: value.Truncated,
 			})
 		}
 		return engine.IssueDiscussionReadResult{Mode: mode, Roots: roots}, nil

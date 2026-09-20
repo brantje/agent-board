@@ -26,7 +26,11 @@ func (s *issueCommentHTTPStore) ListIssueDiscussionRoots(_ context.Context, pid,
 		}
 		replies++
 	}
-	return []store.IssueDiscussionRoot{{Root: root, ReplyCount: replies, LastActivityAt: last}}, nil
+	compact := []store.IssueComment{}
+	if root.ResolvedAt != nil {
+		compact = append(compact, s.comments...)
+	}
+	return []store.IssueDiscussionRoot{{Root: root, ReplyCount: replies, LastActivityAt: last, CompactComments: compact}}, nil
 }
 
 func (s *issueCommentHTTPStore) GetIssueDiscussionThread(_ context.Context, pid, id, anchorID string, _, _ int) (store.IssueDiscussionThread, error) {
@@ -86,7 +90,7 @@ func TestIssueDiscussionHTTPReadsUseCanonicalProjection(t *testing.T) {
 	if err := json.Unmarshal(rootsResponse.Body.Bytes(), &roots); err != nil {
 		t.Fatal(err)
 	}
-	if len(roots) != 1 || roots[0].Root.ID != rootID || roots[0].Root.IssueID != issueKey || roots[0].ReplyCount != 1 {
+	if len(roots) != 1 || roots[0].Root.ID != rootID || roots[0].Root.IssueID != issueKey || roots[0].ReplyCount != 1 || len(roots[0].CompactComments) != 0 {
 		t.Fatalf("roots=%+v", roots)
 	}
 

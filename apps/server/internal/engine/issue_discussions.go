@@ -49,10 +49,11 @@ type IssueDiscussionComment struct {
 }
 
 type IssueDiscussionRoot struct {
-	Root           IssueDiscussionComment `json:"root"`
-	ReplyCount     int                    `json:"replyCount"`
-	LastActivityAt time.Time              `json:"lastActivityAt"`
-	Truncated      bool                   `json:"truncated"`
+	Root            IssueDiscussionComment   `json:"root"`
+	ReplyCount      int                      `json:"replyCount"`
+	LastActivityAt  time.Time                `json:"lastActivityAt"`
+	CompactComments []IssueDiscussionComment `json:"compactComments"`
+	Truncated       bool                     `json:"truncated"`
 }
 
 type IssueDiscussionThread struct {
