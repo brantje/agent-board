@@ -256,8 +256,12 @@ func TestHandleToolPartOmitsIssueDiscussionResultPreview(t *testing.T) {
 	if event.Type != "tool.completed" || event.Payload["toolCallId"] != "call_discussion" {
 		t.Fatalf("event=%+v", event)
 	}
-	if _, exists := event.Payload["resultPreview"]; exists {
-		t.Fatalf("discussion result leaked into durable tool evidence: %+v", event.Payload)
+	preview, _ := event.Payload["resultPreview"].(string)
+	if preview != "mode=recent roots=1 truncated=false" {
+		t.Fatalf("discussion result preview=%q", preview)
+	}
+	if strings.Contains(preview, body) {
+		t.Fatalf("discussion body leaked into durable tool evidence: %+v", event.Payload)
 	}
 	input, ok := event.Payload["input"].(map[string]any)
 	if !ok || input["mode"] != engine.IssueDiscussionReadRecent {
