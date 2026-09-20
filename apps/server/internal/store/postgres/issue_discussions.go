@@ -574,9 +574,7 @@ func (s *Store) issueCommentAncestorIDsBounded(ctx context.Context, projectID, i
 		return nil, false, store.ErrNotFound
 	}
 	last := chain[len(chain)-1]
-	if last.parentID != nil {
-		return nil, store.ErrInvalidArgument
-	}
+	truncated := last.parentID != nil
 	ids := make([]string, 0, len(chain))
 	for index := len(chain) - 1; index >= 0; index-- {
 		ids = append(ids, chain[index].id)
