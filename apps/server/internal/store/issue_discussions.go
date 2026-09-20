@@ -40,9 +40,13 @@ type IssueDiscussionThread struct {
 
 // IssueDiscussionComment marks whether a returned comment is newer than the
 // caller cursor or ancestor context restored solely to keep replies coherent.
+// ContextTruncated is true only when the bounded update page cannot restore the
+// comment's complete ancestor chain. Such an item is explicit partial context,
+// not an ordinary coherent reply projection.
 type IssueDiscussionComment struct {
-	Comment IssueComment
-	IsNew   bool
+	Comment          IssueComment
+	IsNew            bool
+	ContextTruncated bool
 }
 
 // IssueDiscussionUpdates is an incremental collaboration page. NextCursor only
