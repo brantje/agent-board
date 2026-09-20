@@ -240,6 +240,137 @@ func TestIssueDiscussionReadsAreThreadAwareBoundedAndCursorSafe(t *testing.T) {
 	}
 }
 
+func TestIssueDiscussionUpdatesRepresentDeepContextWithoutWedgingCursor(t *testing.T) {
+	s := New(testPool(t))
+	ctx := t.Context()
+	author, err := s.CreateUser(ctx, authUser("discussion-deep-updates", "discussion-deep-updates@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.CreateProject(ctx, testProjectInput("Deep discussion updates", "/repo/deep-discussion-updates", "DDU"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "Keep deep update cursors moving", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(body string, parent *string) store.IssueComment {
+		t.Helper()
+		result, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+			IssueID: issue.ID, ParentCommentID: parent, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, Body: body,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Comment
+	}
+	setTime := func(comment store.IssueComment, at time.Time) {
+		t.Helper()
+		if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET created_at=$1, updated_at=$1 WHERE id=$2`, at, comment.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	base := time.Date(2026, 9, 20, 19, 0, 0, 0, time.UTC)
+	chain := make([]store.IssueComment, 0, issueDiscussionRootTraversalDepth+1)
+	root := create("root", nil)
+	setTime(root, base)
+	chain = append(chain, root)
+	parent := root
+	for depth := 1; depth <= issueDiscussionRootTraversalDepth; depth++ {
+		parentID := parent.ID
+		child := create("depth", &parentID)
+		setTime(child, base.Add(time.Duration(depth)*time.Millisecond))
+		chain = append(chain, child)
+		parent = child
+	}
+
+	cursorComment := chain[len(chain)-2]
+	exactDepth := chain[len(chain)-1]
+	shallowBefore := create("shallow before deep", nil)
+	setTime(shallowBefore, base.Add(time.Duration(issueDiscussionRootTraversalDepth+1)*time.Millisecond))
+	deepParentID := exactDepth.ID
+	deepFirst := create("one beyond depth limit", &deepParentID)
+	setTime(deepFirst, base.Add(time.Duration(issueDiscussionRootTraversalDepth+2)*time.Millisecond))
+	deepFirstID := deepFirst.ID
+	deepSecond := create("two beyond depth limit", &deepFirstID)
+	setTime(deepSecond, base.Add(time.Duration(issueDiscussionRootTraversalDepth+3)*time.Millisecond))
+	shallowAfter := create("shallow after deep", nil)
+	setTime(shallowAfter, base.Add(time.Duration(issueDiscussionRootTraversalDepth+4)*time.Millisecond))
+
+	contextLimit := issueDiscussionRootTraversalDepth + 1
+	exactPage, err := s.ListIssueDiscussionUpdates(
+		ctx,
+		project.ID,
+		issue.ID,
+		&store.IssueCommentCursor{CreatedAt: cursorComment.CreatedAt, ID: cursorComment.ID},
+		1,
+		contextLimit,
+		issueDiscussionRootTraversalDepth,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exactPage.NextCursor == nil || exactPage.NextCursor.ID != exactDepth.ID || !exactPage.HasMore || len(exactPage.Comments) != contextLimit {
+		t.Fatalf("exact-depth page=%+v", exactPage)
+	}
+	exactNew := 0
+	for _, item := range exactPage.Comments {
+		if item.ContextTruncated {
+			t.Fatalf("exact-depth comment was marked partial: %+v", item)
+		}
+		if item.IsNew {
+			exactNew++
+			if item.Comment.ID != exactDepth.ID {
+				t.Fatalf("unexpected exact-depth new comment=%+v", item)
+			}
+		}
+	}
+	if exactNew != 1 {
+		t.Fatalf("exact-depth new count=%d page=%+v", exactNew, exactPage)
+	}
+
+	mixedPage, err := s.ListIssueDiscussionUpdates(
+		ctx,
+		project.ID,
+		issue.ID,
+		exactPage.NextCursor,
+		4,
+		contextLimit,
+		issueDiscussionRootTraversalDepth,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mixedPage.NextCursor == nil || mixedPage.NextCursor.ID != shallowAfter.ID || mixedPage.HasMore || len(mixedPage.Comments) != 4 {
+		t.Fatalf("mixed deep page=%+v", mixedPage)
+	}
+	wantIDs := []string{shallowBefore.ID, deepFirst.ID, deepSecond.ID, shallowAfter.ID}
+	wantTruncated := []bool{false, true, true, false}
+	for index, item := range mixedPage.Comments {
+		if item.Comment.ID != wantIDs[index] || !item.IsNew || item.ContextTruncated != wantTruncated[index] {
+			t.Fatalf("mixed deep item[%d]=%+v want id=%s truncated=%v", index, item, wantIDs[index], wantTruncated[index])
+		}
+	}
+
+	after, err := s.ListIssueDiscussionUpdates(
+		ctx,
+		project.ID,
+		issue.ID,
+		mixedPage.NextCursor,
+		4,
+		contextLimit,
+		issueDiscussionRootTraversalDepth,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Comments) != 0 || after.NextCursor != nil || after.HasMore {
+		t.Fatalf("updates remained wedged after represented deep comments: %+v", after)
+	}
+}
+
 func TestIssueDiscussionReadsRejectInvalidBoundsAndAllowEmptyProjection(t *testing.T) {
 	s := New(testPool(t))
 	ctx := t.Context()
