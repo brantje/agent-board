@@ -234,7 +234,6 @@ func TestIssueDiscussionHTTPFallbackErrorsAndPathValidation(t *testing.T) {
 
 func TestIssueDiscussionHTTPReadsWithoutProjectAccessAdapter(t *testing.T) {
 	fixture, database := newIssueCommentHTTPFixture(t)
-	_, token := fixture.createUser(t, "discussion-direct-reader", store.DeploymentRoleMember)
 
 	at := time.Date(2026, 9, 20, 13, 0, 0, 0, time.UTC)
 	rootID := "11111111-1111-4111-8111-111111111111"
@@ -245,7 +244,7 @@ func TestIssueDiscussionHTTPReadsWithoutProjectAccessAdapter(t *testing.T) {
 	}}
 
 	control := app.New(database)
-	fixture.handler = NewRouterWithApplication(&app.Services{ControlPlane: control, Auth: fixture.auth})
+	fixture.handler = NewRouter(control)
 
 	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
 	for name, path := range map[string]string{
@@ -254,7 +253,7 @@ func TestIssueDiscussionHTTPReadsWithoutProjectAccessAdapter(t *testing.T) {
 		"updates": base + "/updates",
 	} {
 		t.Run(name, func(t *testing.T) {
-			response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", bearer(token))
+			response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", nil)
 			if response.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 			}
