@@ -74,7 +74,9 @@ func (r *issueDiscussionReader) ReadIssueDiscussion(ctx context.Context, request
 		}
 		comments := make([]engine.IssueDiscussionUpdate, 0, len(value.Comments))
 		for _, item := range value.Comments {
-			comments = append(comments, engine.IssueDiscussionUpdate{Comment: mapEngineIssueDiscussionComment(item.Comment), IsNew: item.IsNew})
+			comments = append(comments, engine.IssueDiscussionUpdate{
+				Comment: mapEngineIssueDiscussionComment(item.Comment), IsNew: item.IsNew, ContextTruncated: item.ContextTruncated,
+			})
 		}
 		updates := engine.IssueDiscussionUpdates{Comments: comments, NextCursor: value.NextCursor, HasMore: value.HasMore}
 		return engine.IssueDiscussionReadResult{Mode: mode, Updates: &updates}, nil
