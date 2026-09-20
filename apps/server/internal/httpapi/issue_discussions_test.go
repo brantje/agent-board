@@ -139,7 +139,7 @@ func TestIssueDiscussionHTTPAuthorizationAndCompactProjection(t *testing.T) {
 		base + "/11111111-1111-4111-8111-111111111111/thread",
 		base + "/updates",
 	} {
-		response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", "")
+		response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", nil)
 		if response.Code != http.StatusUnauthorized {
 			t.Fatalf("unauthenticated %s status=%d body=%s", path, response.Code, response.Body.String())
 		}
