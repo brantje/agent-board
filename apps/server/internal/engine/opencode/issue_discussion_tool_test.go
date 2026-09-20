@@ -458,6 +458,40 @@ func TestIssueDiscussionCapabilityIsInstalledAndMatched(t *testing.T) {
 	}
 }
 
+func TestIssueDiscussionBridgeAddressFallsBackToNativeIdentityAndAvoidsCollision(t *testing.T) {
+	first, err := issueDiscussionBridgeAddress("127.0.0.1:44570", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != "127.0.0.1:44571" {
+		t.Fatalf("collision-adjusted bridge address=%q", first)
+	}
+	second, err := issueDiscussionBridgeAddress("127.0.0.1:44570", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second != first {
+		t.Fatalf("fallback bridge address changed: first=%q second=%q", first, second)
+	}
+}
+
+func TestIssueDiscussionBridgeServeStopsOnCanceledContext(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	bridge := &issueDiscussionBridge{
+		http:    server.Client(),
+		baseURL: server.URL,
+		reader:  &recordingIssueDiscussionReader{},
+	}
+	if err := bridge.Serve(ctx); err != nil {
+		t.Fatalf("canceled bridge serve error=%v", err)
+	}
+}
+
 func TestIssueDiscussionBridgeAddressIsStableAndSeparate(t *testing.T) {
 	native := "127.0.0.1:32000"
 	first, err := issueDiscussionBridgeAddress(native, "run-1")
