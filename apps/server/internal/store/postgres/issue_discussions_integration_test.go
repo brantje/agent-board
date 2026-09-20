@@ -712,6 +712,31 @@ func TestIssueDiscussionProjectionHelpersRejectInvalidGraphsAndEmptyScans(t *tes
 		t.Fatalf("cyclic projection error=%v", err)
 	}
 
+	partialID := "66666666-6666-4666-8666-666666666666"
+	partialParentID := "77777777-7777-4777-8777-777777777777"
+	partialChildID := "88888888-8888-4888-8888-888888888888"
+	partialValues := map[string]store.IssueComment{
+		partialID:      {ID: partialID, ParentCommentID: &partialParentID, CreatedAt: at},
+		partialChildID: {ID: partialChildID, ParentCommentID: &partialID, CreatedAt: at.Add(time.Second)},
+	}
+	contextTruncated, err := issueDiscussionContextTruncation(partialValues)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contextTruncated[partialID] || !contextTruncated[partialChildID] {
+		t.Fatalf("partial context markers=%+v", contextTruncated)
+	}
+	partialOrdered, err := orderIssueCommentsAncestorFirstWithPartialContext(
+		[]store.IssueComment{partialValues[partialChildID], partialValues[partialID]},
+		contextTruncated,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(partialOrdered) != 2 || partialOrdered[0].ID != partialID || partialOrdered[1].ID != partialChildID {
+		t.Fatalf("partial ancestor order=%+v", partialOrdered)
+	}
+
 	zero := &Store{}
 	children, hasMore, err := zero.issueCommentChildIDs(t.Context(), "", "", nil, 1)
 	if err != nil || hasMore || len(children) != 0 {
