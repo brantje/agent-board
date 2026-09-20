@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -320,6 +321,15 @@ func TestPublishAgentIssueCommentDerivesTrustedRunContext(t *testing.T) {
 	service := New(fake)
 	publisher := &assigneePublisher{}
 	service.SetEventRecorder(publisher)
+
+	if _, err := service.PublishAgentIssueComment(
+		t.Context(), projectID, runID, "tool-call-multi", "Please split this work.", []string{"agent-2", "agent-3"},
+	); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("multiple Agent mention error=%v want invalid argument", err)
+	}
+	if fake.createCalls != 0 {
+		t.Fatalf("multiple Agent mention reached durable comment creation %d times", fake.createCalls)
+	}
 
 	created, err := service.PublishAgentIssueComment(t.Context(), projectID, runID, "tool-call-1", "Concise finding @name remains plain text", nil)
 	if err != nil {

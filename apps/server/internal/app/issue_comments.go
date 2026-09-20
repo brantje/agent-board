@@ -93,6 +93,9 @@ func (s *Service) PublishAgentIssueComment(ctx context.Context, projectID, runID
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" || requestKey == "" {
 		return store.IssueComment{}, invalid("project and Run are required")
 	}
+	if len(mentionAgentIDs) > 1 {
+		return store.IssueComment{}, invalid("Agent-authored Issue comments support at most one structured Agent mention")
+	}
 	run, err := s.GetRun(ctx, projectID, runID)
 	if err != nil {
 		return store.IssueComment{}, err
