@@ -347,9 +347,24 @@ func (s *Store) ListIssueDiscussionUpdates(ctx context.Context, projectID, issue
 		if !ok {
 			return store.IssueDiscussionUpdates{}, store.ErrNotFound
 		}
-		chainIDs, err := s.issueCommentAncestorIDs(ctx, projectID, issueID, id, maxDepth)
+		chainIDs, ancestorTruncated, err := s.issueCommentAncestorIDsBounded(ctx, projectID, issueID, id, maxDepth)
 		if err != nil {
 			return store.IssueDiscussionUpdates{}, err
+		}
+		if ancestorTruncated {
+			// The complete ancestor chain is outside the bounded walk. Represent
+			// the canonical new comment explicitly rather than failing the page or
+			// advancing past an update the caller never received.
+			if _, exists := included[id]; !exists {
+				if len(included)+1 > maxContext {
+					hasMore = true
+					break
+				}
+				included[id] = comment
+			}
+			newIDs[id] = struct{}{}
+			accepted = append(accepted, comment)
+			continue
 		}
 		missingIDs := make([]string, 0, len(chainIDs))
 		for _, chainID := range chainIDs {
@@ -375,33 +390,77 @@ func (s *Store) ListIssueDiscussionUpdates(ctx context.Context, projectID, issue
 		return store.IssueDiscussionUpdates{}, store.ErrInvalidArgument
 	}
 
+	contextTruncated, err := issueDiscussionContextTruncation(included)
+	if err != nil {
+		return store.IssueDiscussionUpdates{}, err
+	}
 	values := make([]store.IssueComment, 0, len(included))
 	for _, comment := range included {
 		values = append(values, comment)
 	}
-	values, err = orderIssueCommentsAncestorFirst(values)
+	values, err = orderIssueCommentsAncestorFirstWithPartialContext(values, contextTruncated)
 	if err != nil {
 		return store.IssueDiscussionUpdates{}, err
 	}
 	comments := make([]store.IssueDiscussionComment, 0, len(values))
 	for _, comment := range values {
 		_, isNew := newIDs[comment.ID]
-		comments = append(comments, store.IssueDiscussionComment{Comment: comment, IsNew: isNew})
+		comments = append(comments, store.IssueDiscussionComment{
+			Comment: comment, IsNew: isNew, ContextTruncated: contextTruncated[comment.ID],
+		})
 	}
 	last := accepted[len(accepted)-1]
 	next := store.IssueCommentCursor{CreatedAt: last.CreatedAt, ID: last.ID}
 	return store.IssueDiscussionUpdates{Comments: comments, NextCursor: &next, HasMore: hasMore || len(accepted) < len(candidateIDs)}, nil
 }
 
+func issueDiscussionContextTruncation(values map[string]store.IssueComment) (map[string]bool, error) {
+	truncated := make(map[string]bool, len(values))
+	state := make(map[string]uint8, len(values))
+	var visit func(string) (bool, error)
+	visit = func(id string) (bool, error) {
+		switch state[id] {
+		case 1:
+			return false, store.ErrInvalidArgument
+		case 2:
+			return truncated[id], nil
+		}
+		value, ok := values[id]
+		if !ok {
+			return true, nil
+		}
+		state[id] = 1
+		partial := false
+		if value.ParentCommentID != nil {
+			if _, ok := values[*value.ParentCommentID]; !ok {
+				partial = true
+			} else {
+				var err error
+				partial, err = visit(*value.ParentCommentID)
+				if err != nil {
+					return false, err
+				}
+			}
+		}
+		state[id] = 2
+		truncated[id] = partial
+		return partial, nil
+	}
+	for id := range values {
+		if _, err := visit(id); err != nil {
+			return nil, err
+		}
+	}
+	return truncated, nil
+}
+
 func orderIssueCommentsAncestorFirst(values []store.IssueComment) ([]store.IssueComment, error) {
+	return orderIssueCommentsAncestorFirstWithPartialContext(values, nil)
+}
+
+func orderIssueCommentsAncestorFirstWithPartialContext(values []store.IssueComment, contextTruncated map[string]bool) ([]store.IssueComment, error) {
 	if len(values) == 0 {
 		return []store.IssueComment{}, nil
-	}
-	if len(values) == 1 {
-		if values[0].ParentCommentID != nil {
-			return nil, store.ErrInvalidArgument
-		}
-		return append([]store.IssueComment(nil), values...), nil
 	}
 	byID := make(map[string]store.IssueComment, len(values))
 	for _, value := range values {
@@ -415,6 +474,10 @@ func orderIssueCommentsAncestorFirst(values []store.IssueComment) ([]store.Issue
 			continue
 		}
 		if _, ok := byID[*value.ParentCommentID]; !ok {
+			if contextTruncated != nil && contextTruncated[value.ID] {
+				roots = append(roots, value)
+				continue
+			}
 			return nil, store.ErrInvalidArgument
 		}
 		children[*value.ParentCommentID] = append(children[*value.ParentCommentID], value)
@@ -459,6 +522,17 @@ func orderIssueCommentsAncestorFirst(values []store.IssueComment) ([]store.Issue
 }
 
 func (s *Store) issueCommentAncestorIDs(ctx context.Context, projectID, issueID, anchorID string, maxDepth int) ([]string, error) {
+	ids, truncated, err := s.issueCommentAncestorIDsBounded(ctx, projectID, issueID, anchorID, maxDepth)
+	if err != nil {
+		return nil, err
+	}
+	if truncated {
+		return nil, store.ErrInvalidArgument
+	}
+	return ids, nil
+}
+
+func (s *Store) issueCommentAncestorIDsBounded(ctx context.Context, projectID, issueID, anchorID string, maxDepth int) ([]string, bool, error) {
 	rows, err := s.pool.Query(ctx, `
 		WITH RECURSIVE ancestors(id, parent_comment_id, depth) AS (
 			SELECT c.id, c.parent_comment_id, 0
@@ -476,7 +550,7 @@ func (s *Store) issueCommentAncestorIDs(ctx context.Context, projectID, issueID,
 		ORDER BY depth
 	`, projectID, issueID, anchorID, maxDepth)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer rows.Close()
 
@@ -489,15 +563,15 @@ func (s *Store) issueCommentAncestorIDs(ctx context.Context, projectID, issueID,
 	for rows.Next() {
 		var value item
 		if err := rows.Scan(&value.id, &value.parentID, &value.depth); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		chain = append(chain, value)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if len(chain) == 0 {
-		return nil, store.ErrNotFound
+		return nil, false, store.ErrNotFound
 	}
 	last := chain[len(chain)-1]
 	if last.parentID != nil {
@@ -507,8 +581,9 @@ func (s *Store) issueCommentAncestorIDs(ctx context.Context, projectID, issueID,
 	for index := len(chain) - 1; index >= 0; index-- {
 		ids = append(ids, chain[index].id)
 	}
-	return ids, nil
+	return ids, truncated, nil
 }
+
 
 func (s *Store) listIssueCommentsByIDs(ctx context.Context, projectID, issueID string, ids []string) ([]store.IssueComment, error) {
 	if len(ids) == 0 {
