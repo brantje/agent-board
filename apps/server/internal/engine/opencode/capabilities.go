@@ -74,10 +74,20 @@ func reconcileAttachedOpenCodeCapabilitiesWithDiscussion(ctx context.Context, la
 }
 
 func openCodeToolCapabilitiesMatch(ids []string, issueStatusEnabled, issueCommentEnabled, delegationEnabled bool) bool {
-	return openCodeToolCapabilitiesMatchWithDiscussion(ids, issueStatusEnabled, issueCommentEnabled, false, delegationEnabled)
+	available := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		available[id] = struct{}{}
+	}
+	_, hasStatus := available[issueStatusToolName]
+	_, hasComment := available[issueCommentToolName]
+	_, hasDelegation := available[delegationToolName]
+	return hasStatus == issueStatusEnabled && hasComment == issueCommentEnabled && hasDelegation == delegationEnabled
 }
 
 func openCodeToolCapabilitiesMatchWithDiscussion(ids []string, issueStatusEnabled, issueCommentEnabled, issueDiscussionEnabled, delegationEnabled bool) bool {
+	if !issueDiscussionEnabled {
+		return openCodeToolCapabilitiesMatch(ids, issueStatusEnabled, issueCommentEnabled, delegationEnabled)
+	}
 	available := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		available[id] = struct{}{}
@@ -86,7 +96,7 @@ func openCodeToolCapabilitiesMatchWithDiscussion(ids []string, issueStatusEnable
 	_, hasComment := available[issueCommentToolName]
 	_, hasDiscussion := available[issueDiscussionToolName]
 	_, hasDelegation := available[delegationToolName]
-	return hasStatus == issueStatusEnabled && hasComment == issueCommentEnabled && hasDiscussion == issueDiscussionEnabled && hasDelegation == delegationEnabled
+	return hasStatus == issueStatusEnabled && hasComment == issueCommentEnabled && hasDiscussion && hasDelegation == delegationEnabled
 }
 
 func discardProcessStreams(process engine.Process) <-chan struct{} {
@@ -107,12 +117,26 @@ func discardProcessStreams(process engine.Process) <-chan struct{} {
 }
 
 func startOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string, issueStatusEnabled, issueCommentEnabled, delegationEnabled bool) (engine.Process, error) {
-	return startOpenCodeProcessWithDiscussion(ctx, launcher, host, port, env, issueStatusEnabled, issueCommentEnabled, false, delegationEnabled)
+	process, err := launcher.Start(ctx, engine.ProcessRequest{
+		Command:               openCodeServeCommand(host, port, issueStatusEnabled, issueCommentEnabled, delegationEnabled),
+		CWD:                   runtimepkg.WorkspaceTarget,
+		Env:                   env,
+		ProviderCredentialEnv: providerCredentialEnv,
+		Kind:                  "tool",
+		Name:                  "opencode-server",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("opencode engine: start server: %w", err)
+	}
+	return process, nil
 }
 
 func startOpenCodeProcessWithDiscussion(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string, issueStatusEnabled, issueCommentEnabled, issueDiscussionEnabled, delegationEnabled bool) (engine.Process, error) {
+	if !issueDiscussionEnabled {
+		return startOpenCodeProcess(ctx, launcher, host, port, env, issueStatusEnabled, issueCommentEnabled, delegationEnabled)
+	}
 	process, err := launcher.Start(ctx, engine.ProcessRequest{
-		Command:               openCodeServeCommandWithDiscussion(host, port, issueStatusEnabled, issueCommentEnabled, issueDiscussionEnabled, delegationEnabled),
+		Command:               openCodeServeCommandWithDiscussion(host, port, issueStatusEnabled, issueCommentEnabled, true, delegationEnabled),
 		CWD:                   runtimepkg.WorkspaceTarget,
 		Env:                   env,
 		ProviderCredentialEnv: providerCredentialEnv,
