@@ -523,3 +523,40 @@ func TestIssueDiscussionReadsRemainAncestorClosedAcrossTimestampTies(t *testing.
 	}
 }
 
+
+func TestIssueDiscussionProjectionHelpersRejectInvalidGraphsAndEmptyScans(t *testing.T) {
+	at := time.Date(2026, 9, 20, 18, 0, 0, 0, time.UTC)
+
+	single, err := orderIssueCommentsAncestorFirst([]store.IssueComment{{
+		ID: "11111111-1111-4111-8111-111111111111", CreatedAt: at,
+	}})
+	if err != nil || len(single) != 1 {
+		t.Fatalf("single projection=%+v err=%v", single, err)
+	}
+
+	missingParent := "22222222-2222-4222-8222-222222222222"
+	if _, err := orderIssueCommentsAncestorFirst([]store.IssueComment{{
+		ID: "33333333-3333-4333-8333-333333333333", ParentCommentID: &missingParent, CreatedAt: at,
+	}}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("orphan projection error=%v", err)
+	}
+
+	firstID := "44444444-4444-4444-8444-444444444444"
+	secondID := "55555555-5555-4555-8555-555555555555"
+	if _, err := orderIssueCommentsAncestorFirst([]store.IssueComment{
+		{ID: firstID, ParentCommentID: &secondID, CreatedAt: at},
+		{ID: secondID, ParentCommentID: &firstID, CreatedAt: at},
+	}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("cyclic projection error=%v", err)
+	}
+
+	zero := &Store{}
+	children, hasMore, err := zero.issueCommentChildIDs(t.Context(), "", "", nil, 1)
+	if err != nil || hasMore || len(children) != 0 {
+		t.Fatalf("empty child scan=%+v hasMore=%v err=%v", children, hasMore, err)
+	}
+	exists, err := zero.issueCommentChildrenExist(t.Context(), "", "", nil)
+	if err != nil || exists {
+		t.Fatalf("empty child existence=%v err=%v", exists, err)
+	}
+}
