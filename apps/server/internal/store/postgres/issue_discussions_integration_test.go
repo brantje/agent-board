@@ -306,7 +306,7 @@ func TestIssueDiscussionUpdatesRepresentDeepContextWithoutWedgingCursor(t *testi
 		project.ID,
 		issue.ID,
 		&store.IssueCommentCursor{CreatedAt: cursorAt, ID: cursorComment.ID},
-		1,
+		2,
 		contextLimit,
 		issueDiscussionRootTraversalDepth,
 	)
