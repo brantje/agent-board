@@ -225,16 +225,23 @@ func (s *Store) issueCommentChildIDs(ctx context.Context, projectID, issueID str
 	if len(parentIDs) == 0 || limit < 1 {
 		return []string{}, false, nil
 	}
+	queryLimit := limit + 1
 	rows, err := s.pool.Query(ctx, `
-		SELECT c.id::text
-		FROM issue_comments AS c
-		JOIN issues AS i ON i.id = c.issue_id
-		WHERE i.project_id = $1
-		  AND c.issue_id = $2
-		  AND c.parent_comment_id = ANY($3::uuid[])
-		ORDER BY c.created_at, c.id
+		SELECT bounded.id::text
+		FROM unnest($3::uuid[]) AS parent(parent_id)
+		CROSS JOIN LATERAL (
+			SELECT c.id, c.created_at
+			FROM issue_comments AS c
+			JOIN issues AS i ON i.id = c.issue_id
+			WHERE i.project_id = $1
+			  AND c.issue_id = $2
+			  AND c.parent_comment_id = parent.parent_id
+			ORDER BY c.created_at, c.id
+			LIMIT $4
+		) AS bounded
+		ORDER BY bounded.created_at, bounded.id
 		LIMIT $4
-	`, projectID, issueID, parentIDs, limit+1)
+	`, projectID, issueID, parentIDs, queryLimit)
 	if err != nil {
 		return nil, false, err
 	}
