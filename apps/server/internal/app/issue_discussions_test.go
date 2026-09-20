@@ -167,3 +167,37 @@ func TestIssueDiscussionApplicationHandlesUnavailableAndStoreFailures(t *testing
 		t.Fatal("incomplete cursor payload unexpectedly decoded")
 	}
 }
+
+func TestProductionServicesPreserveIssueDiscussionCapability(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues:  map[string]store.Issue{issueID: {ID: issueID, ProjectID: projectID, Title: "Issue"}},
+		runs:    map[string]store.Run{},
+	}
+	fake := &issueDiscussionTestStore{
+		issueCommentTestStore: &issueCommentTestStore{projectWorkflowAuthorizationStore: base},
+		roots: []store.IssueDiscussionRoot{{
+			Root: store.IssueComment{ID: "root", IssueID: issueID},
+		}},
+	}
+	services, err := NewServicesWithRuntimes(fake, workspaceMaterializerFunc(func(_ context.Context, _ store.Project, _ store.Issue, workspace store.Workspace) (store.Workspace, error) {
+		return workspace, nil
+	}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = services.Close() })
+
+	if services.ControlPlane.issueDiscussions != fake {
+		t.Fatal("Issue discussion reads were not bound to the authoritative control-plane store")
+	}
+	roots, err := services.ControlPlane.ListRecentIssueDiscussions(t.Context(), projectID, issueID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0].Root.ID != "root" || fake.rootLimit != 1 {
+		t.Fatalf("roots=%+v limit=%d", roots, fake.rootLimit)
+	}
+}
