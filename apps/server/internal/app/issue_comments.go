@@ -88,7 +88,7 @@ func (s *Service) CreateHumanIssueComment(ctx context.Context, input CreateIssue
 	})
 }
 
-func (s *Service) PublishAgentIssueComment(ctx context.Context, projectID, runID, requestKey, body string) (store.IssueComment, error) {
+func (s *Service) PublishAgentIssueComment(ctx context.Context, projectID, runID, requestKey, body string, mentionAgentIDs []string) (store.IssueComment, error) {
 	requestKey = strings.TrimSpace(requestKey)
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" || requestKey == "" {
 		return store.IssueComment{}, invalid("project and Run are required")
@@ -104,12 +104,13 @@ func (s *Service) PublishAgentIssueComment(ctx context.Context, projectID, runID
 	sourceActionKey := requestKey
 	return s.createIssueComment(ctx, issueCommentCreateInput{
 		CreateIssueCommentInput: CreateIssueCommentInput{
-			ProjectID: projectID,
-			IssueID:   run.IssueID,
-			Body:      body,
+			ProjectID:       projectID,
+			IssueID:         run.IssueID,
+			Body:            body,
+			MentionAgentIDs: append([]string(nil), mentionAgentIDs...),
 		},
-		AuthorType:  store.ActorTypeAgent,
-		AuthorID:    *run.AgentID,
+		AuthorType:      store.ActorTypeAgent,
+		AuthorID:        *run.AgentID,
 		SourceRunID:     &sourceRunID,
 		SourceActionKey: &sourceActionKey,
 	})

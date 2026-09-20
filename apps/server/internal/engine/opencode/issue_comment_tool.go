@@ -15,12 +15,13 @@ const (
 	issueCommentToolSource = `import { tool } from "@opencode-ai/plugin"
 
 export default tool({
-  description: "Publish a concise durable comment on the current Agent Board Issue. Use it deliberately for findings, results, handoffs, non-blocking collaboration questions, or pointers to existing Run/Review evidence. Do not copy raw logs, command/test output, file contents, progress chatter, or hidden reasoning. Use the native Question capability for blocking human input.",
+  description: "Publish a concise durable comment on the current Agent Board Issue. Use it deliberately for findings, results, handoffs, non-blocking collaboration questions, or pointers to existing Run/Review evidence. To request focused Agent work, pass stable Agent IDs explicitly in mentionAgentIds; plain @name text never routes work. Do not copy raw logs, command/test output, file contents, progress chatter, or hidden reasoning. Use the native Question capability for blocking human input.",
   args: {
     body: tool.schema.string().describe("Concise user-visible Issue comment"),
+    mentionAgentIds: tool.schema.array(tool.schema.string()).optional().describe("Optional stable Agent IDs to mention structurally and request focused work from"),
   },
-  async execute({ body }) {
-    return "Emitted durable Issue comment publication request."
+  async execute({ body, mentionAgentIds }) {
+    return JSON.stringify({ status: "emitted", mentionAgentIds: mentionAgentIds ?? [] })
   },
 })
 `
@@ -125,9 +126,39 @@ func (t *issueCommentToolTracker) applyPart(ctx context.Context, part issueComme
 	if body == "" {
 		return fmt.Errorf("opencode engine: Issue comment tool requires body")
 	}
-	if _, err := publisher.PublishIssueComment(ctx, engine.IssueCommentPublishRequest{Body: body, RequestKey: partID}); err != nil {
+	mentionAgentIDs, err := issueCommentMentionAgentIDs(input["mentionAgentIds"])
+	if err != nil {
+		return err
+	}
+	published, err := publisher.PublishIssueComment(ctx, engine.IssueCommentPublishRequest{
+		Body: body, RequestKey: partID, MentionAgentIDs: mentionAgentIDs,
+	})
+	if err != nil {
 		return fmt.Errorf("opencode engine: publish Issue comment: %w", err)
 	}
 	t.seen[partID] = struct{}{}
+	if published.Delegation != nil {
+		return engine.NewDelegationHandoff(*published.Delegation)
+	}
 	return nil
 }
+func issueCommentMentionAgentIDs(raw any) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	values, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("opencode engine: Issue comment mentionAgentIds must be an array")
+	}
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		id, ok := value.(string)
+		id = strings.TrimSpace(id)
+		if !ok || id == "" {
+			return nil, fmt.Errorf("opencode engine: Issue comment mentionAgentIds must contain non-empty Agent IDs")
+		}
+		result = append(result, id)
+	}
+	return result, nil
+}
+

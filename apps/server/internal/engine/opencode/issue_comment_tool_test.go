@@ -12,14 +12,18 @@ import (
 )
 
 type recordingIssueCommentPublisher struct {
-	requests []engine.IssueCommentPublishRequest
-	err      error
+	requests  []engine.IssueCommentPublishRequest
+	published engine.PublishedIssueComment
+	err       error
 }
 
 func (p *recordingIssueCommentPublisher) PublishIssueComment(_ context.Context, request engine.IssueCommentPublishRequest) (engine.PublishedIssueComment, error) {
 	p.requests = append(p.requests, request)
 	if p.err != nil {
 		return engine.PublishedIssueComment{}, p.err
+	}
+	if p.published.ID != "" || p.published.Delegation != nil {
+		return p.published, nil
 	}
 	return engine.PublishedIssueComment{ID: "comment-1"}, nil
 }
@@ -119,4 +123,68 @@ func issueCommentToolPartPayload(sessionID, partID, body, status string) map[str
 		"id": partID, "sessionID": sessionID, "type": "tool", "tool": issueCommentToolName,
 		"state": map[string]any{"status": status, "input": map[string]any{"body": body}},
 	}
+}
+
+func TestIssueCommentToolPassesStructuredMentionsAndSignalsCanonicalHandoff(t *testing.T) {
+	tracker := newIssueCommentToolTracker()
+	publisher := &recordingIssueCommentPublisher{published: engine.PublishedIssueComment{
+		ID: "comment-1",
+		Delegation: &engine.Delegation{ID: "delegation-1", RunID: "child-run-1"},
+	}}
+	event := issueCommentToolEventWithMentions(t, "ses_1", "part_mentions", "Please inspect this.", []string{"agent-2"}, "completed")
+
+	err := tracker.Handle(t.Context(), event, "ses_1", publisher)
+	if !errors.Is(err, engine.ErrDelegationHandoff) {
+		t.Fatalf("handoff err=%v", err)
+	}
+	delegation, ok := engine.AsDelegationHandoff(err)
+	if !ok || delegation.ID != "delegation-1" || delegation.RunID != "child-run-1" {
+		t.Fatalf("handoff=%+v ok=%v", delegation, ok)
+	}
+	if len(publisher.requests) != 1 || len(publisher.requests[0].MentionAgentIDs) != 1 ||
+		publisher.requests[0].MentionAgentIDs[0] != "agent-2" {
+		t.Fatalf("requests=%+v", publisher.requests)
+	}
+	if err := tracker.Handle(t.Context(), event, "ses_1", publisher); err != nil {
+		t.Fatalf("duplicate completed part should already be seen: %v", err)
+	}
+	if len(publisher.requests) != 1 {
+		t.Fatalf("duplicate handoff republished comment: %+v", publisher.requests)
+	}
+}
+
+func TestIssueCommentToolRejectsMalformedStructuredMentionInput(t *testing.T) {
+	tracker := newIssueCommentToolTracker()
+	properties, err := json.Marshal(map[string]any{
+		"sessionID": "ses_1",
+		"part": map[string]any{
+			"id": "part_bad_mentions", "sessionID": "ses_1", "type": "tool", "tool": issueCommentToolName,
+			"state": map[string]any{"status": "completed", "input": map[string]any{
+				"body": "finding", "mentionAgentIds": []any{"agent-2", ""},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.Handle(t.Context(), client.Event{Type: "message.part.updated", Properties: properties}, "ses_1", &recordingIssueCommentPublisher{}); err == nil {
+		t.Fatal("blank structured mention Agent ID unexpectedly accepted")
+	}
+}
+
+func issueCommentToolEventWithMentions(t *testing.T, sessionID, partID, body string, mentionAgentIDs []string, status string) client.Event {
+	t.Helper()
+	properties, err := json.Marshal(map[string]any{
+		"sessionID": sessionID,
+		"part": map[string]any{
+			"id": partID, "sessionID": sessionID, "type": "tool", "tool": issueCommentToolName,
+			"state": map[string]any{"status": status, "input": map[string]any{
+				"body": body, "mentionAgentIds": mentionAgentIDs,
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client.Event{Type: "message.part.updated", Properties: properties}
 }
