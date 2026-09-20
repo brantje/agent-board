@@ -335,3 +335,23 @@ func TestIssueCommentMentionTargetIsProjectScoped(t *testing.T) {
 	}
 }
 
+
+func TestNormalizeIssueCommentMentionAgentIDsRejectsInvalidInput(t *testing.T) {
+	valid := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	tooMany := make([]string, store.MaxIssueCommentMentions+1)
+	for index := range tooMany {
+		tooMany[index] = valid
+	}
+	for name, values := range map[string][]string{
+		"too many": tooMany,
+		"blank":    {""},
+		"invalid":  {"not-a-uuid"},
+		"duplicate": {valid, valid},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := normalizeIssueCommentMentionAgentIDs(values); !errors.Is(err, store.ErrInvalidArgument) {
+				t.Fatalf("error=%v want invalid argument", err)
+			}
+		})
+	}
+}

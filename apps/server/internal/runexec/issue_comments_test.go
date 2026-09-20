@@ -2,6 +2,7 @@ package runexec
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
@@ -95,5 +96,60 @@ func TestIssueCommentPublisherReturnsQueuedMentionDelegationForWorkspaceHandoff(
 	}
 	if result.Delegation == nil || result.Delegation.ID != delegationID || result.Delegation.RunID != childRunID {
 		t.Fatalf("published result=%+v", result)
+	}
+}
+
+func TestIssueCommentPublisherRejectsInvalidDurableMentionResults(t *testing.T) {
+	if _, err := (*issueCommentPublisher)(nil).PublishIssueComment(t.Context(), engine.IssueCommentPublishRequest{
+		Body: "body", RequestKey: "key",
+	}); err == nil {
+		t.Fatal("nil publisher unexpectedly succeeded")
+	}
+
+	sentinel := errors.New("publish failed")
+	failing := newIssueCommentPublisher(&recordingAgentIssueCommentService{err: sentinel}, executioncontext.SafeContext{
+		Project: executioncontext.ProjectContext{ID: "project-1"},
+		Run: executioncontext.RunContext{ID: "run-1"},
+	})
+	if _, err := failing.PublishIssueComment(t.Context(), engine.IssueCommentPublishRequest{
+		Body: "body", RequestKey: "key",
+	}); !errors.Is(err, sentinel) {
+		t.Fatalf("service error=%v want sentinel", err)
+	}
+
+	delegationID, runID := "delegation-1", "run-1"
+	cases := []struct {
+		name     string
+		mentions []store.IssueCommentMention
+	}{
+		{
+			name: "missing lineage",
+			mentions: []store.IssueCommentMention{{
+				Outcome: store.IssueCommentMentionOutcomeQueued,
+			}},
+		},
+		{
+			name: "multiple queued handoffs",
+			mentions: []store.IssueCommentMention{
+				{Outcome: store.IssueCommentMentionOutcomeBlocked},
+				{Outcome: store.IssueCommentMentionOutcomeQueued, DelegationID: &delegationID, DelegatedRunID: &runID},
+				{Outcome: store.IssueCommentMentionOutcomeQueued, DelegationID: &delegationID, DelegatedRunID: &runID},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			publisher := newIssueCommentPublisher(&recordingAgentIssueCommentService{comment: store.IssueComment{
+				ID: "comment-1", Mentions: tc.mentions,
+			}}, executioncontext.SafeContext{
+				Project: executioncontext.ProjectContext{ID: "project-1"},
+				Run: executioncontext.RunContext{ID: "parent-run"},
+			})
+			if _, err := publisher.PublishIssueComment(t.Context(), engine.IssueCommentPublishRequest{
+				Body: "body", RequestKey: "key",
+			}); err == nil {
+				t.Fatal("invalid durable mention result unexpectedly succeeded")
+			}
+		})
 	}
 }

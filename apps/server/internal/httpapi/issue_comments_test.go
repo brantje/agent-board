@@ -354,6 +354,32 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	if missingRequest.Code != http.StatusBadRequest {
 		t.Fatalf("missing request status=%d body=%s", missingRequest.Code, missingRequest.Body.String())
 	}
+
+	tooManyIDs := `["` + strings.TrimSuffix(strings.Repeat(agentID+`","`, store.MaxIssueCommentMentions+1), `","`) + `"]`
+	for name, body := range map[string]string{
+		"invalid parent":  `{"body":"Mention","parentCommentId":"not-a-uuid"}`,
+		"invalid target":  `{"body":"Mention","requestId":"` + requestID + `","mentionAgentIds":["not-a-uuid"]}`,
+		"invalid request": `{"body":"Mention","requestId":"not-a-uuid","mentionAgentIds":["` + agentID + `"]}`,
+		"too many":        `{"body":"Mention","requestId":"` + requestID + `","mentionAgentIds":` + tooManyIDs + `}`,
+	} {
+		t.Run("create "+name, func(t *testing.T) {
+			response := authHTTPRequest(t, fixture.handler, http.MethodPost, base, body, bearer(token))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	for name, body := range map[string]string{
+		"invalid target": `{"mentionAgentIds":["not-a-uuid"]}`,
+		"too many":       `{"mentionAgentIds":` + tooManyIDs + `}`,
+	} {
+		t.Run("preview "+name, func(t *testing.T) {
+			response := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview", body, bearer(token))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
 	plain := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"plain @Agent text only"}`, bearer(token))
 	if plain.Code != http.StatusCreated {
 		t.Fatalf("plain status=%d body=%s", plain.Code, plain.Body.String())
