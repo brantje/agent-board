@@ -111,8 +111,15 @@ func TestIssueDiscussionApplicationBoundsReadsAndKeepsOpaqueCursor(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := access.ListRecentIssueDiscussions(t.Context(), AuthenticatedUser{ID: "viewer", Status: store.UserStatusActive, DeploymentRole: store.DeploymentRoleMember}, projectID, issueID, 1); err != nil {
-		t.Fatalf("viewer discussion read error=%v", err)
+	viewer := AuthenticatedUser{ID: "viewer", Status: store.UserStatusActive, DeploymentRole: store.DeploymentRoleMember}
+	if _, err := access.ListRecentIssueDiscussions(t.Context(), viewer, projectID, issueID, 1); err != nil {
+		t.Fatalf("viewer recent discussion read error=%v", err)
+	}
+	if _, err := access.GetIssueDiscussionThread(t.Context(), viewer, projectID, issueID, "33333333-3333-4333-8333-333333333333", 1); err != nil {
+		t.Fatalf("viewer thread discussion read error=%v", err)
+	}
+	if _, err := access.ListIssueDiscussionUpdates(t.Context(), viewer, projectID, issueID, "", 1); err != nil {
+		t.Fatalf("viewer update discussion read error=%v", err)
 	}
 }
 
@@ -156,6 +163,29 @@ func TestIssueDiscussionApplicationHandlesUnavailableAndStoreFailures(t *testing
 	if _, err := service.ListRecentIssueDiscussions(t.Context(), projectID, "22222222-2222-4222-8222-222222222222", 1); err == nil {
 		t.Fatal("missing Issue unexpectedly produced discussion roots")
 	}
+
+	if _, err := service.GetIssueDiscussionThread(t.Context(), projectID, issueID, "33333333-3333-4333-8333-333333333333", -1); err == nil {
+		t.Fatal("negative thread limit unexpectedly succeeded")
+	}
+	if _, err := service.ListIssueDiscussionUpdates(t.Context(), projectID, issueID, "", -1); err == nil {
+		t.Fatal("negative update limit unexpectedly succeeded")
+	}
+	missingIssueID := "22222222-2222-4222-8222-222222222222"
+	if _, err := service.GetIssueDiscussionThread(t.Context(), projectID, missingIssueID, "33333333-3333-4333-8333-333333333333", 1); err == nil {
+		t.Fatal("missing Issue unexpectedly produced a thread")
+	}
+	if _, err := service.ListIssueDiscussionUpdates(t.Context(), projectID, missingIssueID, "", 1); err == nil {
+		t.Fatal("missing Issue unexpectedly produced updates")
+	}
+	fake.updateErr = nil
+	fake.updates = store.IssueDiscussionUpdates{NextCursor: &store.IssueCommentCursor{
+		CreatedAt: time.Now(),
+		ID:        "not-a-uuid",
+	}}
+	if _, err := service.ListIssueDiscussionUpdates(t.Context(), projectID, issueID, "", 1); err == nil {
+		t.Fatal("invalid store cursor unexpectedly encoded")
+	}
+
 
 	if _, err := encodeIssueDiscussionCursor(store.IssueCommentCursor{}); err == nil {
 		t.Fatal("zero cursor unexpectedly encoded")
