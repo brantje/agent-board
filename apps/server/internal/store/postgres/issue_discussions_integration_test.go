@@ -287,6 +287,7 @@ func TestIssueDiscussionUpdatesRepresentDeepContextWithoutWedgingCursor(t *testi
 	}
 
 	cursorComment := chain[len(chain)-2]
+	cursorAt := base.Add(time.Duration(issueDiscussionRootTraversalDepth-1) * time.Millisecond)
 	exactDepth := chain[len(chain)-1]
 	shallowBefore := create("shallow before deep", nil)
 	setTime(shallowBefore, base.Add(time.Duration(issueDiscussionRootTraversalDepth+1)*time.Millisecond))
@@ -304,7 +305,7 @@ func TestIssueDiscussionUpdatesRepresentDeepContextWithoutWedgingCursor(t *testi
 		ctx,
 		project.ID,
 		issue.ID,
-		&store.IssueCommentCursor{CreatedAt: cursorComment.CreatedAt, ID: cursorComment.ID},
+		&store.IssueCommentCursor{CreatedAt: cursorAt, ID: cursorComment.ID},
 		1,
 		contextLimit,
 		issueDiscussionRootTraversalDepth,
