@@ -423,12 +423,15 @@ IssueDiscussionThread:
 IssueDiscussionUpdateItem:
   type: object
   additionalProperties: false
-  required: [comment, isNew]
+  required: [comment, isNew, contextTruncated]
   properties:
     comment: {$ref: '#/IssueComment'}
     isNew:
       type: boolean
       description: True for a comment newer than the supplied cursor; false for restored ancestor context.
+    contextTruncated:
+      type: boolean
+      description: True when the bounded update page cannot restore this comment's complete ancestor chain. The canonical comment is returned deliberately as partial context so the durable cursor can advance without silently skipping it.
 
 IssueDiscussionUpdates:
   type: object
