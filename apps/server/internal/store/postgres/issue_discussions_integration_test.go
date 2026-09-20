@@ -589,6 +589,14 @@ func TestIssueDiscussionReadsBoundWideAndDeepGraphs(t *testing.T) {
 	if len(recent) != 1 || recent[0].Root.ID != safeRoot.ID {
 		t.Fatalf("recent roots crossed unresolved deep activity boundary: %+v", recent)
 	}
+
+	cycle := create("cyclic ancestry", nil)
+	if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET parent_comment_id=id WHERE id=$1`, cycle.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.issueCommentAncestorIDsBounded(ctx, project.ID, issue.ID, cycle.ID, 8); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("cyclic bounded ancestry error=%v", err)
+	}
 }
 
 func TestIssueDiscussionReadsRemainAncestorClosedAcrossTimestampTies(t *testing.T) {
