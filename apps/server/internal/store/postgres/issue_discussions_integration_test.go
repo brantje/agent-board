@@ -98,12 +98,8 @@ func TestIssueDiscussionReadsAreThreadAwareBoundedAndCursorSafe(t *testing.T) {
 			t.Fatalf("thread ids=%+v", thread.Comments)
 		}
 	}
-	bounded, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, grandchild.ID, 8, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bounded.Truncated || len(bounded.Comments) != 2 || bounded.Comments[0].ID != root.ID {
-		t.Fatalf("bounded thread=%+v", bounded)
+	if _, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, grandchild.ID, 8, 2); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("bounded thread insufficient ancestor budget error=%v", err)
 	}
 	if _, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, grandchild.ID, 1, 10); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("deep anchor error=%v", err)
