@@ -341,6 +341,7 @@ func (s *Store) ListIssueDiscussionUpdates(ctx context.Context, projectID, issue
 
 	included := make(map[string]store.IssueComment)
 	newIDs := make(map[string]struct{})
+	partialContextRoots := make(map[string]struct{})
 	accepted := make([]store.IssueComment, 0, len(candidateIDs))
 	for _, id := range candidateIDs {
 		comment, ok := candidateByID[id]
@@ -363,6 +364,7 @@ func (s *Store) ListIssueDiscussionUpdates(ctx context.Context, projectID, issue
 				included[id] = comment
 			}
 			newIDs[id] = struct{}{}
+			partialContextRoots[id] = struct{}{}
 			accepted = append(accepted, comment)
 			continue
 		}
@@ -390,7 +392,7 @@ func (s *Store) ListIssueDiscussionUpdates(ctx context.Context, projectID, issue
 		return store.IssueDiscussionUpdates{}, store.ErrInvalidArgument
 	}
 
-	contextTruncated, err := issueDiscussionContextTruncation(included)
+	contextTruncated, err := issueDiscussionContextTruncation(included, partialContextRoots)
 	if err != nil {
 		return store.IssueDiscussionUpdates{}, err
 	}
@@ -414,7 +416,7 @@ func (s *Store) ListIssueDiscussionUpdates(ctx context.Context, projectID, issue
 	return store.IssueDiscussionUpdates{Comments: comments, NextCursor: &next, HasMore: hasMore || len(accepted) < len(candidateIDs)}, nil
 }
 
-func issueDiscussionContextTruncation(values map[string]store.IssueComment) (map[string]bool, error) {
+func issueDiscussionContextTruncation(values map[string]store.IssueComment, partialRoots map[string]struct{}) (map[string]bool, error) {
 	truncated := make(map[string]bool, len(values))
 	state := make(map[string]uint8, len(values))
 	var visit func(string) (bool, error)
@@ -427,12 +429,15 @@ func issueDiscussionContextTruncation(values map[string]store.IssueComment) (map
 		}
 		value, ok := values[id]
 		if !ok {
-			return true, nil
+			return false, store.ErrInvalidArgument
 		}
 		state[id] = 1
 		partial := false
 		if value.ParentCommentID != nil {
 			if _, ok := values[*value.ParentCommentID]; !ok {
+				if _, explicitlyTruncated := partialRoots[id]; !explicitlyTruncated {
+					return false, store.ErrInvalidArgument
+				}
 				partial = true
 			} else {
 				var err error
