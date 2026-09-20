@@ -502,7 +502,7 @@ func TestIssueDiscussionReadsRemainAncestorClosedAcrossTimestampTies(t *testing.
 		&store.IssueCommentCursor{CreatedAt: cursorAt, ID: cursorResult.Comment.ID},
 		1,
 		3,
-		8,
+		2,
 	)
 	if err != nil {
 		t.Fatal(err)
