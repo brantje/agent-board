@@ -717,6 +717,8 @@ func initialTaskPromptWithDelegationToolContext(safe executioncontext.SafeContex
 		if delegationContext != nil {
 			sections = append(sections, delegationPromptGuidance+"\n\n"+delegationToolContextPrompt(delegationContext))
 		}
+	} else if safe.Delegation.SourceCommentID != nil {
+		sections = append(sections, "This is bounded delegated execution requested by a structured Agent mention in the Issue discussion. Work only on the delegated task. There is no parent Run to resume; Issue ownership, Board status and Review authority remain outside this delegated Run. Do not attempt to change Issue status or delegate further work.")
 	} else {
 		sections = append(sections, "This is delegated execution. Work only on the bounded delegated task. The parent Run remains authoritative for Issue ownership and Board/Review outcome; do not attempt to change Issue status or delegate further work.")
 	}

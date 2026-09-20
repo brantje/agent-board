@@ -10,6 +10,10 @@ import (
 func TestHumanIssueCommentMentionsPersistStableTargetsDispatchAndRetryIdempotently(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
+	beforeIssue, err := f.store.GetIssue(ctx, f.project.ID, f.issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	author, err := f.store.CreateUser(ctx, authUser("mention-author", "mention-author@example.com", store.UserStatusActive))
 	if err != nil {
 		t.Fatal(err)
@@ -63,6 +67,15 @@ func TestHumanIssueCommentMentionsPersistStableTargetsDispatchAndRetryIdempotent
 	}
 	if len(runs) != 2 {
 		t.Fatalf("Runs=%+v want parent plus one mentioned target", runs)
+	}
+	afterIssue, err := f.store.GetIssue(ctx, f.project.ID, f.issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterIssue.Status != beforeIssue.Status || afterIssue.AssigneeType == nil || beforeIssue.AssigneeType == nil ||
+		*afterIssue.AssigneeType != *beforeIssue.AssigneeType || afterIssue.AssigneeID == nil || beforeIssue.AssigneeID == nil ||
+		*afterIssue.AssigneeID != *beforeIssue.AssigneeID {
+		t.Fatalf("mention changed Issue ownership/status: before=%+v after=%+v", beforeIssue, afterIssue)
 	}
 }
 
@@ -273,5 +286,48 @@ func TestIssueCommentMentionPreviewUsesPostingEligibility(t *testing.T) {
 	}
 	if len(busy) != 1 || busy[0].Eligible || busy[0].ReasonCode == nil || *busy[0].ReasonCode != store.IssueCommentMentionReasonTargetBusy {
 		t.Fatalf("busy preview=%+v", busy)
+	}
+}
+
+func TestIssueCommentMentionTargetIsProjectScoped(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("mention-project-author", "mention-project@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherProject, err := f.store.CreateProject(ctx, testProjectInput("Other mention project", "/repos/other-mention", "OM"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := createDelegationAgent(t, ctx, f.store, otherProject, "Foreign agent", false)
+
+	preview, err := f.store.PreviewIssueCommentMentions(ctx, f.project.ID, f.issue.ID, []string{foreign.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview) != 1 || preview[0].Eligible || preview[0].ReasonCode == nil ||
+		*preview[0].ReasonCode != store.IssueCommentMentionReasonTargetUnavailable || preview[0].TargetAgentName != "" {
+		t.Fatalf("cross-Project preview leaked target state: %+v", preview)
+	}
+
+	requestKey := "cross-project-target"
+	result, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+		SourceActionKey: &requestKey, Body: "Try a foreign target.",
+	}, []string{foreign.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Comment.Mentions) != 1 || result.Comment.Mentions[0].Outcome != store.IssueCommentMentionOutcomeBlocked ||
+		result.Comment.Mentions[0].ReasonCode == nil || *result.Comment.Mentions[0].ReasonCode != store.IssueCommentMentionReasonTargetUnavailable {
+		t.Fatalf("cross-Project mention=%+v", result.Comment.Mentions)
+	}
+	foreignRuns, err := f.store.ListRuns(ctx, otherProject.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(foreignRuns) != 0 {
+		t.Fatalf("cross-Project mention created foreign execution: %+v", foreignRuns)
 	}
 }

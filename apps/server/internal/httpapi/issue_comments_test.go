@@ -312,8 +312,15 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	fixture, _ := newIssueCommentHTTPFixture(t)
 	member, token := fixture.createUser(t, "mention-http-member", store.DeploymentRoleMember)
+	viewer, viewerToken := fixture.createUser(t, "mention-http-viewer", store.DeploymentRoleMember)
 	fixture.access.roles[projectGrantKey(projectID, member.ID)] = store.ProjectRoleMember
+	fixture.access.roles[projectGrantKey(projectID, viewer.ID)] = store.ProjectRoleViewer
 	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
+
+	deniedPreview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview", `{"mentionAgentIds":["`+agentID+`"]}`, bearer(viewerToken))
+	if deniedPreview.Code != http.StatusForbidden {
+		t.Fatalf("viewer preview status=%d body=%s", deniedPreview.Code, deniedPreview.Body.String())
+	}
 
 	preview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview", `{"mentionAgentIds":["`+agentID+`"]}`, bearer(token))
 	if preview.Code != http.StatusOK {
