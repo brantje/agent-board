@@ -254,6 +254,59 @@ func TestIssueDiscussionBridgeRejectsInvalidHTTPResponses(t *testing.T) {
 	})
 }
 
+
+func TestIssueDiscussionBridgeServeReturnsPollingFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/next" {
+			t.Fatalf("path=%s", r.URL.Path)
+		}
+		http.Error(w, "queue unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	bridge := &issueDiscussionBridge{
+		http:    server.Client(),
+		baseURL: server.URL,
+		reader:  &recordingIssueDiscussionReader{},
+	}
+	err := bridge.Serve(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "read Issue discussion bridge request") || !strings.Contains(err.Error(), "HTTP 503") {
+		t.Fatalf("serve polling error=%v", err)
+	}
+}
+
+func TestIssueDiscussionBridgeServeReturnsResponseFailure(t *testing.T) {
+	reader := &recordingIssueDiscussionReader{result: engine.IssueDiscussionReadResult{Mode: engine.IssueDiscussionReadRecent}}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /next", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(issueDiscussionBridgeRequest{
+			ID:      "call-response-fails",
+			Request: engine.IssueDiscussionReadRequest{Mode: engine.IssueDiscussionReadRecent},
+		})
+	})
+	mux.HandleFunc("POST /respond", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "response unavailable", http.StatusBadGateway)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	bridge := &issueDiscussionBridge{http: server.Client(), baseURL: server.URL, reader: reader}
+	err := bridge.Serve(t.Context())
+	if err == nil || !strings.Contains(err.Error(), "respond to Issue discussion bridge request") || !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("serve response error=%v", err)
+	}
+	requests := reader.Requests()
+	if len(requests) != 1 || requests[0].Mode != engine.IssueDiscussionReadRecent {
+		t.Fatalf("requests=%+v", requests)
+	}
+}
+
+func TestIssueDiscussionBridgeCloseIdleConnectionsIsNilSafe(t *testing.T) {
+	var nilBridge *issueDiscussionBridge
+	nilBridge.CloseIdleConnections()
+	(&issueDiscussionBridge{}).CloseIdleConnections()
+}
+
 func TestWaitIssueDiscussionBridgeHealthyHonorsCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "not ready", http.StatusServiceUnavailable)
