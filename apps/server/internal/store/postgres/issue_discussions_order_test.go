@@ -51,3 +51,26 @@ func TestOrderIssueCommentsAncestorFirstRejectsInvalidGraphsAndOrdersSiblings(t 
 		}
 	})
 }
+
+func TestIssueDiscussionBoundedHelpersRejectInvalidAndEmptyInputs(t *testing.T) {
+	var database Store
+
+	if ids, truncated, err := database.boundedIssueCommentTreeIDs(t.Context(), "", "", "", 8, 10); !errors.Is(err, store.ErrInvalidArgument) || ids != nil || truncated {
+		t.Fatalf("invalid tree ids=%v truncated=%v err=%v", ids, truncated, err)
+	}
+	if ids, hasMore, err := database.issueCommentChildIDs(t.Context(), "project", "issue", nil, 10); err != nil || len(ids) != 0 || hasMore {
+		t.Fatalf("empty child ids=%v hasMore=%v err=%v", ids, hasMore, err)
+	}
+	if exists, err := database.issueCommentChildrenExist(t.Context(), "project", "issue", nil); err != nil || exists {
+		t.Fatalf("empty children exist=%v err=%v", exists, err)
+	}
+
+	single := store.IssueComment{ID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}
+	ordered, err := orderIssueCommentsAncestorFirst([]store.IssueComment{single})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ordered) != 1 || ordered[0].ID != single.ID {
+		t.Fatalf("single ordered=%+v", ordered)
+	}
+}
