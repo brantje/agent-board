@@ -70,6 +70,23 @@ type IssueCommentReactionSummaryDTO struct {
 	ReactedByCurrentUser bool   `json:"reactedByCurrentUser"`
 }
 
+type IssueCommentMentionDTO struct {
+	ID              string  `json:"id"`
+	TargetAgentID   string  `json:"targetAgentId"`
+	TargetAgentName string  `json:"targetAgentName"`
+	Outcome         string  `json:"outcome"`
+	ReasonCode      *string `json:"reasonCode"`
+	DelegationID    *string `json:"delegationId"`
+	DelegatedRunID  *string `json:"delegatedRunId"`
+}
+
+type IssueCommentMentionPreviewDTO struct {
+	TargetAgentID   string  `json:"targetAgentId"`
+	TargetAgentName string  `json:"targetAgentName"`
+	Eligible        bool    `json:"eligible"`
+	ReasonCode      *string `json:"reasonCode"`
+}
+
 type IssueCommentDTO struct {
 	ID              string                           `json:"id"`
 	IssueID         string                           `json:"issueId"`
@@ -81,13 +98,20 @@ type IssueCommentDTO struct {
 	ResolvedAt      *time.Time                       `json:"resolvedAt"`
 	ResolvedBy      *IssueCommentResolverDTO         `json:"resolvedBy"`
 	Reactions       []IssueCommentReactionSummaryDTO `json:"reactions"`
+	Mentions        []IssueCommentMentionDTO          `json:"mentions"`
 	CreatedAt       time.Time                        `json:"createdAt"`
 	UpdatedAt       time.Time                        `json:"updatedAt"`
 }
 
 type CreateIssueCommentRequest struct {
-	ParentCommentID *string `json:"parentCommentId"`
-	Body            string  `json:"body"`
+	ParentCommentID *string  `json:"parentCommentId"`
+	Body            string   `json:"body"`
+	RequestID       string   `json:"requestId"`
+	MentionAgentIDs []string `json:"mentionAgentIds"`
+}
+
+type PreviewIssueCommentMentionsRequest struct {
+	MentionAgentIDs []string `json:"mentionAgentIds"`
 }
 
 type UpdateIssueCommentRequest struct {
