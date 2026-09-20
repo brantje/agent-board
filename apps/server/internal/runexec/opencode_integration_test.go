@@ -175,11 +175,11 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 
 func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
-	const expectedBody = "Agent integration comment @nobody"
+	const expectedBody = "agent-comment-proof-7b2f9c"
 	project, run := fixture.createRun(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Use publish_issue_comment only when explicitly requested. Do not ask a Question, delegate, or change Issue status unless explicitly requested.",
 		title:            "Publish a trusted Agent-authored Issue comment",
-		description:      "Use publish_issue_comment exactly once. Publish exactly this body and no other Issue comment: Agent integration comment @nobody. Do not ask a Question. Do not delegate. Do not call set_issue_status. Do not modify files. After the comment tool succeeds, stop.",
+		description:      "Use publish_issue_comment exactly once. Pass exactly this raw body string with no added punctuation or formatting, and publish no other Issue comment: agent-comment-proof-7b2f9c. Do not ask a Question. Do not delegate. Do not call set_issue_status. Do not modify files. After the comment tool succeeds, stop.",
 	})
 	if run.AgentID == nil {
 		t.Fatal("OpenCode integration Run has no Agent identity")
