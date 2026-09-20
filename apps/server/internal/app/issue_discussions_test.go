@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
@@ -229,5 +230,36 @@ func TestProductionServicesPreserveIssueDiscussionCapability(t *testing.T) {
 	}
 	if len(roots) != 1 || roots[0].Root.ID != "root" || fake.rootLimit != 1 {
 		t.Fatalf("roots=%+v limit=%d", roots, fake.rootLimit)
+	}
+}
+
+func TestIssueDiscussionCursorEncodingIsStrictAndRoundTrips(t *testing.T) {
+	position := store.IssueCommentCursor{
+		CreatedAt: time.Date(2026, 9, 20, 9, 30, 0, 123, time.FixedZone("test", 2*60*60)),
+		ID:        "ABCDEFAB-CDEF-4ABC-8DEF-ABCDEFABCDEF",
+	}
+	encoded, err := encodeIssueDiscussionCursor(position)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := decodeIssueDiscussionCursor("  " + encoded + "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded == nil || decoded.ID != position.ID || !decoded.CreatedAt.Equal(position.CreatedAt) || decoded.CreatedAt.Location() != time.UTC {
+		t.Fatalf("decoded cursor=%+v", decoded)
+	}
+
+	for name, raw := range map[string]string{
+		"invalid base64": "***",
+		"unknown field": base64.RawURLEncoding.EncodeToString([]byte(`{"createdAt":"2026-09-20T09:30:00Z","id":"11111111-1111-4111-8111-111111111111","extra":true}`)),
+		"trailing value": base64.RawURLEncoding.EncodeToString([]byte(`{"createdAt":"2026-09-20T09:30:00Z","id":"11111111-1111-4111-8111-111111111111"} {}`)),
+		"invalid hex id": base64.RawURLEncoding.EncodeToString([]byte(`{"createdAt":"2026-09-20T09:30:00Z","id":"11111111-1111-4111-8111-11111111111g"}`)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeIssueDiscussionCursor(raw); err == nil {
+				t.Fatalf("invalid cursor %q unexpectedly decoded", raw)
+			}
+		})
 	}
 }
