@@ -64,8 +64,9 @@ type IssueDiscussionThread struct {
 }
 
 type IssueDiscussionUpdate struct {
-	Comment IssueDiscussionComment `json:"comment"`
-	IsNew   bool                   `json:"isNew"`
+	Comment          IssueDiscussionComment `json:"comment"`
+	IsNew            bool                   `json:"isNew"`
+	ContextTruncated bool                   `json:"contextTruncated"`
 }
 
 type IssueDiscussionUpdates struct {
