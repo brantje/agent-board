@@ -40,7 +40,14 @@ func (s *recordingIssueDiscussionService) GetIssueDiscussionThread(_ context.Con
 	if s.threadErr != nil {
 		return store.IssueDiscussionThread{}, s.threadErr
 	}
-	return store.IssueDiscussionThread{RootID: "root", AnchorID: anchorID}, nil
+	at := time.Date(2026, 9, 20, 11, 5, 0, 0, time.UTC)
+	return store.IssueDiscussionThread{
+		RootID: "root", AnchorID: anchorID,
+		Comments: []store.IssueComment{{
+			ID: "thread-comment", AuthorType: store.ActorTypeHuman, AuthorID: "user-1", AuthorName: "User",
+			Body: "thread context", CreatedAt: at, UpdatedAt: at,
+		}},
+	}, nil
 }
 
 func (s *recordingIssueDiscussionService) ListIssueDiscussionUpdates(_ context.Context, projectID, issueID, cursor string, limit int) (app.IssueDiscussionUpdatePage, error) {
@@ -48,7 +55,17 @@ func (s *recordingIssueDiscussionService) ListIssueDiscussionUpdates(_ context.C
 	if s.updateErr != nil {
 		return app.IssueDiscussionUpdatePage{}, s.updateErr
 	}
-	return app.IssueDiscussionUpdatePage{NextCursor: "next", HasMore: true}, nil
+	at := time.Date(2026, 9, 20, 11, 10, 0, 0, time.UTC)
+	return app.IssueDiscussionUpdatePage{
+		Comments: []store.IssueDiscussionComment{{
+			Comment: store.IssueComment{
+				ID: "update-comment", AuthorType: store.ActorTypeHuman, AuthorID: "user-1", AuthorName: "User",
+				Body: "update context", CreatedAt: at, UpdatedAt: at,
+			},
+			IsNew: true,
+		}},
+		NextCursor: "next", HasMore: true,
+	}, nil
 }
 
 func TestIssueDiscussionReaderUsesTrustedIssueScopeAndSharedQueries(t *testing.T) {
@@ -73,9 +90,16 @@ func TestIssueDiscussionReaderUsesTrustedIssueScopeAndSharedQueries(t *testing.T
 	if err != nil || thread.Thread == nil || service.anchorID != "comment-1" || service.projectID != "project-1" || service.issueID != "issue-1" {
 		t.Fatalf("thread=%+v service=%+v err=%v", thread, service, err)
 	}
+	if len(thread.Thread.Comments) != 1 || thread.Thread.Comments[0].Body == nil || *thread.Thread.Comments[0].Body != "thread context" {
+		t.Fatalf("mapped thread comments=%+v", thread.Thread.Comments)
+	}
 	updates, err := reader.ReadIssueDiscussion(t.Context(), engine.IssueDiscussionReadRequest{Mode: engine.IssueDiscussionReadUpdates, Cursor: "cursor-1"})
 	if err != nil || updates.Updates == nil || updates.Updates.NextCursor != "next" || service.cursor != "cursor-1" {
 		t.Fatalf("updates=%+v service=%+v err=%v", updates, service, err)
+	}
+	if len(updates.Updates.Comments) != 1 || !updates.Updates.Comments[0].IsNew ||
+		updates.Updates.Comments[0].Comment.Body == nil || *updates.Updates.Comments[0].Comment.Body != "update context" {
+		t.Fatalf("mapped updates=%+v", updates.Updates.Comments)
 	}
 	if _, err := reader.ReadIssueDiscussion(t.Context(), engine.IssueDiscussionReadRequest{Mode: engine.IssueDiscussionReadThread}); err == nil {
 		t.Fatal("thread without anchor unexpectedly succeeded")
