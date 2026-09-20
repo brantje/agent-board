@@ -311,3 +311,120 @@ func TestIssueDiscussionReadsRejectInvalidBoundsAndAllowEmptyProjection(t *testi
 		t.Fatalf("empty projection=%+v", values)
 	}
 }
+
+func TestIssueDiscussionReadsBoundWideAndDeepGraphs(t *testing.T) {
+	s := New(testPool(t))
+	ctx := t.Context()
+	author, err := s.CreateUser(ctx, authUser("discussion-bounds", "discussion-bounds@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.CreateProject(ctx, testProjectInput("Discussion bounds", "/repo/discussion-bounds", "DBD"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "Bound discussion graph work", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := func(body string, parent *string) store.IssueComment {
+		t.Helper()
+		result, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+			IssueID: issue.ID, ParentCommentID: parent, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, Body: body,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result.Comment
+	}
+
+	base := time.Date(2026, 9, 20, 15, 0, 0, 0, time.UTC)
+	wideRoot := create("wide root", nil)
+	if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET created_at=$1, updated_at=$1 WHERE id=$2`, base, wideRoot.ID); err != nil {
+		t.Fatal(err)
+	}
+	const wideReplies = 300
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO issue_comments (issue_id, parent_comment_id, author_type, author_id, body, created_at, updated_at)
+		SELECT $1, $2, 'HUMAN', $3, 'wide reply ' || n::text,
+		       $4 + n * interval '1 microsecond',
+		       $4 + n * interval '1 microsecond'
+		FROM generate_series(1, $5) AS n
+	`, issue.ID, wideRoot.ID, author.ID, base, wideReplies); err != nil {
+		t.Fatal(err)
+	}
+
+	ids, truncated, err := s.boundedIssueCommentTreeIDs(ctx, project.ID, issue.ID, wideRoot.ID, 8, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 5 || !truncated {
+		t.Fatalf("bounded wide tree ids=%d truncated=%v", len(ids), truncated)
+	}
+	thread, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, wideRoot.ID, 8, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(thread.Comments) != 5 || !thread.Truncated {
+		t.Fatalf("bounded wide thread=%+v", thread)
+	}
+	roots, err := s.ListIssueDiscussionRoots(ctx, project.ID, issue.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || roots[0].Root.ID != wideRoot.ID {
+		t.Fatalf("wide roots=%+v", roots)
+	}
+	wantWideActivity := base.Add(wideReplies * time.Microsecond)
+	if !roots[0].LastActivityAt.Equal(wantWideActivity) {
+		t.Fatalf("wide last activity=%s want=%s", roots[0].LastActivityAt, wantWideActivity)
+	}
+	if !roots[0].Truncated || roots[0].ReplyCount <= 0 || roots[0].ReplyCount >= wideReplies {
+		t.Fatalf("wide metadata=%+v", roots[0])
+	}
+
+	deepBase := base.Add(10 * time.Second)
+	deepRoot := create("deep root", nil)
+	if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET created_at=$1, updated_at=$1 WHERE id=$2`, deepBase, deepRoot.ID); err != nil {
+		t.Fatal(err)
+	}
+	parent := deepRoot
+	var deepLeaf store.IssueComment
+	for index := 0; index < issueDiscussionRootTraversalDepth+1; index++ {
+		child := create("deep reply", &parent.ID)
+		at := deepBase.Add(time.Duration(index+1) * time.Millisecond)
+		if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET created_at=$1, updated_at=$1 WHERE id=$2`, at, child.ID); err != nil {
+			t.Fatal(err)
+		}
+		parent = child
+		deepLeaf = child
+	}
+	deepIDs, deepTruncated, err := s.boundedIssueCommentTreeIDs(
+		ctx, project.ID, issue.ID, deepRoot.ID, issueDiscussionRootTraversalDepth, issueDiscussionRootMetadataCommentLimit,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deepTruncated || len(deepIDs) != issueDiscussionRootTraversalDepth+1 {
+		t.Fatalf("deep bounded ids=%d truncated=%v", len(deepIDs), deepTruncated)
+	}
+	if _, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, deepLeaf.ID, issueDiscussionRootTraversalDepth, 100); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("deep thread error=%v", err)
+	}
+
+	olderRoot := create("older safe root", nil)
+	safeRoot := create("newest safe root", nil)
+	if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET created_at=$1, updated_at=$1 WHERE id=$2`, deepBase.Add(-time.Second), olderRoot.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET created_at=$1, updated_at=$1 WHERE id=$2`, deepBase.Add(2*time.Second), safeRoot.ID); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := s.ListIssueDiscussionRoots(ctx, project.ID, issue.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recent) != 1 || recent[0].Root.ID != safeRoot.ID {
+		t.Fatalf("recent roots crossed unresolved deep activity boundary: %+v", recent)
+	}
+}

@@ -9,64 +9,87 @@ import (
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
-const issueDiscussionRootTraversalDepth = 64
+const (
+	issueDiscussionRootTraversalDepth      = 64
+	issueDiscussionRootCandidateLimit      = 256
+	issueDiscussionRootCandidateMultiplier = 8
+	issueDiscussionRootMetadataCommentLimit = 256
+)
 
 func (s *Store) ListIssueDiscussionRoots(ctx context.Context, projectID, issueID string, limit int) ([]store.IssueDiscussionRoot, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(issueID) == "" || limit <= 0 {
 		return nil, store.ErrInvalidArgument
 	}
+
+	candidateLimit := limit * issueDiscussionRootCandidateMultiplier
+	if candidateLimit < limit || candidateLimit > issueDiscussionRootCandidateLimit {
+		candidateLimit = issueDiscussionRootCandidateLimit
+	}
 	rows, err := s.pool.Query(ctx, `
-		WITH RECURSIVE thread(root_id, id, created_at, depth) AS (
-			SELECT c.id, c.id, c.created_at, 0
-			FROM issue_comments AS c
-			JOIN issues AS i ON i.id = c.issue_id
-			WHERE i.project_id = $1 AND c.issue_id = $2 AND c.parent_comment_id IS NULL
-			UNION ALL
-			SELECT t.root_id, child.id, child.created_at, t.depth + 1
-			FROM thread AS t
-			JOIN issue_comments AS child ON child.issue_id = $2 AND child.parent_comment_id = t.id
-			WHERE t.depth < $3
-		), stats AS (
-			SELECT t.root_id,
-			       count(*) - 1 AS reply_count,
-			       max(t.created_at) AS last_activity_at,
-			       (array_agg(t.id ORDER BY t.created_at DESC, t.id DESC))[1] AS latest_id,
-			       bool_or(t.depth = $3 AND EXISTS (
-				   SELECT 1 FROM issue_comments AS child
-				   WHERE child.issue_id = $2 AND child.parent_comment_id = t.id
-			       )) AS truncated
-			FROM thread AS t
-			GROUP BY t.root_id
-		)
-		SELECT root_id::text, reply_count, last_activity_at, latest_id::text, truncated
-		FROM stats
-		ORDER BY last_activity_at DESC, root_id DESC
-		LIMIT $4
-	`, projectID, issueID, issueDiscussionRootTraversalDepth, limit)
+		SELECT c.id::text, c.created_at
+		FROM issue_comments AS c
+		JOIN issues AS i ON i.id = c.issue_id
+		WHERE i.project_id = $1 AND c.issue_id = $2
+		ORDER BY c.created_at DESC, c.id DESC
+		LIMIT $3
+	`, projectID, issueID, candidateLimit)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	type candidate struct {
+		id        string
+		createdAt time.Time
+	}
+	candidates := make([]candidate, 0, candidateLimit)
+	for rows.Next() {
+		var value candidate
+		if err := rows.Scan(&value.id, &value.createdAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, value)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
 
 	type metadata struct {
 		id             string
-		replyCount     int
-		lastActivityAt time.Time
 		latestID       string
-		truncated      bool
+		lastActivityAt time.Time
+		chainIDs       []string
 	}
 	selected := make([]metadata, 0, limit)
-	ids := make([]string, 0, limit)
-	for rows.Next() {
-		var value metadata
-		if err := rows.Scan(&value.id, &value.replyCount, &value.lastActivityAt, &value.latestID, &value.truncated); err != nil {
+	seen := make(map[string]struct{}, limit)
+	for _, candidate := range candidates {
+		chainIDs, err := s.issueCommentAncestorIDs(ctx, projectID, issueID, candidate.id, issueDiscussionRootTraversalDepth)
+		if err != nil {
+			if errors.Is(err, store.ErrInvalidArgument) {
+				// A newer comment exists beyond the supported ancestor depth.
+				// Stop before older candidates so we never return a root with a
+				// stale last-activity timestamp.
+				break
+			}
 			return nil, err
 		}
-		selected = append(selected, value)
-		ids = append(ids, value.id)
+		rootID := chainIDs[0]
+		if _, exists := seen[rootID]; exists {
+			continue
+		}
+		seen[rootID] = struct{}{}
+		selected = append(selected, metadata{
+			id: rootID, latestID: candidate.id, lastActivityAt: candidate.createdAt, chainIDs: chainIDs,
+		})
+		if len(selected) >= limit {
+			break
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+
+	ids := make([]string, 0, len(selected))
+	for _, item := range selected {
+		ids = append(ids, item.id)
 	}
 	comments, err := s.listIssueCommentsByIDs(ctx, projectID, issueID, ids)
 	if err != nil {
@@ -76,24 +99,27 @@ func (s *Store) ListIssueDiscussionRoots(ctx context.Context, projectID, issueID
 	for _, comment := range comments {
 		byID[comment.ID] = comment
 	}
+
 	result := make([]store.IssueDiscussionRoot, 0, len(selected))
 	for _, item := range selected {
 		root, ok := byID[item.id]
 		if !ok {
 			return nil, store.ErrNotFound
 		}
+		treeIDs, truncated, err := s.boundedIssueCommentTreeIDs(
+			ctx, projectID, issueID, item.id, issueDiscussionRootTraversalDepth, issueDiscussionRootMetadataCommentLimit,
+		)
+		if err != nil {
+			return nil, err
+		}
 		projection := store.IssueDiscussionRoot{
 			Root:           root,
-			ReplyCount:     item.replyCount,
+			ReplyCount:     len(treeIDs) - 1,
 			LastActivityAt: item.lastActivityAt,
-			Truncated:      item.truncated,
+			Truncated:      truncated,
 		}
 		if root.ResolvedAt != nil {
-			chainIDs, err := s.issueCommentAncestorIDs(ctx, projectID, issueID, item.latestID, issueDiscussionRootTraversalDepth)
-			if err != nil {
-				return nil, err
-			}
-			chain, err := s.listIssueCommentsByIDs(ctx, projectID, issueID, chainIDs)
+			chain, err := s.listIssueCommentsByIDs(ctx, projectID, issueID, item.chainIDs)
 			if err != nil {
 				return nil, err
 			}
@@ -101,8 +127,8 @@ func (s *Store) ListIssueDiscussionRoots(ctx context.Context, projectID, issueID
 			for _, comment := range chain {
 				chainByID[comment.ID] = comment
 			}
-			projection.CompactComments = make([]store.IssueComment, 0, len(chainIDs))
-			for _, id := range chainIDs {
+			projection.CompactComments = make([]store.IssueComment, 0, len(item.chainIDs))
+			for _, id := range item.chainIDs {
 				comment, ok := chainByID[id]
 				if !ok {
 					return nil, store.ErrNotFound
@@ -124,77 +150,26 @@ func (s *Store) GetIssueDiscussionThread(ctx context.Context, projectID, issueID
 		return store.IssueDiscussionThread{}, err
 	}
 	rootID := chain[0]
-	rows, err := s.pool.Query(ctx, `
-		WITH RECURSIVE descendants(id, depth) AS (
-			SELECT c.id, 0
-			FROM issue_comments AS c
-			JOIN issues AS i ON i.id = c.issue_id
-			WHERE i.project_id = $1 AND c.issue_id = $2 AND c.id = $3
-			UNION ALL
-			SELECT child.id, d.depth + 1
-			FROM descendants AS d
-			JOIN issue_comments AS child ON child.issue_id = $2 AND child.parent_comment_id = d.id
-			WHERE d.depth < $4
-		)
-		SELECT d.id::text, d.depth,
-		       (d.depth = $4 AND EXISTS (
-			   SELECT 1 FROM issue_comments AS child
-			   WHERE child.issue_id = $2 AND child.parent_comment_id = d.id
-		       )) AS has_deeper
-		FROM descendants AS d
-		JOIN issue_comments AS c ON c.id = d.id
-		ORDER BY c.created_at, c.id
-		LIMIT $5
-	`, projectID, issueID, rootID, maxDepth, maxComments+1)
+	ids, truncated, err := s.boundedIssueCommentTreeIDs(ctx, projectID, issueID, rootID, maxDepth, maxComments)
 	if err != nil {
 		return store.IssueDiscussionThread{}, err
-	}
-	defer rows.Close()
-
-	ids := make([]string, 0, maxComments+1)
-	truncated := false
-	for rows.Next() {
-		var id string
-		var depth int
-		var hasDeeper bool
-		if err := rows.Scan(&id, &depth, &hasDeeper); err != nil {
-			return store.IssueDiscussionThread{}, err
-		}
-		if hasDeeper {
-			truncated = true
-		}
-		ids = append(ids, id)
-	}
-	if err := rows.Err(); err != nil {
-		return store.IssueDiscussionThread{}, err
-	}
-	if len(ids) > maxComments {
-		ids = ids[:maxComments]
-		truncated = true
 	}
 	if !containsString(ids, anchorID) {
 		if len(chain) > maxComments {
 			return store.IssueDiscussionThread{}, store.ErrInvalidArgument
 		}
-		chainSet := make(map[string]struct{}, len(chain))
-		for _, id := range chain {
-			chainSet[id] = struct{}{}
-		}
 		selected := make([]string, 0, maxComments)
 		selectedSet := make(map[string]struct{}, maxComments)
-		for _, id := range ids {
-			if _, mandatory := chainSet[id]; mandatory {
-				continue
-			}
-			if len(selected)+len(chain) >= maxComments {
-				break
-			}
+		for _, id := range chain {
 			selected = append(selected, id)
 			selectedSet[id] = struct{}{}
 		}
-		for _, id := range chain {
+		for _, id := range ids {
 			if _, exists := selectedSet[id]; exists {
 				continue
+			}
+			if len(selected) >= maxComments {
+				break
 			}
 			selected = append(selected, id)
 			selectedSet[id] = struct{}{}
@@ -207,6 +182,95 @@ func (s *Store) GetIssueDiscussionThread(ctx context.Context, projectID, issueID
 		return store.IssueDiscussionThread{}, err
 	}
 	return store.IssueDiscussionThread{RootID: rootID, AnchorID: anchorID, Comments: comments, Truncated: truncated}, nil
+}
+
+func (s *Store) boundedIssueCommentTreeIDs(ctx context.Context, projectID, issueID, rootID string, maxDepth, maxComments int) ([]string, bool, error) {
+	if strings.TrimSpace(rootID) == "" || maxDepth < 1 || maxComments < 1 {
+		return nil, false, store.ErrInvalidArgument
+	}
+	ids := []string{rootID}
+	frontier := []string{rootID}
+	for depth := 0; depth < maxDepth && len(frontier) > 0; depth++ {
+		remaining := maxComments - len(ids)
+		if remaining <= 0 {
+			more, err := s.issueCommentChildrenExist(ctx, projectID, issueID, frontier)
+			return ids, more, err
+		}
+		children, hasMore, err := s.issueCommentChildIDs(ctx, projectID, issueID, frontier, remaining)
+		if err != nil {
+			return nil, false, err
+		}
+		ids = append(ids, children...)
+		if hasMore {
+			return ids, true, nil
+		}
+		frontier = children
+	}
+	if len(frontier) == 0 {
+		return ids, false, nil
+	}
+	more, err := s.issueCommentChildrenExist(ctx, projectID, issueID, frontier)
+	if err != nil {
+		return nil, false, err
+	}
+	return ids, more, nil
+}
+
+func (s *Store) issueCommentChildIDs(ctx context.Context, projectID, issueID string, parentIDs []string, limit int) ([]string, bool, error) {
+	if len(parentIDs) == 0 || limit < 1 {
+		return []string{}, false, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.id::text
+		FROM issue_comments AS c
+		JOIN issues AS i ON i.id = c.issue_id
+		WHERE i.project_id = $1
+		  AND c.issue_id = $2
+		  AND c.parent_comment_id = ANY($3::uuid[])
+		ORDER BY c.created_at, c.id
+		LIMIT $4
+	`, projectID, issueID, parentIDs, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0, limit+1)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, false, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, err
+	}
+	hasMore := len(ids) > limit
+	if hasMore {
+		ids = ids[:limit]
+	}
+	return ids, hasMore, nil
+}
+
+func (s *Store) issueCommentChildrenExist(ctx context.Context, projectID, issueID string, parentIDs []string) (bool, error) {
+	if len(parentIDs) == 0 {
+		return false, nil
+	}
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM issue_comments AS c
+			JOIN issues AS i ON i.id = c.issue_id
+			WHERE i.project_id = $1
+			  AND c.issue_id = $2
+			  AND c.parent_comment_id = ANY($3::uuid[])
+			LIMIT 1
+		)
+	`, projectID, issueID, parentIDs).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
 }
 
 func (s *Store) ListIssueDiscussionUpdates(ctx context.Context, projectID, issueID string, cursor *store.IssueCommentCursor, newLimit, maxContext, maxDepth int) (store.IssueDiscussionUpdates, error) {
