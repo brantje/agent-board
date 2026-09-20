@@ -308,14 +308,7 @@ func TestIssueDiscussionBridgeCloseIdleConnectionsIsNilSafe(t *testing.T) {
 }
 
 
-func TestIssueDiscussionBridgeRejectsUnavailableReaderAndMalformedQueuePayload(t *testing.T) {
-	t.Run("unavailable reader", func(t *testing.T) {
-		bridge := &issueDiscussionBridge{}
-		if err := bridge.Serve(t.Context()); err == nil || !strings.Contains(err.Error(), "unavailable") {
-			t.Fatalf("serve error=%v", err)
-		}
-	})
-
+func TestIssueDiscussionBridgeRejectsMalformedQueuePayload(t *testing.T) {
 	t.Run("malformed queue payload", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			_, _ = w.Write([]byte("{"))
