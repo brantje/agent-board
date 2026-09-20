@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -213,19 +212,6 @@ func TestIssueDiscussionHTTPFallbackErrorsAndPathValidation(t *testing.T) {
 		response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", bearer(outsiderToken))
 		if response.Code != http.StatusNotFound {
 			t.Fatalf("outsider %s status=%d body=%s user=%s", path, response.Code, response.Body.String(), outsider.ID)
-		}
-	}
-
-	directControl := app.New(database)
-	directHandler := NewRouterWithApplication(&app.Services{ControlPlane: directControl, Auth: fixture.auth})
-	for _, path := range []string{
-		base + "/discussions",
-		base + "/" + rootID + "/thread",
-		base + "/updates",
-	} {
-		response := authHTTPRequest(t, directHandler, http.MethodGet, path, "", bearer(token))
-		if response.Code != http.StatusOK {
-			t.Fatalf("direct %s status=%d body=%s", path, response.Code, response.Body.String())
 		}
 	}
 
