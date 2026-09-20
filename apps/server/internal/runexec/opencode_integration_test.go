@@ -82,6 +82,60 @@ func TestOpenCodeDockerNormalCodingRun(t *testing.T) {
 	assertOpenCodeServerSession(t, fixture.ctx, fixture.database, project.ID, run.ID, false)
 }
 
+func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
+	fixture := newOpenCodeIntegrationFixture(t)
+	const expectedBody = "discussion-read-proof-7b2f9c"
+	setup := fixture.createRunSetup(t, openCodeRunSpec{
+		roleInstructions: "Follow the issue instructions exactly. Use read_issue_discussion only when explicitly requested. Do not ask a Question, publish a comment, delegate, or change Issue status unless explicitly requested.",
+		title:            "Read trusted Issue discussion context",
+		description:      "Use read_issue_discussion with mode recent exactly once. From the returned discussion roots, find the human-authored root by Discussion Author. Create opencode-result.txt containing exactly that root comment body with no trailing newline. Do not modify any other file. After writing the file, stop.",
+	})
+	author, err := fixture.database.CreateUser(fixture.ctx, store.User{
+		Username: "discussion-author", Email: "discussion-author@example.com", DisplayName: "Discussion Author",
+		DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusPending, AuthVersion: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.services.ControlPlane.CreateHumanIssueComment(fixture.ctx, app.CreateIssueCommentInput{
+		ProjectID: setup.Project.ID, IssueID: setup.Issue.ID, Body: expectedBody,
+	}, author.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.services.ControlPlane.SetIssueAssignee(fixture.ctx, setup.Project.ID, setup.Issue.ID, &store.Assignee{Type: "AGENT", ID: setup.Agent.ID}, store.EmptyObject); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := fixture.services.ControlPlane.ListRuns(fixture.ctx, setup.Project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run store.Run
+	for _, candidate := range runs {
+		if candidate.IssueID == setup.Issue.ID && candidate.AgentID != nil && *candidate.AgentID == setup.Agent.ID {
+			run = candidate
+			break
+		}
+	}
+	if run.ID == "" {
+		t.Fatal("automatic assignment did not create a Run")
+	}
+
+	fixture.startScheduler(t)
+	terminal := waitForScriptedRun(t, fixture.ctx, fixture.database, setup.Project.ID, run.ID)
+	if terminal.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
+	}
+	assertOpenCodeWorkspaceFile(t, fixture.ctx, fixture.database, setup.Project.ID, terminal.WorkspaceID, "opencode-result.txt", expectedBody)
+
+	comments, err := fixture.services.ControlPlane.ListIssueComments(fixture.ctx, setup.Project.ID, setup.Issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 || comments[0].Body != expectedBody || comments[0].AuthorID != author.ID {
+		t.Fatalf("discussion read mutated durable comments: %+v", comments)
+	}
+}
+
 func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
 	const expectedBody = "Agent integration comment @nobody"
