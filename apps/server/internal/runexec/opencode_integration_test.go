@@ -200,17 +200,56 @@ func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
 	}
 
+	events, err := fixture.database.ListRunEvents(fixture.ctx, project.ID, run.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedPublishes := make([]evidence.ToolPayload, 0)
+	for _, event := range events {
+		if event.Type != "tool.completed" {
+			continue
+		}
+		var payload evidence.ToolPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode publication tool evidence: %v", err)
+		}
+		if payload.Name == "publish_issue_comment" {
+			completedPublishes = append(completedPublishes, payload)
+		}
+	}
+	if len(completedPublishes) == 0 {
+		t.Fatalf("publish_issue_comment did not complete; events=%v", eventTypes(events))
+	}
+
 	comments, err := fixture.services.ControlPlane.ListIssueComments(fixture.ctx, project.ID, run.IssueID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(comments) != 1 {
-		t.Fatalf("durable Issue comments=%+v want exactly one", comments)
+	if len(comments) != len(completedPublishes) {
+		t.Fatalf("durable Issue comments=%d completed publish actions=%d comments=%+v", len(comments), len(completedPublishes), comments)
 	}
-	comment := comments[0]
-	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != *run.AgentID ||
-		comment.SourceRunID == nil || *comment.SourceRunID != run.ID || comment.Body != expectedBody {
-		t.Fatalf("trusted Agent comment=%+v run=%+v", comment, run)
+	commentsByAction := make(map[string]store.IssueComment, len(comments))
+	for _, comment := range comments {
+		if comment.SourceActionKey == nil || strings.TrimSpace(*comment.SourceActionKey) == "" {
+			t.Fatalf("trusted Agent comment has no source action key: %+v", comment)
+		}
+		commentsByAction[*comment.SourceActionKey] = comment
+	}
+	for _, publish := range completedPublishes {
+		if publish.ToolCallID == "" {
+			t.Fatalf("completed publication has no tool call id: %+v", publish)
+		}
+		if body, _ := publish.Input["body"].(string); body != expectedBody {
+			t.Fatalf("publication input=%+v want body=%q", publish.Input, expectedBody)
+		}
+		comment, ok := commentsByAction[publish.ToolCallID]
+		if !ok {
+			t.Fatalf("no durable comment for completed publication %q; comments=%+v", publish.ToolCallID, comments)
+		}
+		if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != *run.AgentID ||
+			comment.SourceRunID == nil || *comment.SourceRunID != run.ID || comment.Body != expectedBody {
+			t.Fatalf("trusted Agent comment=%+v run=%+v", comment, run)
+		}
 	}
 
 	reloadedDatabase, err := postgres.Open(fixture.ctx, fixture.env.databaseURL)
@@ -222,14 +261,22 @@ func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reloaded) != 1 {
-		t.Fatalf("reloaded Issue comments=%+v want exactly one", reloaded)
+	if len(reloaded) != len(comments) {
+		t.Fatalf("reloaded Issue comments=%d original=%d reloaded=%+v", len(reloaded), len(comments), reloaded)
 	}
-	reloadedComment := reloaded[0]
-	if reloadedComment.ID != comment.ID || reloadedComment.AuthorType != store.ActorTypeAgent ||
-		reloadedComment.AuthorID != *run.AgentID || reloadedComment.AuthorName != comment.AuthorName ||
-		reloadedComment.SourceRunID == nil || *reloadedComment.SourceRunID != run.ID || reloadedComment.Body != expectedBody {
-		t.Fatalf("reloaded trusted Agent comment=%+v original=%+v", reloadedComment, comment)
+	reloadedByID := make(map[string]store.IssueComment, len(reloaded))
+	for _, comment := range reloaded {
+		reloadedByID[comment.ID] = comment
+	}
+	for _, original := range comments {
+		reloadedComment, ok := reloadedByID[original.ID]
+		if !ok || reloadedComment.AuthorType != store.ActorTypeAgent ||
+			reloadedComment.AuthorID != *run.AgentID || reloadedComment.AuthorName != original.AuthorName ||
+			reloadedComment.SourceRunID == nil || *reloadedComment.SourceRunID != run.ID ||
+			reloadedComment.SourceActionKey == nil || original.SourceActionKey == nil ||
+			*reloadedComment.SourceActionKey != *original.SourceActionKey || reloadedComment.Body != expectedBody {
+			t.Fatalf("reloaded trusted Agent comment=%+v original=%+v", reloadedComment, original)
+		}
 	}
 
 	afterIssue, err := fixture.services.ControlPlane.GetIssue(fixture.ctx, project.ID, run.IssueID)
