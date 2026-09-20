@@ -152,6 +152,8 @@ paths:
     $ref: ./paths/issues-runs.yaml#/path2
   /api/projects/{projectID}/issues/{issueID}/comments:
     $ref: ./paths/issue-comments.yaml#/comments
+  /api/projects/{projectID}/issues/{issueID}/comments/mention-preview:
+    $ref: ./paths/issue-comments.yaml#/mentionPreview
   /api/projects/{projectID}/issues/{issueID}/comments/discussions:
     $ref: ./paths/issue-comments.yaml#/discussions
   /api/projects/{projectID}/issues/{issueID}/comments/updates:

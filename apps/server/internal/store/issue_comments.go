@@ -22,6 +22,7 @@ const (
 	IssueCommentMentionOutcomeBlocked = "BLOCKED"
 
 	IssueCommentMentionReasonTargetUnavailable = "TARGET_UNAVAILABLE"
+	IssueCommentMentionReasonTargetBusy        = "TARGET_BUSY"
 	IssueCommentMentionReasonDelegationBlocked = "DELEGATION_BLOCKED"
 
 	MaxIssueCommentMentions = 10
@@ -91,8 +92,16 @@ type IssueCommentDeleteResult struct {
 	Events []Event
 }
 
+type IssueCommentMentionPreview struct {
+	TargetAgentID   string
+	TargetAgentName string
+	Eligible        bool
+	ReasonCode      *string
+}
+
 type IssueCommentMentionStore interface {
 	CreateIssueCommentWithMentions(context.Context, string, IssueComment, []string) (IssueCommentMutationResult, error)
+	PreviewIssueCommentMentions(context.Context, string, string, []string) ([]IssueCommentMentionPreview, error)
 }
 
 type IssueCommentStore interface {

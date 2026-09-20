@@ -240,3 +240,38 @@ func TestIssueCommentMentionValidationRejectsDuplicateOrChangedRetryTargets(t *t
 		t.Fatalf("changed retry targets error=%v want conflict", err)
 	}
 }
+
+func TestIssueCommentMentionPreviewUsesPostingEligibility(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+
+	preview, err := f.store.PreviewIssueCommentMentions(ctx, f.project.ID, f.issue.ID, []string{f.target.ID, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview) != 2 || !preview[0].Eligible || preview[0].TargetAgentName != f.target.Name ||
+		preview[0].ReasonCode != nil || preview[1].Eligible || preview[1].ReasonCode == nil ||
+		*preview[1].ReasonCode != store.IssueCommentMentionReasonTargetUnavailable {
+		t.Fatalf("preview=%+v", preview)
+	}
+
+	author, err := f.store.CreateUser(ctx, authUser("preview-author", "preview-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestKey := "preview-dispatch"
+	if _, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+		SourceActionKey: &requestKey, Body: "Create target work.",
+	}, []string{f.target.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	busy, err := f.store.PreviewIssueCommentMentions(ctx, f.project.ID, f.issue.ID, []string{f.target.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(busy) != 1 || busy[0].Eligible || busy[0].ReasonCode == nil || *busy[0].ReasonCode != store.IssueCommentMentionReasonTargetBusy {
+		t.Fatalf("busy preview=%+v", busy)
+	}
+}

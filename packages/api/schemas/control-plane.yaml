@@ -340,10 +340,44 @@ IssueCommentReactionSummary:
     reaction: {$ref: '#/IssueCommentReactionKey'}
     count: {type: integer, minimum: 1}
     reactedByCurrentUser: {type: boolean}
+IssueCommentMentionOutcome:
+  type: string
+  enum: [QUEUED, BLOCKED]
+IssueCommentMention:
+  type: object
+  additionalProperties: false
+  required: [id, targetAgentId, targetAgentName, outcome, reasonCode, delegationId, delegatedRunId]
+  properties:
+    id: {type: string, format: uuid}
+    targetAgentId: {type: string, format: uuid}
+    targetAgentName: {type: string}
+    outcome: {$ref: '#/IssueCommentMentionOutcome'}
+    reasonCode: {type: [string, 'null'], enum: [TARGET_UNAVAILABLE, TARGET_BUSY, DELEGATION_BLOCKED, null]}
+    delegationId: {type: [string, 'null'], format: uuid}
+    delegatedRunId: {type: [string, 'null'], format: uuid}
+IssueCommentMentionPreview:
+  type: object
+  additionalProperties: false
+  required: [targetAgentId, targetAgentName, eligible, reasonCode]
+  properties:
+    targetAgentId: {type: string, format: uuid}
+    targetAgentName: {type: string}
+    eligible: {type: boolean}
+    reasonCode: {type: [string, 'null'], enum: [TARGET_UNAVAILABLE, TARGET_BUSY, DELEGATION_BLOCKED, null]}
+IssueCommentMentionPreviewInput:
+  type: object
+  additionalProperties: false
+  required: [mentionAgentIds]
+  properties:
+    mentionAgentIds:
+      type: array
+      maxItems: 10
+      uniqueItems: true
+      items: {type: string, format: uuid}
 IssueComment:
   type: object
   additionalProperties: false
-  required: [id, issueId, parentCommentId, sourceRunId, author, body, deletedAt, resolvedAt, resolvedBy, reactions, createdAt, updatedAt]
+  required: [id, issueId, parentCommentId, sourceRunId, author, body, deletedAt, resolvedAt, resolvedBy, reactions, mentions, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     issueId: {$ref: '#/IssueKey'}
@@ -363,6 +397,9 @@ IssueComment:
     reactions:
       type: array
       items: {$ref: '#/IssueCommentReactionSummary'}
+    mentions:
+      type: array
+      items: {$ref: '#/IssueCommentMention'}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
 IssueCommentCreate:
@@ -375,6 +412,15 @@ IssueCommentCreate:
       type: string
       minLength: 1
       pattern: '\S'
+    requestId:
+      type: string
+      format: uuid
+      description: Stable client request identity. Required when mentionAgentIds is non-empty.
+    mentionAgentIds:
+      type: array
+      maxItems: 10
+      uniqueItems: true
+      items: {type: string, format: uuid}
 IssueCommentUpdate:
   type: object
   additionalProperties: false
@@ -512,13 +558,14 @@ Run:
 Delegation:
   type: object
   additionalProperties: false
-  required: [id, projectId, issueId, parentRunId, parentAgentId, targetAgentId, task, delegatedRunId, workspaceAccess, requestKey, parentRunStatus, delegatedRunStatus, outcome, resultSummary, resultEventId, workspaceChangesAccepted, workspaceRevision, continuationJobId, completedAt, createdAt, updatedAt]
+  required: [id, projectId, issueId, parentRunId, parentAgentId, sourceCommentId, targetAgentId, task, delegatedRunId, workspaceAccess, requestKey, parentRunStatus, delegatedRunStatus, outcome, resultSummary, resultEventId, workspaceChangesAccepted, workspaceRevision, continuationJobId, completedAt, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     projectId: {type: string, format: uuid}
     issueId: {$ref: '#/IssueKey'}
-    parentRunId: {type: string, format: uuid}
-    parentAgentId: {type: string, format: uuid}
+    parentRunId: {type: [string, 'null'], format: uuid}
+    parentAgentId: {type: [string, 'null'], format: uuid}
+    sourceCommentId: {type: [string, 'null'], format: uuid}
     targetAgentId: {type: string, format: uuid}
     task: {type: string}
     delegatedRunId: {type: string, format: uuid}
@@ -527,7 +574,7 @@ Delegation:
       enum: [WRITE]
       description: Effective delegated access to the shared Issue Workspace. v0.1 supports serialized WRITE only.
     requestKey: {type: string}
-    parentRunStatus: {type: string}
+    parentRunStatus: {type: [string, 'null']}
     delegatedRunStatus: {type: string}
     outcome:
       type: [string, 'null']

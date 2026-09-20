@@ -17,7 +17,7 @@ comments:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
     operationId: createIssueComment
-    description: Creates a human-authored Issue comment or reply. The authenticated User is authoritative; comment text has no execution semantics.
+    description: Creates a human-authored Issue comment or reply. Only explicit structured mentionAgentIds can request Agent work; mention-looking text alone has no execution semantics.
     requestBody:
       required: true
       content:
@@ -29,6 +29,29 @@ comments:
         content:
           application/json:
             schema: {$ref: ../schemas/control-plane.yaml#/IssueComment}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+mentionPreview:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  post:
+    operationId: previewIssueCommentMentions
+    description: Advisory preview of explicit Agent mention eligibility. Comment creation revalidates all targets authoritatively.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: ../schemas/control-plane.yaml#/IssueCommentMentionPreviewInput}
+    responses:
+      '200':
+        description: Agent mention preview
+        content:
+          application/json:
+            schema:
+              type: array
+              items: {$ref: ../schemas/control-plane.yaml#/IssueCommentMentionPreview}
       default:
         $ref: ../components/api-components.yaml#/responses/Error
 

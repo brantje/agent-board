@@ -207,14 +207,15 @@ type DelegationDTO struct {
 	ID                       string     `json:"id"`
 	ProjectID                string     `json:"projectId"`
 	IssueID                  string     `json:"issueId"`
-	ParentRunID              string     `json:"parentRunId"`
-	ParentAgentID            string     `json:"parentAgentId"`
+	ParentRunID              *string    `json:"parentRunId"`
+	ParentAgentID            *string    `json:"parentAgentId"`
+	SourceCommentID          *string    `json:"sourceCommentId"`
 	TargetAgentID            string     `json:"targetAgentId"`
 	Task                     string     `json:"task"`
 	DelegatedRunID           string     `json:"delegatedRunId"`
 	WorkspaceAccess          string     `json:"workspaceAccess"`
 	RequestKey               string     `json:"requestKey"`
-	ParentRunStatus          string     `json:"parentRunStatus"`
+	ParentRunStatus          *string    `json:"parentRunStatus"`
 	DelegatedRunStatus       string     `json:"delegatedRunStatus"`
 	Outcome                  *string    `json:"outcome"`
 	ResultSummary            *string    `json:"resultSummary"`

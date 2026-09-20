@@ -49,6 +49,21 @@ func (s *Service) ListIssueComments(ctx context.Context, projectID, issueID stri
 	return values, nil
 }
 
+func (s *Service) PreviewIssueCommentMentions(ctx context.Context, projectID, issueID string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
+	if _, err := s.GetIssue(ctx, projectID, issueID); err != nil {
+		return nil, err
+	}
+	mentions, ok := any(s.issueComments).(store.IssueCommentMentionStore)
+	if !ok {
+		return nil, errors.New("issue comment mentions are unavailable")
+	}
+	values, err := mentions.PreviewIssueCommentMentions(ctx, projectID, issueID, targetAgentIDs)
+	if err != nil {
+		return nil, translateStoreError(err, "issue_comment_mention")
+	}
+	return values, nil
+}
+
 func (s *Service) GetIssueComment(ctx context.Context, projectID, issueID, commentID string) (store.IssueComment, error) {
 	if _, err := s.GetIssue(ctx, projectID, issueID); err != nil {
 		return store.IssueComment{}, err

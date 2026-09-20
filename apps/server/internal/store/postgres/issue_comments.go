@@ -94,6 +94,38 @@ func (s *Store) CreateIssueCommentWithMentions(ctx context.Context, projectID st
 	return s.createIssueComment(ctx, projectID, input, mentionAgentIDs)
 }
 
+func (s *Store) PreviewIssueCommentMentions(ctx context.Context, projectID, issueID string, mentionAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
+	projectID = strings.TrimSpace(projectID)
+	issueID = strings.TrimSpace(issueID)
+	mentions, err := normalizeIssueCommentMentionAgentIDs(mentionAgentIDs)
+	if err != nil || projectID == "" || issueID == "" {
+		return nil, store.ErrInvalidArgument
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var exists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND id=$2)
+	`, projectID, issueID).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, store.ErrNotFound
+	}
+	result := make([]store.IssueCommentMentionPreview, 0, len(mentions))
+	for _, targetAgentID := range mentions {
+		preview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, issueID, targetAgentID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, preview)
+	}
+	return result, nil
+}
+
 func (s *Store) createIssueComment(ctx context.Context, projectID string, input store.IssueComment, mentionAgentIDs []string) (store.IssueCommentMutationResult, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(input.IssueID) == "" || strings.TrimSpace(input.AuthorID) == "" || strings.TrimSpace(input.Body) == "" || !store.ValidActorType(input.AuthorType) {
 		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
@@ -277,23 +309,17 @@ func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, pro
 	result := make([]store.IssueCommentMention, 0, len(mentionAgentIDs))
 	events := make([]store.Event, 0, len(mentionAgentIDs))
 	for index, targetAgentID := range mentionAgentIDs {
-		targetName := ""
-		err := tx.QueryRow(ctx, `
-			SELECT name
-			FROM agents
-			WHERE id=$2 AND (project_id IS NULL OR project_id=$1)
-			FOR SHARE
-		`, projectID, targetAgentID).Scan(&targetName)
+		preview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, comment.IssueID, targetAgentID)
+		if err != nil {
+			return nil, nil, err
+		}
 
 		var delegationID *string
 		var delegatedRunID *string
 		var reasonCode *string
 		outcome := store.IssueCommentMentionOutcomeBlocked
-		if errors.Is(err, pgx.ErrNoRows) {
-			reason := store.IssueCommentMentionReasonTargetUnavailable
-			reasonCode = &reason
-		} else if err != nil {
-			return nil, nil, err
+		if !preview.Eligible {
+			reasonCode = preview.ReasonCode
 		} else if utf8.RuneCountInString(comment.Body) > store.MaxDelegationTaskCharacters {
 			reason := store.IssueCommentMentionReasonDelegationBlocked
 			reasonCode = &reason
@@ -336,11 +362,45 @@ func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, pro
 		); err != nil {
 			return nil, nil, err
 		}
-		mention.TargetAgentName = targetName
+		mention.TargetAgentName = preview.TargetAgentName
 		mention.DelegatedRunID = delegatedRunID
 		result = append(result, mention)
 	}
 	return result, events, nil
+}
+
+func (s *Store) issueCommentMentionTargetTx(ctx context.Context, tx pgx.Tx, projectID, issueID, targetAgentID string) (store.IssueCommentMentionPreview, error) {
+	preview := store.IssueCommentMentionPreview{TargetAgentID: targetAgentID}
+	if err := tx.QueryRow(ctx, `
+		SELECT name
+		FROM agents
+		WHERE id=$2 AND (project_id IS NULL OR project_id=$1)
+		FOR SHARE
+	`, projectID, targetAgentID).Scan(&preview.TargetAgentName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			reason := store.IssueCommentMentionReasonTargetUnavailable
+			preview.ReasonCode = &reason
+			return preview, nil
+		}
+		return store.IssueCommentMentionPreview{}, err
+	}
+	if err := s.verifyRunnableAgent(ctx, tx, projectID, targetAgentID); err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
+			reason := store.IssueCommentMentionReasonTargetUnavailable
+			preview.ReasonCode = &reason
+			return preview, nil
+		}
+		return store.IssueCommentMentionPreview{}, err
+	}
+	if _, err := activeRunForAgent(ctx, tx, projectID, issueID, targetAgentID); err == nil {
+		reason := store.IssueCommentMentionReasonTargetBusy
+		preview.ReasonCode = &reason
+		return preview, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return store.IssueCommentMentionPreview{}, err
+	}
+	preview.Eligible = true
+	return preview, nil
 }
 
 func issueCommentMentionRequestKey(commentID string, ordinal int, targetAgentID string) string {
