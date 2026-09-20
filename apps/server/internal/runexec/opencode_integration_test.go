@@ -130,20 +130,31 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 		t.Fatal(err)
 	}
 	var completedReads []evidence.ToolPayload
+	var discussionToolEvents []struct {
+		Type    string
+		Payload evidence.ToolPayload
+	}
 	for _, event := range events {
-		if event.Type != "tool.completed" {
+		if event.Type != "tool.started" && event.Type != "tool.completed" && event.Type != "tool.failed" {
 			continue
 		}
 		var payload evidence.ToolPayload
 		if err := json.Unmarshal(event.Payload, &payload); err != nil {
-			t.Fatalf("decode tool completion evidence: %v", err)
+			t.Fatalf("decode tool evidence: %v", err)
 		}
-		if payload.Name == "read_issue_discussion" {
+		if payload.Name != "read_issue_discussion" {
+			continue
+		}
+		discussionToolEvents = append(discussionToolEvents, struct {
+			Type    string
+			Payload evidence.ToolPayload
+		}{Type: event.Type, Payload: payload})
+		if event.Type == "tool.completed" {
 			completedReads = append(completedReads, payload)
 		}
 	}
 	if len(completedReads) != 1 {
-		t.Fatalf("read_issue_discussion completions=%d want 1; events=%v", len(completedReads), eventTypes(events))
+		t.Fatalf("read_issue_discussion completions=%d want 1; tool events=%+v; events=%v", len(completedReads), discussionToolEvents, eventTypes(events))
 	}
 	read := completedReads[0]
 	if mode, _ := read.Input["mode"].(string); mode != engine.IssueDiscussionReadRecent {
