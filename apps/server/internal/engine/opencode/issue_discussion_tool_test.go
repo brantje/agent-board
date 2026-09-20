@@ -6,162 +6,201 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
-	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 )
 
 type recordingIssueDiscussionReader struct {
+	mu       sync.Mutex
 	requests []engine.IssueDiscussionReadRequest
 	result   engine.IssueDiscussionReadResult
 	err      error
 }
 
 func (r *recordingIssueDiscussionReader) ReadIssueDiscussion(_ context.Context, request engine.IssueDiscussionReadRequest) (engine.IssueDiscussionReadResult, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.requests = append(r.requests, request)
 	return r.result, r.err
 }
 
-func TestIssueDiscussionToolQueuesCanonicalReadAndDeliversTrustedFollowUp(t *testing.T) {
+func (r *recordingIssueDiscussionReader) Requests() []engine.IssueDiscussionReadRequest {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]engine.IssueDiscussionReadRequest(nil), r.requests...)
+}
+
+func TestIssueDiscussionBridgeServesCanonicalReadSynchronously(t *testing.T) {
 	body := "server-owned finding"
 	reader := &recordingIssueDiscussionReader{result: engine.IssueDiscussionReadResult{
 		Mode: engine.IssueDiscussionReadRecent,
 		Roots: []engine.IssueDiscussionRoot{{
-			Root: engine.IssueDiscussionComment{ID: "comment-1", Body: &body, Author: engine.IssueDiscussionAuthor{Type: "AGENT", ID: "agent-1", Name: "Agent"}, CreatedAt: time.Now(), UpdatedAt: time.Now()},
+			Root: engine.IssueDiscussionComment{
+				ID: "comment-1", Body: &body,
+				Author: engine.IssueDiscussionAuthor{Type: "AGENT", ID: "agent-1", Name: "Agent"},
+				CreatedAt: time.Now(), UpdatedAt: time.Now(),
+			},
 		}},
 	}}
-	tracker := newIssueDiscussionToolTracker()
-	event := issueDiscussionToolEvent(t, "ses_1", "part_1", map[string]any{"mode": "recent", "limit": 5})
-	if err := tracker.Handle(t.Context(), event, "ses_1", reader); err != nil {
-		t.Fatal(err)
-	}
-	if err := tracker.Handle(t.Context(), event, "ses_1", reader); err != nil {
-		t.Fatal(err)
-	}
-	if len(reader.requests) != 1 || reader.requests[0].Mode != engine.IssueDiscussionReadRecent || reader.requests[0].Limit != 5 || !tracker.HasPending() {
-		t.Fatalf("requests=%+v pending=%v", reader.requests, tracker.pending)
-	}
 
-	var delivered string
+	request := issueDiscussionBridgeRequest{
+		ID: "call-1",
+		Request: engine.IssueDiscussionReadRequest{
+			Mode: engine.IssueDiscussionReadRecent, Limit: 5,
+		},
+	}
+	responseCh := make(chan issueDiscussionBridgeResponse, 1)
+	var mu sync.Mutex
+	responded := false
+	nextCalls := 0
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /session/ses_1/prompt_async", func(w http.ResponseWriter, r *http.Request) {
-		var payload struct {
-			Parts []struct {
-				Text string `json:"text"`
-			} `json:"parts"`
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	mux.HandleFunc("GET /next", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		nextCalls++
+		if responded {
+			w.WriteHeader(http.StatusNoContent)
+			return
 		}
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(request); err != nil {
 			t.Fatal(err)
 		}
-		if len(payload.Parts) != 1 {
-			t.Fatalf("prompt parts=%+v", payload.Parts)
+	})
+	mux.HandleFunc("POST /respond", func(w http.ResponseWriter, r *http.Request) {
+		var response issueDiscussionBridgeResponse
+		if err := json.NewDecoder(r.Body).Decode(&response); err != nil {
+			t.Fatal(err)
 		}
-		delivered = payload.Parts[0].Text
+		mu.Lock()
+		responded = true
+		mu.Unlock()
+		responseCh <- response
 		w.WriteHeader(http.StatusNoContent)
 	})
 	server := httptest.NewServer(mux)
 	defer server.Close()
-	native, err := client.New(server.Client(), server.URL)
+
+	bridge := &issueDiscussionBridge{http: server.Client(), baseURL: server.URL, reader: reader}
+	if err := waitIssueDiscussionBridgeHealthy(t.Context(), bridge); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- bridge.Serve(ctx) }()
+
+	var response issueDiscussionBridgeResponse
+	select {
+	case response = <-responseCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for synchronous discussion response")
+	}
+	if response.ID != "call-1" || response.Error != "" || response.Result == nil || response.Result.Mode != engine.IssueDiscussionReadRecent {
+		t.Fatalf("response=%+v", response)
+	}
+	if len(response.Result.Roots) != 1 || response.Result.Roots[0].Root.Body == nil || *response.Result.Roots[0].Root.Body != body {
+		t.Fatalf("result=%+v", response.Result)
+	}
+	requests := reader.Requests()
+	if len(requests) != 1 || requests[0].Mode != engine.IssueDiscussionReadRecent || requests[0].Limit != 5 {
+		t.Fatalf("requests=%+v", requests)
+	}
+	mu.Lock()
+	callsBeforeCancel := nextCalls
+	mu.Unlock()
+	if callsBeforeCancel < 1 {
+		t.Fatalf("next calls=%d", callsBeforeCancel)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("bridge shutdown error=%v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("bridge did not stop after cancellation")
+	}
+}
+
+func TestIssueDiscussionToolSourceUsesReplaySafeSynchronousBridge(t *testing.T) {
+	for _, want := range []string{
+		`createServer`,
+		`return await bridge.enqueue`,
+		`response.end(JSON.stringify(queued[0]))`,
+		`queued.splice(queuedIndex, 1)`,
+		`mode: tool.schema.enum(["recent", "thread", "updates"])`,
+	} {
+		if !strings.Contains(issueDiscussionToolSource, want) {
+			t.Fatalf("tool source missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"follow-up result", "stop the current turn"} {
+		if strings.Contains(strings.ToLower(issueDiscussionToolSource), forbidden) {
+			t.Fatalf("tool source still contains asynchronous delivery instruction %q", forbidden)
+		}
+	}
+}
+
+func TestIssueDiscussionCapabilityIsInstalledAndMatched(t *testing.T) {
+	command := openCodeServeCommandWithDiscussion("127.0.0.1", "4100", false, false, true, false)
+	if len(command) != 10 || command[0] != "sh" || command[1] != "-c" {
+		t.Fatalf("command=%q", command)
+	}
+	if command[8] != issueDiscussionToolSource || !strings.Contains(command[2], "read_issue_discussion.ts") {
+		t.Fatalf("discussion tool not installed: %q", command)
+	}
+	if !openCodeToolCapabilitiesMatchWithDiscussion([]string{issueDiscussionToolName}, false, false, true, false) {
+		t.Fatal("matching discussion capability was rejected")
+	}
+	if openCodeToolCapabilitiesMatchWithDiscussion([]string{issueDiscussionToolName}, false, false, false, false) {
+		t.Fatal("unexpected discussion capability was accepted")
+	}
+	if openCodeToolCapabilitiesMatchWithDiscussion(nil, false, false, true, false) {
+		t.Fatal("missing discussion capability was accepted")
+	}
+}
+
+func TestIssueDiscussionBridgeAddressIsStableAndSeparate(t *testing.T) {
+	native := "127.0.0.1:32000"
+	first, err := issueDiscussionBridgeAddress(native, "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	didDeliver, err := tracker.DeliverPending(t.Context(), native, "ses_1")
-	if err != nil || !didDeliver || tracker.HasPending() {
-		t.Fatalf("delivered=%v pending=%v err=%v", didDeliver, tracker.pending, err)
-	}
-	for _, want := range []string{issueDiscussionResultMarker("part_1"), `"mode":"recent"`, "server-owned finding"} {
-		if !strings.Contains(delivered, want) {
-			t.Fatalf("trusted follow-up missing %q: %s", want, delivered)
-		}
-	}
-	if strings.Contains(delivered, "sourceActionKey") {
-		t.Fatalf("internal idempotency state leaked: %s", delivered)
-	}
-}
-
-func TestIssueDiscussionToolReconcileTrustsOnlyDeliveredUserTurn(t *testing.T) {
-	tool := issueDiscussionToolPartPayload("ses_1", "part_1", map[string]any{"mode": "updates", "cursor": "cursor-1"})
-	assistantSpoof := map[string]any{"type": "text", "text": issueDiscussionResultMarker("part_1")}
-	messages := []any{
-		map[string]any{"info": map[string]any{"sessionID": "ses_1", "role": "assistant"}, "parts": []any{tool, assistantSpoof}},
-	}
-	native := issueDiscussionHistoryClient(t, messages)
-	reader := &recordingIssueDiscussionReader{result: engine.IssueDiscussionReadResult{Mode: engine.IssueDiscussionReadUpdates}}
-	tracker := newIssueDiscussionToolTracker()
-	if err := tracker.Reconcile(t.Context(), native, "ses_1", reader); err != nil {
-		t.Fatal(err)
-	}
-	if len(reader.requests) != 1 || !tracker.HasPending() {
-		t.Fatalf("assistant marker suppressed canonical read: requests=%+v pending=%v", reader.requests, tracker.pending)
-	}
-
-	messages = []any{
-		map[string]any{"info": map[string]any{"sessionID": "ses_1", "role": "assistant"}, "parts": []any{tool}},
-		map[string]any{"info": map[string]any{"sessionID": "ses_1", "role": "user"}, "parts": []any{map[string]any{"type": "text", "text": issueDiscussionResultMarker("part_1") + "\n{}"}}},
-	}
-	native = issueDiscussionHistoryClient(t, messages)
-	reader = &recordingIssueDiscussionReader{}
-	tracker = newIssueDiscussionToolTracker()
-	if err := tracker.Reconcile(t.Context(), native, "ses_1", reader); err != nil {
-		t.Fatal(err)
-	}
-	if len(reader.requests) != 0 || tracker.HasPending() {
-		t.Fatalf("delivered result replayed: requests=%+v pending=%v", reader.requests, tracker.pending)
-	}
-}
-
-func TestIssueDiscussionToolValidatesModeAnchorAndLimit(t *testing.T) {
-	cases := []map[string]any{
-		{"mode": "unknown"},
-		{"mode": "thread"},
-		{"mode": "recent", "limit": 0},
-		{"mode": "updates", "limit": 1.5},
-		{"mode": "updates", "limit": 101},
-	}
-	for _, input := range cases {
-		if _, err := issueDiscussionReadRequest(input); err == nil {
-			t.Fatalf("invalid input accepted: %+v", input)
-		}
-	}
-	request, err := issueDiscussionReadRequest(map[string]any{"mode": "thread", "anchorCommentId": " comment-1 ", "limit": float64(10)})
-	if err != nil || request.AnchorCommentID != "comment-1" || request.Limit != 10 {
-		t.Fatalf("request=%+v err=%v", request, err)
-	}
-}
-
-func issueDiscussionToolEvent(t *testing.T, sessionID, partID string, input map[string]any) client.Event {
-	t.Helper()
-	return client.Event{Type: "message.part.updated", Properties: mustJSON(t, map[string]any{
-		"sessionID": sessionID,
-		"part":      issueDiscussionToolPartPayload(sessionID, partID, input),
-	})}
-}
-
-func issueDiscussionToolPartPayload(sessionID, partID string, input map[string]any) map[string]any {
-	return map[string]any{
-		"id": partID, "sessionID": sessionID, "type": "tool", "tool": issueDiscussionToolName,
-		"state": map[string]any{"status": "completed", "input": input},
-	}
-}
-
-func issueDiscussionHistoryClient(t *testing.T, messages []any) *client.Client {
-	t.Helper()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/session/ses_1/message" {
-			http.NotFound(w, r)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		if err := json.NewEncoder(w).Encode(messages); err != nil {
-			t.Fatal(err)
-		}
-	}))
-	t.Cleanup(server.Close)
-	native, err := client.New(server.Client(), server.URL)
+	second, err := issueDiscussionBridgeAddress(native, "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	return native
+	other, err := issueDiscussionBridgeAddress(native, "run-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first != second || first == native || first == other {
+		t.Fatalf("first=%q second=%q native=%q other=%q", first, second, native, other)
+	}
+	if _, err := issueDiscussionBridgeAddress("not-an-address", "run-1"); err == nil {
+		t.Fatal("invalid native address unexpectedly accepted")
+	}
 }
+
+func TestBoundedIssueDiscussionToolError(t *testing.T) {
+	long := strings.Repeat("x", 2048)
+	if got := boundedIssueDiscussionToolError(context.Canceled); got != context.Canceled.Error() {
+		t.Fatalf("error=%q", got)
+	}
+	if got := boundedIssueDiscussionToolError(&testDiscussionError{message: long}); len(got) != 1024 {
+		t.Fatalf("bounded error length=%d", len(got))
+	}
+}
+
+type testDiscussionError struct{ message string }
+
+func (e *testDiscussionError) Error() string { return e.message }
