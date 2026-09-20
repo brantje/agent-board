@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -472,6 +473,47 @@ func TestIssueDiscussionBridgeAddressFallsBackToNativeIdentityAndAvoidsCollision
 	}
 	if second != first {
 		t.Fatalf("fallback bridge address changed: first=%q second=%q", first, second)
+	}
+}
+
+type issueDiscussionRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f issueDiscussionRoundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestIssueDiscussionBridgeServeStopsWhenResponseTransportIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	calls := 0
+	httpClient := &http.Client{Transport: issueDiscussionRoundTripFunc(func(request *http.Request) (*http.Response, error) {
+		calls++
+		switch request.URL.Path {
+		case "/next":
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader(`{"id":"call-1","request":{"mode":"recent"}}`)),
+				Request:    request,
+			}, nil
+		case "/respond":
+			cancel()
+			return nil, context.Canceled
+		default:
+			t.Fatalf("unexpected bridge path %q", request.URL.Path)
+			return nil, nil
+		}
+	})}
+	bridge := &issueDiscussionBridge{
+		http:    httpClient,
+		baseURL: "http://bridge.local",
+		reader:  &recordingIssueDiscussionReader{result: engine.IssueDiscussionReadResult{Mode: engine.IssueDiscussionReadRecent}},
+	}
+	if err := bridge.Serve(ctx); err != nil {
+		t.Fatalf("canceled response serve error=%v", err)
+	}
+	if calls != 2 {
+		t.Fatalf("bridge calls=%d want 2", calls)
 	}
 }
 
