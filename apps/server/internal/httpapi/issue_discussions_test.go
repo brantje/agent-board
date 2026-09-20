@@ -211,7 +211,7 @@ func TestIssueDiscussionHTTPFallbackErrorsAndPathValidation(t *testing.T) {
 		base + "/updates",
 	} {
 		response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", bearer(outsiderToken))
-		if response.Code != http.StatusForbidden {
+		if response.Code != http.StatusNotFound {
 			t.Fatalf("outsider %s status=%d body=%s user=%s", path, response.Code, response.Body.String(), outsider.ID)
 		}
 	}
