@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -166,8 +165,5 @@ func TestIssueDiscussionApplicationHandlesUnavailableAndStoreFailures(t *testing
 	}
 	if _, err := decodeIssueDiscussionCursor("e30"); err == nil {
 		t.Fatal("incomplete cursor payload unexpectedly decoded")
-	}
-	if !errors.Is(context.Canceled, context.Canceled) {
-		t.Fatal("context error sanity check failed")
 	}
 }
