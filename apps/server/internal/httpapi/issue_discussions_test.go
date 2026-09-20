@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -187,5 +188,53 @@ func TestIssueDiscussionHTTPAuthorizationAndCompactProjection(t *testing.T) {
 	badAnchor := authHTTPRequest(t, fixture.handler, http.MethodGet, base+"/not-a-uuid/thread", "", bearer(token))
 	if badAnchor.Code != http.StatusBadRequest {
 		t.Fatalf("bad anchor status=%d body=%s", badAnchor.Code, badAnchor.Body.String())
+	}
+}
+
+func TestIssueDiscussionHTTPFallbackErrorsAndPathValidation(t *testing.T) {
+	fixture, database := newIssueCommentHTTPFixture(t)
+	viewer, token := fixture.createUser(t, "discussion-fallback-viewer", store.DeploymentRoleMember)
+	fixture.access.roles[projectGrantKey(projectID, viewer.ID)] = store.ProjectRoleViewer
+	outsider, outsiderToken := fixture.createUser(t, "discussion-outsider", store.DeploymentRoleMember)
+
+	at := time.Date(2026, 9, 20, 14, 0, 0, 0, time.UTC)
+	rootID := "11111111-1111-4111-8111-111111111111"
+	database.comments = []store.IssueComment{{
+		ID: rootID, IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: viewer.ID,
+		AuthorName: "Viewer", Body: "root", CreatedAt: at, UpdatedAt: at,
+	}}
+	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
+
+	for _, path := range []string{
+		base + "/discussions",
+		base + "/" + rootID + "/thread",
+		base + "/updates",
+	} {
+		response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", bearer(outsiderToken))
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("outsider %s status=%d body=%s user=%s", path, response.Code, response.Body.String(), outsider.ID)
+		}
+	}
+
+	directControl := app.New(database)
+	directHandler := NewRouterWithApplication(&app.Services{ControlPlane: directControl, Auth: fixture.auth})
+	for _, path := range []string{
+		base + "/discussions",
+		base + "/" + rootID + "/thread",
+		base + "/updates",
+	} {
+		response := authHTTPRequest(t, directHandler, http.MethodGet, path, "", bearer(token))
+		if response.Code != http.StatusOK {
+			t.Fatalf("direct %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+
+	badProject := authHTTPRequest(t, fixture.handler, http.MethodGet, "/api/projects/not-a-uuid/issues/"+issueKey+"/comments/discussions", "", bearer(token))
+	if badProject.Code != http.StatusBadRequest {
+		t.Fatalf("bad project status=%d body=%s", badProject.Code, badProject.Body.String())
+	}
+	badIssue := authHTTPRequest(t, fixture.handler, http.MethodGet, "/api/projects/"+projectID+"/issues/not-an-issue-key/comments/discussions", "", bearer(token))
+	if badIssue.Code != http.StatusBadRequest {
+		t.Fatalf("bad issue status=%d body=%s", badIssue.Code, badIssue.Body.String())
 	}
 }
