@@ -228,6 +228,43 @@ func TestHandleToolPartPersistsCallInputAndBoundedResult(t *testing.T) {
 	}
 }
 
+
+func TestHandleToolPartOmitsIssueDiscussionResultPreview(t *testing.T) {
+	sink := &recordingActivitySink{}
+	state := newRunState("ses_1", nil, sink)
+	body := "canonical discussion body must not become Run evidence"
+	part := mustJSON(t, map[string]any{
+		"id": "part_discussion", "callID": "call_discussion", "tool": issueDiscussionToolName,
+		"state": map[string]any{
+			"status": "completed",
+			"input":  map[string]any{"mode": engine.IssueDiscussionReadRecent, "limit": 5},
+			"output": map[string]any{
+				"mode": "recent",
+				"roots": []any{map[string]any{
+					"root": map[string]any{"id": "comment-1", "body": body},
+				}},
+			},
+		},
+	})
+	if err := state.handleToolPart(context.Background(), part); err != nil {
+		t.Fatalf("handleToolPart() error=%v", err)
+	}
+	if len(sink.events) != 1 {
+		t.Fatalf("events=%+v", sink.events)
+	}
+	event := sink.events[0]
+	if event.Type != "tool.completed" || event.Payload["toolCallId"] != "call_discussion" {
+		t.Fatalf("event=%+v", event)
+	}
+	if _, exists := event.Payload["resultPreview"]; exists {
+		t.Fatalf("discussion result leaked into durable tool evidence: %+v", event.Payload)
+	}
+	input, ok := event.Payload["input"].(map[string]any)
+	if !ok || input["mode"] != engine.IssueDiscussionReadRecent {
+		t.Fatalf("input=%+v", event.Payload["input"])
+	}
+}
+
 func TestHandleToolPartPreservesStructuredOutputAsPreview(t *testing.T) {
 	sink := &recordingActivitySink{}
 	state := newRunState("ses_1", nil, sink)

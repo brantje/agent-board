@@ -249,7 +249,7 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 		Input:      decodeToolInput(part.State.Input),
 		Summary:    evidence.BoundActivityPreview(part.State.Title),
 	}
-	if eventType == "tool.completed" {
+	if eventType == "tool.completed" && part.Tool != issueDiscussionToolName {
 		payload.ResultPreview = toolResultPreview(part.State.Output)
 	}
 	if eventType == "tool.failed" {

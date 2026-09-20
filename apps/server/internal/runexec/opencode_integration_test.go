@@ -88,7 +88,7 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 	setup := fixture.createRunSetup(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Use read_issue_discussion only when explicitly requested. Do not ask a Question, publish a comment, delegate, or change Issue status unless explicitly requested.",
 		title:            "Read trusted Issue discussion context",
-		description:      "Use read_issue_discussion with mode recent exactly once. Inspect the returned discussion roots, then stop. Do not modify files, publish comments, ask a Question, delegate, or change Issue status.",
+		description:      "Use read_issue_discussion with mode recent exactly once. After it returns, reply with exactly LEN=<N>, where N is the number of ASCII characters in the first returned root body. Do not quote or repeat the body. Do not modify files, publish comments, ask a Question, delegate, or change Issue status.",
 	})
 	author, err := fixture.database.CreateUser(fixture.ctx, store.User{
 		Username: "discussion-author", Email: "discussion-author@example.com", DisplayName: "Discussion Author",
@@ -160,8 +160,29 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 	if mode, _ := read.Input["mode"].(string); mode != engine.IssueDiscussionReadRecent {
 		t.Fatalf("read_issue_discussion input=%+v", read.Input)
 	}
-	if !strings.Contains(read.ResultPreview, expectedBody) {
-		t.Fatalf("read_issue_discussion result preview=%q does not contain canonical comment body", read.ResultPreview)
+	if read.ResultPreview != "" {
+		t.Fatalf("read_issue_discussion persisted result preview=%q", read.ResultPreview)
+	}
+	expectedVisible := "LEN=" + strconv.Itoa(len(expectedBody))
+	visible := false
+	for _, event := range events {
+		if event.Type != "agent.message" {
+			continue
+		}
+		var payload struct {
+			Kind    string `json:"kind"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode agent message evidence: %v", err)
+		}
+		if payload.Kind == "message" && strings.TrimSpace(payload.Message) == expectedVisible {
+			visible = true
+			break
+		}
+	}
+	if !visible {
+		t.Fatalf("model did not prove synchronous discussion result; want visible %q events=%v", expectedVisible, eventTypes(events))
 	}
 
 	comments, err := fixture.services.ControlPlane.ListIssueComments(fixture.ctx, setup.Project.ID, setup.Issue.ID)
