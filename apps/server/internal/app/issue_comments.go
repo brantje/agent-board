@@ -15,6 +15,8 @@ type CreateIssueCommentInput struct {
 	IssueID         string
 	ParentCommentID *string
 	Body            string
+	RequestKey      string
+	MentionAgentIDs []string
 }
 
 type issueCommentCreateInput struct {
@@ -59,10 +61,15 @@ func (s *Service) GetIssueComment(ctx context.Context, projectID, issueID, comme
 }
 
 func (s *Service) CreateHumanIssueComment(ctx context.Context, input CreateIssueCommentInput, authorID string) (store.IssueComment, error) {
+	var sourceActionKey *string
+	if requestKey := strings.TrimSpace(input.RequestKey); requestKey != "" {
+		sourceActionKey = &requestKey
+	}
 	return s.createIssueComment(ctx, issueCommentCreateInput{
 		CreateIssueCommentInput: input,
 		AuthorType:              store.ActorTypeHuman,
 		AuthorID:                authorID,
+		SourceActionKey:         sourceActionKey,
 	})
 }
 
@@ -106,7 +113,7 @@ func (s *Service) createIssueComment(ctx context.Context, input issueCommentCrea
 	if input.ParentCommentID != nil && strings.TrimSpace(*input.ParentCommentID) == "" {
 		return store.IssueComment{}, invalid("parent comment id must not be blank")
 	}
-	result, err := s.issueComments.CreateIssueComment(ctx, input.ProjectID, store.IssueComment{
+	commentInput := store.IssueComment{
 		IssueID:         input.IssueID,
 		ParentCommentID: input.ParentCommentID,
 		AuthorType:      input.AuthorType,
@@ -114,7 +121,21 @@ func (s *Service) createIssueComment(ctx context.Context, input issueCommentCrea
 		SourceRunID:     input.SourceRunID,
 		SourceActionKey: input.SourceActionKey,
 		Body:            input.Body,
-	})
+	}
+	var result store.IssueCommentMutationResult
+	var err error
+	if len(input.MentionAgentIDs) != 0 {
+		if input.SourceActionKey == nil {
+			return store.IssueComment{}, invalid("structured Agent mentions require a stable request key")
+		}
+		mentions, ok := any(s.issueComments).(store.IssueCommentMentionStore)
+		if !ok {
+			return store.IssueComment{}, errors.New("issue comment mentions are unavailable")
+		}
+		result, err = mentions.CreateIssueCommentWithMentions(ctx, input.ProjectID, commentInput, input.MentionAgentIDs)
+	} else {
+		result, err = s.issueComments.CreateIssueComment(ctx, input.ProjectID, commentInput)
+	}
 	if err != nil {
 		return store.IssueComment{}, translateStoreError(err, "issue_comment")
 	}

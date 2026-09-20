@@ -360,7 +360,7 @@ CREATE TABLE issue_comments (
     CHECK ((resolved_at IS NULL) = (resolved_by_user_id IS NULL)),
     CHECK (parent_comment_id IS NULL OR (resolved_at IS NULL AND resolved_by_user_id IS NULL)),
     CHECK (
-        (author_type = 'HUMAN' AND source_run_id IS NULL AND source_action_key IS NULL)
+        (author_type = 'HUMAN' AND source_run_id IS NULL AND (source_action_key IS NULL OR btrim(source_action_key) <> ''))
         OR (author_type = 'AGENT' AND source_run_id IS NOT NULL AND source_action_key IS NOT NULL AND btrim(source_action_key) <> '')
     )
 );
@@ -370,6 +370,9 @@ CREATE INDEX issue_comments_parent_idx ON issue_comments (issue_id, parent_comme
 CREATE UNIQUE INDEX issue_comments_source_action_uq
     ON issue_comments (source_run_id, source_action_key)
     WHERE source_run_id IS NOT NULL AND source_action_key IS NOT NULL;
+CREATE UNIQUE INDEX issue_comments_human_action_uq
+    ON issue_comments (issue_id, author_id, source_action_key)
+    WHERE author_type = 'HUMAN' AND source_action_key IS NOT NULL;
 
 CREATE TABLE issue_comment_reactions (
     issue_id uuid NOT NULL,
@@ -481,6 +484,32 @@ CREATE UNIQUE INDEX delegations_comment_request_uq
 CREATE INDEX delegations_parent_run_idx ON delegations (project_id, parent_run_id, created_at, id) WHERE parent_run_id IS NOT NULL;
 CREATE INDEX delegations_source_comment_idx ON delegations (project_id, source_comment_id, created_at, id) WHERE source_comment_id IS NOT NULL;
 CREATE INDEX delegations_target_agent_idx ON delegations (project_id, target_agent_id, created_at, id);
+CREATE TABLE issue_comment_mentions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid NOT NULL,
+    issue_id uuid NOT NULL,
+    comment_id uuid NOT NULL,
+    ordinal integer NOT NULL CHECK (ordinal >= 0),
+    target_agent_id uuid NOT NULL,
+    outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'BLOCKED')),
+    reason_code text CHECK (reason_code IS NULL OR btrim(reason_code) <> ''),
+    delegation_id uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT issue_comment_mentions_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT issue_comment_mentions_comment_fk FOREIGN KEY (issue_id, comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE RESTRICT,
+    CONSTRAINT issue_comment_mentions_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
+    CHECK (
+        (outcome = 'QUEUED' AND delegation_id IS NOT NULL AND reason_code IS NULL)
+        OR (outcome = 'BLOCKED' AND delegation_id IS NULL AND reason_code IS NOT NULL)
+    ),
+    UNIQUE (issue_id, comment_id, target_agent_id),
+    UNIQUE (issue_id, comment_id, ordinal),
+    UNIQUE (project_id, id)
+);
+
+CREATE INDEX issue_comment_mentions_comment_idx ON issue_comment_mentions (project_id, issue_id, comment_id, ordinal);
+CREATE INDEX issue_comment_mentions_delegation_idx ON issue_comment_mentions (project_id, delegation_id) WHERE delegation_id IS NOT NULL;
+
 CREATE TABLE scheduler_jobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL,

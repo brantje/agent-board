@@ -49,12 +49,20 @@ func (s *Store) RequestDelegation(ctx context.Context, input store.RequestDelega
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	result, err := s.requestDelegationTx(ctx, tx, input)
+	if err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	return result, nil
+}
+
+func (s *Store) requestDelegationTx(ctx context.Context, tx pgx.Tx, input store.RequestDelegationCommand) (store.RequestDelegationResult, error) {
 	if result, found, err := existingDelegationRequest(ctx, tx, input); err != nil {
 		return store.RequestDelegationResult{}, err
 	} else if found {
-		if err := tx.Commit(ctx); err != nil {
-			return store.RequestDelegationResult{}, err
-		}
 		return result, nil
 	}
 
@@ -69,21 +77,12 @@ func (s *Store) RequestDelegation(ctx context.Context, input store.RequestDelega
 		return store.RequestDelegationResult{}, err
 	}
 
-	// A concurrent retry can have committed while this transaction waited for
-	// the parent Run lock. Re-check under the lock before applying authority rules.
 	if result, found, err := existingDelegationRequest(ctx, tx, input); err != nil {
 		return store.RequestDelegationResult{}, err
 	} else if found {
-		if err := tx.Commit(ctx); err != nil {
-			return store.RequestDelegationResult{}, err
-		}
 		return result, nil
 	}
 
-	// The parent Run lock serializes delegation requests from the same parent.
-	// Same-request retries have already returned above, so any remaining
-	// unfinished delegation represents a distinct request and must complete
-	// before this parent can delegate again.
 	var unfinished bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
@@ -150,9 +149,6 @@ func (s *Store) RequestDelegation(ctx context.Context, input store.RequestDelega
 	if err != nil {
 		return store.RequestDelegationResult{}, err
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return store.RequestDelegationResult{}, err
-	}
 	return store.RequestDelegationResult{Delegation: delegation, DelegatedRun: run, SchedulerJob: job, Events: []store.Event{event}}, nil
 }
 
@@ -173,12 +169,20 @@ func (s *Store) RequestIssueDelegation(ctx context.Context, input store.RequestI
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
+	result, err := s.requestIssueDelegationTx(ctx, tx, input)
+	if err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.RequestDelegationResult{}, err
+	}
+	return result, nil
+}
+
+func (s *Store) requestIssueDelegationTx(ctx context.Context, tx pgx.Tx, input store.RequestIssueDelegationCommand) (store.RequestDelegationResult, error) {
 	if result, found, err := existingIssueDelegationRequest(ctx, tx, input); err != nil {
 		return store.RequestDelegationResult{}, err
 	} else if found {
-		if err := tx.Commit(ctx); err != nil {
-			return store.RequestDelegationResult{}, err
-		}
 		return result, nil
 	}
 
@@ -199,9 +203,6 @@ func (s *Store) RequestIssueDelegation(ctx context.Context, input store.RequestI
 	if result, found, err := existingIssueDelegationRequest(ctx, tx, input); err != nil {
 		return store.RequestDelegationResult{}, err
 	} else if found {
-		if err := tx.Commit(ctx); err != nil {
-			return store.RequestDelegationResult{}, err
-		}
 		return result, nil
 	}
 
@@ -229,9 +230,6 @@ func (s *Store) RequestIssueDelegation(ctx context.Context, input store.RequestI
 		input.ProjectID, issue.ID, input.SourceCommentID, input.TargetAgentID, input.Task, run.ID, input.RequestKey,
 	))
 	if err != nil {
-		return store.RequestDelegationResult{}, err
-	}
-	if err := tx.Commit(ctx); err != nil {
 		return store.RequestDelegationResult{}, err
 	}
 	return store.RequestDelegationResult{Delegation: delegation, DelegatedRun: run, SchedulerJob: job, Events: []store.Event{event}}, nil

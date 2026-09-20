@@ -17,6 +17,14 @@ const (
 	IssueCommentReactionHeart      = "HEART"
 	IssueCommentReactionRocket     = "ROCKET"
 	IssueCommentReactionEyes       = "EYES"
+
+	IssueCommentMentionOutcomeQueued  = "QUEUED"
+	IssueCommentMentionOutcomeBlocked = "BLOCKED"
+
+	IssueCommentMentionReasonTargetUnavailable = "TARGET_UNAVAILABLE"
+	IssueCommentMentionReasonDelegationBlocked = "DELEGATION_BLOCKED"
+
+	MaxIssueCommentMentions = 10
 )
 
 var issueCommentReactions = map[string]struct{}{
@@ -41,6 +49,17 @@ type IssueCommentReactionSummary struct {
 	ActorIDs []string
 }
 
+type IssueCommentMention struct {
+	ID              string
+	TargetAgentID   string
+	TargetAgentName string
+	Outcome         string
+	ReasonCode      *string
+	DelegationID    *string
+	DelegatedRunID  *string
+	CreatedAt       time.Time
+}
+
 // IssueComment is durable Issue-domain collaboration. Presentation names are
 // resolved fields and are never authoritative identity.
 type IssueComment struct {
@@ -58,6 +77,7 @@ type IssueComment struct {
 	ResolvedByUserID *string
 	ResolvedByName   string
 	Reactions        []IssueCommentReactionSummary
+	Mentions         []IssueCommentMention
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -69,6 +89,10 @@ type IssueCommentMutationResult struct {
 
 type IssueCommentDeleteResult struct {
 	Events []Event
+}
+
+type IssueCommentMentionStore interface {
+	CreateIssueCommentWithMentions(context.Context, string, IssueComment, []string) (IssueCommentMutationResult, error)
 }
 
 type IssueCommentStore interface {
