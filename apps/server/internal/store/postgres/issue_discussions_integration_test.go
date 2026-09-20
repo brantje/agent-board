@@ -215,3 +215,91 @@ func TestIssueDiscussionReadsAreThreadAwareBoundedAndCursorSafe(t *testing.T) {
 		t.Fatalf("deterministic tied roots=%+v want first=%s second=%s", tiedRoots, wantFirst, wantSecond)
 	}
 }
+
+func TestIssueDiscussionReadsRejectInvalidBoundsAndAllowEmptyProjection(t *testing.T) {
+	s := New(testPool(t))
+	ctx := t.Context()
+
+	for _, tc := range []struct {
+		name string
+		run  func() error
+	}{
+		{
+			name: "roots missing project",
+			run: func() error {
+				_, err := s.ListIssueDiscussionRoots(ctx, "", "11111111-1111-4111-8111-111111111111", 1)
+				return err
+			},
+		},
+		{
+			name: "roots zero limit",
+			run: func() error {
+				_, err := s.ListIssueDiscussionRoots(ctx, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", 0)
+				return err
+			},
+		},
+		{
+			name: "thread missing anchor",
+			run: func() error {
+				_, err := s.GetIssueDiscussionThread(ctx, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "", 8, 10)
+				return err
+			},
+		},
+		{
+			name: "thread zero depth",
+			run: func() error {
+				_, err := s.GetIssueDiscussionThread(ctx, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333", 0, 10)
+				return err
+			},
+		},
+		{
+			name: "thread zero comments",
+			run: func() error {
+				_, err := s.GetIssueDiscussionThread(ctx, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333", 8, 0)
+				return err
+			},
+		},
+		{
+			name: "updates zero new limit",
+			run: func() error {
+				_, err := s.ListIssueDiscussionUpdates(ctx, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", nil, 0, 200, 64)
+				return err
+			},
+		},
+		{
+			name: "updates zero depth",
+			run: func() error {
+				_, err := s.ListIssueDiscussionUpdates(ctx, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", nil, 1, 200, 0)
+				return err
+			},
+		},
+		{
+			name: "updates insufficient context budget",
+			run: func() error {
+				_, err := s.ListIssueDiscussionUpdates(ctx, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", nil, 1, 64, 64)
+				return err
+			},
+		},
+		{
+			name: "updates invalid cursor",
+			run: func() error {
+				_, err := s.ListIssueDiscussionUpdates(ctx, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", &store.IssueCommentCursor{ID: "33333333-3333-4333-8333-333333333333"}, 1, 200, 64)
+				return err
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.run(); !errors.Is(err, store.ErrInvalidArgument) {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+
+	values, err := s.listIssueCommentsByIDs(ctx, "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(values) != 0 {
+		t.Fatalf("empty projection=%+v", values)
+	}
+}
