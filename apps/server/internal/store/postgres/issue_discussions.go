@@ -565,11 +565,16 @@ func (s *Store) issueCommentAncestorIDsBounded(ctx context.Context, projectID, i
 		depth    int
 	}
 	chain := make([]item, 0, maxDepth+1)
+	seen := make(map[string]struct{}, maxDepth+1)
 	for rows.Next() {
 		var value item
 		if err := rows.Scan(&value.id, &value.parentID, &value.depth); err != nil {
 			return nil, false, err
 		}
+		if _, exists := seen[value.id]; exists {
+			return nil, false, store.ErrInvalidArgument
+		}
+		seen[value.id] = struct{}{}
 		chain = append(chain, value)
 	}
 	if err := rows.Err(); err != nil {
