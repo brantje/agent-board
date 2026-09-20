@@ -237,12 +237,6 @@ func (s *Store) createIssueComment(ctx context.Context, projectID string, input 
 		return store.IssueCommentMutationResult{}, err
 	}
 
-	mentionValues, delegationEvents, err := s.createIssueCommentMentionsTx(ctx, tx, projectID, comment, mentions)
-	if err != nil {
-		return store.IssueCommentMutationResult{}, err
-	}
-	comment.Mentions = mentionValues
-
 	actor, err := json.Marshal(map[string]string{"type": input.AuthorType, "id": input.AuthorID})
 	if err != nil {
 		return store.IssueCommentMutationResult{}, err
@@ -266,6 +260,12 @@ func (s *Store) createIssueComment(ctx context.Context, projectID string, input 
 	if err != nil {
 		return store.IssueCommentMutationResult{}, err
 	}
+
+	mentionValues, delegationEvents, err := s.createIssueCommentMentionsTx(ctx, tx, projectID, comment, mentions)
+	if err != nil {
+		return store.IssueCommentMutationResult{}, err
+	}
+	comment.Mentions = mentionValues
 
 	if err := tx.Commit(ctx); err != nil {
 		return store.IssueCommentMutationResult{}, err

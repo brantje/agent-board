@@ -40,6 +40,9 @@ func TestHumanIssueCommentMentionsPersistStableTargetsDispatchAndRetryIdempotent
 	if len(result.Events) != 2 || result.Events[0].Type != "issue.comment_created" || result.Events[1].Type != "run.created" {
 		t.Fatalf("events=%+v", result.Events)
 	}
+	if result.Events[0].CreatedAt.After(result.Events[1].CreatedAt) {
+		t.Fatalf("persisted event order is effect-before-cause: %+v", result.Events)
+	}
 
 	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, *mention.DelegatedRunID)
 	if err != nil {
