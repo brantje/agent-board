@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -228,5 +229,35 @@ func TestIssueDiscussionHTTPFallbackErrorsAndPathValidation(t *testing.T) {
 	badIssue := authHTTPRequest(t, fixture.handler, http.MethodGet, "/api/projects/"+projectID+"/issues/not-an-issue-key/comments/discussions", "", bearer(token))
 	if badIssue.Code != http.StatusBadRequest {
 		t.Fatalf("bad issue status=%d body=%s", badIssue.Code, badIssue.Body.String())
+	}
+}
+
+func TestIssueDiscussionHTTPReadsWithoutProjectAccessAdapter(t *testing.T) {
+	fixture, database := newIssueCommentHTTPFixture(t)
+	_, token := fixture.createUser(t, "discussion-direct-reader", store.DeploymentRoleMember)
+
+	at := time.Date(2026, 9, 20, 13, 0, 0, 0, time.UTC)
+	rootID := "11111111-1111-4111-8111-111111111111"
+	database.comments = []store.IssueComment{{
+		ID: rootID, IssueID: issueID, AuthorType: store.ActorTypeHuman,
+		AuthorID: "22222222-2222-4222-8222-222222222222", AuthorName: "Author",
+		Body: "direct read", CreatedAt: at, UpdatedAt: at,
+	}}
+
+	control := app.New(database)
+	fixture.handler = NewRouterWithApplication(&app.Services{ControlPlane: control, Auth: fixture.auth})
+
+	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
+	for name, path := range map[string]string{
+		"recent":  base + "/discussions",
+		"thread":  base + "/" + rootID + "/thread",
+		"updates": base + "/updates",
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", bearer(token))
+			if response.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
 	}
 }
