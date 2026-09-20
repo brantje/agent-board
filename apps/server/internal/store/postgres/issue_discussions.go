@@ -394,7 +394,13 @@ func (s *Store) ListIssueDiscussionUpdates(ctx context.Context, projectID, issue
 }
 
 func orderIssueCommentsAncestorFirst(values []store.IssueComment) ([]store.IssueComment, error) {
-	if len(values) < 2 {
+	if len(values) == 0 {
+		return []store.IssueComment{}, nil
+	}
+	if len(values) == 1 {
+		if values[0].ParentCommentID != nil {
+			return nil, store.ErrInvalidArgument
+		}
 		return append([]store.IssueComment(nil), values...), nil
 	}
 	byID := make(map[string]store.IssueComment, len(values))
