@@ -82,6 +82,98 @@ func TestOpenCodeDockerNormalCodingRun(t *testing.T) {
 	assertOpenCodeServerSession(t, fixture.ctx, fixture.database, project.ID, run.ID, false)
 }
 
+func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
+	fixture := newOpenCodeIntegrationFixture(t)
+	const expectedBody = "Agent integration comment @nobody"
+	project, run := fixture.createRun(t, openCodeRunSpec{
+		roleInstructions: "Follow the issue instructions exactly. Use publish_issue_comment only when explicitly requested. Do not ask a Question, delegate, or change Issue status unless explicitly requested.",
+		title:            "Publish a trusted Agent-authored Issue comment",
+		description:      "Use publish_issue_comment exactly once. Publish exactly this body and no other Issue comment: Agent integration comment @nobody. Do not ask a Question. Do not delegate. Do not call set_issue_status. Do not modify files. After the comment tool succeeds, stop.",
+	})
+	if run.AgentID == nil {
+		t.Fatal("OpenCode integration Run has no Agent identity")
+	}
+	beforeIssue, err := fixture.services.ControlPlane.GetIssue(fixture.ctx, project.ID, run.IssueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeAssignee := beforeIssue.AssignedTo()
+	beforeRuns, err := fixture.services.ControlPlane.ListRuns(fixture.ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fixture.startScheduler(t)
+	terminal := waitForScriptedRun(t, fixture.ctx, fixture.database, project.ID, run.ID)
+	if terminal.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
+	}
+
+	comments, err := fixture.services.ControlPlane.ListIssueComments(fixture.ctx, project.ID, run.IssueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("durable Issue comments=%+v want exactly one", comments)
+	}
+	comment := comments[0]
+	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != *run.AgentID ||
+		comment.SourceRunID == nil || *comment.SourceRunID != run.ID || comment.Body != expectedBody {
+		t.Fatalf("trusted Agent comment=%+v run=%+v", comment, run)
+	}
+
+	reloadedDatabase, err := postgres.Open(fixture.ctx, fixture.env.databaseURL)
+	if err != nil {
+		t.Fatalf("reopen PostgreSQL store: %v", err)
+	}
+	defer reloadedDatabase.Close()
+	reloaded, err := reloadedDatabase.ListIssueComments(fixture.ctx, project.ID, run.IssueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded) != 1 {
+		t.Fatalf("reloaded Issue comments=%+v want exactly one", reloaded)
+	}
+	reloadedComment := reloaded[0]
+	if reloadedComment.ID != comment.ID || reloadedComment.AuthorType != store.ActorTypeAgent ||
+		reloadedComment.AuthorID != *run.AgentID || reloadedComment.AuthorName != comment.AuthorName ||
+		reloadedComment.SourceRunID == nil || *reloadedComment.SourceRunID != run.ID || reloadedComment.Body != expectedBody {
+		t.Fatalf("reloaded trusted Agent comment=%+v original=%+v", reloadedComment, comment)
+	}
+
+	afterIssue, err := fixture.services.ControlPlane.GetIssue(fixture.ctx, project.ID, run.IssueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterAssignee := afterIssue.AssignedTo()
+	if afterIssue.Status != beforeIssue.Status || beforeAssignee == nil || afterAssignee == nil ||
+		beforeAssignee.Type != afterAssignee.Type || beforeAssignee.ID != afterAssignee.ID {
+		t.Fatalf("Issue lifecycle changed around comment publication before=%+v after=%+v", beforeIssue, afterIssue)
+	}
+	afterRuns, err := fixture.services.ControlPlane.ListRuns(fixture.ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(afterRuns) != len(beforeRuns) {
+		t.Fatalf("comment publication changed Run count before=%d after=%d runs=%+v", len(beforeRuns), len(afterRuns), afterRuns)
+	}
+	delegations, err := fixture.services.ControlPlane.ListDelegationsByParentRun(fixture.ctx, project.ID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(delegations) != 0 {
+		t.Fatalf("comment publication unexpectedly created delegations: %+v", delegations)
+	}
+	filterRunID := run.ID
+	questions, err := fixture.database.ListQuestions(fixture.ctx, project.ID, store.QuestionFilter{RunID: &filterRunID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(questions) != 0 {
+		t.Fatalf("comment publication unexpectedly created Questions: %+v", questions)
+	}
+}
+
 func TestOpenCodeDockerInteractiveQuestionRoundTrip(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
 	project, run := fixture.createRun(t, openCodeRunSpec{
@@ -291,6 +383,7 @@ func newOpenCodeIntegrationFixture(t *testing.T) *openCodeIntegrationFixture {
 		t.Fatal(err)
 	}
 	processor.SetWorkspaceEnsurer(services.Workspaces)
+	processor.SetIssueCommentService(services.ControlPlane)
 	startOutboundOpenCodeRunner(t, ctx, services, database, env.image)
 	config := scheduler.DefaultConfig("opencode-integration")
 	config.PollInterval = 20 * time.Millisecond

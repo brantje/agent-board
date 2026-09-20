@@ -14,9 +14,15 @@ type CreateIssueCommentInput struct {
 	ProjectID       string
 	IssueID         string
 	ParentCommentID *string
-	AuthorType      string
-	AuthorID        string
 	Body            string
+}
+
+type issueCommentCreateInput struct {
+	CreateIssueCommentInput
+	AuthorType  string
+	AuthorID    string
+	SourceRunID    *string
+	SourceActionKey *string
 }
 
 type IssueTimelineEntry struct {
@@ -52,7 +58,42 @@ func (s *Service) GetIssueComment(ctx context.Context, projectID, issueID, comme
 	return value, translateStoreError(err, "issue_comment")
 }
 
-func (s *Service) CreateIssueComment(ctx context.Context, input CreateIssueCommentInput) (store.IssueComment, error) {
+func (s *Service) CreateHumanIssueComment(ctx context.Context, input CreateIssueCommentInput, authorID string) (store.IssueComment, error) {
+	return s.createIssueComment(ctx, issueCommentCreateInput{
+		CreateIssueCommentInput: input,
+		AuthorType:              store.ActorTypeHuman,
+		AuthorID:                authorID,
+	})
+}
+
+func (s *Service) PublishAgentIssueComment(ctx context.Context, projectID, runID, requestKey, body string) (store.IssueComment, error) {
+	requestKey = strings.TrimSpace(requestKey)
+	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(runID) == "" || requestKey == "" {
+		return store.IssueComment{}, invalid("project and Run are required")
+	}
+	run, err := s.GetRun(ctx, projectID, runID)
+	if err != nil {
+		return store.IssueComment{}, err
+	}
+	if run.AgentID == nil || strings.TrimSpace(*run.AgentID) == "" {
+		return store.IssueComment{}, NewError("invalid_argument", "Run has no Agent identity", store.ErrInvalidArgument)
+	}
+	sourceRunID := run.ID
+	sourceActionKey := requestKey
+	return s.createIssueComment(ctx, issueCommentCreateInput{
+		CreateIssueCommentInput: CreateIssueCommentInput{
+			ProjectID: projectID,
+			IssueID:   run.IssueID,
+			Body:      body,
+		},
+		AuthorType:  store.ActorTypeAgent,
+		AuthorID:    *run.AgentID,
+		SourceRunID:     &sourceRunID,
+		SourceActionKey: &sourceActionKey,
+	})
+}
+
+func (s *Service) createIssueComment(ctx context.Context, input issueCommentCreateInput) (store.IssueComment, error) {
 	if _, err := s.GetIssue(ctx, input.ProjectID, input.IssueID); err != nil {
 		return store.IssueComment{}, err
 	}
@@ -70,6 +111,8 @@ func (s *Service) CreateIssueComment(ctx context.Context, input CreateIssueComme
 		ParentCommentID: input.ParentCommentID,
 		AuthorType:      input.AuthorType,
 		AuthorID:        input.AuthorID,
+		SourceRunID:     input.SourceRunID,
+		SourceActionKey: input.SourceActionKey,
 		Body:            input.Body,
 	})
 	if err != nil {
@@ -78,7 +121,6 @@ func (s *Service) CreateIssueComment(ctx context.Context, input CreateIssueComme
 	s.publishIssueCommentEvents(ctx, result.Events)
 	return result.Comment, nil
 }
-
 func (s *Service) UpdateIssueComment(ctx context.Context, projectID, issueID, commentID, actorID, body string) (store.IssueComment, error) {
 	if strings.TrimSpace(body) == "" {
 		return store.IssueComment{}, invalid("comment body is required")

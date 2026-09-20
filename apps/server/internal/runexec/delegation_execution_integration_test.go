@@ -74,10 +74,10 @@ func newDelegationExecutionRunnerClient(targetAgentID string) *delegationExecuti
 }
 
 func (c *delegationExecutionRunnerClient) Start(_ context.Context, sessionID string, request runner.Request) (runner.ProcessSession, error) {
-	if len(request.Command) < 8 || request.Command[0] != "sh" || request.Command[1] != "-c" || !strings.Contains(request.Command[2], "opencode serve") {
+	if len(request.Command) < 9 || request.Command[0] != "sh" || request.Command[1] != "-c" || !strings.Contains(request.Command[2], "opencode serve") {
 		return nil, fmt.Errorf("delegation E2E runner received unexpected command: %v", request.Command)
 	}
-	delegationEnabled := strings.TrimSpace(request.Command[7]) != ""
+	delegationEnabled := strings.TrimSpace(request.Command[8]) != ""
 
 	c.mu.Lock()
 	payload := append([]byte(nil), c.payloads[sessionID]...)

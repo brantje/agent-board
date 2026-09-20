@@ -38,8 +38,8 @@ func (u *recordingIssueStatusUpdater) SetRecoveredStatus(ctx context.Context, st
 }
 
 func TestOpenCodeServeCommandInstallsIssueStatusToolOutsideWorkspace(t *testing.T) {
-	command := openCodeServeCommand("127.0.0.1", "4100", true, false)
-	if len(command) != 8 || command[0] != "sh" || command[1] != "-c" {
+	command := openCodeServeCommand("127.0.0.1", "4100", true, false, false)
+	if len(command) != 9 || command[0] != "sh" || command[1] != "-c" {
 		t.Fatalf("command=%q", command)
 	}
 	if command[4] != "127.0.0.1" || command[5] != "4100" {
@@ -53,7 +53,10 @@ func TestOpenCodeServeCommandInstallsIssueStatusToolOutsideWorkspace(t *testing.
 		t.Fatalf("tool source=%q", toolSource)
 	}
 	if command[7] != "" {
-		t.Fatalf("delegation tool unexpectedly installed: %q", command[7])
+		t.Fatalf("comment tool unexpectedly installed: %q", command[7])
+	}
+	if command[8] != "" {
+		t.Fatalf("delegation tool unexpectedly installed: %q", command[8])
 	}
 }
 

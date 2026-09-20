@@ -167,9 +167,7 @@ func (s *ProjectAccessService) CreateIssueComment(ctx context.Context, actor Aut
 	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
 		return store.IssueComment{}, err
 	}
-	input.AuthorType = store.ActorTypeHuman
-	input.AuthorID = actor.ID
-	return s.controlPlane.CreateIssueComment(ctx, input)
+	return s.controlPlane.CreateHumanIssueComment(ctx, input, actor.ID)
 }
 
 func (s *ProjectAccessService) UpdateIssueComment(ctx context.Context, actor AuthenticatedUser, projectID, issueID, commentID, body string) (store.IssueComment, error) {

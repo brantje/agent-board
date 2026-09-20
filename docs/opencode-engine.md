@@ -44,9 +44,17 @@ Text, single-choice, and multi-choice Questions round-trip when they are represe
 
 Duplicate/stale Agent Board answers are rejected by the durable Question state. If a native reply fails after OpenCode may already have accepted it, the adapter checks the authoritative pending-Question list before deciding whether a retry is necessary.
 
+## Agent-authored Issue comments
+
+Every executing OpenCode Run receives the trusted `publish_issue_comment(body)` capability. The model controls only the concise user-visible body. Project, Issue, Agent and source Run identity come from Agent Board's trusted execution context, and the durable native tool-part ID is used as the Run-scoped idempotency key.
+
+Publication is explicit: ordinary assistant output, reasoning, command/test output, files, logs, Run Events and status transitions are never copied into Issue comments. Completed native comment-tool parts are reconciled after attach, reconnect and normal completion; replay returns the same canonical comment rather than multiplying comments. Blocking human input continues to use OpenCode's native Question capability.
+
+A delegated Run may publish a finding or handoff tied to its own Run, but it still receives neither `set_issue_status` nor `delegate_task`. Comment publication does not transfer Issue ownership, mutate Board status, create another Run, or add mention/routing semantics. Plain `@name` text remains ordinary comment content.
+
 ## Delegation capability
 
-OpenCode receives Agent Board tools from trusted Engine capabilities rather than from static adapter configuration. An authoritative Run receives `delegate_task(targetAgentId, task)` only when its Agent has `Allow delegation` enabled. A delegated Run receives neither `delegate_task` nor `set_issue_status`, so nested delegation and authoritative Issue status mutation are absent from the model-visible tool surface.
+OpenCode receives Agent Board tools from trusted Engine capabilities rather than from static adapter configuration. An authoritative Run receives `delegate_task(targetAgentId, task)` only when its Agent has `Allow delegation` enabled. A delegated Run receives neither `delegate_task` nor `set_issue_status`; it may still use `publish_issue_comment(body)` for bounded collaboration tied to its own Run, while nested delegation and authoritative Issue status mutation remain absent from the model-visible tool surface.
 
 The OpenCode adapter is only a transport bridge. It does not validate target eligibility, create Runs, inspect capacity, or schedule work. When OpenCode completes a native `delegate_task` part, the adapter forwards the target Agent and bounded task to the shared delegation capability. The durable native tool-part ID becomes the canonical request key; parent Project/Run/Agent identity is supplied by trusted execution context and cannot be forged by tool input.
 

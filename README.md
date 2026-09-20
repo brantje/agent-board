@@ -262,6 +262,7 @@ See [`.env.example`](./.env.example) for the available deployment settings.
 | **Workspace** | Durable Git state associated with an Issue |
 | **Execution Session** | One Runner-supervised Engine process tree |
 | **Question** | Structured request for human input |
+| **Issue Comment** | Durable human/Agent collaboration, with Agent comments linked to their source Run |
 | **Review** | Human inspection and delivery decision |
 | **Event** | Append-only execution/activity history |
 | **Artifact** | Durable output produced by a Run |

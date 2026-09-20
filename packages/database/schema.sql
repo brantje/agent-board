@@ -341,6 +341,8 @@ CREATE TABLE issue_comments (
     parent_comment_id uuid,
     author_type text NOT NULL CHECK (author_type IN ('HUMAN', 'AGENT')),
     author_id uuid NOT NULL,
+    source_run_id uuid,
+    source_action_key text,
     body text,
     deleted_at timestamptz,
     resolved_at timestamptz,
@@ -356,10 +358,17 @@ CREATE TABLE issue_comments (
         OR (deleted_at IS NOT NULL AND body IS NULL)
     ),
     CHECK ((resolved_at IS NULL) = (resolved_by_user_id IS NULL)),
-    CHECK (parent_comment_id IS NULL OR (resolved_at IS NULL AND resolved_by_user_id IS NULL))
+    CHECK (parent_comment_id IS NULL OR (resolved_at IS NULL AND resolved_by_user_id IS NULL)),
+    CHECK (
+        (author_type = 'HUMAN' AND source_run_id IS NULL AND source_action_key IS NULL)
+        OR (author_type = 'AGENT' AND source_run_id IS NOT NULL AND source_action_key IS NOT NULL AND btrim(source_action_key) <> '')
+    )
 );
 
 CREATE INDEX issue_comments_issue_timeline_idx ON issue_comments (issue_id, created_at, id);
+CREATE UNIQUE INDEX issue_comments_source_action_uq
+    ON issue_comments (source_run_id, source_action_key)
+    WHERE source_run_id IS NOT NULL AND source_action_key IS NOT NULL;
 
 CREATE TABLE issue_comment_reactions (
     issue_id uuid NOT NULL,
@@ -423,6 +432,10 @@ CREATE TABLE runs (
 CREATE INDEX runs_project_status_idx ON runs (project_id, status, created_at);
 CREATE INDEX runs_issue_created_idx ON runs (issue_id, created_at DESC);
 CREATE INDEX runs_agent_active_idx ON runs (agent_id, status) WHERE agent_id IS NOT NULL AND status IN ('STARTING', 'RUNNING');
+
+ALTER TABLE issue_comments
+    ADD CONSTRAINT issue_comments_source_run_fk
+    FOREIGN KEY (source_run_id) REFERENCES runs(id) ON DELETE RESTRICT;
 
 CREATE TABLE delegations (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
