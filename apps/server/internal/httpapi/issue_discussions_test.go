@@ -215,6 +215,12 @@ func TestIssueDiscussionHTTPFallbackErrorsAndPathValidation(t *testing.T) {
 		}
 	}
 
+	missingThread := authHTTPRequest(t, fixture.handler, http.MethodGet, base+"/44444444-4444-4444-8444-444444444444/thread", "", bearer(token))
+	if missingThread.Code != http.StatusNotFound {
+		t.Fatalf("missing thread status=%d body=%s", missingThread.Code, missingThread.Body.String())
+	}
+
+
 	badProject := authHTTPRequest(t, fixture.handler, http.MethodGet, "/api/projects/not-a-uuid/issues/"+issueKey+"/comments/discussions", "", bearer(token))
 	if badProject.Code != http.StatusBadRequest {
 		t.Fatalf("bad project status=%d body=%s", badProject.Code, badProject.Body.String())
