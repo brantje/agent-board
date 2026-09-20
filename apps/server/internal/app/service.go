@@ -15,6 +15,7 @@ import (
 type Service struct {
 	store                          store.ControlPlaneStore
 	issueComments                  store.IssueCommentStore
+	issueDiscussions               store.IssueDiscussionStore
 	issueActivity                  store.IssueActivityStore
 	assignmentStore                store.IssueAssignmentStore
 	projectWorkflowUserEligibility store.ProjectWorkflowUserEligibilityStore
@@ -31,6 +32,7 @@ type issueEventRecorder interface {
 func New(controlPlaneStore store.ControlPlaneStore) *Service {
 	s := &Service{store: controlPlaneStore}
 	s.issueComments, _ = controlPlaneStore.(store.IssueCommentStore)
+	s.issueDiscussions, _ = controlPlaneStore.(store.IssueDiscussionStore)
 	s.issueActivity, _ = controlPlaneStore.(store.IssueActivityStore)
 	s.assignmentStore, _ = controlPlaneStore.(store.IssueAssignmentStore)
 	s.projectWorkflowUserEligibility, _ = controlPlaneStore.(store.ProjectWorkflowUserEligibilityStore)

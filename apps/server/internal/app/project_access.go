@@ -163,6 +163,27 @@ func (s *ProjectAccessService) ListIssueComments(ctx context.Context, actor Auth
 	return s.controlPlane.ListIssueComments(ctx, projectID, issueID)
 }
 
+func (s *ProjectAccessService) ListRecentIssueDiscussions(ctx context.Context, actor AuthenticatedUser, projectID, issueID string, limit int) ([]store.IssueDiscussionRoot, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.controlPlane.ListRecentIssueDiscussions(ctx, projectID, issueID, limit)
+}
+
+func (s *ProjectAccessService) GetIssueDiscussionThread(ctx context.Context, actor AuthenticatedUser, projectID, issueID, anchorCommentID string, limit int) (store.IssueDiscussionThread, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return store.IssueDiscussionThread{}, err
+	}
+	return s.controlPlane.GetIssueDiscussionThread(ctx, projectID, issueID, anchorCommentID, limit)
+}
+
+func (s *ProjectAccessService) ListIssueDiscussionUpdates(ctx context.Context, actor AuthenticatedUser, projectID, issueID, cursor string, limit int) (IssueDiscussionUpdatePage, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return IssueDiscussionUpdatePage{}, err
+	}
+	return s.controlPlane.ListIssueDiscussionUpdates(ctx, projectID, issueID, cursor, limit)
+}
+
 func (s *ProjectAccessService) CreateIssueComment(ctx context.Context, actor AuthenticatedUser, input CreateIssueCommentInput) (store.IssueComment, error) {
 	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
 		return store.IssueComment{}, err
