@@ -255,6 +255,27 @@ func TestIssueDiscussionBridgeRejectsInvalidHTTPResponses(t *testing.T) {
 }
 
 
+
+func TestIssueDiscussionBridgeRespondReturnsRequestAndTransportFailures(t *testing.T) {
+	t.Run("invalid base url", func(t *testing.T) {
+		bridge := &issueDiscussionBridge{http: http.DefaultClient, baseURL: "://invalid"}
+		if err := bridge.respond(t.Context(), issueDiscussionBridgeResponse{ID: "call-1"}); err == nil {
+			t.Fatal("invalid response URL unexpectedly accepted")
+		}
+	})
+
+	t.Run("transport failure", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+		client := server.Client()
+		baseURL := server.URL
+		server.Close()
+		bridge := &issueDiscussionBridge{http: client, baseURL: baseURL}
+		if err := bridge.respond(t.Context(), issueDiscussionBridgeResponse{ID: "call-1"}); err == nil {
+			t.Fatal("closed response transport unexpectedly succeeded")
+		}
+	})
+}
+
 func TestIssueDiscussionBridgeServeReturnsPollingFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/next" {
@@ -456,6 +477,17 @@ func TestIssueDiscussionBridgeAddressIsStableAndSeparate(t *testing.T) {
 	}
 	if _, err := issueDiscussionBridgeAddress("not-an-address", "run-1"); err == nil {
 		t.Fatal("invalid native address unexpectedly accepted")
+	}
+	fallback, err := issueDiscussionBridgeAddress(native, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fallbackAgain, err := issueDiscussionBridgeAddress(native, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fallback == native || fallback != fallbackAgain {
+		t.Fatalf("fallback bridge address first=%q second=%q native=%q", fallback, fallbackAgain, native)
 	}
 }
 
