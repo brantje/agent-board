@@ -428,3 +428,98 @@ func TestIssueDiscussionReadsBoundWideAndDeepGraphs(t *testing.T) {
 		t.Fatalf("recent roots crossed unresolved deep activity boundary: %+v", recent)
 	}
 }
+
+func TestIssueDiscussionReadsRemainAncestorClosedAcrossTimestampTies(t *testing.T) {
+	s := New(testPool(t))
+	ctx := t.Context()
+	author, err := s.CreateUser(ctx, authUser("discussion-ties", "discussion-ties@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.CreateProject(ctx, testProjectInput("Discussion ties", "/repo/discussion-ties", "DTI"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "Keep ancestor context under timestamp ties", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tieAt := time.Date(2026, 9, 20, 17, 0, 0, 0, time.UTC)
+	rootID := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	parentID := "ffffffff-ffff-4fff-8fff-ffffffffffff"
+	childID := "00000000-0000-4000-8000-000000000001"
+	for _, input := range []struct {
+		id     string
+		parent *string
+		body   string
+	}{
+		{id: rootID, body: "root"},
+		{id: parentID, parent: &rootID, body: "parent"},
+		{id: childID, parent: &parentID, body: "child"},
+	} {
+		if _, err := s.pool.Exec(ctx, `
+			INSERT INTO issue_comments (id, issue_id, parent_comment_id, author_type, author_id, body, created_at, updated_at)
+			VALUES ($1, $2, $3, 'HUMAN', $4, $5, $6, $6)
+		`, input.id, issue.ID, input.parent, author.ID, input.body, tieAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	thread, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, rootID, 8, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if thread.Truncated || len(thread.Comments) != 3 {
+		t.Fatalf("thread=%+v", thread)
+	}
+	for index, want := range []string{rootID, parentID, childID} {
+		if thread.Comments[index].ID != want {
+			t.Fatalf("ancestor order ids=%+v", []string{thread.Comments[0].ID, thread.Comments[1].ID, thread.Comments[2].ID})
+		}
+	}
+	small, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, rootID, 8, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !small.Truncated || len(small.Comments) != 2 || small.Comments[0].ID != rootID || small.Comments[1].ID != parentID {
+		t.Fatalf("small ancestor-closed thread=%+v", small)
+	}
+
+	cursorResult, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+		IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, Body: "cursor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursorAt := tieAt.Add(-time.Second)
+	if _, err := s.pool.Exec(ctx, `UPDATE issue_comments SET created_at=$1, updated_at=$1 WHERE id=$2`, cursorAt, cursorResult.Comment.ID); err != nil {
+		t.Fatal(err)
+	}
+	updates, err := s.ListIssueDiscussionUpdates(
+		ctx,
+		project.ID,
+		issue.ID,
+		&store.IssueCommentCursor{CreatedAt: cursorAt, ID: cursorResult.Comment.ID},
+		1,
+		3,
+		8,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates.Comments) != 3 || !updates.HasMore || updates.NextCursor == nil || updates.NextCursor.ID != childID {
+		t.Fatalf("tied updates=%+v", updates)
+	}
+	for index, want := range []string{rootID, parentID, childID} {
+		if updates.Comments[index].Comment.ID != want {
+			t.Fatalf("tied update order=%+v", updates.Comments)
+		}
+	}
+	if updates.Comments[0].IsNew || updates.Comments[1].IsNew || !updates.Comments[2].IsNew {
+		t.Fatalf("tied update new markers=%+v", updates.Comments)
+	}
+	if len(updates.Comments) > 3 {
+		t.Fatalf("updates exceeded context budget: %d", len(updates.Comments))
+	}
+}
+

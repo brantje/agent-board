@@ -181,6 +181,10 @@ func (s *Store) GetIssueDiscussionThread(ctx context.Context, projectID, issueID
 	if err != nil {
 		return store.IssueDiscussionThread{}, err
 	}
+	comments, err = orderIssueCommentsAncestorFirst(comments)
+	if err != nil {
+		return store.IssueDiscussionThread{}, err
+	}
 	return store.IssueDiscussionThread{RootID: rootID, AnchorID: anchorID, Comments: comments, Truncated: truncated}, nil
 }
 
@@ -363,21 +367,81 @@ func (s *Store) ListIssueDiscussionUpdates(ctx context.Context, projectID, issue
 		return store.IssueDiscussionUpdates{}, store.ErrInvalidArgument
 	}
 
-	comments := make([]store.IssueDiscussionComment, 0, len(included))
+	values := make([]store.IssueComment, 0, len(included))
 	for _, comment := range included {
+		values = append(values, comment)
+	}
+	values, err = orderIssueCommentsAncestorFirst(values)
+	if err != nil {
+		return store.IssueDiscussionUpdates{}, err
+	}
+	comments := make([]store.IssueDiscussionComment, 0, len(values))
+	for _, comment := range values {
 		_, isNew := newIDs[comment.ID]
 		comments = append(comments, store.IssueDiscussionComment{Comment: comment, IsNew: isNew})
 	}
-	sort.Slice(comments, func(i, j int) bool {
-		left, right := comments[i].Comment, comments[j].Comment
+	last := accepted[len(accepted)-1]
+	next := store.IssueCommentCursor{CreatedAt: last.CreatedAt, ID: last.ID}
+	return store.IssueDiscussionUpdates{Comments: comments, NextCursor: &next, HasMore: hasMore || len(accepted) < len(candidateIDs)}, nil
+}
+
+func orderIssueCommentsAncestorFirst(values []store.IssueComment) ([]store.IssueComment, error) {
+	if len(values) < 2 {
+		return append([]store.IssueComment(nil), values...), nil
+	}
+	byID := make(map[string]store.IssueComment, len(values))
+	for _, value := range values {
+		byID[value.ID] = value
+	}
+	roots := make([]store.IssueComment, 0)
+	children := make(map[string][]store.IssueComment)
+	for _, value := range values {
+		if value.ParentCommentID == nil {
+			roots = append(roots, value)
+			continue
+		}
+		if _, ok := byID[*value.ParentCommentID]; !ok {
+			return nil, store.ErrInvalidArgument
+		}
+		children[*value.ParentCommentID] = append(children[*value.ParentCommentID], value)
+	}
+	less := func(left, right store.IssueComment) bool {
 		if !left.CreatedAt.Equal(right.CreatedAt) {
 			return left.CreatedAt.Before(right.CreatedAt)
 		}
 		return left.ID < right.ID
-	})
-	last := accepted[len(accepted)-1]
-	next := store.IssueCommentCursor{CreatedAt: last.CreatedAt, ID: last.ID}
-	return store.IssueDiscussionUpdates{Comments: comments, NextCursor: &next, HasMore: hasMore || len(accepted) < len(candidateIDs)}, nil
+	}
+	sort.Slice(roots, func(i, j int) bool { return less(roots[i], roots[j]) })
+	for parentID := range children {
+		siblings := children[parentID]
+		sort.Slice(siblings, func(i, j int) bool { return less(siblings[i], siblings[j]) })
+		children[parentID] = siblings
+	}
+	ordered := make([]store.IssueComment, 0, len(values))
+	visited := make(map[string]struct{}, len(values))
+	var visit func(store.IssueComment) error
+	visit = func(value store.IssueComment) error {
+		if _, exists := visited[value.ID]; exists {
+			return store.ErrInvalidArgument
+		}
+		visited[value.ID] = struct{}{}
+		ordered = append(ordered, value)
+		for _, child := range children[value.ID] {
+			if err := visit(child); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, root := range roots {
+		if err := visit(root); err != nil {
+			return nil, err
+		}
+	}
+	if len(ordered) != len(values) {
+		return nil, store.ErrInvalidArgument
+	}
+	return ordered, nil
 }
 
 func (s *Store) issueCommentAncestorIDs(ctx context.Context, projectID, issueID, anchorID string, maxDepth int) ([]string, error) {
