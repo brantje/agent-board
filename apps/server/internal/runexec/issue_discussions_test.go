@@ -62,7 +62,7 @@ func (s *recordingIssueDiscussionService) ListIssueDiscussionUpdates(_ context.C
 				ID: "update-comment", AuthorType: store.ActorTypeHuman, AuthorID: "user-1", AuthorName: "User",
 				Body: "update context", CreatedAt: at, UpdatedAt: at,
 			},
-			IsNew: true,
+			IsNew: true, ContextTruncated: true,
 		}},
 		NextCursor: "next", HasMore: true,
 	}, nil
@@ -97,7 +97,7 @@ func TestIssueDiscussionReaderUsesTrustedIssueScopeAndSharedQueries(t *testing.T
 	if err != nil || updates.Updates == nil || updates.Updates.NextCursor != "next" || service.cursor != "cursor-1" {
 		t.Fatalf("updates=%+v service=%+v err=%v", updates, service, err)
 	}
-	if len(updates.Updates.Comments) != 1 || !updates.Updates.Comments[0].IsNew ||
+	if len(updates.Updates.Comments) != 1 || !updates.Updates.Comments[0].IsNew || !updates.Updates.Comments[0].ContextTruncated ||
 		updates.Updates.Comments[0].Comment.Body == nil || *updates.Updates.Comments[0].Comment.Body != "update context" {
 		t.Fatalf("mapped updates=%+v", updates.Updates.Comments)
 	}
