@@ -127,3 +127,65 @@ func TestIssueDiscussionHTTPReadsUseCanonicalProjection(t *testing.T) {
 		t.Fatalf("bad cursor status=%d body=%s", badCursor.Code, badCursor.Body.String())
 	}
 }
+
+func TestIssueDiscussionHTTPAuthorizationAndCompactProjection(t *testing.T) {
+	fixture, database := newIssueCommentHTTPFixture(t)
+	viewer, token := fixture.createUser(t, "discussion-compact-viewer", store.DeploymentRoleMember)
+	fixture.access.roles[projectGrantKey(projectID, viewer.ID)] = store.ProjectRoleViewer
+
+	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
+	for _, path := range []string{
+		base + "/discussions",
+		base + "/11111111-1111-4111-8111-111111111111/thread",
+		base + "/updates",
+	} {
+		response := authHTTPRequest(t, fixture.handler, http.MethodGet, path, "", "")
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("unauthenticated %s status=%d body=%s", path, response.Code, response.Body.String())
+		}
+	}
+
+	resolvedAt := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
+	rootID := "11111111-1111-4111-8111-111111111111"
+	replyID := "22222222-2222-4222-8222-222222222222"
+	database.comments = []store.IssueComment{
+		{
+			ID: rootID, IssueID: issueID, AuthorType: store.ActorTypeHuman, AuthorID: viewer.ID, AuthorName: "Viewer",
+			Body: "resolved root", ResolvedAt: &resolvedAt, ResolvedByUserID: &viewer.ID, ResolvedByName: "Viewer",
+			CreatedAt: resolvedAt.Add(-time.Minute), UpdatedAt: resolvedAt,
+		},
+		{
+			ID: replyID, IssueID: issueID, ParentCommentID: &rootID, AuthorType: store.ActorTypeHuman, AuthorID: viewer.ID, AuthorName: "Viewer",
+			Body: "conclusion", CreatedAt: resolvedAt, UpdatedAt: resolvedAt,
+		},
+	}
+	rootsResponse := authHTTPRequest(t, fixture.handler, http.MethodGet, base+"/discussions", "", bearer(token))
+	if rootsResponse.Code != http.StatusOK {
+		t.Fatalf("resolved roots status=%d body=%s", rootsResponse.Code, rootsResponse.Body.String())
+	}
+	var roots []IssueDiscussionRootDTO
+	if err := json.Unmarshal(rootsResponse.Body.Bytes(), &roots); err != nil {
+		t.Fatal(err)
+	}
+	if len(roots) != 1 || len(roots[0].CompactComments) != 2 || roots[0].CompactComments[1].Body == nil || *roots[0].CompactComments[1].Body != "conclusion" {
+		t.Fatalf("resolved roots=%+v", roots)
+	}
+
+	database.comments = nil
+	updatesResponse := authHTTPRequest(t, fixture.handler, http.MethodGet, base+"/updates", "", bearer(token))
+	if updatesResponse.Code != http.StatusOK {
+		t.Fatalf("empty updates status=%d body=%s", updatesResponse.Code, updatesResponse.Body.String())
+	}
+	var updates IssueDiscussionUpdatesDTO
+	if err := json.Unmarshal(updatesResponse.Body.Bytes(), &updates); err != nil {
+		t.Fatal(err)
+	}
+	if updates.NextCursor != nil || len(updates.Comments) != 0 || updates.HasMore {
+		t.Fatalf("empty updates=%+v", updates)
+	}
+
+	badAnchor := authHTTPRequest(t, fixture.handler, http.MethodGet, base+"/not-a-uuid/thread", "", bearer(token))
+	if badAnchor.Code != http.StatusBadRequest {
+		t.Fatalf("bad anchor status=%d body=%s", badAnchor.Code, badAnchor.Body.String())
+	}
+}
