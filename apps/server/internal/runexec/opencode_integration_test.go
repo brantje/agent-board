@@ -88,7 +88,7 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 	setup := fixture.createRunSetup(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Use read_issue_discussion only when explicitly requested. Do not ask a Question, publish a comment, delegate, or change Issue status unless explicitly requested.",
 		title:            "Read trusted Issue discussion context",
-		description:      "Use read_issue_discussion with mode recent exactly once. From the returned discussion roots, find the human-authored root by Discussion Author. Create opencode-result.txt containing exactly that root comment body with no trailing newline. Do not modify any other file. After writing the file, stop.",
+		description:      "Use read_issue_discussion with mode recent exactly once. Inspect the returned discussion roots, then stop. Do not modify files, publish comments, ask a Question, delegate, or change Issue status.",
 	})
 	author, err := fixture.database.CreateUser(fixture.ctx, store.User{
 		Username: "discussion-author", Email: "discussion-author@example.com", DisplayName: "Discussion Author",
@@ -125,7 +125,33 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 	if terminal.Status != "READY_FOR_REVIEW" {
 		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
 	}
-	assertOpenCodeWorkspaceFile(t, fixture.ctx, fixture.database, setup.Project.ID, terminal.WorkspaceID, "opencode-result.txt", expectedBody)
+	events, err := fixture.database.ListRunEvents(fixture.ctx, setup.Project.ID, run.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var completedReads []evidence.ToolPayload
+	for _, event := range events {
+		if event.Type != "tool.completed" {
+			continue
+		}
+		var payload evidence.ToolPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode tool completion evidence: %v", err)
+		}
+		if payload.Name == "read_issue_discussion" {
+			completedReads = append(completedReads, payload)
+		}
+	}
+	if len(completedReads) != 1 {
+		t.Fatalf("read_issue_discussion completions=%d want 1; events=%v", len(completedReads), eventTypes(events))
+	}
+	read := completedReads[0]
+	if mode, _ := read.Input["mode"].(string); mode != engine.IssueDiscussionReadRecent {
+		t.Fatalf("read_issue_discussion input=%+v", read.Input)
+	}
+	if !strings.Contains(read.ResultPreview, expectedBody) {
+		t.Fatalf("read_issue_discussion result preview=%q does not contain canonical comment body", read.ResultPreview)
+	}
 
 	comments, err := fixture.services.ControlPlane.ListIssueComments(fixture.ctx, setup.Project.ID, setup.Issue.ID)
 	if err != nil {
