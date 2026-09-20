@@ -123,6 +123,10 @@ func TestIssueDiscussionHTTPReadsUseCanonicalProjection(t *testing.T) {
 	if badLimit.Code != http.StatusBadRequest {
 		t.Fatalf("bad limit status=%d body=%s", badLimit.Code, badLimit.Body.String())
 	}
+	zeroLimit := authHTTPRequest(t, fixture.handler, http.MethodGet, base+"/discussions?limit=0", "", bearer(token))
+	if zeroLimit.Code != http.StatusBadRequest {
+		t.Fatalf("zero limit status=%d body=%s", zeroLimit.Code, zeroLimit.Body.String())
+	}
 	badCursor := authHTTPRequest(t, fixture.handler, http.MethodGet, base+"/updates?cursor=forged", "", bearer(token))
 	if badCursor.Code != http.StatusBadRequest {
 		t.Fatalf("bad cursor status=%d body=%s", badCursor.Code, badCursor.Body.String())

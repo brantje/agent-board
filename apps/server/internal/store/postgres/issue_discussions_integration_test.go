@@ -29,6 +29,14 @@ func TestIssueDiscussionReadsAreThreadAwareBoundedAndCursorSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	emptyComments, err := s.listIssueCommentsByIDs(ctx, project.ID, issue.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(emptyComments) != 0 {
+		t.Fatalf("empty comment id read=%+v", emptyComments)
+	}
+
 	create := func(body string, parent *string) store.IssueComment {
 		t.Helper()
 		result, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
