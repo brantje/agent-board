@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
+	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
 )
 
 type recordingIssueDiscussionReader struct {
@@ -273,6 +274,7 @@ func TestIssueDiscussionToolSourceUsesReplaySafeSynchronousBridge(t *testing.T) 
 		`response.end(JSON.stringify(queued[0]))`,
 		`queued.splice(queuedIndex, 1)`,
 		`mode: tool.schema.enum(["recent", "thread", "updates"])`,
+		`tool.schema.number().int().positive().max(100)`,
 	} {
 		if !strings.Contains(issueDiscussionToolSource, want) {
 			t.Fatalf("tool source missing %q", want)
@@ -282,6 +284,30 @@ func TestIssueDiscussionToolSourceUsesReplaySafeSynchronousBridge(t *testing.T) 
 		if strings.Contains(strings.ToLower(issueDiscussionToolSource), forbidden) {
 			t.Fatalf("tool source still contains asynchronous delivery instruction %q", forbidden)
 		}
+	}
+}
+
+
+func TestIssueDiscussionCapabilityDoesNotReadOrInjectHistoryIntoBootstrapPrompt(t *testing.T) {
+	body := "unrelated-comment-history-sentinel"
+	reader := &recordingIssueDiscussionReader{result: engine.IssueDiscussionReadResult{
+		Mode: engine.IssueDiscussionReadRecent,
+		Roots: []engine.IssueDiscussionRoot{{
+			Root: engine.IssueDiscussionComment{ID: "comment-1", Body: &body},
+		}},
+	}}
+	request := engine.Request{
+		Context: executioncontext.SafeContext{
+			Issue: executioncontext.IssueContext{Title: "Implement bounded discussion reads", Description: "Use the task description only."},
+		},
+		IssueDiscussions: reader,
+	}
+	prompt := initialTaskPromptForRequest(request)
+	if requests := reader.Requests(); len(requests) != 0 {
+		t.Fatalf("bootstrap unexpectedly read Issue discussions: %+v", requests)
+	}
+	if strings.Contains(prompt, body) {
+		t.Fatalf("bootstrap prompt injected Issue discussion history: %s", prompt)
 	}
 }
 
