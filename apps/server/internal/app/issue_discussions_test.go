@@ -98,7 +98,7 @@ func TestIssueDiscussionApplicationBoundsReadsAndKeepsOpaqueCursor(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := access.ListRecentIssueDiscussions(t.Context(), AuthenticatedUser{ID: "viewer"}, projectID, issueID, 1); err != nil {
+	if _, err := access.ListRecentIssueDiscussions(t.Context(), AuthenticatedUser{ID: "viewer", Status: store.UserStatusActive, DeploymentRole: store.DeploymentRoleMember}, projectID, issueID, 1); err != nil {
 		t.Fatalf("viewer discussion read error=%v", err)
 	}
 }
