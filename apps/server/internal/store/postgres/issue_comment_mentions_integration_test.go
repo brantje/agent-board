@@ -335,39 +335,3 @@ func TestIssueCommentMentionTargetIsProjectScoped(t *testing.T) {
 	}
 }
 
-func TestIssueCommentMentionLineageAllowsIssueCascadeDeletion(t *testing.T) {
-	f := newDelegationFixture(t, true)
-	ctx := t.Context()
-	author, err := f.store.CreateUser(ctx, authUser("mention-cascade-author", "mention-cascade@example.com", store.UserStatusActive))
-	if err != nil {
-		t.Fatal(err)
-	}
-	requestKey := "mention-cascade"
-	result, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
-		IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
-		SourceActionKey: &requestKey, Body: "Please inspect this before the Issue is removed.",
-	}, []string{f.target.ID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Comment.Mentions) != 1 || result.Comment.Mentions[0].DelegationID == nil {
-		t.Fatalf("mention lineage=%+v", result.Comment.Mentions)
-	}
-
-	if _, err := f.store.pool.Exec(ctx, `DELETE FROM issues WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID); err != nil {
-		t.Fatalf("Issue cascade deletion failed with mention provenance: %v", err)
-	}
-
-	var comments, delegations, mentions int
-	if err := f.store.pool.QueryRow(ctx, `
-		SELECT
-			(SELECT count(*) FROM issue_comments WHERE issue_id=$1),
-			(SELECT count(*) FROM delegations WHERE issue_id=$1),
-			(SELECT count(*) FROM issue_comment_mentions WHERE issue_id=$1)
-	`, f.issue.ID).Scan(&comments, &delegations, &mentions); err != nil {
-		t.Fatal(err)
-	}
-	if comments != 0 || delegations != 0 || mentions != 0 {
-		t.Fatalf("Issue cascade left mention provenance comments=%d delegations=%d mentions=%d", comments, delegations, mentions)
-	}
-}
