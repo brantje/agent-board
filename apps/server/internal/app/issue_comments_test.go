@@ -344,10 +344,10 @@ func TestPublishAgentIssueCommentDerivesTrustedRunContext(t *testing.T) {
 	}
 	runWithoutAgent := "run-no-agent"
 	base.runs[runWithoutAgent] = store.Run{ID: runWithoutAgent, ProjectID: projectID, IssueID: issueID, Status: "RUNNING"}
-	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runWithoutAgent, "tool-call-3", "body"); err == nil {
+	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runWithoutAgent, "tool-call-3", "body", nil); err == nil {
 		t.Fatal("Run without Agent unexpectedly published a comment")
 	}
-	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runID, "tool-call-4", "   "); err == nil {
+	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, runID, "tool-call-4", "   ", nil); err == nil {
 		t.Fatal("blank Agent comment unexpectedly succeeded")
 	}
 }
