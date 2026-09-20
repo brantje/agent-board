@@ -172,6 +172,36 @@ func (s *Store) GetIssueDiscussionThread(ctx context.Context, projectID, issueID
 		ids = ids[:maxComments]
 		truncated = true
 	}
+	if !containsString(ids, anchorID) {
+		if len(chain) > maxComments {
+			return store.IssueDiscussionThread{}, store.ErrInvalidArgument
+		}
+		chainSet := make(map[string]struct{}, len(chain))
+		for _, id := range chain {
+			chainSet[id] = struct{}{}
+		}
+		selected := make([]string, 0, maxComments)
+		selectedSet := make(map[string]struct{}, maxComments)
+		for _, id := range ids {
+			if _, mandatory := chainSet[id]; mandatory {
+				continue
+			}
+			if len(selected)+len(chain) >= maxComments {
+				break
+			}
+			selected = append(selected, id)
+			selectedSet[id] = struct{}{}
+		}
+		for _, id := range chain {
+			if _, exists := selectedSet[id]; exists {
+				continue
+			}
+			selected = append(selected, id)
+			selectedSet[id] = struct{}{}
+		}
+		ids = selected
+		truncated = true
+	}
 	comments, err := s.listIssueCommentsByIDs(ctx, projectID, issueID, ids)
 	if err != nil {
 		return store.IssueDiscussionThread{}, err
@@ -378,4 +408,13 @@ func (s *Store) listIssueCommentsByIDs(ctx context.Context, projectID, issueID s
 		return nil, err
 	}
 	return values, nil
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

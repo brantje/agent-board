@@ -109,6 +109,28 @@ func TestIssueDiscussionReadsAreThreadAwareBoundedAndCursorSafe(t *testing.T) {
 		t.Fatalf("deep anchor error=%v", err)
 	}
 
+	lateRoot := create("late root", nil)
+	for index := 0; index < 4; index++ {
+		create("early sibling", &lateRoot.ID)
+	}
+	lateParent := create("late parent", &lateRoot.ID)
+	lateAnchor := create("late anchor", &lateParent.ID)
+	lateThread, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, lateAnchor.ID, 8, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !lateThread.Truncated || len(lateThread.Comments) != 3 {
+		t.Fatalf("late bounded thread=%+v", lateThread)
+	}
+	for index, want := range []string{lateRoot.ID, lateParent.ID, lateAnchor.ID} {
+		if lateThread.Comments[index].ID != want {
+			t.Fatalf("late bounded ids=%+v", lateThread.Comments)
+		}
+	}
+	if _, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, lateAnchor.ID, 8, 2); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("late anchor insufficient budget error=%v", err)
+	}
+
 	cursor := store.IssueCommentCursor{CreatedAt: base.Add(time.Second), ID: reply.ID}
 	updates, err := s.ListIssueDiscussionUpdates(ctx, project.ID, issue.ID, &cursor, 1, 16, 8)
 	if err != nil {

@@ -85,9 +85,6 @@ func openCodeToolCapabilitiesMatch(ids []string, issueStatusEnabled, issueCommen
 }
 
 func openCodeToolCapabilitiesMatchWithDiscussion(ids []string, issueStatusEnabled, issueCommentEnabled, issueDiscussionEnabled, delegationEnabled bool) bool {
-	if !issueDiscussionEnabled {
-		return openCodeToolCapabilitiesMatch(ids, issueStatusEnabled, issueCommentEnabled, delegationEnabled)
-	}
 	available := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
 		available[id] = struct{}{}
@@ -96,7 +93,10 @@ func openCodeToolCapabilitiesMatchWithDiscussion(ids []string, issueStatusEnable
 	_, hasComment := available[issueCommentToolName]
 	_, hasDiscussion := available[issueDiscussionToolName]
 	_, hasDelegation := available[delegationToolName]
-	return hasStatus == issueStatusEnabled && hasComment == issueCommentEnabled && hasDiscussion && hasDelegation == delegationEnabled
+	return hasStatus == issueStatusEnabled &&
+		hasComment == issueCommentEnabled &&
+		hasDiscussion == issueDiscussionEnabled &&
+		hasDelegation == delegationEnabled
 }
 
 func discardProcessStreams(process engine.Process) <-chan struct{} {
