@@ -2,6 +2,7 @@ package runexec
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -17,10 +18,16 @@ type recordingIssueDiscussionService struct {
 	anchorID  string
 	cursor    string
 	limit     int
+	recentErr error
+	threadErr error
+	updateErr error
 }
 
 func (s *recordingIssueDiscussionService) ListRecentIssueDiscussions(_ context.Context, projectID, issueID string, limit int) ([]store.IssueDiscussionRoot, error) {
 	s.projectID, s.issueID, s.limit = projectID, issueID, limit
+	if s.recentErr != nil {
+		return nil, s.recentErr
+	}
 	at := time.Date(2026, 9, 20, 11, 0, 0, 0, time.UTC)
 	root := store.IssueComment{ID: "root", AuthorType: store.ActorTypeAgent, AuthorID: "agent", AuthorName: "Agent", Body: "finding", SourceRunID: stringPointer("run-1"), SourceActionKey: stringPointer("internal-action"), CreatedAt: at, UpdatedAt: at}
 	return []store.IssueDiscussionRoot{{
@@ -30,11 +37,17 @@ func (s *recordingIssueDiscussionService) ListRecentIssueDiscussions(_ context.C
 
 func (s *recordingIssueDiscussionService) GetIssueDiscussionThread(_ context.Context, projectID, issueID, anchorID string, limit int) (store.IssueDiscussionThread, error) {
 	s.projectID, s.issueID, s.anchorID, s.limit = projectID, issueID, anchorID, limit
+	if s.threadErr != nil {
+		return store.IssueDiscussionThread{}, s.threadErr
+	}
 	return store.IssueDiscussionThread{RootID: "root", AnchorID: anchorID}, nil
 }
 
 func (s *recordingIssueDiscussionService) ListIssueDiscussionUpdates(_ context.Context, projectID, issueID, cursor string, limit int) (app.IssueDiscussionUpdatePage, error) {
 	s.projectID, s.issueID, s.cursor, s.limit = projectID, issueID, cursor, limit
+	if s.updateErr != nil {
+		return app.IssueDiscussionUpdatePage{}, s.updateErr
+	}
 	return app.IssueDiscussionUpdatePage{NextCursor: "next", HasMore: true}, nil
 }
 
@@ -73,3 +86,62 @@ func TestIssueDiscussionReaderUsesTrustedIssueScopeAndSharedQueries(t *testing.T
 }
 
 func stringPointer(value string) *string { return &value }
+
+func TestIssueDiscussionReaderPropagatesSharedQueryFailures(t *testing.T) {
+	safe := executioncontext.SafeContext{
+		Project: executioncontext.ProjectContext{ID: "project-1"},
+		Issue:   executioncontext.IssueContext{ID: "issue-1"},
+	}
+	var nilReader *issueDiscussionReader
+	if _, err := nilReader.ReadIssueDiscussion(t.Context(), engine.IssueDiscussionReadRequest{Mode: engine.IssueDiscussionReadRecent}); err == nil {
+		t.Fatal("nil discussion reader unexpectedly succeeded")
+	}
+
+	want := errors.New("shared discussion read failed")
+	service := &recordingIssueDiscussionService{recentErr: want, threadErr: want, updateErr: want}
+	reader := newIssueDiscussionReader(service, safe)
+	for _, request := range []engine.IssueDiscussionReadRequest{
+		{Mode: engine.IssueDiscussionReadRecent},
+		{Mode: engine.IssueDiscussionReadThread, AnchorCommentID: "comment-1"},
+		{Mode: engine.IssueDiscussionReadUpdates, Cursor: "cursor-1"},
+	} {
+		if _, err := reader.ReadIssueDiscussion(t.Context(), request); !errors.Is(err, want) {
+			t.Fatalf("request=%+v err=%v", request, err)
+		}
+	}
+}
+
+func TestMapEngineIssueDiscussionCommentPreservesPublicContextAndTombstonesBody(t *testing.T) {
+	at := time.Date(2026, 9, 20, 13, 0, 0, 0, time.UTC)
+	parentID := "parent-1"
+	runID := "run-1"
+	actionKey := "internal-action-key"
+	resolverID := "user-1"
+	value := store.IssueComment{
+		ID:               "comment-1",
+		IssueID:          "issue-1",
+		ParentCommentID:  &parentID,
+		AuthorType:       store.ActorTypeAgent,
+		AuthorID:         "agent-1",
+		AuthorName:       "Agent",
+		SourceRunID:      &runID,
+		SourceActionKey:  &actionKey,
+		Body:             "must stay hidden after deletion",
+		DeletedAt:        &at,
+		ResolvedAt:       &at,
+		ResolvedByUserID: &resolverID,
+		ResolvedByName:   "Resolver",
+		Reactions: []store.IssueCommentReactionSummary{
+			{Reaction: store.IssueCommentReactionHeart, Count: 2, ActorIDs: []string{"user-1", "user-2"}},
+		},
+		CreatedAt: at.Add(-time.Minute),
+		UpdatedAt: at,
+	}
+	mapped := mapEngineIssueDiscussionComment(value)
+	if mapped.Body != nil || mapped.ParentCommentID == nil || *mapped.ParentCommentID != parentID ||
+		mapped.SourceRunID == nil || *mapped.SourceRunID != runID || mapped.ResolvedBy == nil ||
+		mapped.ResolvedBy.ID != resolverID || mapped.ResolvedBy.Name != "Resolver" ||
+		len(mapped.Reactions) != 1 || mapped.Reactions[0].Reaction != store.IssueCommentReactionHeart || mapped.Reactions[0].Count != 2 {
+		t.Fatalf("mapped=%+v", mapped)
+	}
+}
