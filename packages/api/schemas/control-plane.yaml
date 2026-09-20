@@ -384,6 +384,70 @@ IssueCommentUpdate:
       type: string
       minLength: 1
       pattern: '\S'
+IssueDiscussionRoot:
+  type: object
+  additionalProperties: false
+  required: [root, replyCount, lastActivityAt, compactComments, truncated]
+  properties:
+    root: {$ref: '#/IssueComment'}
+    replyCount:
+      type: integer
+      minimum: 0
+      description: Exact when truncated is false. When truncated is true, this is a lower bound from the bounded traversal, never an implied exact total.
+    lastActivityAt:
+      type: string
+      format: date-time
+      description: Exact latest activity timestamp for this returned discussion root.
+    compactComments:
+      type: array
+      description: For resolved discussions, a bounded root-to-latest-activity path. Empty for unresolved discussions; this is a read projection, not a durable AI summary.
+      items: {$ref: '#/IssueComment'}
+    truncated:
+      type: boolean
+      description: True when descendants exist beyond the bounded depth or cardinality used for orientation; replyCount is then a lower bound.
+
+IssueDiscussionThread:
+  type: object
+  additionalProperties: false
+  required: [rootId, anchorId, comments, truncated]
+  properties:
+    rootId: {type: string, format: uuid}
+    anchorId: {type: string, format: uuid}
+    comments:
+      type: array
+      items: {$ref: '#/IssueComment'}
+    truncated:
+      type: boolean
+      description: True when the thread contains more descendants than the bounded response includes.
+
+IssueDiscussionUpdateItem:
+  type: object
+  additionalProperties: false
+  required: [comment, isNew, contextTruncated]
+  properties:
+    comment: {$ref: '#/IssueComment'}
+    isNew:
+      type: boolean
+      description: True for a comment newer than the supplied cursor; false for restored ancestor context.
+    contextTruncated:
+      type: boolean
+      description: True when the bounded update page cannot restore this comment's complete ancestor chain. The canonical comment is returned deliberately as partial context so the durable cursor can advance without silently skipping it.
+
+IssueDiscussionUpdates:
+  type: object
+  additionalProperties: false
+  required: [comments, nextCursor, hasMore]
+  properties:
+    comments:
+      type: array
+      items: {$ref: '#/IssueDiscussionUpdateItem'}
+    nextCursor:
+      type: [string, 'null']
+      description: Opaque durable cursor covering only new comments actually returned by this response.
+    hasMore:
+      type: boolean
+      description: True when additional new comments remain after the bounded response.
+
 IssueTimelineEntry:
   type: object
   additionalProperties: false

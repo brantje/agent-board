@@ -52,6 +52,14 @@ Publication is explicit: ordinary assistant output, reasoning, command/test outp
 
 A delegated Run may publish a finding or handoff tied to its own Run, but it still receives neither `set_issue_status` nor `delegate_task`. Comment publication does not transfer Issue ownership, mutate Board status, create another Run, or add mention/routing semantics. Plain `@name` text remains ordinary comment content.
 
+## Issue discussion reads
+
+Executing OpenCode Runs receive the trusted `read_issue_discussion` capability backed by Agent Board's canonical Issue-comment application queries. The model can ask for `recent` discussion roots, a bounded `thread` from any comment anchor, or incremental `updates` from an opaque cursor. Project and Issue identity are never tool arguments: run execution derives both from the trusted execution context and delegates to the same server-owned queries used by HTTP and available to a future MCP adapter.
+
+The read tool returns its canonical result in the same native tool turn. Agent Board does not copy the full Issue history into the bootstrap prompt and does not issue a second model prompt to deliver query results. Instead, the tool module hosts a tiny Run-scoped loopback request queue inside the existing OpenCode process. The trusted adapter reaches that queue only through the Execution Session's existing `SessionConnector`, executes the shared `IssueDiscussionReader`, and posts the result back to the exact pending tool call. The Runtime receives no database credentials, Project/Issue selector, or general Agent Board API token.
+
+Discussion reads are explicitly bounded. Recent orientation is thread-first and includes reply counts plus last-activity metadata. Thread reads restore the root/ancestor context needed to avoid orphan-looking replies. Incremental reads use an opaque composite chronological cursor and restore required ancestors without advancing the cursor past omitted newer comments. Resolved discussions may expose a compact root-to-latest-activity path for orientation, while the full durable thread remains fetchable. The loopback queue retains a request until its response is acknowledged so control-plane reattachment can safely replay an in-flight read.
+
 ## Delegation capability
 
 OpenCode receives Agent Board tools from trusted Engine capabilities rather than from static adapter configuration. An authoritative Run receives `delegate_task(targetAgentId, task)` only when its Agent has `Allow delegation` enabled. A delegated Run receives neither `delegate_task` nor `set_issue_status`; it may still use `publish_issue_comment(body)` for bounded collaboration tied to its own Run, while nested delegation and authoritative Issue status mutation remain absent from the model-visible tool surface.

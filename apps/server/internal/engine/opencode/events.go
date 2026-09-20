@@ -250,7 +250,11 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 		Summary:    evidence.BoundActivityPreview(part.State.Title),
 	}
 	if eventType == "tool.completed" {
-		payload.ResultPreview = toolResultPreview(part.State.Output)
+		if part.Tool == issueDiscussionToolName {
+			payload.ResultPreview = issueDiscussionResultPreview(part.State.Output)
+		} else {
+			payload.ResultPreview = toolResultPreview(part.State.Output)
+		}
 	}
 	if eventType == "tool.failed" {
 		payload.Reason = evidence.BoundActivityPreview(part.State.Error)
@@ -262,6 +266,53 @@ func (s *runState) handleToolPart(ctx context.Context, data json.RawMessage) err
 	}
 	s.seenToolStates[key] = struct{}{}
 	return nil
+}
+
+func issueDiscussionResultPreview(value any) string {
+	var encoded []byte
+	switch typed := value.(type) {
+	case string:
+		encoded = []byte(typed)
+	default:
+		var err error
+		encoded, err = json.Marshal(value)
+		if err != nil {
+			return "discussion read completed"
+		}
+	}
+	var result engine.IssueDiscussionReadResult
+	if err := json.Unmarshal(encoded, &result); err != nil {
+		return "discussion read completed"
+	}
+	switch result.Mode {
+	case engine.IssueDiscussionReadRecent:
+		truncated := false
+		for _, root := range result.Roots {
+			if root.Truncated {
+				truncated = true
+				break
+			}
+		}
+		return fmt.Sprintf("mode=%s roots=%d truncated=%t", result.Mode, len(result.Roots), truncated)
+	case engine.IssueDiscussionReadThread:
+		if result.Thread == nil {
+			return "mode=thread"
+		}
+		return fmt.Sprintf("mode=%s comments=%d truncated=%t", result.Mode, len(result.Thread.Comments), result.Thread.Truncated)
+	case engine.IssueDiscussionReadUpdates:
+		if result.Updates == nil {
+			return "mode=updates"
+		}
+		return fmt.Sprintf(
+			"mode=%s comments=%d hasMore=%t cursor=%t",
+			result.Mode,
+			len(result.Updates.Comments),
+			result.Updates.HasMore,
+			strings.TrimSpace(result.Updates.NextCursor) != "",
+		)
+	default:
+		return "discussion read completed"
+	}
 }
 
 func toolResultPreview(value any) string {

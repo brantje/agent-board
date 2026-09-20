@@ -82,13 +82,128 @@ func TestOpenCodeDockerNormalCodingRun(t *testing.T) {
 	assertOpenCodeServerSession(t, fixture.ctx, fixture.database, project.ID, run.ID, false)
 }
 
+func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
+	fixture := newOpenCodeIntegrationFixture(t)
+	const expectedBody = "discussion-read-proof-7b2f9c"
+	setup := fixture.createRunSetup(t, openCodeRunSpec{
+		roleInstructions: "Follow the issue instructions exactly. Use read_issue_discussion only when explicitly requested. Do not ask a Question, publish a comment, delegate, or change Issue status unless explicitly requested.",
+		title:            "Read trusted Issue discussion context",
+		description:      "Use read_issue_discussion with mode recent exactly once. After it returns, reply with exactly LEN=<N>, where N is the number of ASCII characters in the first returned root body. Do not quote or repeat the body. Do not modify files, publish comments, ask a Question, delegate, or change Issue status.",
+	})
+	author, err := fixture.database.CreateUser(fixture.ctx, store.User{
+		Username: "discussion-author", Email: "discussion-author@example.com", DisplayName: "Discussion Author",
+		DeploymentRole: store.DeploymentRoleMember, Status: store.UserStatusPending, AuthVersion: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.services.ControlPlane.CreateHumanIssueComment(fixture.ctx, app.CreateIssueCommentInput{
+		ProjectID: setup.Project.ID, IssueID: setup.Issue.ID, Body: expectedBody,
+	}, author.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.services.ControlPlane.SetIssueAssignee(fixture.ctx, setup.Project.ID, setup.Issue.ID, &store.Assignee{Type: "AGENT", ID: setup.Agent.ID}, store.EmptyObject); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := fixture.services.ControlPlane.ListRuns(fixture.ctx, setup.Project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var run store.Run
+	for _, candidate := range runs {
+		if candidate.IssueID == setup.Issue.ID && candidate.AgentID != nil && *candidate.AgentID == setup.Agent.ID {
+			run = candidate
+			break
+		}
+	}
+	if run.ID == "" {
+		t.Fatal("automatic assignment did not create a Run")
+	}
+
+	fixture.startScheduler(t)
+	terminal := waitForScriptedRun(t, fixture.ctx, fixture.database, setup.Project.ID, run.ID)
+	if terminal.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
+	}
+	events, err := fixture.database.ListRunEvents(fixture.ctx, setup.Project.ID, run.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var completedReads []evidence.ToolPayload
+	var discussionToolEvents []struct {
+		Type    string
+		Payload evidence.ToolPayload
+	}
+	for _, event := range events {
+		if event.Type != "tool.started" && event.Type != "tool.completed" && event.Type != "tool.failed" {
+			continue
+		}
+		var payload evidence.ToolPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode tool evidence: %v", err)
+		}
+		if payload.Name != "read_issue_discussion" {
+			continue
+		}
+		discussionToolEvents = append(discussionToolEvents, struct {
+			Type    string
+			Payload evidence.ToolPayload
+		}{Type: event.Type, Payload: payload})
+		if event.Type == "tool.completed" {
+			completedReads = append(completedReads, payload)
+		}
+	}
+	if len(completedReads) != 1 {
+		t.Fatalf("read_issue_discussion completions=%d want 1; tool events=%+v; events=%v", len(completedReads), discussionToolEvents, eventTypes(events))
+	}
+	read := completedReads[0]
+	if mode, _ := read.Input["mode"].(string); mode != engine.IssueDiscussionReadRecent {
+		t.Fatalf("read_issue_discussion input=%+v", read.Input)
+	}
+	if read.ResultPreview != "mode=recent roots=1 truncated=false" {
+		t.Fatalf("read_issue_discussion safe result preview=%q", read.ResultPreview)
+	}
+	if strings.Contains(read.ResultPreview, expectedBody) {
+		t.Fatalf("read_issue_discussion leaked canonical body into Run evidence: %q", read.ResultPreview)
+	}
+	expectedVisible := "LEN=" + strconv.Itoa(len(expectedBody))
+	visible := false
+	for _, event := range events {
+		if event.Type != "agent.message" {
+			continue
+		}
+		var payload struct {
+			Kind    string `json:"kind"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode agent message evidence: %v", err)
+		}
+		if payload.Kind == "message" && strings.TrimSpace(payload.Message) == expectedVisible {
+			visible = true
+			break
+		}
+	}
+	if !visible {
+		t.Fatalf("model did not prove synchronous discussion result; want visible %q events=%v", expectedVisible, eventTypes(events))
+	}
+
+	comments, err := fixture.services.ControlPlane.ListIssueComments(fixture.ctx, setup.Project.ID, setup.Issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 || comments[0].Body != expectedBody || comments[0].AuthorID != author.ID {
+		t.Fatalf("discussion read mutated durable comments: %+v", comments)
+	}
+}
+
 func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
-	const expectedBody = "Agent integration comment @nobody"
+	const expectedBody = "agent-comment-proof-7b2f9c"
 	project, run := fixture.createRun(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Use publish_issue_comment only when explicitly requested. Do not ask a Question, delegate, or change Issue status unless explicitly requested.",
 		title:            "Publish a trusted Agent-authored Issue comment",
-		description:      "Use publish_issue_comment exactly once. Publish exactly this body and no other Issue comment: Agent integration comment @nobody. Do not ask a Question. Do not delegate. Do not call set_issue_status. Do not modify files. After the comment tool succeeds, stop.",
+		description:      "Use publish_issue_comment exactly once. Pass exactly this raw body string with no added punctuation or formatting, and publish no other Issue comment: agent-comment-proof-7b2f9c. Do not ask a Question. Do not delegate. Do not call set_issue_status. Do not modify files. After the comment tool succeeds, stop.",
 	})
 	if run.AgentID == nil {
 		t.Fatal("OpenCode integration Run has no Agent identity")
@@ -109,6 +224,34 @@ func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 		t.Fatalf("run status=%s failure=%q", terminal.Status, openCodeFailureReason(terminal.FailureReason))
 	}
 
+	events, err := fixture.database.ListRunEvents(fixture.ctx, project.ID, run.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedPublishes := make([]evidence.ToolPayload, 0)
+	for _, event := range events {
+		if event.Type != "tool.completed" {
+			continue
+		}
+		var payload evidence.ToolPayload
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode publication tool evidence: %v", err)
+		}
+		if payload.Name == "publish_issue_comment" {
+			completedPublishes = append(completedPublishes, payload)
+		}
+	}
+	if len(completedPublishes) != 1 {
+		t.Fatalf("publish_issue_comment completions=%d want exactly one; events=%v", len(completedPublishes), eventTypes(events))
+	}
+	publish := completedPublishes[0]
+	if publish.ToolCallID == "" {
+		t.Fatalf("completed publication has no tool call id: %+v", publish)
+	}
+	if body, _ := publish.Input["body"].(string); body != expectedBody {
+		t.Fatalf("publication input=%+v want body=%q", publish.Input, expectedBody)
+	}
+
 	comments, err := fixture.services.ControlPlane.ListIssueComments(fixture.ctx, project.ID, run.IssueID)
 	if err != nil {
 		t.Fatal(err)
@@ -117,6 +260,9 @@ func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 		t.Fatalf("durable Issue comments=%+v want exactly one", comments)
 	}
 	comment := comments[0]
+	if comment.SourceActionKey == nil || strings.TrimSpace(*comment.SourceActionKey) == "" {
+		t.Fatalf("trusted Agent comment has no source action key: %+v", comment)
+	}
 	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != *run.AgentID ||
 		comment.SourceRunID == nil || *comment.SourceRunID != run.ID || comment.Body != expectedBody {
 		t.Fatalf("trusted Agent comment=%+v run=%+v", comment, run)
@@ -131,14 +277,22 @@ func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(reloaded) != 1 {
-		t.Fatalf("reloaded Issue comments=%+v want exactly one", reloaded)
+	if len(reloaded) != len(comments) {
+		t.Fatalf("reloaded Issue comments=%d original=%d reloaded=%+v", len(reloaded), len(comments), reloaded)
 	}
-	reloadedComment := reloaded[0]
-	if reloadedComment.ID != comment.ID || reloadedComment.AuthorType != store.ActorTypeAgent ||
-		reloadedComment.AuthorID != *run.AgentID || reloadedComment.AuthorName != comment.AuthorName ||
-		reloadedComment.SourceRunID == nil || *reloadedComment.SourceRunID != run.ID || reloadedComment.Body != expectedBody {
-		t.Fatalf("reloaded trusted Agent comment=%+v original=%+v", reloadedComment, comment)
+	reloadedByID := make(map[string]store.IssueComment, len(reloaded))
+	for _, comment := range reloaded {
+		reloadedByID[comment.ID] = comment
+	}
+	for _, original := range comments {
+		reloadedComment, ok := reloadedByID[original.ID]
+		if !ok || reloadedComment.AuthorType != store.ActorTypeAgent ||
+			reloadedComment.AuthorID != *run.AgentID || reloadedComment.AuthorName != original.AuthorName ||
+			reloadedComment.SourceRunID == nil || *reloadedComment.SourceRunID != run.ID ||
+			reloadedComment.SourceActionKey == nil || original.SourceActionKey == nil ||
+			*reloadedComment.SourceActionKey != *original.SourceActionKey || reloadedComment.Body != expectedBody {
+			t.Fatalf("reloaded trusted Agent comment=%+v original=%+v", reloadedComment, original)
+		}
 	}
 
 	afterIssue, err := fixture.services.ControlPlane.GetIssue(fixture.ctx, project.ID, run.IssueID)

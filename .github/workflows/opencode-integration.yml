@@ -134,10 +134,21 @@ jobs:
         run: |
           set -euo pipefail
           if timeout --signal=TERM --kill-after=10s 600s \
-            go test -count=1 -run '^TestOpenCodeDockerPublishesTrustedIssueComment$' -v ./internal/runexec; then
-            if timeout --signal=TERM --kill-after=10s 600s \
-              go test -count=1 -failfast -run '^(TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion|OpenRouterDelegationEndToEnd)|TestOpenCodeExternalRunnerGoldenPath)$' -v ./internal/runexec; then
-              exit 0
+            go test -count=1 -run '^TestOpenCodeDockerReadsTrustedIssueDiscussion$' -v ./internal/runexec; then
+            publication_ok=0
+            for attempt in 1 2 3; do
+              echo "trusted Issue comment live proof attempt $attempt/3"
+              if timeout --signal=TERM --kill-after=10s 600s \
+                go test -count=1 -run '^TestOpenCodeDockerPublishesTrustedIssueComment$' -v ./internal/runexec; then
+                publication_ok=1
+                break
+              fi
+            done
+            if [[ "$publication_ok" -eq 1 ]]; then
+              if timeout --signal=TERM --kill-after=10s 600s \
+                go test -count=1 -failfast -run '^(TestOpenCodeDocker(NormalCodingRun|InteractiveQuestionRoundTrip|InvalidCredentialsFailWithoutSecretLeak|CancelWhileWaitingForQuestion|OpenRouterDelegationEndToEnd)|TestOpenCodeExternalRunnerGoldenPath)$' -v ./internal/runexec; then
+                exit 0
+              fi
             fi
           fi
 
