@@ -222,6 +222,22 @@ func TestIssueDiscussionReadsAreThreadAwareBoundedAndCursorSafe(t *testing.T) {
 	if len(tiedRoots) < 2 || tiedRoots[0].Root.ID != wantFirst || tiedRoots[1].Root.ID != wantSecond {
 		t.Fatalf("deterministic tied roots=%+v want first=%s second=%s", tiedRoots, wantFirst, wantSecond)
 	}
+
+	emptyUpdates, err := s.ListIssueDiscussionUpdates(
+		ctx,
+		project.ID,
+		issue.ID,
+		&store.IssueCommentCursor{CreatedAt: tieAt.Add(time.Hour), ID: "ffffffff-ffff-4fff-8fff-ffffffffffff"},
+		1,
+		16,
+		8,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(emptyUpdates.Comments) != 0 || emptyUpdates.NextCursor != nil || emptyUpdates.HasMore {
+		t.Fatalf("empty updates=%+v", emptyUpdates)
+	}
 }
 
 func TestIssueDiscussionReadsRejectInvalidBoundsAndAllowEmptyProjection(t *testing.T) {
@@ -361,6 +377,13 @@ func TestIssueDiscussionReadsBoundWideAndDeepGraphs(t *testing.T) {
 	if len(ids) != 5 || !truncated {
 		t.Fatalf("bounded wide tree ids=%d truncated=%v", len(ids), truncated)
 	}
+	rootOnly, rootOnlyTruncated, err := s.boundedIssueCommentTreeIDs(ctx, project.ID, issue.ID, wideRoot.ID, 8, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rootOnly) != 1 || rootOnly[0] != wideRoot.ID || !rootOnlyTruncated {
+		t.Fatalf("root-only wide tree ids=%v truncated=%v", rootOnly, rootOnlyTruncated)
+	}
 	thread, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, wideRoot.ID, 8, 5)
 	if err != nil {
 		t.Fatal(err)
@@ -410,6 +433,13 @@ func TestIssueDiscussionReadsBoundWideAndDeepGraphs(t *testing.T) {
 	}
 	if _, err := s.GetIssueDiscussionThread(ctx, project.ID, issue.ID, deepLeaf.ID, issueDiscussionRootTraversalDepth, 100); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("deep thread error=%v", err)
+	}
+	leafOnly, leafOnlyTruncated, err := s.boundedIssueCommentTreeIDs(ctx, project.ID, issue.ID, deepLeaf.ID, 8, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leafOnly) != 1 || leafOnly[0] != deepLeaf.ID || leafOnlyTruncated {
+		t.Fatalf("leaf-only tree ids=%v truncated=%v", leafOnly, leafOnlyTruncated)
 	}
 
 	olderRoot := create("older safe root", nil)
