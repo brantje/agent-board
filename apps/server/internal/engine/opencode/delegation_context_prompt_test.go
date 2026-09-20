@@ -100,7 +100,7 @@ func TestIssueCommentPromptRequiresStructuredMentionIDs(t *testing.T) {
 	for _, want := range []string{
 		"publish_issue_comment(body, mentionAgentIds?)",
 		"Plain @name text has no routing semantics",
-		"pass stable Agent IDs structurally in mentionAgentIds",
+		"pass at most one stable Agent ID structurally in mentionAgentIds",
 		"never guess Agent identifiers",
 	} {
 		if !strings.Contains(issueCommentPromptGuidance, want) {

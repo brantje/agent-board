@@ -15,10 +15,10 @@ const (
 	issueCommentToolSource = `import { tool } from "@opencode-ai/plugin"
 
 export default tool({
-  description: "Publish a concise durable comment on the current Agent Board Issue. Use it deliberately for findings, results, handoffs, non-blocking collaboration questions, or pointers to existing Run/Review evidence. To request focused Agent work, pass stable Agent IDs explicitly in mentionAgentIds; plain @name text never routes work. Do not copy raw logs, command/test output, file contents, progress chatter, or hidden reasoning. Use the native Question capability for blocking human input.",
+  description: "Publish a concise durable comment on the current Agent Board Issue. Use it deliberately for findings, results, handoffs, non-blocking collaboration questions, or pointers to existing Run/Review evidence. To request focused Agent work, pass at most one stable Agent ID explicitly in mentionAgentIds; plain @name text never routes work. Do not copy raw logs, command/test output, file contents, progress chatter, or hidden reasoning. Use the native Question capability for blocking human input.",
   args: {
     body: tool.schema.string().describe("Concise user-visible Issue comment"),
-    mentionAgentIds: tool.schema.array(tool.schema.string()).optional().describe("Optional stable Agent IDs to mention structurally and request focused work from"),
+    mentionAgentIds: tool.schema.array(tool.schema.string()).optional().describe("Optional single stable Agent ID to mention structurally and request focused work from"),
   },
   async execute({ body, mentionAgentIds }) {
     return JSON.stringify({ status: "emitted", mentionAgentIds: mentionAgentIds ?? [] })
