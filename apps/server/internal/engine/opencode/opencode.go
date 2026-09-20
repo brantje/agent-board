@@ -91,7 +91,19 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	if err != nil {
 		return engine.Result{}, fmt.Errorf("opencode engine: parse native server address: %w", err)
 	}
-	process, recovered, err := launchOpenCodeProcessWithCapabilities(ctx, request.Launcher, host, port, env, request.IssueStatus != nil, request.IssueComments != nil, request.Delegation != nil)
+	discussionAddress := ""
+	if request.IssueDiscussions != nil {
+		discussionAddress, err = issueDiscussionBridgeAddress(address, request.Context.Run.ID)
+		if err != nil {
+			return engine.Result{}, err
+		}
+		_, discussionPort, splitErr := net.SplitHostPort(discussionAddress)
+		if splitErr != nil {
+			return engine.Result{}, fmt.Errorf("opencode engine: parse Issue discussion bridge address: %w", splitErr)
+		}
+		env[issueDiscussionBridgePortEnv] = discussionPort
+	}
+	process, recovered, err := launchOpenCodeProcessWithDiscussionCapabilities(ctx, request.Launcher, host, port, env, request.IssueStatus != nil, request.IssueComments != nil, request.IssueDiscussions != nil, request.Delegation != nil)
 	if err != nil {
 		return engine.Result{}, err
 	}
@@ -132,6 +144,32 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	native.SetDirectory(nativeWorkingDirectory(process))
 	if err := waitHealthy(ctx, native); err != nil {
 		return engine.Result{}, err
+	}
+
+	var discussionBridgeErrors <-chan error
+	if request.IssueDiscussions != nil {
+		ids, toolErr := native.ToolIDs(ctx)
+		if toolErr != nil {
+			return engine.Result{}, fmt.Errorf("opencode engine: load Issue discussion tool: %w", toolErr)
+		}
+		if !containsOpenCodeTool(ids, issueDiscussionToolName) {
+			return engine.Result{}, fmt.Errorf("opencode engine: Issue discussion tool is unavailable")
+		}
+		bridge, bridgeErr := newIssueDiscussionBridge(connector, discussionAddress, request.IssueDiscussions)
+		if bridgeErr != nil {
+			return engine.Result{}, bridgeErr
+		}
+		defer bridge.CloseIdleConnections()
+		if bridgeErr := waitIssueDiscussionBridgeHealthy(ctx, bridge); bridgeErr != nil {
+			return engine.Result{}, bridgeErr
+		}
+		bridgeCtx, cancelBridge := context.WithCancel(ctx)
+		defer cancelBridge()
+		errors := make(chan error, 1)
+		discussionBridgeErrors = errors
+		go func() {
+			errors <- bridge.Serve(bridgeCtx)
+		}()
 	}
 
 	initialPrompt := initialTaskPromptForRequest(request)
@@ -249,6 +287,11 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 	statePollFailures := 0
 	for {
 		select {
+		case bridgeErr := <-discussionBridgeErrors:
+			if bridgeErr != nil {
+				return engine.Result{}, bridgeErr
+			}
+			discussionBridgeErrors = nil
 		case <-ctx.Done():
 			cancelNativeSession(ctx, native, session.ID, state)
 			return engine.Result{}, ctx.Err()
@@ -492,23 +535,36 @@ func launchOpenCodeProcess(ctx context.Context, launcher engine.ProcessLauncher,
 }
 
 func launchOpenCodeProcessWithCapabilities(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string, issueStatusEnabled, issueCommentEnabled, delegationEnabled bool) (engine.Process, bool, error) {
+	return launchOpenCodeProcessWithDiscussionCapabilities(ctx, launcher, host, port, env, issueStatusEnabled, issueCommentEnabled, false, delegationEnabled)
+}
+
+func launchOpenCodeProcessWithDiscussionCapabilities(ctx context.Context, launcher engine.ProcessLauncher, host, port string, env map[string]string, issueStatusEnabled, issueCommentEnabled, issueDiscussionEnabled, delegationEnabled bool) (engine.Process, bool, error) {
 	if attacher, ok := launcher.(engine.ProcessAttacher); ok {
 		process, err := attacher.Attach(ctx)
 		if err == nil {
 			if process == nil {
 				return nil, false, fmt.Errorf("opencode engine: attached process is unavailable")
 			}
-			return reconcileAttachedOpenCodeCapabilities(ctx, launcher, process, host, port, env, issueStatusEnabled, issueCommentEnabled, delegationEnabled)
+			return reconcileAttachedOpenCodeCapabilitiesWithDiscussion(ctx, launcher, process, host, port, env, issueStatusEnabled, issueCommentEnabled, issueDiscussionEnabled, delegationEnabled)
 		}
 		if !errors.Is(err, engine.ErrNotAttachable) {
 			return nil, false, fmt.Errorf("opencode engine: attach existing server: %w", err)
 		}
 	}
-	process, err := startOpenCodeProcess(ctx, launcher, host, port, env, issueStatusEnabled, issueCommentEnabled, delegationEnabled)
+	process, err := startOpenCodeProcessWithDiscussion(ctx, launcher, host, port, env, issueStatusEnabled, issueCommentEnabled, issueDiscussionEnabled, delegationEnabled)
 	if err != nil {
 		return nil, false, err
 	}
 	return process, false, nil
+}
+
+func containsOpenCodeTool(ids []string, name string) bool {
+	for _, id := range ids {
+		if id == name {
+			return true
+		}
+	}
+	return false
 }
 
 func ensureNativeSession(ctx context.Context, native *client.Client, safe executioncontext.SafeContext, settings settings, expectedPrompt string, recovered bool) (client.Session, bool, error) {

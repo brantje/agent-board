@@ -62,6 +62,20 @@ func New(httpClient *http.Client, baseURL string) (*Client, error) {
 // synthetic; every dial is redirected to the explicitly allowed loopback
 // address inside the Runtime.
 func NewSession(dialer Dialer, address string) (*Client, error) {
+	if strings.TrimSpace(address) == "" {
+		address = defaultSessionAddress
+	}
+	httpClient, err := NewSessionHTTPClient(dialer, address)
+	if err != nil {
+		return nil, err
+	}
+	return New(httpClient, "http://"+address)
+}
+
+// NewSessionHTTPClient creates an HTTP client whose TCP connections stay inside
+// the owning Execution Session. Engine-specific session-local services can
+// reuse this trusted transport without learning Runner or Runtime details.
+func NewSessionHTTPClient(dialer Dialer, address string) (*http.Client, error) {
 	if dialer == nil {
 		return nil, fmt.Errorf("opencode: session dialer is required")
 	}
@@ -77,7 +91,7 @@ func NewSession(dialer Dialer, address string) (*Client, error) {
 		DisableKeepAlives:  true,
 		DisableCompression: true,
 	}
-	return New(&http.Client{Transport: transport}, "http://"+address)
+	return &http.Client{Transport: transport}, nil
 }
 
 func (c *Client) CloseIdleConnections() {

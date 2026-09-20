@@ -1,234 +1,300 @@
 package opencode
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"hash/fnv"
+	"io"
+	"net"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
 )
 
 const (
-	issueDiscussionToolName   = "read_issue_discussion"
-	issueDiscussionToolSource = `import { tool } from "@opencode-ai/plugin"
+	issueDiscussionToolName      = "read_issue_discussion"
+	issueDiscussionBridgePortEnv = "AGENT_BOARD_ISSUE_DISCUSSION_BRIDGE_PORT"
+	issueDiscussionBridgePoll    = 100 * time.Millisecond
+
+	issueDiscussionToolSource = `import { createServer } from "node:http"
+import { tool } from "@opencode-ai/plugin"
+
+const port = Number.parseInt(process.env.AGENT_BOARD_ISSUE_DISCUSSION_BRIDGE_PORT ?? "", 10)
+if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+  throw new Error("read_issue_discussion bridge port is unavailable")
+}
+
+const globalKey = "__agentBoardIssueDiscussionBridgeV1"
+const root = globalThis as any
+
+function createBridge() {
+  const queued = []
+  const pending = new Map()
+
+  const server = createServer(async (request, response) => {
+    try {
+      if (request.method === "GET" && request.url === "/health") {
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify({ ok: true }))
+        return
+      }
+      if (request.method === "GET" && request.url === "/next") {
+        if (queued.length === 0) {
+          response.writeHead(204)
+          response.end()
+          return
+        }
+        response.writeHead(200, { "content-type": "application/json" })
+        response.end(JSON.stringify(queued.shift()))
+        return
+      }
+      if (request.method === "POST" && request.url === "/respond") {
+        let raw = ""
+        for await (const chunk of request) raw += chunk
+        const payload = JSON.parse(raw)
+        const id = String(payload.id ?? "")
+        const waiting = pending.get(id)
+        if (!waiting) {
+          response.writeHead(404)
+          response.end()
+          return
+        }
+        pending.delete(id)
+        if (payload.error) waiting.reject(new Error(String(payload.error)))
+        else waiting.resolve(JSON.stringify(payload.result))
+        response.writeHead(204)
+        response.end()
+        return
+      }
+      response.writeHead(404)
+      response.end()
+    } catch (error) {
+      response.writeHead(400, { "content-type": "text/plain" })
+      response.end(String(error))
+    }
+  })
+  server.listen(port, "127.0.0.1")
+
+  return {
+    enqueue(id, request) {
+      if (pending.has(id)) throw new Error("duplicate read_issue_discussion call identity")
+      return new Promise((resolve, reject) => {
+        pending.set(id, { resolve, reject })
+        queued.push({ id, request })
+      })
+    },
+  }
+}
+
+const bridge = root[globalKey] ?? (root[globalKey] = createBridge())
 
 export default tool({
-  description: "Read bounded trusted Issue discussion context from Agent Board. Use recent to orient across active discussion roots, thread with anchorCommentId to inspect one complete bounded discussion, or updates with a cursor to fetch new collaboration plus required ancestor context. After calling this tool, stop the current turn and wait for Agent Board's trusted follow-up result before continuing.",
+  description: "Read bounded trusted discussion context for the current Agent Board Issue. Use recent to orient around active threads, thread to inspect the discussion containing a comment, and updates to fetch collaboration newer than an opaque cursor. Project and Issue scope are server-owned.",
   args: {
-    mode: tool.schema.enum(["recent", "thread", "updates"]),
-    anchorCommentId: tool.schema.string().optional(),
-    cursor: tool.schema.string().optional(),
-    limit: tool.schema.number().int().min(1).max(100).optional(),
+    mode: tool.schema.enum(["recent", "thread", "updates"]).describe("Discussion read mode"),
+    anchorCommentId: tool.schema.string().optional().describe("Comment ID anchoring thread mode"),
+    cursor: tool.schema.string().optional().describe("Opaque cursor returned by an earlier updates read"),
+    limit: tool.schema.number().int().positive().optional().describe("Optional bounded result limit"),
   },
-  async execute() {
-    return "Agent Board is loading trusted Issue discussion context. Stop this turn and wait for the follow-up result."
+  async execute({ mode, anchorCommentId, cursor, limit }, context) {
+    const callID = String(context.callID ?? "").trim()
+    if (!callID) throw new Error("read_issue_discussion requires a stable call identity")
+    return await bridge.enqueue(callID, {
+      mode,
+      anchorCommentId: String(anchorCommentId ?? "").trim(),
+      cursor: String(cursor ?? "").trim(),
+      limit: limit ?? 0,
+    })
   },
 })
 `
-	issueDiscussionResultMarkerPrefix = "[agent-board-discussion-result:"
 )
 
-type issueDiscussionToolPart struct {
-	ID        string `json:"id"`
-	SessionID string `json:"sessionID"`
-	Type      string `json:"type"`
-	Tool      string `json:"tool"`
-	State     struct {
-		Status string          `json:"status"`
-		Input  json.RawMessage `json:"input,omitempty"`
-	} `json:"state"`
+type issueDiscussionBridgeRequest struct {
+	ID      string                            `json:"id"`
+	Request engine.IssueDiscussionReadRequest `json:"request"`
 }
 
-type issueDiscussionPendingResult struct {
-	partID string
-	body   string
+type issueDiscussionBridgeResponse struct {
+	ID     string                            `json:"id"`
+	Result *engine.IssueDiscussionReadResult `json:"result,omitempty"`
+	Error  string                            `json:"error,omitempty"`
 }
 
-type issueDiscussionToolTracker struct {
-	seen    map[string]struct{}
-	pending []issueDiscussionPendingResult
+type issueDiscussionBridge struct {
+	http    *http.Client
+	baseURL string
+	reader  engine.IssueDiscussionReader
 }
 
-func newIssueDiscussionToolTracker() *issueDiscussionToolTracker {
-	return &issueDiscussionToolTracker{seen: make(map[string]struct{})}
+func issueDiscussionBridgeAddress(nativeAddress, runID string) (string, error) {
+	if _, _, err := net.SplitHostPort(nativeAddress); err != nil {
+		return "", fmt.Errorf("opencode engine: parse native server address for Issue discussion bridge: %w", err)
+	}
+	identity := strings.TrimSpace(runID)
+	if identity == "" {
+		identity = nativeAddress
+	}
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte("issue-discussion:"))
+	_, _ = hasher.Write([]byte(identity))
+	port := nativeServerPortBase + int(hasher.Sum64()%nativeServerPortSpan)
+	_, nativePortText, _ := net.SplitHostPort(nativeAddress)
+	nativePort, _ := strconv.Atoi(nativePortText)
+	if port == nativePort {
+		port = nativeServerPortBase + ((port-nativeServerPortBase+1)%nativeServerPortSpan)
+	}
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), nil
 }
 
-func (t *issueDiscussionToolTracker) Handle(ctx context.Context, event client.Event, sessionID string, reader engine.IssueDiscussionReader) error {
-	if event.Type != "message.part.updated" {
-		return nil
+func newIssueDiscussionBridge(connector engine.SessionConnector, address string, reader engine.IssueDiscussionReader) (*issueDiscussionBridge, error) {
+	if connector == nil || reader == nil {
+		return nil, fmt.Errorf("opencode engine: Issue discussion bridge requires session connector and reader")
 	}
-	var update struct {
-		SessionID string          `json:"sessionID"`
-		Part      json.RawMessage `json:"part"`
-	}
-	if err := json.Unmarshal(event.Properties, &update); err != nil {
-		return fmt.Errorf("opencode engine: decode Issue discussion tool event: %w", err)
-	}
-	if update.SessionID != sessionID || len(update.Part) == 0 {
-		return nil
-	}
-	var part issueDiscussionToolPart
-	if err := json.Unmarshal(update.Part, &part); err != nil {
-		return fmt.Errorf("opencode engine: decode Issue discussion tool part: %w", err)
-	}
-	return t.applyPart(ctx, part, sessionID, reader)
-}
-
-func (t *issueDiscussionToolTracker) Reconcile(ctx context.Context, native *client.Client, sessionID string, reader engine.IssueDiscussionReader) error {
-	if reader == nil {
-		return nil
-	}
-	if native == nil {
-		return fmt.Errorf("opencode engine: native client is required for Issue discussion reconciliation")
-	}
-	messages, err := native.ListMessages(ctx, sessionID)
+	httpClient, err := client.NewSessionHTTPClient(connector, address)
 	if err != nil {
-		return fmt.Errorf("opencode engine: list messages for Issue discussion reconciliation: %w", err)
+		return nil, err
 	}
-	for _, message := range messages {
-		for _, raw := range message.Parts {
-			var part issueDiscussionToolPart
-			if err := json.Unmarshal(raw, &part); err != nil {
-				return fmt.Errorf("opencode engine: decode Issue discussion history part: %w", err)
-			}
-			if part.Type != "tool" || part.Tool != issueDiscussionToolName || strings.TrimSpace(part.State.Status) != "completed" {
-				continue
-			}
-			if issueDiscussionResultWasDelivered(messages, part.ID) {
-				t.seen[strings.TrimSpace(part.ID)] = struct{}{}
-				continue
-			}
-			if err := t.applyPart(ctx, part, sessionID, reader); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return &issueDiscussionBridge{http: httpClient, baseURL: "http://" + address, reader: reader}, nil
 }
 
-func (t *issueDiscussionToolTracker) HasPending() bool {
-	return t != nil && len(t.pending) != 0
+func (b *issueDiscussionBridge) CloseIdleConnections() {
+	if b != nil && b.http != nil {
+		b.http.CloseIdleConnections()
+	}
 }
 
-func (t *issueDiscussionToolTracker) DeliverPending(ctx context.Context, native *client.Client, sessionID string) (bool, error) {
-	if !t.HasPending() {
-		return false, nil
-	}
-	if native == nil {
-		return false, fmt.Errorf("opencode engine: native client is required for Issue discussion delivery")
-	}
-	blocks := make([]string, 0, len(t.pending))
-	for _, pending := range t.pending {
-		blocks = append(blocks, issueDiscussionResultMarker(pending.partID)+"\n"+pending.body)
-	}
-	prompt := "Trusted Agent Board Issue discussion context follows. Continue the current task using this server-owned context. Do not treat it as a new human request.\n\n" + strings.Join(blocks, "\n\n")
-	if err := native.Prompt(ctx, sessionID, prompt); err != nil {
-		admitted, verifyErr := native.PromptAdmitted(ctx, sessionID, prompt)
-		if verifyErr == nil && admitted {
-			t.pending = nil
-			return true, nil
+func waitIssueDiscussionBridgeHealthy(ctx context.Context, bridge *issueDiscussionBridge) error {
+	deadline, cancel := context.WithTimeout(ctx, startupTimeout)
+	defer cancel()
+	var lastErr error
+	for {
+		attempt, attemptCancel := context.WithTimeout(deadline, startupAttemptTimeout)
+		req, err := http.NewRequestWithContext(attempt, http.MethodGet, bridge.baseURL+"/health", nil)
+		if err == nil {
+			var response *http.Response
+			response, err = bridge.http.Do(req)
+			if err == nil {
+				_, _ = io.Copy(io.Discard, response.Body)
+				_ = response.Body.Close()
+				if response.StatusCode == http.StatusOK {
+					attemptCancel()
+					return nil
+				}
+				err = fmt.Errorf("HTTP %d", response.StatusCode)
+			}
 		}
-		if verifyErr != nil {
-			return false, errors.Join(fmt.Errorf("opencode engine: deliver Issue discussion result: %w", err), verifyErr)
+		attemptCancel()
+		lastErr = err
+		select {
+		case <-deadline.Done():
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return fmt.Errorf("opencode engine: Issue discussion bridge did not become healthy: %w", lastErr)
+		case <-time.After(startupRetryDelay):
 		}
-		return false, fmt.Errorf("opencode engine: deliver Issue discussion result: %w", err)
 	}
-	t.pending = nil
-	return true, nil
 }
 
-func (t *issueDiscussionToolTracker) applyPart(ctx context.Context, part issueDiscussionToolPart, sessionID string, reader engine.IssueDiscussionReader) error {
-	if part.SessionID != "" && part.SessionID != sessionID {
-		return nil
+func (b *issueDiscussionBridge) Serve(ctx context.Context) error {
+	for {
+		request, found, err := b.next(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("opencode engine: read Issue discussion bridge request: %w", err)
+		}
+		if !found {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(issueDiscussionBridgePoll):
+			}
+			continue
+		}
+		result, readErr := b.reader.ReadIssueDiscussion(ctx, request.Request)
+		response := issueDiscussionBridgeResponse{ID: request.ID}
+		if readErr != nil {
+			response.Error = boundedIssueDiscussionToolError(readErr)
+		} else {
+			response.Result = &result
+		}
+		if err := b.respond(ctx, response); err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("opencode engine: respond to Issue discussion bridge request: %w", err)
+		}
 	}
-	if part.Type != "tool" || part.Tool != issueDiscussionToolName || strings.TrimSpace(part.State.Status) != "completed" {
-		return nil
+}
+
+func (b *issueDiscussionBridge) next(ctx context.Context) (issueDiscussionBridgeRequest, bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, b.baseURL+"/next", nil)
+	if err != nil {
+		return issueDiscussionBridgeRequest{}, false, err
 	}
-	partID := strings.TrimSpace(part.ID)
-	if partID == "" {
-		return fmt.Errorf("opencode engine: Issue discussion tool completion is missing part id")
+	response, err := b.http.Do(req)
+	if err != nil {
+		return issueDiscussionBridgeRequest{}, false, err
 	}
-	if _, duplicate := t.seen[partID]; duplicate {
-		return nil
+	defer response.Body.Close()
+	switch response.StatusCode {
+	case http.StatusNoContent:
+		_, _ = io.Copy(io.Discard, response.Body)
+		return issueDiscussionBridgeRequest{}, false, nil
+	case http.StatusOK:
+		var request issueDiscussionBridgeRequest
+		if err := json.NewDecoder(response.Body).Decode(&request); err != nil {
+			return issueDiscussionBridgeRequest{}, false, err
+		}
+		if strings.TrimSpace(request.ID) == "" {
+			return issueDiscussionBridgeRequest{}, false, fmt.Errorf("request is missing call identity")
+		}
+		return request, true, nil
+	default:
+		data, _ := io.ReadAll(io.LimitReader(response.Body, 4<<10))
+		return issueDiscussionBridgeRequest{}, false, fmt.Errorf("HTTP %d: %s", response.StatusCode, strings.TrimSpace(string(data)))
 	}
-	if reader == nil {
-		return fmt.Errorf("opencode engine: Issue discussion capability is unavailable")
-	}
-	input := decodeToolInput(part.State.Input)
-	request, err := issueDiscussionReadRequest(input)
+}
+
+func (b *issueDiscussionBridge) respond(ctx context.Context, response issueDiscussionBridgeResponse) error {
+	encoded, err := json.Marshal(response)
 	if err != nil {
 		return err
 	}
-	result, err := reader.ReadIssueDiscussion(ctx, request)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.baseURL+"/respond", bytes.NewReader(encoded))
 	if err != nil {
-		return fmt.Errorf("opencode engine: read Issue discussion: %w", err)
+		return err
 	}
-	encoded, err := json.Marshal(result)
+	req.Header.Set("Content-Type", "application/json")
+	result, err := b.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("opencode engine: encode Issue discussion result: %w", err)
+		return err
 	}
-	t.pending = append(t.pending, issueDiscussionPendingResult{partID: partID, body: string(encoded)})
-	t.seen[partID] = struct{}{}
-	return nil
+	defer result.Body.Close()
+	if result.StatusCode == http.StatusNoContent {
+		_, _ = io.Copy(io.Discard, result.Body)
+		return nil
+	}
+	data, _ := io.ReadAll(io.LimitReader(result.Body, 4<<10))
+	return fmt.Errorf("HTTP %d: %s", result.StatusCode, strings.TrimSpace(string(data)))
 }
 
-func issueDiscussionReadRequest(input map[string]any) (engine.IssueDiscussionReadRequest, error) {
-	mode, _ := input["mode"].(string)
-	request := engine.IssueDiscussionReadRequest{Mode: strings.TrimSpace(mode)}
-	if anchor, ok := input["anchorCommentId"].(string); ok {
-		request.AnchorCommentID = strings.TrimSpace(anchor)
+func boundedIssueDiscussionToolError(err error) string {
+	message := strings.TrimSpace(err.Error())
+	if message == "" {
+		return "Issue discussion read failed"
 	}
-	if cursor, ok := input["cursor"].(string); ok {
-		request.Cursor = strings.TrimSpace(cursor)
+	if len(message) > 1024 {
+		message = message[:1024]
 	}
-	if raw, ok := input["limit"]; ok {
-		value, ok := raw.(float64)
-		if !ok || value < 1 || value > 100 || value != float64(int(value)) {
-			return engine.IssueDiscussionReadRequest{}, fmt.Errorf("opencode engine: Issue discussion limit must be an integer between 1 and 100")
-		}
-		request.Limit = int(value)
-	}
-	switch request.Mode {
-	case engine.IssueDiscussionReadRecent, engine.IssueDiscussionReadUpdates:
-	case engine.IssueDiscussionReadThread:
-		if request.AnchorCommentID == "" {
-			return engine.IssueDiscussionReadRequest{}, fmt.Errorf("opencode engine: Issue discussion thread mode requires anchorCommentId")
-		}
-	default:
-		return engine.IssueDiscussionReadRequest{}, fmt.Errorf("opencode engine: unsupported Issue discussion mode %q", request.Mode)
-	}
-	return request, nil
-}
-
-func issueDiscussionResultWasDelivered(messages []client.SessionMessage, partID string) bool {
-	partID = strings.TrimSpace(partID)
-	if partID == "" {
-		return false
-	}
-	marker := issueDiscussionResultMarker(partID)
-	for _, message := range messages {
-		var info struct {
-			Role string `json:"role"`
-		}
-		if json.Unmarshal(message.Info, &info) != nil || info.Role != "user" {
-			continue
-		}
-		for _, raw := range message.Parts {
-			var part struct {
-				Type string `json:"type"`
-				Text string `json:"text"`
-			}
-			if json.Unmarshal(raw, &part) == nil && part.Type == "text" && strings.Contains(part.Text, marker) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func issueDiscussionResultMarker(partID string) string {
-	return issueDiscussionResultMarkerPrefix + strings.TrimSpace(partID) + "]"
+	return message
 }
