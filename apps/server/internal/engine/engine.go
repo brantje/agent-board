@@ -212,6 +212,7 @@ type Request struct {
 	Questions              Questioner
 	InteractiveQuestions   InteractiveQuestioner
 	IssueComments          IssueCommentPublisher
+	IssueDiscussions       IssueDiscussionReader
 	IssueStatus            IssueStatusUpdater
 	Delegation             DelegationRequester
 	DelegationContext      *DelegationToolContext

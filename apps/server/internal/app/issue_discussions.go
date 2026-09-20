@@ -59,8 +59,8 @@ func (s *Service) GetIssueDiscussionThread(ctx context.Context, projectID, issue
 	if s.issueDiscussions == nil {
 		return store.IssueDiscussionThread{}, errors.New("issue discussions are unavailable")
 	}
-	if strings.TrimSpace(anchorCommentID) == "" {
-		return store.IssueDiscussionThread{}, invalid("comment anchor is required")
+	if !validIssueDiscussionCursorID(anchorCommentID) {
+		return store.IssueDiscussionThread{}, invalid("comment anchor must be a UUID")
 	}
 	bounded, err := normalizeIssueDiscussionLimit(limit, issueDiscussionDefaultThreadLimit, issueDiscussionMaxThreadLimit)
 	if err != nil {

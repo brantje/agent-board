@@ -58,7 +58,7 @@ func TestIssueDiscussionApplicationBoundsReadsAndKeepsOpaqueCursor(t *testing.T)
 			ReplyCount:     2,
 			LastActivityAt: cursorPosition.CreatedAt,
 		}},
-		thread: store.IssueDiscussionThread{RootID: "root", AnchorID: "reply"},
+		thread: store.IssueDiscussionThread{RootID: "root", AnchorID: "33333333-3333-4333-8333-333333333333"},
 		updates: store.IssueDiscussionUpdates{
 			NextCursor: &cursorPosition,
 			HasMore:    true,
@@ -70,7 +70,7 @@ func TestIssueDiscussionApplicationBoundsReadsAndKeepsOpaqueCursor(t *testing.T)
 	if err != nil || len(roots) != 1 || fake.rootLimit != issueDiscussionMaxRootLimit {
 		t.Fatalf("roots=%+v limit=%d err=%v", roots, fake.rootLimit, err)
 	}
-	thread, err := service.GetIssueDiscussionThread(t.Context(), projectID, issueID, "reply", 999)
+	thread, err := service.GetIssueDiscussionThread(t.Context(), projectID, issueID, "33333333-3333-4333-8333-333333333333", 999)
 	if err != nil || thread.RootID != "root" || fake.threadLimit != issueDiscussionMaxThreadLimit || fake.threadDepth != issueDiscussionMaxDepth {
 		t.Fatalf("thread=%+v limit=%d depth=%d err=%v", thread, fake.threadLimit, fake.threadDepth, err)
 	}
@@ -86,6 +86,9 @@ func TestIssueDiscussionApplicationBoundsReadsAndKeepsOpaqueCursor(t *testing.T)
 	}
 	if _, err := service.ListIssueDiscussionUpdates(t.Context(), projectID, issueID, "not-a-cursor", 1); err == nil {
 		t.Fatal("invalid cursor unexpectedly succeeded")
+	}
+	if _, err := service.GetIssueDiscussionThread(t.Context(), projectID, issueID, "not-a-uuid", 1); err == nil {
+		t.Fatal("invalid thread anchor unexpectedly succeeded")
 	}
 	if _, err := service.ListRecentIssueDiscussions(t.Context(), projectID, issueID, -1); err == nil {
 		t.Fatal("negative limit unexpectedly succeeded")

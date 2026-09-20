@@ -32,6 +32,7 @@ func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.Saf
 func (p *Processor) engineRequestWithDelegationContinuation(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string, delegationContinuation *engine.DelegationContinuation) (engine.Request, error) {
 	request := engine.Request{Context: safe, Launcher: launcher, DelegationContinuation: delegationContinuation}
 	request.IssueComments = newIssueCommentPublisher(p.issueComments, safe)
+	request.IssueDiscussions = newIssueDiscussionReader(p.issueDiscussions, safe)
 	if safe.Delegation == nil {
 		if statusStore, ok := any(p.store).(issueStatusStore); ok {
 			request.IssueStatus = &issueStatusUpdater{store: statusStore, events: p.events, safe: safe}

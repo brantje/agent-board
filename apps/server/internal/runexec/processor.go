@@ -109,7 +109,8 @@ type Processor struct {
 	branches   *branchObserver
 	git        workspace.Git
 	workspaces    IssueWorkspaceEnsurer
-	issueComments AgentIssueCommentService
+	issueComments    AgentIssueCommentService
+	issueDiscussions AgentIssueDiscussionService
 }
 
 func NewProcessor(
@@ -141,6 +142,7 @@ func (p *Processor) SetWorkspaceEnsurer(ensurer IssueWorkspaceEnsurer) {
 func (p *Processor) SetIssueCommentService(service AgentIssueCommentService) {
 	if p != nil {
 		p.issueComments = service
+		p.issueDiscussions, _ = service.(AgentIssueDiscussionService)
 	}
 }
 
