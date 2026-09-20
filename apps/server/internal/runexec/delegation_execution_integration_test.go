@@ -649,7 +649,9 @@ func TestDelegationTrustedExecutionEndToEnd(t *testing.T) {
 	created := listed[0]
 	var lineage httpapi.DelegationDTO
 	delegationExecutionJSON(t, router, http.MethodGet, "/api/projects/"+project.ID+"/runs/"+created.DelegatedRunID+"/delegation", "", http.StatusOK, &lineage)
-	if lineage.ID != created.ID || lineage.ParentRunID != parentRun.ID || lineage.ParentAgentID != parent.ID || lineage.TargetAgentID != target.ID || lineage.IssueID != issue.ID || lineage.WorkspaceAccess != store.DelegationWorkspaceAccessWrite {
+	if lineage.ID != created.ID || lineage.ParentRunID == nil || *lineage.ParentRunID != parentRun.ID ||
+		lineage.ParentAgentID == nil || *lineage.ParentAgentID != parent.ID || lineage.SourceCommentID != nil ||
+		lineage.TargetAgentID != target.ID || lineage.IssueID != issue.ID || lineage.WorkspaceAccess != store.DelegationWorkspaceAccessWrite {
 		t.Fatalf("child lineage=%+v", lineage)
 	}
 
