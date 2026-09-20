@@ -307,6 +307,27 @@ func TestIssueDiscussionBridgeCloseIdleConnectionsIsNilSafe(t *testing.T) {
 	(&issueDiscussionBridge{}).CloseIdleConnections()
 }
 
+
+func TestIssueDiscussionBridgeRejectsUnavailableReaderAndMalformedQueuePayload(t *testing.T) {
+	t.Run("unavailable reader", func(t *testing.T) {
+		bridge := &issueDiscussionBridge{}
+		if err := bridge.Serve(t.Context()); err == nil || !strings.Contains(err.Error(), "unavailable") {
+			t.Fatalf("serve error=%v", err)
+		}
+	})
+
+	t.Run("malformed queue payload", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte("{"))
+		}))
+		defer server.Close()
+		bridge := &issueDiscussionBridge{http: server.Client(), baseURL: server.URL}
+		if _, _, err := bridge.next(t.Context()); err == nil || !strings.Contains(err.Error(), "decode") {
+			t.Fatalf("next error=%v", err)
+		}
+	})
+}
+
 func TestWaitIssueDiscussionBridgeHealthyHonorsCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "not ready", http.StatusServiceUnavailable)
