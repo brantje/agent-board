@@ -335,6 +335,84 @@ func TestIssueCommentImplicitOwnerFallbackExcludesUserAndUnassignedIssues(t *tes
 	}
 }
 
+func TestIssueCommentImplicitPreviewReportsSuppressionBodyPolicyAndExplicitPrecedence(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	issue, err := f.store.CreateIssue(ctx, store.Issue{
+		ProjectID: f.project.ID, Title: "Implicit preview policy", Status: "TODO",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE issues
+		SET assignee_type='AGENT', assignee_id=$3
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, issue.ID, f.target.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	eligible, err := f.store.PreviewIssueCommentTriggers(
+		ctx, f.project.ID, issue.ID, nil, "Short actionable comment.", store.IssueCommentTriggerRequest{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eligible.Implicit == nil || eligible.Implicit.TargetAgentID != f.target.ID ||
+		eligible.Implicit.RoutingReason != store.IssueCommentImplicitRoutingReasonIssueAssignee ||
+		!eligible.Implicit.Eligible || eligible.Implicit.Suppressed || eligible.Implicit.ReasonCode != nil {
+		t.Fatalf("eligible preview=%+v", eligible)
+	}
+
+	suppressed, err := f.store.PreviewIssueCommentTriggers(
+		ctx, f.project.ID, issue.ID, nil, "Short actionable comment.",
+		store.IssueCommentTriggerRequest{SuppressImplicit: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suppressed.Implicit == nil || suppressed.Implicit.TargetAgentID != f.target.ID ||
+		suppressed.Implicit.Eligible || !suppressed.Implicit.Suppressed || suppressed.Implicit.ReasonCode != nil {
+		t.Fatalf("suppressed preview=%+v", suppressed)
+	}
+
+	longBody := strings.Repeat("x", store.MaxDelegationTaskCharacters+1)
+	blocked, err := f.store.PreviewIssueCommentTriggers(
+		ctx, f.project.ID, issue.ID, nil, longBody, store.IssueCommentTriggerRequest{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Implicit == nil || blocked.Implicit.Eligible || blocked.Implicit.Suppressed ||
+		blocked.Implicit.ReasonCode == nil || *blocked.Implicit.ReasonCode != store.IssueCommentMentionReasonDelegationBlocked {
+		t.Fatalf("long-body preview=%+v", blocked)
+	}
+
+	explicit, err := f.store.PreviewIssueCommentTriggers(
+		ctx, f.project.ID, issue.ID, nil, "Explicit request.",
+		store.IssueCommentTriggerRequest{MentionAgentIDs: []string{f.target.ID}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(explicit.Mentions) != 1 || explicit.Mentions[0].TargetAgentID != f.target.ID ||
+		!explicit.Mentions[0].Eligible || explicit.Implicit != nil {
+		t.Fatalf("explicit preview=%+v", explicit)
+	}
+
+	blankParent := " "
+	if _, err := f.store.PreviewIssueCommentTriggers(
+		ctx, f.project.ID, issue.ID, &blankParent, "body", store.IssueCommentTriggerRequest{},
+	); err != store.ErrInvalidArgument {
+		t.Fatalf("blank parent error=%v want invalid argument", err)
+	}
+	if _, err := f.store.PreviewIssueCommentTriggers(
+		ctx, " ", issue.ID, nil, "body", store.IssueCommentTriggerRequest{},
+	); err != store.ErrInvalidArgument {
+		t.Fatalf("blank project error=%v want invalid argument", err)
+	}
+}
+
 func TestIssueCommentImplicitPreviewRejectsCrossIssueParent(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
