@@ -188,6 +188,174 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	assertOpenCodeDelegationResultEvidence(t, fixture, project.ID, parentRun.ID, child.ID)
 }
 
+
+func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T) {
+	fixture := newOpenCodeIntegrationFixture(t)
+	if !strings.EqualFold(fixture.env.providerKind, "openrouter") {
+		t.Skip("OpenRouter provider is required for the structured mention E2E")
+	}
+
+	const (
+		expectedBody      = "Create mentioned-result.txt containing exactly structured-mention-child-ok with no trailing newline. Plain @OpenCode integration agent prose is inert."
+		expectedChildFile = "structured-mention-child-ok"
+	)
+	setup := fixture.createRunSetup(t, openCodeRunSpec{
+		roleInstructions: "Follow the issue instructions exactly. Do not ask a Question, delegate, publish a comment, change Issue status, or modify files unless explicitly directed.",
+		title:            "Prove structured Agent mention delegation",
+		description:      "Publish the requested structured Issue mention through publish_issue_comment. Do not call delegate_task.",
+	})
+	project := setup.Project
+	parentAgent := setup.Agent
+	scope := project.ID
+	target, err := fixture.services.ControlPlane.CreateAgent(fixture.ctx, store.Agent{
+		ProjectID: &scope,
+		Name: "OpenCode structured mention target",
+		RoleInstructions: "Perform only the bounded delegated task. Plain @name text is prose and has no routing meaning. Do not publish comments, delegate, ask a Question, or change Issue status.",
+		Engine: opencode.Name,
+		ModelProfileID: parentAgent.ModelProfileID,
+		EngineSettings: store.EmptyObject,
+		ConcurrencyLimit: 1,
+		State: "ENABLED",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentAgent.AllowDelegation = true
+	parentAgent.RoleInstructions = "If the prompt contains 'Delegation result returned to this parent Run:', do not call publish_issue_comment or delegate_task again. Verify mentioned-result.txt contains exactly structured-mention-child-ok, then create parent-after-mention.txt containing exactly parent-after-mention-ok with no trailing newline and finish normally without changing Issue status. Otherwise call publish_issue_comment exactly once. Pass exactly this raw body string with no added punctuation or formatting: " + expectedBody + " Set mentionAgentIds to a single-item array containing exactly this stable Agent ID: " + target.ID + ". Use the trusted Available delegation targets only to confirm that exact ID is available; do not substitute a name or another ID. Do not call delegate_task. Do not ask a Question, change Issue status, or modify files. After publish_issue_comment completes, stop."
+	if _, err := fixture.services.ControlPlane.UpdateAgent(fixture.ctx, &scope, parentAgent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixture.services.ControlPlane.SetIssueAssignee(
+		fixture.ctx,
+		project.ID,
+		setup.Issue.ID,
+		&store.Assignee{Type: "AGENT", ID: parentAgent.ID},
+		store.EmptyObject,
+	); err != nil {
+		t.Fatal(err)
+	}
+	runs, err := fixture.services.ControlPlane.ListRuns(fixture.ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parentRun store.Run
+	for _, run := range runs {
+		if run.IssueID == setup.Issue.ID && run.AgentID != nil && *run.AgentID == parentAgent.ID {
+			parentRun = run
+			break
+		}
+	}
+	if parentRun.ID == "" {
+		t.Fatal("Agent assignment did not create the authoritative parent Run")
+	}
+
+	fixture.startScheduler(t)
+	delegation := waitForOpenCodeDelegation(t, fixture, project.ID, parentRun.ID)
+	if delegation.ParentRunID != parentRun.ID || delegation.ParentAgentID != parentAgent.ID ||
+		delegation.SourceCommentID != nil || delegation.TargetAgentID != target.ID ||
+		delegation.DelegatedRunID == "" || delegation.Task != expectedBody {
+		t.Fatalf("structured mention delegation=%+v", delegation)
+	}
+	parentPaused := waitForOpenCodeRunStatus(t, fixture, project.ID, parentRun.ID, "PAUSED")
+	if parentPaused.WorkspaceID != parentRun.WorkspaceID {
+		t.Fatalf("paused parent Workspace=%s want %s", parentPaused.WorkspaceID, parentRun.WorkspaceID)
+	}
+
+	events, err := fixture.database.ListRunEvents(fixture.ctx, project.ID, parentRun.ID, 0, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completedPublishes := 0
+	for _, event := range events {
+		if event.Type != "tool.started" && event.Type != "tool.completed" && event.Type != "tool.failed" {
+			continue
+		}
+		var payload struct {
+			Name  string         `json:"name"`
+			Input map[string]any `json:"input"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatalf("decode tool evidence: %v", err)
+		}
+		if payload.Name == "delegate_task" {
+			t.Fatalf("structured mention parent invoked delegate_task: events=%v", eventTypes(events))
+		}
+		if event.Type != "tool.completed" || payload.Name != "publish_issue_comment" {
+			continue
+		}
+		completedPublishes++
+		if body, _ := payload.Input["body"].(string); body != expectedBody {
+			t.Fatalf("publish_issue_comment body=%q want %q", body, expectedBody)
+		}
+		mentionIDs, ok := payload.Input["mentionAgentIds"].([]any)
+		if !ok || len(mentionIDs) != 1 || mentionIDs[0] != target.ID {
+			t.Fatalf("publish_issue_comment mentionAgentIds=%+v want [%s]", payload.Input["mentionAgentIds"], target.ID)
+		}
+	}
+	if completedPublishes != 1 {
+		t.Fatalf("publish_issue_comment completions=%d want exactly one; events=%v", completedPublishes, eventTypes(events))
+	}
+
+	comments, err := fixture.services.ControlPlane.ListIssueComments(fixture.ctx, project.ID, parentRun.IssueID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 {
+		t.Fatalf("durable Issue comments=%+v want exactly one", comments)
+	}
+	comment := comments[0]
+	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != parentAgent.ID ||
+		comment.SourceRunID == nil || *comment.SourceRunID != parentRun.ID ||
+		comment.Body != expectedBody || len(comment.Mentions) != 1 {
+		t.Fatalf("structured Agent comment=%+v", comment)
+	}
+	if !strings.Contains(comment.Body, "@"+parentAgent.Name) {
+		t.Fatalf("comment body does not contain the inert plain-prose mention proof: %q", comment.Body)
+	}
+	mention := comment.Mentions[0]
+	if mention.TargetAgentID != target.ID || mention.TargetAgentName != target.Name ||
+		mention.Outcome != store.IssueCommentMentionOutcomeQueued || mention.ReasonCode != nil ||
+		mention.DelegationID == nil || *mention.DelegationID != delegation.ID ||
+		mention.DelegatedRunID == nil || *mention.DelegatedRunID != delegation.DelegatedRunID {
+		t.Fatalf("structured mention=%+v delegation=%+v", mention, delegation)
+	}
+	if mention.TargetAgentID == parentAgent.ID {
+		t.Fatalf("plain prose @%s incorrectly determined the structured routing target", parentAgent.Name)
+	}
+
+	child := waitForOpenCodeTerminalRun(t, fixture, project.ID, delegation.DelegatedRunID)
+	if child.Status != "COMPLETED" {
+		t.Fatalf("delegated Run status=%s failure=%q", child.Status, openCodeFailureReason(child.FailureReason))
+	}
+	if child.AgentID == nil || *child.AgentID != target.ID {
+		t.Fatalf("delegated Run Agent=%v want %s", child.AgentID, target.ID)
+	}
+	if child.WorkspaceID != parentRun.WorkspaceID {
+		t.Fatalf("delegated Run workspace=%s want parent workspace %s", child.WorkspaceID, parentRun.WorkspaceID)
+	}
+	assertOpenCodeWorkspaceFile(t, fixture.ctx, fixture.database, project.ID, child.WorkspaceID, "mentioned-result.txt", expectedChildFile)
+	assertOpenCodeServerSession(t, fixture.ctx, fixture.database, project.ID, child.ID, false)
+	assertOpenCodeCommentMentionHandoffOrder(t, fixture, project.ID, parentRun.ID, child.ID)
+	assertNoAuthoritativeDelegationTools(t, fixture, project.ID, child.ID)
+
+	persisted, err := fixture.database.GetDelegationByRun(fixture.ctx, project.ID, child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ID != delegation.ID || persisted.ParentRunID != parentRun.ID ||
+		persisted.ParentAgentID != parentAgent.ID || persisted.SourceCommentID != nil ||
+		persisted.TargetAgentID != target.ID || persisted.DelegatedRunID != child.ID {
+		t.Fatalf("persisted structured mention delegation=%+v", persisted)
+	}
+
+	parentFinal := waitForOpenCodeTerminalRun(t, fixture, project.ID, parentRun.ID)
+	if parentFinal.Status != "READY_FOR_REVIEW" {
+		t.Fatalf("parent continuation status=%s failure=%q", parentFinal.Status, openCodeFailureReason(parentFinal.FailureReason))
+	}
+	assertOpenCodeWorkspaceFile(t, fixture.ctx, fixture.database, project.ID, parentFinal.WorkspaceID, "parent-after-mention.txt", "parent-after-mention-ok")
+}
+
+
 func waitForOpenCodeDelegation(t *testing.T, fixture *openCodeIntegrationFixture, projectID, parentRunID string) store.Delegation {
 	t.Helper()
 	ticker := time.NewTicker(100 * time.Millisecond)
@@ -342,11 +510,21 @@ func assertOpenCodeDelegationToolEvidence(t *testing.T, fixture *openCodeIntegra
 
 func assertOpenCodeDelegationHandoffOrder(t *testing.T, fixture *openCodeIntegrationFixture, projectID, parentRunID, childRunID string) {
 	t.Helper()
+	assertOpenCodeToolHandoffOrder(t, fixture, projectID, parentRunID, childRunID, "delegate_task")
+}
+
+func assertOpenCodeCommentMentionHandoffOrder(t *testing.T, fixture *openCodeIntegrationFixture, projectID, parentRunID, childRunID string) {
+	t.Helper()
+	assertOpenCodeToolHandoffOrder(t, fixture, projectID, parentRunID, childRunID, "publish_issue_comment")
+}
+
+func assertOpenCodeToolHandoffOrder(t *testing.T, fixture *openCodeIntegrationFixture, projectID, parentRunID, childRunID, toolName string) {
+	t.Helper()
 	parentEvents, err := fixture.database.ListRunEvents(fixture.ctx, projectID, parentRunID, 0, 500)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var delegateCompleted, workspaceReturned, paused *store.Event
+	var toolCompleted, workspaceReturned, paused *store.Event
 	for index := range parentEvents {
 		event := &parentEvents[index]
 		switch event.Type {
@@ -354,8 +532,8 @@ func assertOpenCodeDelegationHandoffOrder(t *testing.T, fixture *openCodeIntegra
 			var payload struct {
 				Name string `json:"name"`
 			}
-			if json.Unmarshal(event.Payload, &payload) == nil && payload.Name == "delegate_task" {
-				delegateCompleted = event
+			if json.Unmarshal(event.Payload, &payload) == nil && payload.Name == toolName {
+				toolCompleted = event
 			}
 		case "workspace.transfer.completed":
 			var payload struct {
@@ -368,14 +546,15 @@ func assertOpenCodeDelegationHandoffOrder(t *testing.T, fixture *openCodeIntegra
 			paused = event
 		}
 	}
-	if delegateCompleted == nil || workspaceReturned == nil || paused == nil ||
-		delegateCompleted.Sequence == nil || workspaceReturned.Sequence == nil || paused.Sequence == nil {
-		t.Fatalf("missing durable phase-2 handoff evidence: %v", eventTypes(parentEvents))
+	if toolCompleted == nil || workspaceReturned == nil || paused == nil ||
+		toolCompleted.Sequence == nil || workspaceReturned.Sequence == nil || paused.Sequence == nil {
+		t.Fatalf("missing durable handoff evidence for %s: %v", toolName, eventTypes(parentEvents))
 	}
-	if !(*delegateCompleted.Sequence < *workspaceReturned.Sequence && *workspaceReturned.Sequence < *paused.Sequence) {
+	if !(*toolCompleted.Sequence < *workspaceReturned.Sequence && *workspaceReturned.Sequence < *paused.Sequence) {
 		t.Fatalf(
-			"phase-2 parent event order delegate=%d workspace=%d paused=%d",
-			*delegateCompleted.Sequence,
+			"parent handoff event order tool=%s completed=%d workspace=%d paused=%d",
+			toolName,
+			*toolCompleted.Sequence,
 			*workspaceReturned.Sequence,
 			*paused.Sequence,
 		)
