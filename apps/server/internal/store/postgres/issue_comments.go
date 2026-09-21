@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 	"github.com/jackc/pgx/v5"
@@ -48,6 +50,9 @@ func (s *Store) ListIssueComments(ctx context.Context, projectID, issueID string
 	if err := s.loadIssueCommentReactions(ctx, projectID, issueID, values); err != nil {
 		return nil, err
 	}
+	if err := s.loadIssueCommentMentions(ctx, projectID, issueID, values); err != nil {
+		return nil, err
+	}
 	return values, nil
 }
 
@@ -75,25 +80,84 @@ func (s *Store) GetIssueComment(ctx context.Context, projectID, issueID, comment
 	if err := s.loadIssueCommentReactions(ctx, projectID, issueID, values); err != nil {
 		return store.IssueComment{}, err
 	}
+	if err := s.loadIssueCommentMentions(ctx, projectID, issueID, values); err != nil {
+		return store.IssueComment{}, err
+	}
 	return values[0], nil
 }
 
 func (s *Store) CreateIssueComment(ctx context.Context, projectID string, input store.IssueComment) (store.IssueCommentMutationResult, error) {
+	return s.createIssueComment(ctx, projectID, input, nil)
+}
+
+func (s *Store) CreateIssueCommentWithMentions(ctx context.Context, projectID string, input store.IssueComment, mentionAgentIDs []string) (store.IssueCommentMutationResult, error) {
+	return s.createIssueComment(ctx, projectID, input, mentionAgentIDs)
+}
+
+func (s *Store) PreviewIssueCommentMentions(ctx context.Context, projectID, issueID string, mentionAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
+	projectID = strings.TrimSpace(projectID)
+	issueID = strings.TrimSpace(issueID)
+	mentions, err := normalizeIssueCommentMentionAgentIDs(mentionAgentIDs)
+	if err != nil || projectID == "" || issueID == "" {
+		return nil, store.ErrInvalidArgument
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var exists bool
+	if err := tx.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM issues WHERE project_id=$1 AND id=$2)
+	`, projectID, issueID).Scan(&exists); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, store.ErrNotFound
+	}
+	result := make([]store.IssueCommentMentionPreview, 0, len(mentions))
+	for _, targetAgentID := range mentions {
+		preview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, issueID, targetAgentID)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, preview)
+	}
+	return result, nil
+}
+
+func (s *Store) createIssueComment(ctx context.Context, projectID string, input store.IssueComment, mentionAgentIDs []string) (store.IssueCommentMutationResult, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(input.IssueID) == "" || strings.TrimSpace(input.AuthorID) == "" || strings.TrimSpace(input.Body) == "" || !store.ValidActorType(input.AuthorType) {
 		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 	}
 	if input.ParentCommentID != nil && strings.TrimSpace(*input.ParentCommentID) == "" {
 		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 	}
+	mentions, err := normalizeIssueCommentMentionAgentIDs(mentionAgentIDs)
+	if err != nil {
+		return store.IssueCommentMutationResult{}, err
+	}
+	if input.SourceActionKey != nil {
+		value := strings.TrimSpace(*input.SourceActionKey)
+		if value == "" {
+			return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
+		}
+		input.SourceActionKey = &value
+	}
+	if len(mentions) != 0 && input.SourceActionKey == nil {
+		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
+	}
 	switch input.AuthorType {
 	case store.ActorTypeHuman:
-		if input.SourceRunID != nil || input.SourceActionKey != nil {
+		if input.SourceRunID != nil {
 			return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 		}
 	case store.ActorTypeAgent:
-		if input.SourceRunID == nil || strings.TrimSpace(*input.SourceRunID) == "" || input.SourceActionKey == nil || strings.TrimSpace(*input.SourceActionKey) == "" {
+		if input.SourceRunID == nil || strings.TrimSpace(*input.SourceRunID) == "" || input.SourceActionKey == nil {
 			return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 		}
+	default:
+		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 	}
 
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
@@ -107,7 +171,6 @@ func (s *Store) CreateIssueComment(ctx context.Context, projectID string, input 
 		SELECT id::text
 		FROM issues
 		WHERE project_id = $1 AND id = $2
-		FOR SHARE
 	`, projectID, input.IssueID).Scan(&issueID); err != nil {
 		return store.IssueCommentMutationResult{}, notFound(err)
 	}
@@ -145,38 +208,35 @@ func (s *Store) CreateIssueComment(ctx context.Context, projectID string, input 
 	comment, err := scanIssueComment(tx.QueryRow(ctx, `
 		INSERT INTO issue_comments (issue_id, parent_comment_id, author_type, author_id, source_run_id, source_action_key, body)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (source_run_id, source_action_key)
-		WHERE source_run_id IS NOT NULL AND source_action_key IS NOT NULL
-		DO NOTHING
+		ON CONFLICT DO NOTHING
 		RETURNING id::text, issue_id::text, parent_comment_id::text, author_type, author_id::text,
 		          $8::text, source_run_id::text, source_action_key, COALESCE(body, ''), deleted_at, resolved_at, resolved_by_user_id::text,
 		          ''::text, created_at, updated_at
 	`, issueID, input.ParentCommentID, input.AuthorType, input.AuthorID, input.SourceRunID, input.SourceActionKey, input.Body, authorName))
-	if errors.Is(err, store.ErrNotFound) && input.AuthorType == store.ActorTypeAgent {
-		existing, lookupErr := scanIssueComment(tx.QueryRow(ctx, `
-			SELECT c.id::text, c.issue_id::text, c.parent_comment_id::text, c.author_type, c.author_id::text,
-			       COALESCE(a.name, ''), c.source_run_id::text, c.source_action_key, COALESCE(c.body, ''),
-			       c.deleted_at, c.resolved_at, c.resolved_by_user_id::text,
-			       COALESCE(u.display_name, ''), c.created_at, c.updated_at
-			FROM issue_comments AS c
-			LEFT JOIN agents AS a ON a.id = c.author_id
-			LEFT JOIN users AS u ON u.id = c.resolved_by_user_id
-			WHERE c.source_run_id = $1 AND c.source_action_key = $2
-		`, input.SourceRunID, input.SourceActionKey))
+	if errors.Is(err, store.ErrNotFound) && input.SourceActionKey != nil {
+		existing, lookupErr := existingIssueCommentRequest(ctx, tx, issueID, authorName, input)
 		if lookupErr != nil {
 			return store.IssueCommentMutationResult{}, lookupErr
 		}
-		if !sameIssueCommentSourceAction(existing, input) {
+		if !sameIssueCommentRequest(existing, input) {
+			return store.IssueCommentMutationResult{}, store.ErrConflict
+		}
+		values := []store.IssueComment{existing}
+		if err := loadIssueCommentMentionsWith(ctx, tx, projectID, issueID, values); err != nil {
+			return store.IssueCommentMutationResult{}, err
+		}
+		if !sameIssueCommentMentionTargets(values[0].Mentions, mentions) {
 			return store.IssueCommentMutationResult{}, store.ErrConflict
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return store.IssueCommentMutationResult{}, err
 		}
-		return store.IssueCommentMutationResult{Comment: existing}, nil
+		return store.IssueCommentMutationResult{Comment: values[0]}, nil
 	}
 	if err != nil {
 		return store.IssueCommentMutationResult{}, err
 	}
+
 	actor, err := json.Marshal(map[string]string{"type": input.AuthorType, "id": input.AuthorID})
 	if err != nil {
 		return store.IssueCommentMutationResult{}, err
@@ -201,10 +261,185 @@ func (s *Store) CreateIssueComment(ctx context.Context, projectID string, input 
 		return store.IssueCommentMutationResult{}, err
 	}
 
+	mentionValues, delegationEvents, err := s.createIssueCommentMentionsTx(ctx, tx, projectID, comment, mentions)
+	if err != nil {
+		return store.IssueCommentMutationResult{}, err
+	}
+	comment.Mentions = mentionValues
+
 	if err := tx.Commit(ctx); err != nil {
 		return store.IssueCommentMutationResult{}, err
 	}
-	return store.IssueCommentMutationResult{Comment: comment, Events: []store.Event{event}}, nil
+	events := make([]store.Event, 0, 1+len(delegationEvents))
+	events = append(events, event)
+	events = append(events, delegationEvents...)
+	return store.IssueCommentMutationResult{Comment: comment, Events: events}, nil
+}
+
+func existingIssueCommentRequest(ctx context.Context, tx pgx.Tx, issueID, authorName string, input store.IssueComment) (store.IssueComment, error) {
+	if input.SourceActionKey == nil {
+		return store.IssueComment{}, store.ErrNotFound
+	}
+	if input.AuthorType == store.ActorTypeAgent {
+		return scanIssueComment(tx.QueryRow(ctx, `
+			SELECT c.id::text, c.issue_id::text, c.parent_comment_id::text, c.author_type, c.author_id::text,
+			       $3::text, c.source_run_id::text, c.source_action_key, COALESCE(c.body, ''),
+			       c.deleted_at, c.resolved_at, c.resolved_by_user_id::text,
+			       COALESCE(u.display_name, ''), c.created_at, c.updated_at
+			FROM issue_comments AS c
+			LEFT JOIN users AS u ON u.id = c.resolved_by_user_id
+			WHERE c.source_run_id = $1 AND c.source_action_key = $2
+		`, input.SourceRunID, input.SourceActionKey, authorName))
+	}
+	return scanIssueComment(tx.QueryRow(ctx, `
+		SELECT c.id::text, c.issue_id::text, c.parent_comment_id::text, c.author_type, c.author_id::text,
+		       $4::text, c.source_run_id::text, c.source_action_key, COALESCE(c.body, ''),
+		       c.deleted_at, c.resolved_at, c.resolved_by_user_id::text,
+		       COALESCE(u.display_name, ''), c.created_at, c.updated_at
+		FROM issue_comments AS c
+		LEFT JOIN users AS u ON u.id = c.resolved_by_user_id
+		WHERE c.issue_id=$1 AND c.author_type='HUMAN' AND c.author_id=$2 AND c.source_action_key=$3
+	`, issueID, input.AuthorID, input.SourceActionKey, authorName))
+}
+
+func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, projectID string, comment store.IssueComment, mentionAgentIDs []string) ([]store.IssueCommentMention, []store.Event, error) {
+	if len(mentionAgentIDs) == 0 {
+		return nil, nil, nil
+	}
+	result := make([]store.IssueCommentMention, 0, len(mentionAgentIDs))
+	events := make([]store.Event, 0, len(mentionAgentIDs))
+	for index, targetAgentID := range mentionAgentIDs {
+		preview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, comment.IssueID, targetAgentID)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		var delegationID *string
+		var delegatedRunID *string
+		var reasonCode *string
+		outcome := store.IssueCommentMentionOutcomeBlocked
+		if !preview.Eligible {
+			reasonCode = preview.ReasonCode
+		} else if utf8.RuneCountInString(comment.Body) > store.MaxDelegationTaskCharacters {
+			reason := store.IssueCommentMentionReasonDelegationBlocked
+			reasonCode = &reason
+		} else {
+			requestKey := issueCommentMentionRequestKey(comment.ID, index, targetAgentID)
+			var delegation store.RequestDelegationResult
+			if comment.AuthorType == store.ActorTypeAgent {
+				delegation, err = s.requestDelegationTx(ctx, tx, store.RequestDelegationCommand{
+					ProjectID: projectID, ParentRunID: *comment.SourceRunID, TargetAgentID: targetAgentID,
+					Task: comment.Body, RequestKey: requestKey,
+				})
+			} else {
+				delegation, err = s.requestIssueDelegationTx(ctx, tx, store.RequestIssueDelegationCommand{
+					ProjectID: projectID, IssueID: comment.IssueID, SourceCommentID: comment.ID, TargetAgentID: targetAgentID,
+					Task: comment.Body, RequestKey: requestKey,
+				})
+			}
+			if err == nil {
+				outcome = store.IssueCommentMentionOutcomeQueued
+				delegationID = &delegation.Delegation.ID
+				delegatedRunID = &delegation.DelegatedRun.ID
+				events = append(events, delegation.Events...)
+			} else if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalidArgument) {
+				reason := store.IssueCommentMentionReasonDelegationBlocked
+				reasonCode = &reason
+			} else {
+				return nil, nil, err
+			}
+		}
+
+		var mention store.IssueCommentMention
+		if err := tx.QueryRow(ctx, `
+			INSERT INTO issue_comment_mentions (
+				project_id, issue_id, comment_id, ordinal, target_agent_id, outcome, reason_code, delegation_id
+			)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+			RETURNING id::text, target_agent_id::text, outcome, reason_code, delegation_id::text, created_at
+		`, projectID, comment.IssueID, comment.ID, index, targetAgentID, outcome, reasonCode, delegationID).Scan(
+			&mention.ID, &mention.TargetAgentID, &mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.CreatedAt,
+		); err != nil {
+			return nil, nil, err
+		}
+		mention.TargetAgentName = preview.TargetAgentName
+		mention.DelegatedRunID = delegatedRunID
+		result = append(result, mention)
+	}
+	return result, events, nil
+}
+
+func (s *Store) issueCommentMentionTargetTx(ctx context.Context, tx pgx.Tx, projectID, issueID, targetAgentID string) (store.IssueCommentMentionPreview, error) {
+	preview := store.IssueCommentMentionPreview{TargetAgentID: targetAgentID}
+	if err := tx.QueryRow(ctx, `
+		SELECT name
+		FROM agents
+		WHERE id=$2 AND (project_id IS NULL OR project_id=$1)
+		FOR SHARE
+	`, projectID, targetAgentID).Scan(&preview.TargetAgentName); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			reason := store.IssueCommentMentionReasonTargetUnavailable
+			preview.ReasonCode = &reason
+			return preview, nil
+		}
+		return store.IssueCommentMentionPreview{}, err
+	}
+	if err := s.verifyRunnableAgent(ctx, tx, projectID, targetAgentID); err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
+			reason := store.IssueCommentMentionReasonTargetUnavailable
+			preview.ReasonCode = &reason
+			return preview, nil
+		}
+		return store.IssueCommentMentionPreview{}, err
+	}
+	if _, err := activeRunForAgent(ctx, tx, projectID, issueID, targetAgentID); err == nil {
+		reason := store.IssueCommentMentionReasonTargetBusy
+		preview.ReasonCode = &reason
+		return preview, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return store.IssueCommentMentionPreview{}, err
+	}
+	preview.Eligible = true
+	return preview, nil
+}
+
+func issueCommentMentionRequestKey(commentID string, ordinal int, targetAgentID string) string {
+	return fmt.Sprintf("comment:%s:mention:%d:%s", commentID, ordinal, targetAgentID)
+}
+
+func normalizeIssueCommentMentionAgentIDs(values []string) ([]string, error) {
+	if len(values) > store.MaxIssueCommentMentions {
+		return nil, store.ErrInvalidArgument
+	}
+	result := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if !validUUIDText(value) {
+			return nil, store.ErrInvalidArgument
+		}
+		if _, duplicate := seen[value]; duplicate {
+			return nil, store.ErrInvalidArgument
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result, nil
+}
+
+func validUUIDText(value string) bool {
+	if len(value) != 36 || value[8] != '-' || value[13] != '-' || value[18] != '-' || value[23] != '-' {
+		return false
+	}
+	for index, char := range value {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			continue
+		}
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') || (char >= 'A' && char <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) UpdateIssueComment(ctx context.Context, projectID, issueID, commentID, actorID, body string) (store.IssueCommentMutationResult, error) {
@@ -289,18 +524,21 @@ func (s *Store) DeleteIssueComment(ctx context.Context, projectID, issueID, comm
 		return store.IssueCommentDeleteResult{}, nil
 	}
 
-	var hasReplies bool
+	var preserveComment bool
 	if err := tx.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM issue_comments
 			WHERE issue_id = $1 AND parent_comment_id = $2
+		) OR EXISTS (
+			SELECT 1 FROM issue_comment_mentions
+			WHERE issue_id = $1 AND comment_id = $2
 		)
-	`, issueID, commentID).Scan(&hasReplies); err != nil {
+	`, issueID, commentID).Scan(&preserveComment); err != nil {
 		return store.IssueCommentDeleteResult{}, err
 	}
 
 	var changedAt time.Time
-	if hasReplies {
+	if preserveComment {
 		if _, err := tx.Exec(ctx, `DELETE FROM issue_comment_reactions WHERE issue_id = $1 AND comment_id = $2`, issueID, commentID); err != nil {
 			return store.IssueCommentDeleteResult{}, err
 		}
@@ -546,6 +784,60 @@ func (s *Store) loadIssueCommentReactions(ctx context.Context, projectID, issueI
 	return rows.Err()
 }
 
+type issueCommentRowsQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func (s *Store) loadIssueCommentMentions(ctx context.Context, projectID, issueID string, values []store.IssueComment) error {
+	return loadIssueCommentMentionsWith(ctx, s.pool, projectID, issueID, values)
+}
+
+func loadIssueCommentMentionsWith(ctx context.Context, q issueCommentRowsQuerier, projectID, issueID string, values []store.IssueComment) error {
+	if len(values) == 0 {
+		return nil
+	}
+	rows, err := q.Query(ctx, `
+		SELECT m.comment_id::text, m.id::text, m.target_agent_id::text,
+		       COALESCE(a.name, ''), m.outcome, m.reason_code, m.delegation_id::text,
+		       d.delegated_run_id::text, m.created_at
+		FROM issue_comment_mentions AS m
+		LEFT JOIN agents AS a
+		  ON a.id=m.target_agent_id
+		 AND (a.project_id IS NULL OR a.project_id=m.project_id)
+		LEFT JOIN delegations AS d
+		  ON d.project_id=m.project_id
+		 AND d.id=m.delegation_id
+		WHERE m.project_id=$1 AND m.issue_id=$2
+		ORDER BY m.comment_id, m.ordinal
+	`, projectID, issueID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	byID := make(map[string]int, len(values))
+	for index := range values {
+		byID[values[index].ID] = index
+		values[index].Mentions = nil
+	}
+	for rows.Next() {
+		var commentID string
+		var mention store.IssueCommentMention
+		if err := rows.Scan(
+			&commentID, &mention.ID, &mention.TargetAgentID, &mention.TargetAgentName,
+			&mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.DelegatedRunID, &mention.CreatedAt,
+		); err != nil {
+			return err
+		}
+		index, ok := byID[commentID]
+		if !ok {
+			continue
+		}
+		values[index].Mentions = append(values[index].Mentions, mention)
+	}
+	return rows.Err()
+}
+
 func appendIssueCommentChangedEventTx(ctx context.Context, tx pgx.Tx, projectID, issueID, commentID, actorID, change string, reaction *string, occurredAt time.Time) (store.Event, error) {
 	actor, err := json.Marshal(map[string]string{"type": store.ActorTypeHuman, "id": actorID})
 	if err != nil {
@@ -586,7 +878,7 @@ func issueCommentAuthorName(ctx context.Context, tx pgx.Tx, projectID, authorTyp
 	return name, nil
 }
 
-func sameIssueCommentSourceAction(existing, requested store.IssueComment) bool {
+func sameIssueCommentRequest(existing, requested store.IssueComment) bool {
 	if existing.IssueID != requested.IssueID || existing.AuthorType != requested.AuthorType || existing.AuthorID != requested.AuthorID || existing.Body != requested.Body {
 		return false
 	}
@@ -596,8 +888,25 @@ func sameIssueCommentSourceAction(existing, requested store.IssueComment) bool {
 	if existing.ParentCommentID != nil && *existing.ParentCommentID != *requested.ParentCommentID {
 		return false
 	}
-	return existing.SourceRunID != nil && requested.SourceRunID != nil && *existing.SourceRunID == *requested.SourceRunID &&
-		existing.SourceActionKey != nil && requested.SourceActionKey != nil && *existing.SourceActionKey == *requested.SourceActionKey
+	if existing.SourceActionKey == nil || requested.SourceActionKey == nil || *existing.SourceActionKey != *requested.SourceActionKey {
+		return false
+	}
+	if existing.AuthorType == store.ActorTypeHuman {
+		return existing.SourceRunID == nil && requested.SourceRunID == nil
+	}
+	return existing.SourceRunID != nil && requested.SourceRunID != nil && *existing.SourceRunID == *requested.SourceRunID
+}
+
+func sameIssueCommentMentionTargets(existing []store.IssueCommentMention, requested []string) bool {
+	if len(existing) != len(requested) {
+		return false
+	}
+	for index := range existing {
+		if existing[index].TargetAgentID != requested[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func scanIssueComment(row pgx.Row) (store.IssueComment, error) {

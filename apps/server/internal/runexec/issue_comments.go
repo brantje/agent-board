@@ -13,7 +13,7 @@ import (
 // AgentIssueCommentService is the shared application boundary used by Run
 // execution to publish deliberate Agent-authored Issue collaboration.
 type AgentIssueCommentService interface {
-	PublishAgentIssueComment(context.Context, string, string, string, string) (store.IssueComment, error)
+	PublishAgentIssueComment(context.Context, string, string, string, string, []string) (store.IssueComment, error)
 }
 
 type issueCommentPublisher struct {
@@ -43,9 +43,23 @@ func (p *issueCommentPublisher) PublishIssueComment(ctx context.Context, request
 		p.safe.Run.ID,
 		request.RequestKey,
 		request.Body,
+		request.MentionAgentIDs,
 	)
 	if err != nil {
 		return engine.PublishedIssueComment{}, err
 	}
-	return engine.PublishedIssueComment{ID: comment.ID}, nil
+	published := engine.PublishedIssueComment{ID: comment.ID}
+	for _, mention := range comment.Mentions {
+		if mention.Outcome != store.IssueCommentMentionOutcomeQueued {
+			continue
+		}
+		if mention.DelegationID == nil || mention.DelegatedRunID == nil {
+			return engine.PublishedIssueComment{}, fmt.Errorf("run execution: queued Issue comment mention is missing delegation lineage")
+		}
+		if published.Delegation != nil {
+			return engine.PublishedIssueComment{}, fmt.Errorf("run execution: Agent-authored Issue comment queued multiple delegations")
+		}
+		published.Delegation = &engine.Delegation{ID: *mention.DelegationID, RunID: *mention.DelegatedRunID}
+	}
+	return published, nil
 }

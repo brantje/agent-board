@@ -1,9 +1,38 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import { chromium, request } from 'playwright'
 
 const webBaseURL = process.env.AGENT_BOARD_E2E_WEB_URL || 'http://127.0.0.1:3000'
 const apiBaseURL = process.env.AGENT_BOARD_E2E_API_URL || 'http://127.0.0.1:3001'
 const authStorageKey = 'agent-board.auth'
+
+const providerModelId = 'e2e-mention-model'
+const dockerNetwork = process.env.AGENT_BOARD_E2E_DOCKER_NETWORK || 'agent-board_default'
+const dockerGateway = execFileSync(
+  'docker',
+  ['network', 'inspect', '--format', '{{(index .IPAM.Config 0).Gateway}}', dockerNetwork],
+  { encoding: 'utf8' }
+).trim()
+assert.ok(dockerGateway, 'compose E2E Docker network has no gateway')
+
+const providerServer = createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/models') {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ data: [{ id: providerModelId, name: 'E2E Mention Model' }] }))
+    return
+  }
+  res.writeHead(404)
+  res.end()
+})
+await new Promise((resolve, reject) => {
+  providerServer.once('error', reject)
+  providerServer.listen(0, '0.0.0.0', resolve)
+})
+const providerAddress = providerServer.address()
+assert.ok(providerAddress && typeof providerAddress === 'object', 'mention Provider fixture did not bind a TCP port')
+const providerBaseURL = 'http://' + dockerGateway + ':' + providerAddress.port
+
 
 const passwords = {
   admin: 'Admin-password-123!',
@@ -57,6 +86,18 @@ async function effectiveRole(projectId, token, expected) {
   const value = await call('GET', `/api/projects/${projectId}/access/effective-role`, { token })
   assert.equal(value.role, expected)
   return value.role
+}
+
+async function waitForProviderHealth(projectId, providerId, token, expected = 'HEALTHY') {
+  let last
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    last = await call('GET', '/api/projects/' + projectId + '/providers/' + providerId, { token })
+    if (last.healthStatus === expected) return last
+    if (last.healthStatus === 'UNHEALTHY') break
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  assert.equal(last?.healthStatus, expected, 'Provider health did not reach ' + expected)
+  return last
 }
 
 async function pageFor(tokens) {
@@ -168,25 +209,185 @@ try {
   })
   assert.ok(issue.id)
 
+  const mentionProvider = await call('POST', '/api/projects/' + project.id + '/providers', {
+    token: creator.tokens.accessToken,
+    body: {
+      name: 'Mention E2E Provider',
+      kind: 'e2e-mock',
+      baseUrl: providerBaseURL,
+      enabled: true,
+      safeMetadata: {}
+    },
+    status: 201
+  })
+  await waitForProviderHealth(project.id, mentionProvider.id, creator.tokens.accessToken)
+
+  const mentionModel = await call('POST', '/api/projects/' + project.id + '/model-profiles', {
+    token: creator.tokens.accessToken,
+    body: {
+      providerId: mentionProvider.id,
+      name: 'Mention E2E Model',
+      model: providerModelId,
+      generationSettings: {},
+      enabled: true
+    },
+    status: 201
+  })
+  const mentionAgent = await call('POST', '/api/projects/' + project.id + '/agents', {
+    token: creator.tokens.accessToken,
+    body: {
+      name: 'Mention E2E Target',
+      roleInstructions: 'Perform only explicitly delegated Issue work.',
+      engine: 'opencode',
+      modelProfileId: mentionModel.id,
+      engineSettings: {},
+      concurrencyLimit: 1,
+      allowDelegation: false,
+      state: 'ENABLED'
+    },
+    status: 201
+  })
+  assert.ok(mentionAgent.id)
+
   {
     const { context, page } = await pageFor(collaborator.tokens)
     await openProjectPage(page, project.id, `/projects/${project.id}/issues/${issue.id}`)
     await page.getByRole('heading', { name: 'Discussion & activity' }).waitFor()
 
+    const mentionBody = 'Browser structured mention proof; plain @Mention E2E Target prose is inert.'
+    await page.getByRole('button', { name: 'Mention Agent' }).click()
+    await page.getByPlaceholder('Filter Agents…').fill('Mention E2E Target')
+    const previewResponsePromise = page.waitForResponse(response => (
+      response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments/mention-preview')
+      && response.request().method() === 'POST'
+    ), { timeout: 15_000 })
+    await page.getByRole('button', { name: '@Mention E2E Target' }).click()
+    const previewResponse = await previewResponsePromise
+    assert.equal(previewResponse.status(), 200, 'real mention preview request failed')
+    assert.deepEqual(previewResponse.request().postDataJSON().mentionAgentIds, [mentionAgent.id])
+    const preview = await previewResponse.json()
+    assert.equal(preview.length, 1)
+    assert.equal(preview[0].targetAgentId, mentionAgent.id)
+    assert.equal(preview[0].eligible, true)
+    assert.equal(preview[0].reasonCode, null)
+    await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Eligible to queue work').waitFor()
+
+    await page.locator('textarea').fill(mentionBody)
+    const mentionPostPromise = page.waitForResponse(response => (
+      response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments')
+      && !response.url().includes('/mention-preview')
+      && response.request().method() === 'POST'
+    ), { timeout: 15_000 })
+    await page.getByRole('button', { name: 'Post comment' }).click()
+    const mentionPostResponse = await mentionPostPromise
+    assert.equal(mentionPostResponse.status(), 201, 'real structured mention comment POST failed')
+    const mentionRequest = mentionPostResponse.request().postDataJSON()
+    assert.deepEqual(mentionRequest.mentionAgentIds, [mentionAgent.id])
+    assert.match(mentionRequest.requestId, /^[0-9a-f-]{36}$/i)
+    const postedMentionComment = await mentionPostResponse.json()
+    assert.equal(postedMentionComment.body, mentionBody)
+    assert.equal(postedMentionComment.mentions.length, 1)
+    assert.equal(postedMentionComment.mentions[0].targetAgentId, mentionAgent.id)
+    assert.equal(postedMentionComment.mentions[0].outcome, 'QUEUED')
+    assert.ok(postedMentionComment.mentions[0].delegationId)
+    assert.ok(postedMentionComment.mentions[0].delegatedRunId)
+
+    let mentionArticle = page.locator('article').filter({ hasText: mentionBody })
+    await mentionArticle.getByText('@Mention E2E Target', { exact: true }).waitFor()
+    await mentionArticle.getByText('Work queued').waitFor()
+    const delegatedRunLink = mentionArticle.getByRole('link', { name: 'Open delegated Run' })
+    await delegatedRunLink.waitFor()
+    assert.equal(
+      await delegatedRunLink.getAttribute('href'),
+      '/projects/' + project.id + '/runs/' + postedMentionComment.mentions[0].delegatedRunId
+    )
+
+    let mentionComments = await call('GET', '/api/projects/' + project.id + '/issues/' + issue.id + '/comments', {
+      token: collaborator.tokens.accessToken
+    })
+    const durableMention = mentionComments.find(comment => comment.id === postedMentionComment.id)
+    assert.ok(durableMention, 'structured mention comment was not durable')
+    assert.equal(durableMention.mentions.length, 1)
+    assert.equal(durableMention.mentions[0].targetAgentId, mentionAgent.id)
+    assert.equal(durableMention.mentions[0].outcome, 'QUEUED')
+    assert.equal(durableMention.mentions[0].delegatedRunId, postedMentionComment.mentions[0].delegatedRunId)
+
+    await page.getByRole('button', { name: 'Mention Agent' }).click()
+    await page.getByPlaceholder('Filter Agents…').fill('Mention E2E Target')
+    const busyPreviewPromise = page.waitForResponse(response => (
+      response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments/mention-preview')
+      && response.request().method() === 'POST'
+    ), { timeout: 15_000 })
+    await page.getByRole('button', { name: '@Mention E2E Target' }).click()
+    const busyPreviewResponse = await busyPreviewPromise
+    assert.equal(busyPreviewResponse.status(), 200, 'real busy mention preview request failed')
+    const busyPreview = await busyPreviewResponse.json()
+    assert.equal(busyPreview.length, 1)
+    assert.equal(busyPreview[0].targetAgentId, mentionAgent.id)
+    assert.equal(busyPreview[0].eligible, false)
+    assert.equal(busyPreview[0].reasonCode, 'TARGET_BUSY')
+    await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Agent already has active work on this Issue').waitFor()
+
+    const blockedBody = 'Browser blocked structured mention proof.'
+    await page.locator('textarea').fill(blockedBody)
+    const blockedPostPromise = page.waitForResponse(response => (
+      response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments')
+      && !response.url().includes('/mention-preview')
+      && response.request().method() === 'POST'
+    ), { timeout: 15_000 })
+    await page.getByRole('button', { name: 'Post comment' }).click()
+    const blockedPostResponse = await blockedPostPromise
+    assert.equal(blockedPostResponse.status(), 201, 'real blocked mention comment POST failed')
+    const blockedComment = await blockedPostResponse.json()
+    assert.equal(blockedComment.mentions.length, 1)
+    assert.equal(blockedComment.mentions[0].targetAgentId, mentionAgent.id)
+    assert.equal(blockedComment.mentions[0].outcome, 'BLOCKED')
+    assert.equal(blockedComment.mentions[0].reasonCode, 'TARGET_BUSY')
+    assert.equal(blockedComment.mentions[0].delegatedRunId, null)
+    const blockedArticle = page.locator('article').filter({ hasText: blockedBody })
+    await blockedArticle.getByText('@Mention E2E Target', { exact: true }).waitFor()
+    await blockedArticle.getByText('Agent already has active work on this Issue').waitFor()
+    assert.equal(await blockedArticle.getByRole('link', { name: 'Open delegated Run' }).count(), 0)
+
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.getByText(mentionBody).waitFor()
+    mentionArticle = page.locator('article').filter({ hasText: mentionBody })
+    await mentionArticle.getByText('@Mention E2E Target', { exact: true }).waitFor()
+    await mentionArticle.getByText('Work queued').waitFor()
+    assert.equal(
+      await mentionArticle.getByRole('link', { name: 'Open delegated Run' }).getAttribute('href'),
+      '/projects/' + project.id + '/runs/' + postedMentionComment.mentions[0].delegatedRunId
+    )
+    await page.getByText(blockedBody).waitFor()
+    await page.locator('article').filter({ hasText: blockedBody }).getByText('Agent already has active work on this Issue').waitFor()
+
+    mentionComments = await call('GET', '/api/projects/' + project.id + '/issues/' + issue.id + '/comments', {
+      token: collaborator.tokens.accessToken
+    })
+    assert.equal(
+      mentionComments.filter(comment => comment.id === postedMentionComment.id)[0]?.mentions[0]?.delegatedRunId,
+      postedMentionComment.mentions[0].delegatedRunId,
+      'delegated Run linkage did not survive reload'
+    )
+
     await page.locator('textarea').fill('Durable **root** comment')
     await page.getByRole('button', { name: 'Post comment' }).click()
     await page.getByText('Durable root comment').waitFor()
 
-    await page.getByRole('button', { name: 'Reply' }).first().click()
+    let rootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
+    await rootArticle.getByRole('button', { name: 'Reply' }).click()
     await page.getByText('Replying to authz-collaborator').waitFor()
     await page.locator('textarea').fill('Durable reply')
     await page.getByRole('button', { name: 'Post reply' }).click()
     await page.getByText('Durable reply').waitFor()
 
     let comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
-    assert.equal(comments.length, 2, 'comment API did not persist root + reply')
-    assert.equal(comments[1].parentCommentId, comments[0].id, 'reply parent relation was not durable')
-    const rootCommentId = comments[0].id
+    const rootComment = comments.find(comment => comment.body === 'Durable **root** comment')
+    const replyComment = comments.find(comment => comment.body === 'Durable reply')
+    assert.ok(rootComment, 'comment API did not persist the lifecycle root comment')
+    assert.ok(replyComment, 'comment API did not persist the lifecycle reply')
+    assert.equal(replyComment.parentCommentId, rootComment.id, 'reply parent relation was not durable')
+    const rootCommentId = rootComment.id
 
     await call('PATCH', `/api/projects/${project.id}/issues/${issue.id}/comments/${rootCommentId}`, {
       token: creator.tokens.accessToken,
@@ -198,9 +399,9 @@ try {
       status: 403
     })
 
-    let rootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
+    rootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
     await rootArticle.getByRole('button', { name: 'Edit' }).click()
-    const editingRootArticle = page.locator('article').first()
+    const editingRootArticle = page.locator('article').filter({ has: page.locator('textarea') })
     await editingRootArticle.locator('textarea').fill('Durable edited root')
     await editingRootArticle.getByRole('button', { name: 'Save edit' }).click()
     await page.getByText('Durable edited root').waitFor()
@@ -220,12 +421,13 @@ try {
     await rootArticle.getByRole('button', { name: '❤️ 1' }).waitFor()
 
     comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
-    assert.equal(comments[0].body, 'Durable edited root', 'edited comment did not survive reload')
-    assert.ok(comments[0].resolvedAt, 'resolved timestamp did not persist')
-    assert.equal(comments[0].resolvedBy.id, collaborator.user.id, 'resolver identity was not durable')
-    assert.equal(comments[0].reactions.length, 1, 'reaction did not persist')
-    assert.equal(comments[0].reactions[0].count, 1, 'reaction count was not idempotent')
-    assert.equal(comments[0].reactions[0].reactedByCurrentUser, true, 'reaction actor projection was incorrect')
+    const persistedRoot = comments.find(comment => comment.id === rootCommentId)
+    assert.equal(persistedRoot?.body, 'Durable edited root', 'edited comment did not survive reload')
+    assert.ok(persistedRoot?.resolvedAt, 'resolved timestamp did not persist')
+    assert.equal(persistedRoot?.resolvedBy.id, collaborator.user.id, 'resolver identity was not durable')
+    assert.equal(persistedRoot?.reactions.length, 1, 'reaction did not persist')
+    assert.equal(persistedRoot?.reactions[0].count, 1, 'reaction count was not idempotent')
+    assert.equal(persistedRoot?.reactions[0].reactedByCurrentUser, true, 'reaction actor projection was incorrect')
 
     await rootArticle.getByRole('button', { name: '❤️ 1' }).click()
     await rootArticle.getByRole('button', { name: 'Reopen' }).click()
@@ -234,12 +436,15 @@ try {
     await page.getByText('Durable reply').waitFor()
 
     comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
-    assert.equal(comments.length, 2, 'tombstoning a parent destroyed its reply')
-    assert.equal(comments[0].body, null, 'deleted parent body remained exposed')
-    assert.ok(comments[0].deletedAt, 'deleted parent did not expose tombstone state')
-    assert.equal(comments[0].reactions.length, 0, 'tombstoned comment retained reactions')
-    assert.equal(comments[0].resolvedAt, null, 'tombstoned comment retained resolution')
-    assert.equal(comments[1].parentCommentId, rootCommentId, 'tombstoning changed reply parent identity')
+    const tombstonedRoot = comments.find(comment => comment.id === rootCommentId)
+    const persistedReply = comments.find(comment => comment.body === 'Durable reply')
+    assert.ok(tombstonedRoot, 'tombstoning removed the parent comment')
+    assert.ok(persistedReply, 'tombstoning a parent destroyed its reply')
+    assert.equal(tombstonedRoot.body, null, 'deleted parent body remained exposed')
+    assert.ok(tombstonedRoot.deletedAt, 'deleted parent did not expose tombstone state')
+    assert.equal(tombstonedRoot.reactions.length, 0, 'tombstoned comment retained reactions')
+    assert.equal(tombstonedRoot.resolvedAt, null, 'tombstoned comment retained resolution')
+    assert.equal(persistedReply.parentCommentId, rootCommentId, 'tombstoning changed reply parent identity')
 
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.getByText('Comment deleted').waitFor()
@@ -331,6 +536,8 @@ try {
 
   console.log('Playwright authorization flow passed')
 } finally {
+  providerServer.closeAllConnections()
+  await new Promise(resolve => providerServer.close(resolve))
   await browser.close()
   await api.dispose()
 }

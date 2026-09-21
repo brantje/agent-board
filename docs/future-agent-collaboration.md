@@ -76,6 +76,31 @@ OpenCode receives `delegate_task(targetAgentId, task)` only when the trusted Eng
 
 The public API exposes parent-scoped delegation listing and child-Run lineage inspection. Delegation inspection reports the effective Workspace access mode as `WRITE`; scheduler state continues to be read from the linked ordinary Run/job rather than copied into delegation responses.
 
+## Structured Issue-comment Agent mentions
+
+Structured `@Agent` mentions are implemented as an adapter into canonical delegation, not as a second execution system.
+
+The durable comment stores explicit target identities separately from prose. A mention is selected by stable Agent ID; the display name is resolved for presentation and can change without breaking historical identity. Plain text that looks like `@name` has no routing semantics. The posting API and OpenCode `publish_issue_comment(body, mentionAgentIds?)` tool carry mention intent structurally.
+
+Before posting, the Issue UI can ask the server for an advisory eligibility preview. Posting always revalidates current Project/Agent eligibility and canonical delegation policy. Each durable mention records only the target identity, its posting outcome, a safe reason when blocked, and the minimum delegation/Run correlation needed for inspection:
+
+```text
+QUEUED
+BLOCKED
+```
+
+The implementation intentionally does not invent `coalesced` or `deferred` mention states because the current canonical delegation command does not provide them. Safe blocked reasons distinguish unavailable targets, an already-active target on the Issue, and canonical delegation-policy rejection without exposing target configuration details.
+
+Human and Agent authors use the same mention representation but enter canonical execution through the appropriate authority boundary:
+
+- a human-authored mention creates a comment-origin delegation linked to `source_comment_id`; it has no synthetic parent Run and therefore no parent continuation;
+- an Agent-authored mention uses that Agent's authoritative executing Run as the canonical parent, honors effective `Allow delegation`, and on acceptance performs the same serialized parent Workspace handoff and later parent continuation as `delegate_task`;
+- delegated execution cannot recursively delegate. If it publishes a structured mention, canonical nested-delegation policy blocks the target while preserving the comment.
+
+Expected denial never discards the collaboration record: the comment and durable `BLOCKED` outcome remain visible. Accepted mentions create ordinary Runs and scheduler jobs on the same Issue Workspace. They never mutate Issue assignment or Board status, and there is no `CommentRun`, `MentionRun`, comment queue, or mention-specific Workspace.
+
+Retry safety follows existing request identity conventions. Human clients send one stable request ID for a mention-bearing draft; OpenCode uses the durable native tool-part ID. The backend binds that identity to the same comment/target set so retries return the original result and changed retries fail closed instead of multiplying delegated work.
+
 ## Workspace inheritance and handoff
 
 Delegated execution reuses the exact durable Issue Workspace and existing Issue branch. There is no child Workspace, delegation branch or merge/reconciliation layer in this phase.
@@ -200,6 +225,7 @@ complete v0.1 coding flow
  -> serialized Workspace handoff [implemented]
  -> delegated outcomes + durable parent continuation/recovery [implemented]
  -> Squad-aware delegation/member context [implemented]
+ -> structured Issue-comment Agent mentions [implemented]
  -> broader messaging/wake policy if needed
  -> worker registry/pools
  -> warm/spot optimizations

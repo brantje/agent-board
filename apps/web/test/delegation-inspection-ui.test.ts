@@ -103,6 +103,48 @@ describe('delegation inspection', () => {
     wrapper.unmount()
   })
 
+
+  it('renders comment-origin delegated child lineage back to the Issue discussion', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (path.endsWith('/delegations')) return new Response(JSON.stringify([]))
+      if (path.endsWith('/delegation')) {
+        return new Response(JSON.stringify({
+          id: 'delegation-comment-1',
+          projectId: 'p',
+          issueId: 'AB-3',
+          parentRunId: null,
+          parentAgentId: null,
+          sourceCommentId: 'comment-1',
+          targetAgentId: 'child-agent',
+          task: 'Inspect the requested area',
+          delegatedRunId: 'child-run',
+          workspaceAccess: 'WRITE',
+          requestKey: 'comment:comment-1:mention:0:child-agent',
+          parentRunStatus: null,
+          delegatedRunStatus: 'RUNNING',
+          outcome: null,
+          resultSummary: null,
+          resultEventId: null,
+          workspaceChangesAccepted: null,
+          workspaceRevision: 'feedbeef',
+          continuationJobId: null,
+          completedAt: null,
+          createdAt: '2026-01-01T00:00:00Z',
+          updatedAt: '2026-01-01T00:00:00Z'
+        }))
+      }
+      if (path.endsWith('/agents')) return new Response(JSON.stringify([{ id: 'child-agent', name: 'Verifier' }]))
+      return new Response(JSON.stringify([]))
+    }))
+
+    const wrapper = mount(RunDelegationCard, { props: { projectId: 'p', runId: 'child-run' }, global })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Triggered by structured Agent mention')
+    expect(wrapper.text()).not.toContain('Parent Agent:')
+    expect(wrapper.get('a[href="/projects/p/issues/AB-3"]').text()).toContain('Open source Issue discussion')
+    wrapper.unmount()
+  })
+
   it('ignores a superseded incoming delegation response after the Run changes', async () => {
     let resolveOld!: (response: Response) => void
     const oldIncoming = new Promise<Response>((resolve) => { resolveOld = resolve })

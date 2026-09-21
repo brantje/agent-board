@@ -62,18 +62,79 @@ func (a *api) createIssueComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "parentCommentId must be a UUID")
 		return
 	}
+	if len(req.MentionAgentIDs) > store.MaxIssueCommentMentions {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "too many Agent mentions")
+		return
+	}
+	for _, targetAgentID := range req.MentionAgentIDs {
+		if !validUUID(targetAgentID) {
+			writeError(w, http.StatusBadRequest, "invalid_argument", "mentionAgentIds must contain UUIDs")
+			return
+		}
+	}
+	if req.RequestID != "" && !validUUID(req.RequestID) {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "requestId must be a UUID")
+		return
+	}
+	if len(req.MentionAgentIDs) != 0 && req.RequestID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "requestId is required for structured Agent mentions")
+		return
+	}
 	actor, ok := a.requireIssueCommentActor(w, r)
 	if !ok {
 		return
 	}
 	value, err := a.projectAccess.CreateIssueComment(r.Context(), actor, app.CreateIssueCommentInput{
 		ProjectID: projectID, IssueID: issueUUID, ParentCommentID: req.ParentCommentID, Body: req.Body,
+		RequestKey: req.RequestID, MentionAgentIDs: req.MentionAgentIDs,
 	})
 	if err != nil {
 		writeProjectAccessError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, issueCommentDTO(value, issueKey, actor.ID))
+}
+
+func (a *api) previewIssueCommentMentions(w http.ResponseWriter, r *http.Request) {
+	projectID, ok := pathUUID(w, r, "projectID")
+	if !ok {
+		return
+	}
+	issueUUID, ok := pathIssueKey(w, r, projectID, a.service.ResolveIssueUUID)
+	if !ok {
+		return
+	}
+	var req PreviewIssueCommentMentionsRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if len(req.MentionAgentIDs) > store.MaxIssueCommentMentions {
+		writeError(w, http.StatusBadRequest, "invalid_argument", "too many Agent mentions")
+		return
+	}
+	for _, targetAgentID := range req.MentionAgentIDs {
+		if !validUUID(targetAgentID) {
+			writeError(w, http.StatusBadRequest, "invalid_argument", "mentionAgentIds must contain UUIDs")
+			return
+		}
+	}
+	actor, ok := a.requireIssueCommentActor(w, r)
+	if !ok {
+		return
+	}
+	values, err := a.projectAccess.PreviewIssueCommentMentions(r.Context(), actor, projectID, issueUUID, req.MentionAgentIDs)
+	if err != nil {
+		writeProjectAccessError(w, err)
+		return
+	}
+	out := make([]IssueCommentMentionPreviewDTO, 0, len(values))
+	for _, value := range values {
+		out = append(out, IssueCommentMentionPreviewDTO{
+			TargetAgentID: value.TargetAgentID, TargetAgentName: value.TargetAgentName,
+			Eligible: value.Eligible, ReasonCode: value.ReasonCode,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (a *api) updateIssueComment(w http.ResponseWriter, r *http.Request) {

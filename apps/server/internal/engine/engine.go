@@ -120,12 +120,14 @@ type InteractiveQuestionReplyTracker interface {
 }
 
 type IssueCommentPublishRequest struct {
-	Body       string
-	RequestKey string
+	Body            string
+	RequestKey      string
+	MentionAgentIDs []string
 }
 
 type PublishedIssueComment struct {
-	ID string
+	ID         string
+	Delegation *Delegation
 }
 
 // IssueCommentPublisher is the narrow server-owned capability for an executing

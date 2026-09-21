@@ -20,6 +20,7 @@ func (a *api) registerIssueRunRoutes(r chi.Router) {
 	r.Patch("/projects/{projectID}/issues/{issueID}", a.updateIssue)
 	r.Get("/projects/{projectID}/issues/{issueID}/comments", a.listIssueComments)
 	r.Post("/projects/{projectID}/issues/{issueID}/comments", a.createIssueComment)
+	r.Post("/projects/{projectID}/issues/{issueID}/comments/mention-preview", a.previewIssueCommentMentions)
 	r.Get("/projects/{projectID}/issues/{issueID}/comments/discussions", a.listRecentIssueDiscussions)
 	r.Get("/projects/{projectID}/issues/{issueID}/comments/updates", a.listIssueDiscussionUpdates)
 	r.Get("/projects/{projectID}/issues/{issueID}/comments/{commentID}/thread", a.getIssueDiscussionThread)

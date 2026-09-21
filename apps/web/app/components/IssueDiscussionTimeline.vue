@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import type { IssueComment, IssueCommentReactionKey, IssueTimelineEntry } from '../types/api'
+import { computed, ref, watch } from 'vue'
+import type {
+  Agent,
+  IssueComment,
+  IssueCommentMentionPreview,
+  IssueCommentMentionReasonCode,
+  IssueCommentReactionKey,
+  IssueTimelineEntry
+} from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { eventActivityIcon, eventDescription, eventTitle, formatActivityTime } from '../utils/events'
 import { useResource } from '../composables/useResource'
@@ -17,6 +24,16 @@ const actionError = ref<Error>()
 const actionBusy = ref('')
 const editingCommentId = ref('')
 const editBody = ref('')
+const mentionPickerOpen = ref(false)
+const mentionLoading = ref(false)
+const mentionLoadError = ref<Error>()
+const mentionQuery = ref('')
+const mentionAgents = ref<Agent[]>([])
+const selectedMentionAgentIDs = ref<string[]>([])
+const mentionPreview = ref<IssueCommentMentionPreview[]>([])
+const mentionPreviewError = ref<Error>()
+const draftRequestId = ref('')
+let mentionPreviewGeneration = 0
 
 const reactionOptions: Array<{ key: IssueCommentReactionKey; emoji: string; label: string }> = [
   { key: 'THUMBS_UP', emoji: '👍', label: 'Thumbs up' },
@@ -35,6 +52,20 @@ const commentsById = computed(() => new Map(
     .map(comment => [comment.id, comment])
 ))
 
+const selectedMentionAgents = computed(() => {
+  const byID = new Map(mentionAgents.value.map(agent => [agent.id, agent]))
+  return selectedMentionAgentIDs.value.map(id => byID.get(id)).filter((agent): agent is Agent => Boolean(agent))
+})
+
+const filteredMentionAgents = computed(() => {
+  const query = mentionQuery.value.trim().toLocaleLowerCase()
+  const selected = new Set(selectedMentionAgentIDs.value)
+  return mentionAgents.value
+    .filter(agent => !selected.has(agent.id))
+    .filter(agent => !query || agent.name.toLocaleLowerCase().includes(query))
+    .slice(0, 8)
+})
+
 function replyLabel(comment: IssueComment) {
   if (!comment.parentCommentId) return undefined
   return commentsById.value.get(comment.parentCommentId)?.author.name || 'an earlier comment'
@@ -52,13 +83,87 @@ function wasEdited(comment: IssueComment) {
   return comment.updatedAt !== comment.createdAt
 }
 
+function resetDraftRequestIdentity() {
+  if (!submitting.value) draftRequestId.value = ''
+}
+
+watch(body, resetDraftRequestIdentity)
+
 function beginReply(comment: IssueComment) {
   if (comment.deletedAt) return
   replyTo.value = comment
+  resetDraftRequestIdentity()
 }
 
 function cancelReply() {
   replyTo.value = undefined
+  resetDraftRequestIdentity()
+}
+
+function mentionReasonLabel(reason: IssueCommentMentionReasonCode | null | undefined) {
+  switch (reason) {
+    case 'TARGET_UNAVAILABLE': return 'Agent unavailable'
+    case 'TARGET_BUSY': return 'Agent already has active work on this Issue'
+    case 'DELEGATION_BLOCKED': return 'Delegation policy blocked this request'
+    default: return 'Unable to queue work'
+  }
+}
+
+function mentionPreviewFor(agentID: string) {
+  return mentionPreview.value.find(item => item.targetAgentId === agentID)
+}
+
+function mentionPreviewLabel(agentID: string) {
+  const preview = mentionPreviewFor(agentID)
+  if (!preview) return 'Checking eligibility…'
+  return preview.eligible ? 'Eligible to queue work' : mentionReasonLabel(preview.reasonCode)
+}
+
+async function loadMentionAgents() {
+  mentionPickerOpen.value = true
+  if (mentionAgents.value.length || mentionLoading.value) return
+  mentionLoading.value = true
+  mentionLoadError.value = undefined
+  try {
+    mentionAgents.value = await apiRequest<Agent[]>(apiPath('agents', props.projectId))
+  } catch (failure) {
+    mentionLoadError.value = failure as Error
+  } finally {
+    mentionLoading.value = false
+  }
+}
+
+async function refreshMentionPreview() {
+  const targetAgentIDs = [...selectedMentionAgentIDs.value]
+  const generation = ++mentionPreviewGeneration
+  mentionPreviewError.value = undefined
+  if (!targetAgentIDs.length) {
+    mentionPreview.value = []
+    return
+  }
+  try {
+    const values = await apiRequest<IssueCommentMentionPreview[]>(
+      `${apiPath('issues', props.projectId, props.issueId)}/comments/mention-preview`,
+      { method: 'POST', body: { mentionAgentIds: targetAgentIDs } }
+    )
+    if (generation === mentionPreviewGeneration) mentionPreview.value = values
+  } catch (failure) {
+    if (generation === mentionPreviewGeneration) mentionPreviewError.value = failure as Error
+  }
+}
+
+async function addMention(agent: Agent) {
+  if (selectedMentionAgentIDs.value.includes(agent.id)) return
+  selectedMentionAgentIDs.value = [...selectedMentionAgentIDs.value, agent.id]
+  mentionQuery.value = ''
+  resetDraftRequestIdentity()
+  await refreshMentionPreview()
+}
+
+async function removeMention(agentID: string) {
+  selectedMentionAgentIDs.value = selectedMentionAgentIDs.value.filter(id => id !== agentID)
+  resetDraftRequestIdentity()
+  await refreshMentionPreview()
 }
 
 function beginEdit(comment: IssueComment) {
@@ -164,18 +269,39 @@ async function submit() {
   const content = body.value.trim()
   if (!props.canMutate || !content || submitting.value) return
 
+  const mentionAgentIds = [...selectedMentionAgentIDs.value]
+  if (mentionAgentIds.length && !draftRequestId.value) {
+    draftRequestId.value = globalThis.crypto.randomUUID()
+  }
+  const requestBody: {
+    body: string
+    parentCommentId: string | null
+    requestId?: string
+    mentionAgentIds?: string[]
+  } = {
+    body: content,
+    parentCommentId: replyTo.value?.id ?? null
+  }
+  if (mentionAgentIds.length) {
+    requestBody.requestId = draftRequestId.value
+    requestBody.mentionAgentIds = mentionAgentIds
+  }
+
   submitting.value = true
   submitError.value = undefined
   try {
     await apiRequest<IssueComment>(`${apiPath('issues', props.projectId, props.issueId)}/comments`, {
       method: 'POST',
-      body: {
-        body: content,
-        parentCommentId: replyTo.value?.id ?? null
-      }
+      body: requestBody
     })
     body.value = ''
     replyTo.value = undefined
+    mentionPickerOpen.value = false
+    mentionQuery.value = ''
+    selectedMentionAgentIDs.value = []
+    mentionPreview.value = []
+    mentionPreviewError.value = undefined
+    draftRequestId.value = ''
     await timeline.refresh()
   } catch (failure) {
     submitError.value = failure as Error
@@ -254,6 +380,25 @@ defineExpose({ refresh: timeline.refresh })
               </div>
             </div>
             <MarkdownContent v-else-if="entry.comment.body !== null" class="mt-2" :content="entry.comment.body" />
+
+            <div v-if="entry.comment.mentions?.length" class="mt-3 space-y-2" aria-label="Structured Agent mentions">
+              <div
+                v-for="mention in entry.comment.mentions"
+                :key="mention.id"
+                class="flex flex-wrap items-center gap-2 rounded-md bg-elevated px-2 py-1 text-xs"
+              >
+                <UBadge :label="`@${mention.targetAgentName || 'Unavailable Agent'}`" size="xs" variant="subtle" />
+                <span v-if="mention.outcome === 'QUEUED'">Work queued</span>
+                <span v-else>{{ mentionReasonLabel(mention.reasonCode) }}</span>
+                <NuxtLink
+                  v-if="mention.delegatedRunId"
+                  :to="`/projects/${projectId}/runs/${mention.delegatedRunId}`"
+                  class="text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+                >
+                  Open delegated Run
+                </NuxtLink>
+              </div>
+            </div>
 
             <div v-if="!entry.comment.deletedAt" class="mt-2 flex flex-wrap gap-2">
               <UButton
@@ -348,6 +493,42 @@ defineExpose({ refresh: timeline.refresh })
       <UFormField label="Comment" name="issue-comment">
         <UTextarea v-model="body" :disabled="submitting" placeholder="Write a comment…" class="w-full" />
       </UFormField>
+
+      <div class="space-y-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <UButton label="Mention Agent" variant="outline" size="sm" :disabled="submitting" @click="loadMentionAgents" />
+          <div v-for="agent in selectedMentionAgents" :key="agent.id" class="flex items-center gap-1 rounded-md bg-elevated px-2 py-1 text-xs">
+            <span>@{{ agent.name }}</span>
+            <UButton :label="`Remove @${agent.name}`" variant="ghost" size="sm" :disabled="submitting" @click="removeMention(agent.id)" />
+          </div>
+        </div>
+
+        <div v-if="mentionPickerOpen" class="space-y-2 rounded-md border border-default p-2">
+          <UInput v-model="mentionQuery" :disabled="submitting || mentionLoading" placeholder="Filter Agents…" />
+          <p v-if="mentionLoading" class="text-xs text-muted">Loading Agents…</p>
+          <UAlert v-else-if="mentionLoadError" title="Unable to load Agents" :description="mentionLoadError.message" color="error" />
+          <div v-else class="flex flex-wrap gap-2">
+            <UButton
+              v-for="agent in filteredMentionAgents"
+              :key="agent.id"
+              :label="`@${agent.name}`"
+              variant="ghost"
+              size="sm"
+              :disabled="submitting"
+              @click="addMention(agent)"
+            />
+            <span v-if="!filteredMentionAgents.length" class="text-xs text-muted">No matching Agents.</span>
+          </div>
+        </div>
+
+        <UAlert v-if="mentionPreviewError" title="Mention preview unavailable" :description="mentionPreviewError.message" color="warning" />
+        <div v-if="selectedMentionAgents.length" class="space-y-1 text-xs text-muted" aria-label="Agent mention preview">
+          <p v-for="agent in selectedMentionAgents" :key="agent.id">
+            @{{ agent.name }} · {{ mentionPreviewLabel(agent.id) }}
+          </p>
+        </div>
+      </div>
+
       <UButton :label="replyTo ? 'Post reply' : 'Post comment'" type="submit" :loading="submitting" :disabled="!body.trim()" />
     </form>
   </UCard>

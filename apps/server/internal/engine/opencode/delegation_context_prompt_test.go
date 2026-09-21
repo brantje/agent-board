@@ -69,3 +69,42 @@ func TestDelegationToolReturnsStructuredCanonicalAcceptance(t *testing.T) {
 		t.Fatal("delegation tool exposes server-owned parent identity")
 	}
 }
+
+func TestInitialTaskPromptDescribesCommentOriginDelegationWithoutInventingParentRun(t *testing.T) {
+	sourceCommentID := "comment-1"
+	prompt := initialTaskPromptForRequest(engine.Request{
+		Context: executioncontext.SafeContext{
+			Issue: executioncontext.IssueContext{Title: "Mentioned work", Status: "TODO"},
+			Delegation: &executioncontext.DelegationContext{
+				ID: "delegation-1", SourceCommentID: &sourceCommentID, TargetAgentID: "agent-2",
+				Task: "Inspect this bounded request.", RequestKey: "mention-1",
+			},
+		},
+		IssueComments: &recordingIssueCommentPublisher{},
+	})
+	for _, want := range []string{
+		"structured Agent mention in the Issue discussion",
+		"There is no parent Run to resume",
+		"Do not attempt to change Issue status or delegate further work",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("prompt missing %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "The parent Run remains authoritative") {
+		t.Fatalf("comment-origin delegated prompt invented a parent Run:\n%s", prompt)
+	}
+}
+
+func TestIssueCommentPromptRequiresStructuredMentionIDs(t *testing.T) {
+	for _, want := range []string{
+		"publish_issue_comment(body, mentionAgentIds?)",
+		"Plain @name text has no routing semantics",
+		"pass at most one stable Agent ID structurally in mentionAgentIds",
+		"never guess Agent identifiers",
+	} {
+		if !strings.Contains(issueCommentPromptGuidance, want) {
+			t.Fatalf("Issue comment guidance missing %q: %s", want, issueCommentPromptGuidance)
+		}
+	}
+}

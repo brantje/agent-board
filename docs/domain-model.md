@@ -71,19 +71,32 @@ BACKLOG -> TODO -> IN_PROGRESS -> BLOCKED -> REVIEW -> DONE
 
 ### Issue Comment
 
-A durable Issue-domain collaboration record. Comments are separate from Run execution evidence and do not change Issue ownership, Board status or Run lifecycle.
+A durable Issue-domain collaboration record. Comments remain Issue state even when an explicit structured Agent mention requests execution: the comment does not become a Run, does not change Issue ownership or Board status, and does not create a mention-specific scheduler lifecycle.
 
-A comment stores one stable ID, its Issue, an optional parent comment on the same Issue, typed author identity (`HUMAN | AGENT`), body, and timestamps. The human-facing create path derives `HUMAN` authorship from the authenticated User; callers cannot choose an author. Deliberate Agent publication derives `AGENT` identity, Issue identity and `source_run_id` from the authoritative Run. A Run-scoped internal action key makes native Engine-tool replay idempotent without becoming public comment identity.
+A comment stores one stable ID, its Issue, an optional parent comment on the same Issue, typed author identity (`HUMAN | AGENT`), body, and timestamps. The human-facing create path derives `HUMAN` authorship from the authenticated User; callers cannot choose an author. Deliberate Agent publication derives `AGENT` identity, Issue identity and `source_run_id` from the authoritative Run. A stable source-action/request key makes replay of one logical create request idempotent without becoming public comment identity.
+
+Structured Agent mentions are separate durable records attached to the comment. Each mention stores the stable target Agent ID, deterministic position, terminal posting outcome, safe reason code when blocked, and only the minimum canonical delegation linkage needed to correlate accepted work. Agent names are read-time display data and may change without changing mention identity. Plain text that resembles `@name` never creates a structured mention or requests work.
+
+The currently supported posting outcomes reflect the canonical execution behavior rather than a mention-specific state machine:
+
+```text
+QUEUED
+BLOCKED
+```
+
+`QUEUED` means canonical delegation accepted the target and created the ordinary delegated Run/scheduler work. `BLOCKED` means no delegated execution was created for that target. Safe blocked reasons are `TARGET_UNAVAILABLE`, `TARGET_BUSY` and `DELEGATION_BLOCKED`; they intentionally do not expose private target configuration. There are no synthetic `coalesced` or `deferred` states while canonical delegation does not provide those outcomes.
+
+A human-authored structured mention creates a canonical comment-origin delegation linked by `source_comment_id`; it does not invent a parent Run or parent continuation. An Agent-authored structured mention crosses the trusted Engine/server boundary as explicit Agent IDs and reuses the same parent-Run canonical delegation request, `Allow delegation` policy and serialized Workspace handoff used by `delegate_task`. Expected eligibility/policy denial leaves the comment and a durable `BLOCKED` mention outcome intact. Accepted work remains an ordinary Run on the Issue Workspace and never changes the Issue assignee or Board status.
 
 Top-level comments and replies share one persistence/application path. Replies retain their parent ID, while Issue detail composes comments with relevant existing durable Events into a chronological read projection. The projection is not a second durable history store. Operational tool/file/test/agent telemetry stays on Run evidence surfaces rather than being copied into comments.
 
-Human authors may edit their own live comments; a content edit advances `updated_at` without creating revision-history storage. Deleting a leaf removes it, while deleting a comment that already has replies turns it into a tombstone with no readable body so the reply tree remains intact. Tombstones cannot be edited, replied to or reacted to, and deletion never cascades through the discussion tree.
+Human authors may edit their own live comments; a content edit advances `updated_at` without creating revision-history storage. Deleting a leaf removes it unless the comment has replies or structured-mention provenance that must remain addressable; those comments become tombstones with no readable body. Tombstones cannot be edited, replied to or reacted to, and deletion never cascades through the discussion tree or erases mention/delegation provenance.
 
 Resolution is explicit thread state on a top-level comment only. A resolved root records one resolver User ID and timestamp; reopening clears that state. New replies do not implicitly reopen a discussion. Project members may resolve/reopen, while viewers remain read-only.
 
 Reactions use the fixed lightweight vocabulary `THUMBS_UP | THUMBS_DOWN | LAUGH | HOORAY | CONFUSED | HEART | ROCKET | EYES`. Each authenticated User may hold at most one row for one reaction key on one comment. Add/remove operations are idempotent and carry no notification or execution semantics.
 
-Plain text that resembles `@name` has no execution semantics. Comment create/edit/delete/resolve/reopen/reaction mutations are Issue collaboration only: they are not Run side-input, Questions, delegation requests, scheduler work, assignment changes or Board-status changes.
+Ordinary comment create/edit/delete/resolve/reopen/reaction behavior remains Issue collaboration only. Execution is requested only by explicit structured mention IDs supplied through the trusted create/tool contract; no prose parsing or implicit routing exists.
 
 ### Issue Relationship
 

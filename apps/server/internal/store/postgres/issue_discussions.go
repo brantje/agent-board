@@ -637,6 +637,9 @@ func (s *Store) listIssueCommentsByIDs(ctx context.Context, projectID, issueID s
 	if err := s.loadIssueCommentReactions(ctx, projectID, issueID, values); err != nil {
 		return nil, err
 	}
+	if err := s.loadIssueCommentMentions(ctx, projectID, issueID, values); err != nil {
+		return nil, err
+	}
 	return values, nil
 }
 

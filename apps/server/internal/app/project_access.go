@@ -184,6 +184,13 @@ func (s *ProjectAccessService) ListIssueDiscussionUpdates(ctx context.Context, a
 	return s.controlPlane.ListIssueDiscussionUpdates(ctx, projectID, issueID, cursor, limit)
 }
 
+func (s *ProjectAccessService) PreviewIssueCommentMentions(ctx context.Context, actor AuthenticatedUser, projectID, issueID string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return nil, err
+	}
+	return s.controlPlane.PreviewIssueCommentMentions(ctx, projectID, issueID, targetAgentIDs)
+}
+
 func (s *ProjectAccessService) CreateIssueComment(ctx context.Context, actor AuthenticatedUser, input CreateIssueCommentInput) (store.IssueComment, error) {
 	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
 		return store.IssueComment{}, err

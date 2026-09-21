@@ -104,12 +104,13 @@ type ReviewFeedbackContext struct {
 }
 
 type DelegationContext struct {
-	ID            string `json:"id"`
-	ParentRunID   string `json:"parentRunId"`
-	ParentAgentID string `json:"parentAgentId"`
-	TargetAgentID string `json:"targetAgentId"`
-	Task          string `json:"task"`
-	RequestKey    string `json:"requestKey"`
+	ID              string  `json:"id"`
+	ParentRunID     string  `json:"parentRunId,omitempty"`
+	ParentAgentID   string  `json:"parentAgentId,omitempty"`
+	SourceCommentID *string `json:"sourceCommentId,omitempty"`
+	TargetAgentID   string  `json:"targetAgentId"`
+	Task            string  `json:"task"`
+	RequestKey      string  `json:"requestKey"`
 }
 
 type Resolved struct {

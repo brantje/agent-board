@@ -88,7 +88,7 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 	setup := fixture.createRunSetup(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Use read_issue_discussion only when explicitly requested. Do not ask a Question, publish a comment, delegate, or change Issue status unless explicitly requested.",
 		title:            "Read trusted Issue discussion context",
-		description:      "Use read_issue_discussion with mode recent exactly once. After it returns, reply with exactly LEN=<N>, where N is the number of ASCII characters in the first returned root body. Do not quote or repeat the body. Do not modify files, publish comments, ask a Question, delegate, or change Issue status.",
+		description:      "Use read_issue_discussion with mode recent exactly once. After it returns, reply with exactly ROOT_ID=<ID>, where ID is the id of the first returned root comment. Do not quote or repeat the body. Do not modify files, publish comments, ask a Question, delegate, or change Issue status.",
 	})
 	author, err := fixture.database.CreateUser(fixture.ctx, store.User{
 		Username: "discussion-author", Email: "discussion-author@example.com", DisplayName: "Discussion Author",
@@ -97,9 +97,10 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixture.services.ControlPlane.CreateHumanIssueComment(fixture.ctx, app.CreateIssueCommentInput{
+	seededComment, err := fixture.services.ControlPlane.CreateHumanIssueComment(fixture.ctx, app.CreateIssueCommentInput{
 		ProjectID: setup.Project.ID, IssueID: setup.Issue.ID, Body: expectedBody,
-	}, author.ID); err != nil {
+	}, author.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := fixture.services.ControlPlane.SetIssueAssignee(fixture.ctx, setup.Project.ID, setup.Issue.ID, &store.Assignee{Type: "AGENT", ID: setup.Agent.ID}, store.EmptyObject); err != nil {
@@ -166,7 +167,7 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 	if strings.Contains(read.ResultPreview, expectedBody) {
 		t.Fatalf("read_issue_discussion leaked canonical body into Run evidence: %q", read.ResultPreview)
 	}
-	expectedVisible := "LEN=" + strconv.Itoa(len(expectedBody))
+	expectedVisible := "ROOT_ID=" + seededComment.ID
 	visible := false
 	for _, event := range events {
 		if event.Type != "agent.message" {

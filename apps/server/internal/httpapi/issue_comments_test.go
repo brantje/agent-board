@@ -52,6 +52,35 @@ func (s *issueCommentHTTPStore) CreateIssueComment(_ context.Context, pid string
 }
 
 
+func (s *issueCommentHTTPStore) CreateIssueCommentWithMentions(ctx context.Context, pid string, input store.IssueComment, targetAgentIDs []string) (store.IssueCommentMutationResult, error) {
+	result, err := s.CreateIssueComment(ctx, pid, input)
+	if err != nil {
+		return store.IssueCommentMutationResult{}, err
+	}
+	result.Comment.Mentions = make([]store.IssueCommentMention, 0, len(targetAgentIDs))
+	for index, targetAgentID := range targetAgentIDs {
+		delegationID := "dddddddd-dddd-4ddd-8ddd-" + string(rune('0'+index)) + "ddddddddddd"
+		delegatedRunID := "eeeeeeee-eeee-4eee-8eee-" + string(rune('0'+index)) + "eeeeeeeeeee"
+		result.Comment.Mentions = append(result.Comment.Mentions, store.IssueCommentMention{
+			ID: otherID, TargetAgentID: targetAgentID, TargetAgentName: "Agent",
+			Outcome: store.IssueCommentMentionOutcomeQueued, DelegationID: &delegationID, DelegatedRunID: &delegatedRunID,
+		})
+	}
+	s.comments[len(s.comments)-1].Mentions = result.Comment.Mentions
+	return result, nil
+}
+
+func (s *issueCommentHTTPStore) PreviewIssueCommentMentions(_ context.Context, pid, id string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
+	if pid != projectID || id != issueID {
+		return nil, store.ErrNotFound
+	}
+	result := make([]store.IssueCommentMentionPreview, 0, len(targetAgentIDs))
+	for _, targetAgentID := range targetAgentIDs {
+		result = append(result, store.IssueCommentMentionPreview{TargetAgentID: targetAgentID, TargetAgentName: "Agent", Eligible: true})
+	}
+	return result, nil
+}
+
 func (s *issueCommentHTTPStore) GetIssueComment(_ context.Context, pid, id, commentID string) (store.IssueComment, error) {
 	if pid != projectID || id != issueID {
 		return store.IssueComment{}, store.ErrNotFound
@@ -279,6 +308,90 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 	}
 }
 
+
+func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
+	fixture, _ := newIssueCommentHTTPFixture(t)
+	member, token := fixture.createUser(t, "mention-http-member", store.DeploymentRoleMember)
+	viewer, viewerToken := fixture.createUser(t, "mention-http-viewer", store.DeploymentRoleMember)
+	fixture.access.roles[projectGrantKey(projectID, member.ID)] = store.ProjectRoleMember
+	fixture.access.roles[projectGrantKey(projectID, viewer.ID)] = store.ProjectRoleViewer
+	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
+
+	deniedPreview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview", `{"mentionAgentIds":["`+agentID+`"]}`, bearer(viewerToken))
+	if deniedPreview.Code != http.StatusForbidden {
+		t.Fatalf("viewer preview status=%d body=%s", deniedPreview.Code, deniedPreview.Body.String())
+	}
+
+	preview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview", `{"mentionAgentIds":["`+agentID+`"]}`, bearer(token))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var previews []IssueCommentMentionPreviewDTO
+	if err := json.Unmarshal(preview.Body.Bytes(), &previews); err != nil {
+		t.Fatal(err)
+	}
+	if len(previews) != 1 || previews[0].TargetAgentID != agentID || !previews[0].Eligible {
+		t.Fatalf("preview=%+v", previews)
+	}
+
+	requestID := "12121212-1212-4212-8212-121212121212"
+	created := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
+		`{"body":"Please inspect @Agent","requestId":"`+requestID+`","mentionAgentIds":["`+agentID+`"]}`, bearer(token))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
+	}
+	var comment IssueCommentDTO
+	if err := json.Unmarshal(created.Body.Bytes(), &comment); err != nil {
+		t.Fatal(err)
+	}
+	if len(comment.Mentions) != 1 || comment.Mentions[0].TargetAgentID != agentID ||
+		comment.Mentions[0].Outcome != store.IssueCommentMentionOutcomeQueued {
+		t.Fatalf("comment mentions=%+v", comment.Mentions)
+	}
+
+	missingRequest := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
+		`{"body":"Mention","mentionAgentIds":["`+agentID+`"]}`, bearer(token))
+	if missingRequest.Code != http.StatusBadRequest {
+		t.Fatalf("missing request status=%d body=%s", missingRequest.Code, missingRequest.Body.String())
+	}
+
+	tooManyIDs := `["` + strings.TrimSuffix(strings.Repeat(agentID+`","`, store.MaxIssueCommentMentions+1), `","`) + `"]`
+	for name, body := range map[string]string{
+		"invalid parent":  `{"body":"Mention","parentCommentId":"not-a-uuid"}`,
+		"invalid target":  `{"body":"Mention","requestId":"` + requestID + `","mentionAgentIds":["not-a-uuid"]}`,
+		"invalid request": `{"body":"Mention","requestId":"not-a-uuid","mentionAgentIds":["` + agentID + `"]}`,
+		"too many":        `{"body":"Mention","requestId":"` + requestID + `","mentionAgentIds":` + tooManyIDs + `}`,
+	} {
+		t.Run("create "+name, func(t *testing.T) {
+			response := authHTTPRequest(t, fixture.handler, http.MethodPost, base, body, bearer(token))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	for name, body := range map[string]string{
+		"invalid target": `{"mentionAgentIds":["not-a-uuid"]}`,
+		"too many":       `{"mentionAgentIds":` + tooManyIDs + `}`,
+	} {
+		t.Run("preview "+name, func(t *testing.T) {
+			response := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview", body, bearer(token))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+	plain := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"plain @Agent text only"}`, bearer(token))
+	if plain.Code != http.StatusCreated {
+		t.Fatalf("plain status=%d body=%s", plain.Code, plain.Body.String())
+	}
+	var plainComment IssueCommentDTO
+	if err := json.Unmarshal(plain.Body.Bytes(), &plainComment); err != nil {
+		t.Fatal(err)
+	}
+	if len(plainComment.Mentions) != 0 {
+		t.Fatalf("plain mention-looking text gained structured mentions: %+v", plainComment.Mentions)
+	}
+}
 
 func TestIssueCommentLowLevelRouterReadCompatibilityAndWriteFailClosed(t *testing.T) {
 	database := &issueCommentHTTPStore{fakeControlPlaneStore: &fakeControlPlaneStore{}}

@@ -219,7 +219,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			return engine.Result{}, err
 		}
 		if err := commentTools.Reconcile(ctx, native, session.ID, request.IssueComments); err != nil {
-			return engine.Result{}, err
+			return engine.Result{}, completeDelegationHandoff(err)
 		}
 		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
 			return engine.Result{}, completeDelegationHandoff(err)
@@ -256,7 +256,7 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 			return engine.Result{}, err
 		}
 		if err := commentTools.Reconcile(ctx, native, session.ID, request.IssueComments); err != nil {
-			return engine.Result{}, err
+			return engine.Result{}, completeDelegationHandoff(err)
 		}
 		if err := delegationTools.Reconcile(ctx, native, session.ID, request.Delegation); err != nil {
 			return engine.Result{}, completeDelegationHandoff(err)
@@ -357,6 +357,9 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 					)
 				}
 				if reconcileErr := commentTools.Reconcile(ctx, native, session.ID, request.IssueComments); reconcileErr != nil {
+					if errors.Is(reconcileErr, engine.ErrDelegationHandoff) {
+						return engine.Result{}, completeDelegationHandoff(reconcileErr)
+					}
 					return engine.Result{}, errors.Join(
 						fmt.Errorf("opencode engine: native event stream disconnected: %w", eventRead.err),
 						reconcileErr,
@@ -410,7 +413,12 @@ func (e *Engine) Execute(ctx context.Context, request engine.Request) (result en
 				return engine.Result{}, err
 			}
 			if err := commentTools.Handle(ctx, eventRead.event, session.ID, request.IssueComments); err != nil {
-				return engine.Result{}, err
+				if errors.Is(err, engine.ErrDelegationHandoff) {
+					if activityErr := state.handleEvent(ctx, native, eventRead.event); activityErr != nil {
+						return engine.Result{}, activityErr
+					}
+				}
+				return engine.Result{}, completeDelegationHandoff(err)
 			}
 			if err := delegationTools.Handle(ctx, eventRead.event, native, session.ID, request.Delegation); err != nil {
 				// A terminal native delegate_task that matches a canonically accepted
@@ -642,7 +650,7 @@ func nativeWorkingDirectory(process engine.Process) string {
 
 const issueStatusPromptGuidance = "Issue Board status is an explicit workflow decision. Use set_issue_status(status) for the current Issue when the Board state should change. When meaningful work starts, use IN_PROGRESS. When you cannot continue, use BLOCKED. When implementation or other work is complete and ready for human review or handoff, use REVIEW. Completing the requested implementation does not by itself mean DONE. For normal coding or implementation work, a successful final handoff should therefore normally leave the Issue in REVIEW, not DONE. Use DONE only when the Issue is fully finished and no human review, approval, or handoff remains. Before your final response, compare the final work outcome with the persisted Issue Board status and call set_issue_status(status) if the Board state should now be different. Do not infer Board status from the Run lifecycle, and do not use status changes as a substitute for OpenCode's native Question capability when human input is required."
 
-const issueCommentPromptGuidance = "Issue comments are deliberate durable collaboration. Use publish_issue_comment(body) only for concise findings/results, handoffs/conclusions, non-blocking collaboration-level questions, or pointers to existing Run/Review evidence. Do not copy raw command output, test output, file contents, logs, ordinary progress, or hidden reasoning into Issue comments. Use OpenCode's native Question capability for blocking human input. Plain @name text in a comment has no routing or execution semantics. Publishing a comment does not change Issue ownership or Board status."
+const issueCommentPromptGuidance = "Issue comments are deliberate durable collaboration. Use publish_issue_comment(body, mentionAgentIds?) only for concise findings/results, handoffs/conclusions, non-blocking collaboration-level questions, or pointers to existing Run/Review evidence. Plain @name text has no routing semantics. To request focused Agent work, pass at most one stable Agent ID structurally in mentionAgentIds and choose it only from the server-provided Available delegation targets; never guess Agent identifiers. A queued Agent mention uses the same canonical delegation and Workspace handoff as delegate_task, so one publication can yield at most one Workspace handoff. Do not copy raw command output, test output, file contents, logs, ordinary progress, or hidden reasoning into Issue comments. Use OpenCode's native Question capability for blocking human input. Publishing a comment does not change Issue ownership or Board status."
 
 const delegationPromptGuidance = "This Run may request bounded help from another Agent with delegate_task(targetAgentId, task). Choose targetAgentId only from the server-provided available delegation targets; never guess Agent identifiers. Delegation does not transfer Issue ownership or Review authority."
 
@@ -709,6 +717,8 @@ func initialTaskPromptWithDelegationToolContext(safe executioncontext.SafeContex
 		if delegationContext != nil {
 			sections = append(sections, delegationPromptGuidance+"\n\n"+delegationToolContextPrompt(delegationContext))
 		}
+	} else if safe.Delegation.SourceCommentID != nil {
+		sections = append(sections, "This is bounded delegated execution requested by a structured Agent mention in the Issue discussion. Work only on the delegated task. There is no parent Run to resume; Issue ownership, Board status and Review authority remain outside this delegated Run. Do not attempt to change Issue status or delegate further work.")
 	} else {
 		sections = append(sections, "This is delegated execution. Work only on the bounded delegated task. The parent Run remains authoritative for Issue ownership and Board/Review outcome; do not attempt to change Issue status or delegate further work.")
 	}

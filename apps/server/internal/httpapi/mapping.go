@@ -68,6 +68,13 @@ func issueCommentDTO(v store.IssueComment, issueKey, viewerID string) IssueComme
 			Reaction: reaction.Reaction, Count: reaction.Count, ReactedByCurrentUser: reacted,
 		})
 	}
+	mentions := make([]IssueCommentMentionDTO, 0, len(v.Mentions))
+	for _, mention := range v.Mentions {
+		mentions = append(mentions, IssueCommentMentionDTO{
+			ID: mention.ID, TargetAgentID: mention.TargetAgentID, TargetAgentName: mention.TargetAgentName,
+			Outcome: mention.Outcome, ReasonCode: mention.ReasonCode, DelegationID: mention.DelegationID, DelegatedRunID: mention.DelegatedRunID,
+		})
+	}
 	return IssueCommentDTO{
 		ID:              v.ID,
 		IssueID:         issueKey,
@@ -79,6 +86,7 @@ func issueCommentDTO(v store.IssueComment, issueKey, viewerID string) IssueComme
 		ResolvedAt:      v.ResolvedAt,
 		ResolvedBy:      resolvedBy,
 		Reactions:       reactions,
+		Mentions:        mentions,
 		CreatedAt:       v.CreatedAt,
 		UpdatedAt:       v.UpdatedAt,
 	}
@@ -129,18 +137,24 @@ func runDTO(v store.Run, issueKeys map[string]string) RunDTO {
 }
 
 func delegationDTO(v app.DelegationInspection, issueKeys map[string]string) DelegationDTO {
+	var parentRunID, parentAgentID, parentRunStatus *string
+	if v.ParentRunID != "" {
+		parentRunIDValue, parentAgentIDValue, parentRunStatusValue := v.ParentRunID, v.ParentAgentID, v.ParentRunStatus
+		parentRunID, parentAgentID, parentRunStatus = &parentRunIDValue, &parentAgentIDValue, &parentRunStatusValue
+	}
 	return DelegationDTO{
 		ID:                       v.ID,
 		ProjectID:                v.ProjectID,
 		IssueID:                  issueKeyForUUID(issueKeys, v.IssueID),
-		ParentRunID:              v.ParentRunID,
-		ParentAgentID:            v.ParentAgentID,
+		ParentRunID:              parentRunID,
+		ParentAgentID:            parentAgentID,
+		SourceCommentID:          v.SourceCommentID,
 		TargetAgentID:            v.TargetAgentID,
 		Task:                     v.Task,
 		DelegatedRunID:           v.DelegatedRunID,
 		WorkspaceAccess:          store.DelegationWorkspaceAccessWrite,
 		RequestKey:               v.RequestKey,
-		ParentRunStatus:          v.ParentRunStatus,
+		ParentRunStatus:          parentRunStatus,
 		DelegatedRunStatus:       v.DelegatedRunStatus,
 		Outcome:                  v.Outcome,
 		ResultSummary:            v.ResultSummary,

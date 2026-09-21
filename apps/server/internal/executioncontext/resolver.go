@@ -139,11 +139,13 @@ func (r *Resolver) resolveDelegation(ctx context.Context, projectID string, run 
 	if err != nil {
 		return nil, fail("execution_delegation_unavailable", "Delegation lineage is unavailable", err)
 	}
-	if value.ProjectID != projectID || value.IssueID != issue.ID || value.DelegatedRunID != run.ID || value.TargetAgentID != agent.ID || value.ParentRunID == "" || value.ParentAgentID == "" || strings.TrimSpace(value.Task) == "" {
+	parentOrigin := value.ParentRunID != "" && value.ParentAgentID != "" && value.SourceCommentID == nil
+	commentOrigin := value.ParentRunID == "" && value.ParentAgentID == "" && value.SourceCommentID != nil && strings.TrimSpace(*value.SourceCommentID) != ""
+	if value.ProjectID != projectID || value.IssueID != issue.ID || value.DelegatedRunID != run.ID || value.TargetAgentID != agent.ID || (!parentOrigin && !commentOrigin) || strings.TrimSpace(value.Task) == "" {
 		return nil, fail("execution_configuration_invalid", "Delegation lineage is inconsistent with Run execution configuration", nil)
 	}
 	return &DelegationContext{
-		ID: value.ID, ParentRunID: value.ParentRunID, ParentAgentID: value.ParentAgentID,
+		ID: value.ID, ParentRunID: value.ParentRunID, ParentAgentID: value.ParentAgentID, SourceCommentID: cloneString(value.SourceCommentID),
 		TargetAgentID: value.TargetAgentID, Task: value.Task, RequestKey: value.RequestKey,
 	}, nil
 }
