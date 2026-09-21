@@ -449,6 +449,63 @@ func TestIssueCommentMentionApplicationPreviewAndCreate(t *testing.T) {
 	}
 }
 
+func TestIssueCommentTriggerApplicationPreviewUsesSharedCapabilityAndErrors(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	reason := store.IssueCommentMentionReasonTargetBusy
+	fake := &issueCommentTestStore{
+		projectWorkflowAuthorizationStore: base,
+		mentionPreview: []store.IssueCommentMentionPreview{{
+			TargetAgentID: "agent-2", TargetAgentName: "Verifier", Eligible: false, ReasonCode: &reason,
+		}},
+	}
+	service := New(fake)
+	parentID := "comment-parent"
+
+	preview, err := service.PreviewIssueCommentTriggers(
+		t.Context(), projectID, issueID, &parentID, "Please inspect this.",
+		store.IssueCommentTriggerRequest{MentionAgentIDs: []string{"agent-2"}, SuppressImplicit: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Mentions) != 1 || preview.Mentions[0].TargetAgentID != "agent-2" ||
+		preview.Mentions[0].ReasonCode == nil || *preview.Mentions[0].ReasonCode != reason || preview.Implicit != nil {
+		t.Fatalf("trigger preview=%+v", preview)
+	}
+
+	fake.mentionErr = store.ErrInvalidArgument
+	if _, err := service.PreviewIssueCommentTriggers(
+		t.Context(), projectID, issueID, nil, "body", store.IssueCommentTriggerRequest{},
+	); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("trigger preview error=%v want invalid argument", err)
+	}
+	fake.mentionErr = nil
+
+	if _, err := service.PreviewIssueCommentTriggers(
+		t.Context(), projectID, "missing", nil, "body", store.IssueCommentTriggerRequest{},
+	); err == nil {
+		t.Fatal("missing Issue trigger preview unexpectedly succeeded")
+	}
+
+	withoutTriggers := &issueCommentWithoutMentionsStore{
+		ControlPlaneStore: fake,
+		IssueCommentStore: fake,
+	}
+	if _, err := New(withoutTriggers).PreviewIssueCommentTriggers(
+		t.Context(), projectID, issueID, nil, "body", store.IssueCommentTriggerRequest{},
+	); err == nil {
+		t.Fatal("trigger preview unexpectedly succeeded without trigger capability")
+	}
+}
+
 func TestPublishAgentIssueCommentDerivesTrustedRunContext(t *testing.T) {
 	const projectID = "project-1"
 	const issueID = "issue-1"
