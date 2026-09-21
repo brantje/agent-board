@@ -196,8 +196,8 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 	}
 
 	const (
-		expectedBody      = "Create mentioned-result.txt containing exactly structured-mention-child-ok with no trailing newline. Plain @OpenCode integration agent prose is inert."
-		expectedChildFile = "structured-mention-child-ok"
+		expectedBody      = "Create mentioned-result.txt with exactly this single line and no trailing newline: structured-mention-child-ok @OpenCode integration agent"
+		expectedChildFile = "structured-mention-child-ok @OpenCode integration agent"
 	)
 	setup := fixture.createRunSetup(t, openCodeRunSpec{
 		roleInstructions: "Follow the issue instructions exactly. Do not ask a Question, delegate, publish a comment, change Issue status, or modify files unless explicitly directed.",
@@ -253,8 +253,11 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 	delegation := waitForOpenCodeDelegation(t, fixture, project.ID, parentRun.ID)
 	if delegation.ParentRunID != parentRun.ID || delegation.ParentAgentID != parentAgent.ID ||
 		delegation.SourceCommentID != nil || delegation.TargetAgentID != target.ID ||
-		delegation.DelegatedRunID == "" || delegation.Task != expectedBody {
+		delegation.DelegatedRunID == "" {
 		t.Fatalf("structured mention delegation=%+v", delegation)
+	}
+	if !strings.Contains(delegation.Task, expectedChildFile) || !strings.Contains(delegation.Task, "@"+parentAgent.Name) {
+		t.Fatalf("structured mention delegation task=%q does not preserve the requested work and inert prose mention", delegation.Task)
 	}
 	parentPaused := waitForOpenCodeRunStatus(t, fixture, project.ID, parentRun.ID, "PAUSED")
 	if parentPaused.WorkspaceID != parentRun.WorkspaceID {
@@ -266,6 +269,7 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 		t.Fatal(err)
 	}
 	completedPublishes := 0
+	publishedBody := ""
 	for _, event := range events {
 		if event.Type != "tool.started" && event.Type != "tool.completed" && event.Type != "tool.failed" {
 			continue
@@ -284,9 +288,11 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 			continue
 		}
 		completedPublishes++
-		if body, _ := payload.Input["body"].(string); body != expectedBody {
-			t.Fatalf("publish_issue_comment body=%q want %q", body, expectedBody)
+		body, _ := payload.Input["body"].(string)
+		if !strings.Contains(body, expectedChildFile) || !strings.Contains(body, "@"+parentAgent.Name) {
+			t.Fatalf("publish_issue_comment body=%q does not preserve the requested work and inert prose mention", body)
 		}
+		publishedBody = body
 		mentionIDs, ok := payload.Input["mentionAgentIds"].([]any)
 		if !ok || len(mentionIDs) != 1 || mentionIDs[0] != target.ID {
 			t.Fatalf("publish_issue_comment mentionAgentIds=%+v want [%s]", payload.Input["mentionAgentIds"], target.ID)
@@ -306,8 +312,8 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 	comment := comments[0]
 	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != parentAgent.ID ||
 		comment.SourceRunID == nil || *comment.SourceRunID != parentRun.ID ||
-		comment.Body != expectedBody || len(comment.Mentions) != 1 {
-		t.Fatalf("structured Agent comment=%+v", comment)
+		comment.Body != publishedBody || delegation.Task != publishedBody || len(comment.Mentions) != 1 {
+		t.Fatalf("structured Agent comment=%+v delegation=%+v publishedBody=%q", comment, delegation, publishedBody)
 	}
 	if !strings.Contains(comment.Body, "@"+parentAgent.Name) {
 		t.Fatalf("comment body does not contain the inert plain-prose mention proof: %q", comment.Body)
