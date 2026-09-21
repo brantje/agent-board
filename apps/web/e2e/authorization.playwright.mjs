@@ -293,7 +293,7 @@ try {
     assert.ok(postedMentionComment.mentions[0].delegatedRunId)
 
     let mentionArticle = page.locator('article').filter({ hasText: mentionBody })
-    await mentionArticle.getByText('@Mention E2E Target').waitFor()
+    await mentionArticle.getByText('@Mention E2E Target', { exact: true }).waitFor()
     await mentionArticle.getByText('Work queued').waitFor()
     const delegatedRunLink = mentionArticle.getByRole('link', { name: 'Open delegated Run' })
     await delegatedRunLink.waitFor()
@@ -345,14 +345,14 @@ try {
     assert.equal(blockedComment.mentions[0].reasonCode, 'TARGET_BUSY')
     assert.equal(blockedComment.mentions[0].delegatedRunId, null)
     const blockedArticle = page.locator('article').filter({ hasText: blockedBody })
-    await blockedArticle.getByText('@Mention E2E Target').waitFor()
+    await blockedArticle.getByText('@Mention E2E Target', { exact: true }).waitFor()
     await blockedArticle.getByText('Agent already has active work on this Issue').waitFor()
     assert.equal(await blockedArticle.getByRole('link', { name: 'Open delegated Run' }).count(), 0)
 
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.getByText(mentionBody).waitFor()
     mentionArticle = page.locator('article').filter({ hasText: mentionBody })
-    await mentionArticle.getByText('@Mention E2E Target').waitFor()
+    await mentionArticle.getByText('@Mention E2E Target', { exact: true }).waitFor()
     await mentionArticle.getByText('Work queued').waitFor()
     assert.equal(
       await mentionArticle.getByRole('link', { name: 'Open delegated Run' }).getAttribute('href'),
