@@ -91,7 +91,13 @@ function resetDraftRequestIdentity() {
   if (!submitting.value) draftRequestId.value = ''
 }
 
-watch(body, resetDraftRequestIdentity)
+watch(body, (_value, _oldValue, onCleanup) => {
+  resetDraftRequestIdentity()
+  const timer = globalThis.setTimeout(() => {
+    void refreshTriggerPreview()
+  }, 250)
+  onCleanup(() => globalThis.clearTimeout(timer))
+})
 watch(suppressImplicitAgentTrigger, () => {
   resetDraftRequestIdentity()
   void refreshTriggerPreview()
@@ -185,7 +191,10 @@ async function refreshTriggerPreview() {
     )
     if (generation === triggerPreviewGeneration) triggerPreview.value = value
   } catch (failure) {
-    if (generation === triggerPreviewGeneration) triggerPreviewError.value = failure as Error
+    if (generation === triggerPreviewGeneration) {
+      triggerPreview.value = { mentions: [], implicit: null }
+      triggerPreviewError.value = failure as Error
+    }
   }
 }
 

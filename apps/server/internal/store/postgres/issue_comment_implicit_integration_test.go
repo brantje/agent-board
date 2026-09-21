@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -190,7 +191,8 @@ func TestIssueCommentImplicitWorkflowSuppressionAndExplicitPrecedence(t *testing
 			t.Run(status, func(t *testing.T) {
 				f := newDelegationFixture(t, true)
 				ctx := t.Context()
-				author, err := f.store.CreateUser(ctx, authUser("guard-"+status, "guard-"+status+"@example.com", store.UserStatusActive))
+				statusSlug := strings.ToLower(status)
+				author, err := f.store.CreateUser(ctx, authUser("guard-"+statusSlug, "guard-"+statusSlug+"@example.com", store.UserStatusActive))
 				if err != nil {
 					t.Fatal(err)
 				}

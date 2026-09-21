@@ -55,7 +55,10 @@ const activity = {
   payload: { message: 'Issue updated' }
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 function stubAuth(userId = 'user-1') {
   vi.stubGlobal('useAuth', () => ({ user: { value: { id: userId } } }))
@@ -675,6 +678,98 @@ describe('IssueDiscussionTimeline', () => {
     expect(wrapper.text()).toContain('@Unavailable Agent')
     expect(wrapper.text()).toContain('current Issue Agent assignee')
     expect(wrapper.text()).toContain('Issue workflow does not allow an implicit Agent wakeup')
+    wrapper.unmount()
+  })
+
+  it('debounces trigger previews from the current draft body', async () => {
+    stubAuth()
+    vi.useFakeTimers()
+    const previewBodies: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) return new Response(JSON.stringify([]))
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        const input = JSON.parse(String(options.body)) as { body: string }
+        previewBodies.push(input.body)
+        return new Response(JSON.stringify({ mentions: [], implicit: null }))
+      }
+      throw new Error(`unexpected request ${url}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('first draft')
+    await wrapper.get('textarea').setValue('current draft')
+    expect(previewBodies).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(249)
+    expect(previewBodies).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+
+    expect(previewBodies).toEqual(['current draft'])
+    wrapper.unmount()
+  })
+
+  it('clears stale routing when the current trigger preview fails', async () => {
+    stubAuth()
+    const agentComment = {
+      ...root,
+      id: 'abababab-abab-4aba-8aba-abababababab',
+      sourceRunId: 'bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc',
+      author: { type: 'AGENT' as const, id: 'cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd', name: 'Routing Agent' },
+      body: 'Agent response'
+    }
+    let previewCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) {
+        return new Response(JSON.stringify([
+          { kind: 'comment', id: agentComment.id, occurredAt: agentComment.createdAt, comment: agentComment, activity: null }
+        ]))
+      }
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        previewCalls++
+        if (previewCalls === 1) {
+          return new Response(JSON.stringify({
+            mentions: [],
+            implicit: {
+              targetAgentId: agentComment.author.id,
+              targetAgentName: agentComment.author.name,
+              routingReason: 'DIRECT_AGENT_REPLY',
+              eligible: true,
+              suppressed: false,
+              reasonCode: null
+            }
+          }))
+        }
+        return new Response(JSON.stringify({ error: { code: 'internal_error', message: 'preview failed' } }), { status: 500 })
+      }
+      throw new Error(`unexpected request ${url}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'Reply')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Routing Agent')
+    expect(wrapper.text()).toContain('Will queue work')
+
+    const suppress = wrapper.find('input[type="checkbox"]')
+    await suppress.setValue(true)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Trigger preview unavailable')
+    expect(wrapper.text()).not.toContain('@Routing Agent')
+    expect(wrapper.text()).not.toContain('Will queue work')
     wrapper.unmount()
   })
 
