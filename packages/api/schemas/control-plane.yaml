@@ -374,10 +374,66 @@ IssueCommentMentionPreviewInput:
       maxItems: 10
       uniqueItems: true
       items: {type: string, format: uuid}
+IssueCommentImplicitRoutingReason:
+  type: string
+  enum: [DIRECT_AGENT_REPLY, UNIQUE_THREAD_AGENT, ISSUE_ASSIGNEE]
+IssueCommentImplicitOutcome:
+  type: string
+  enum: [QUEUED, BLOCKED, SUPPRESSED]
+IssueCommentImplicitReasonCode:
+  type: [string, 'null']
+  enum: [TARGET_UNAVAILABLE, TARGET_BUSY, DELEGATION_BLOCKED, WORKFLOW_BLOCKED, null]
+IssueCommentImplicitTrigger:
+  type: object
+  additionalProperties: false
+  required: [targetAgentId, targetAgentName, routingReason, outcome, reasonCode, delegationId, delegatedRunId]
+  properties:
+    targetAgentId: {type: string, format: uuid}
+    targetAgentName: {type: string}
+    routingReason: {$ref: '#/IssueCommentImplicitRoutingReason'}
+    outcome: {$ref: '#/IssueCommentImplicitOutcome'}
+    reasonCode: {$ref: '#/IssueCommentImplicitReasonCode'}
+    delegationId: {type: [string, 'null'], format: uuid}
+    delegatedRunId: {type: [string, 'null'], format: uuid}
+IssueCommentImplicitTriggerPreview:
+  type: object
+  additionalProperties: false
+  required: [targetAgentId, targetAgentName, routingReason, eligible, suppressed, reasonCode]
+  properties:
+    targetAgentId: {type: string, format: uuid}
+    targetAgentName: {type: string}
+    routingReason: {$ref: '#/IssueCommentImplicitRoutingReason'}
+    eligible: {type: boolean}
+    suppressed: {type: boolean}
+    reasonCode: {$ref: '#/IssueCommentImplicitReasonCode'}
+IssueCommentTriggerPreview:
+  type: object
+  additionalProperties: false
+  required: [mentions, implicit]
+  properties:
+    mentions:
+      type: array
+      items: {$ref: '#/IssueCommentMentionPreview'}
+    implicit:
+      oneOf:
+      - {$ref: '#/IssueCommentImplicitTriggerPreview'}
+      - {type: 'null'}
+IssueCommentTriggerPreviewInput:
+  type: object
+  additionalProperties: false
+  properties:
+    parentCommentId: {type: [string, 'null'], format: uuid}
+    body: {type: string}
+    mentionAgentIds:
+      type: array
+      maxItems: 10
+      uniqueItems: true
+      items: {type: string, format: uuid}
+    suppressImplicitAgentTrigger: {type: boolean, default: false}
 IssueComment:
   type: object
   additionalProperties: false
-  required: [id, issueId, parentCommentId, sourceRunId, author, body, deletedAt, resolvedAt, resolvedBy, reactions, mentions, createdAt, updatedAt]
+  required: [id, issueId, parentCommentId, sourceRunId, author, body, deletedAt, resolvedAt, resolvedBy, reactions, mentions, implicitTrigger, createdAt, updatedAt]
   properties:
     id: {type: string, format: uuid}
     issueId: {$ref: '#/IssueKey'}
@@ -400,12 +456,16 @@ IssueComment:
     mentions:
       type: array
       items: {$ref: '#/IssueCommentMention'}
+    implicitTrigger:
+      oneOf:
+      - {$ref: '#/IssueCommentImplicitTrigger'}
+      - {type: 'null'}
     createdAt: {type: string, format: date-time}
     updatedAt: {type: string, format: date-time}
 IssueCommentCreate:
   type: object
   additionalProperties: false
-  required: [body]
+  required: [body, requestId]
   properties:
     parentCommentId: {type: [string, 'null'], format: uuid}
     body:
@@ -415,12 +475,16 @@ IssueCommentCreate:
     requestId:
       type: string
       format: uuid
-      description: Stable client request identity. Required when mentionAgentIds is non-empty.
+      description: Stable client request identity used to make comment creation and any resulting Agent trigger idempotent.
     mentionAgentIds:
       type: array
       maxItems: 10
       uniqueItems: true
       items: {type: string, format: uuid}
+    suppressImplicitAgentTrigger:
+      type: boolean
+      default: false
+      description: Suppresses only the implicit Agent trigger for this comment. Explicit structured mentions remain explicit requests.
 IssueCommentUpdate:
   type: object
   additionalProperties: false
