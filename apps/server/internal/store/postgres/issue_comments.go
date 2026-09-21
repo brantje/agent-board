@@ -147,6 +147,7 @@ func (s *Store) createIssueComment(ctx context.Context, projectID string, input 
 	if err != nil {
 		return store.IssueCommentMutationResult{}, err
 	}
+	persistedSuppressImplicit := implicitRouting && len(mentions) == 0 && suppressImplicit
 	if input.SourceActionKey != nil {
 		value := strings.TrimSpace(*input.SourceActionKey)
 		if value == "" {
@@ -219,13 +220,16 @@ func (s *Store) createIssueComment(ctx context.Context, projectID string, input 
 	}
 
 	comment, err := scanIssueComment(tx.QueryRow(ctx, `
-		INSERT INTO issue_comments (issue_id, parent_comment_id, author_type, author_id, source_run_id, source_action_key, body)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO issue_comments (
+			issue_id, parent_comment_id, author_type, author_id, source_run_id, source_action_key, body,
+			suppress_implicit_agent_trigger
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		ON CONFLICT DO NOTHING
 		RETURNING id::text, issue_id::text, parent_comment_id::text, author_type, author_id::text,
-		          $8::text, source_run_id::text, source_action_key, COALESCE(body, ''), deleted_at, resolved_at, resolved_by_user_id::text,
+		          $9::text, source_run_id::text, source_action_key, COALESCE(body, ''), deleted_at, resolved_at, resolved_by_user_id::text,
 		          ''::text, created_at, updated_at
-	`, issueID, input.ParentCommentID, input.AuthorType, input.AuthorID, input.SourceRunID, input.SourceActionKey, input.Body, authorName))
+	`, issueID, input.ParentCommentID, input.AuthorType, input.AuthorID, input.SourceRunID, input.SourceActionKey, input.Body, persistedSuppressImplicit, authorName))
 	if errors.Is(err, store.ErrNotFound) && input.SourceActionKey != nil {
 		existing, lookupErr := existingIssueCommentRequest(ctx, tx, issueID, authorName, input)
 		if lookupErr != nil {
@@ -233,6 +237,10 @@ func (s *Store) createIssueComment(ctx context.Context, projectID string, input 
 		}
 		if !sameIssueCommentRequest(existing, input) {
 			return store.IssueCommentMutationResult{}, store.ErrConflict
+		}
+		existingSuppressImplicit, lookupErr := existingIssueCommentSuppressionIntent(ctx, tx, issueID, existing.ID)
+		if lookupErr != nil {
+			return store.IssueCommentMutationResult{}, lookupErr
 		}
 		values := []store.IssueComment{existing}
 		if err := loadIssueCommentMentionsWith(ctx, tx, projectID, issueID, values); err != nil {
@@ -242,7 +250,7 @@ func (s *Store) createIssueComment(ctx context.Context, projectID string, input 
 			return store.IssueCommentMutationResult{}, err
 		}
 		if !sameIssueCommentMentionTargets(values[0].Mentions, mentions) ||
-			!sameIssueCommentImplicitRequest(values[0], implicitRouting, suppressImplicit, len(mentions) != 0) {
+			!sameIssueCommentImplicitRequest(values[0], implicitRouting, suppressImplicit, existingSuppressImplicit, len(mentions) != 0) {
 			return store.IssueCommentMutationResult{}, store.ErrConflict
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -326,6 +334,18 @@ func existingIssueCommentRequest(ctx context.Context, tx pgx.Tx, issueID, author
 		LEFT JOIN users AS u ON u.id = c.resolved_by_user_id
 		WHERE c.issue_id=$1 AND c.author_type='HUMAN' AND c.author_id=$2 AND c.source_action_key=$3
 	`, issueID, input.AuthorID, input.SourceActionKey, authorName))
+}
+
+func existingIssueCommentSuppressionIntent(ctx context.Context, tx pgx.Tx, issueID, commentID string) (bool, error) {
+	var suppressed bool
+	if err := tx.QueryRow(ctx, `
+		SELECT suppress_implicit_agent_trigger
+		FROM issue_comments
+		WHERE issue_id=$1 AND id=$2
+	`, issueID, commentID).Scan(&suppressed); err != nil {
+		return false, notFound(err)
+	}
+	return suppressed, nil
 }
 
 func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, projectID string, comment store.IssueComment, mentionAgentIDs []string) ([]store.IssueCommentMention, []store.Event, error) {

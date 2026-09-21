@@ -344,6 +344,7 @@ CREATE TABLE issue_comments (
     source_run_id uuid,
     source_action_key text,
     body text,
+    suppress_implicit_agent_trigger boolean NOT NULL DEFAULT false,
     deleted_at timestamptz,
     resolved_at timestamptz,
     resolved_by_user_id uuid,
@@ -359,6 +360,7 @@ CREATE TABLE issue_comments (
     ),
     CHECK ((resolved_at IS NULL) = (resolved_by_user_id IS NULL)),
     CHECK (parent_comment_id IS NULL OR (resolved_at IS NULL AND resolved_by_user_id IS NULL)),
+    CHECK (author_type = 'HUMAN' OR NOT suppress_implicit_agent_trigger),
     CHECK (
         (author_type = 'HUMAN' AND source_run_id IS NULL AND (source_action_key IS NULL OR btrim(source_action_key) <> ''))
         OR (author_type = 'AGENT' AND source_run_id IS NOT NULL AND source_action_key IS NOT NULL AND btrim(source_action_key) <> '')

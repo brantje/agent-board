@@ -276,14 +276,17 @@ func issueCommentImplicitRequestKey(commentID, targetAgentID string) string {
 	return fmt.Sprintf("comment:%s:implicit:%s", commentID, targetAgentID)
 }
 
-func sameIssueCommentImplicitRequest(existing store.IssueComment, enabled, suppress, hasExplicitMentions bool) bool {
+func sameIssueCommentImplicitRequest(existing store.IssueComment, enabled, suppress, persistedSuppress, hasExplicitMentions bool) bool {
 	if !enabled || hasExplicitMentions {
-		return existing.ImplicitTrigger == nil
+		return existing.ImplicitTrigger == nil && !persistedSuppress
+	}
+	if persistedSuppress != suppress {
+		return false
 	}
 	if existing.ImplicitTrigger == nil {
 		return true
 	}
-	if suppress {
+	if persistedSuppress {
 		return existing.ImplicitTrigger.Outcome == store.IssueCommentImplicitOutcomeSuppressed
 	}
 	return existing.ImplicitTrigger.Outcome != store.IssueCommentImplicitOutcomeSuppressed

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -345,6 +346,61 @@ func TestIssueCommentImplicitOwnerFallbackExcludesUserAndUnassignedIssues(t *tes
 				t.Fatalf("%s unexpectedly routed: %+v", test.name, result.Comment.ImplicitTrigger)
 			}
 		})
+	}
+}
+
+func TestIssueCommentImplicitSuppressionIntentIsStableWithoutRoute(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("no-route-retry-author", "no-route-retry-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := f.store.CreateIssue(ctx, store.Issue{
+		ProjectID: f.project.ID, Title: "No implicit route retry", Status: "TODO",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	key := "no-route-unsuppressed"
+	input := store.IssueComment{
+		IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+		SourceActionKey: &key, Body: "No implicit target exists.",
+	}
+	first, err := f.store.CreateIssueCommentWithTriggers(ctx, f.project.ID, input, store.IssueCommentTriggerRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Comment.ImplicitTrigger != nil {
+		t.Fatalf("unexpected implicit trigger=%+v", first.Comment.ImplicitTrigger)
+	}
+	retry, err := f.store.CreateIssueCommentWithTriggers(ctx, f.project.ID, input, store.IssueCommentTriggerRequest{})
+	if err != nil || retry.Comment.ID != first.Comment.ID || len(retry.Events) != 0 {
+		t.Fatalf("same-intent retry=%+v err=%v", retry, err)
+	}
+	if _, err := f.store.CreateIssueCommentWithTriggers(
+		ctx, f.project.ID, input, store.IssueCommentTriggerRequest{SuppressImplicit: true},
+	); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("changed suppression retry error=%v want conflict", err)
+	}
+
+	suppressedKey := "no-route-suppressed"
+	suppressedInput := input
+	suppressedInput.SourceActionKey = &suppressedKey
+	suppressed, err := f.store.CreateIssueCommentWithTriggers(
+		ctx, f.project.ID, suppressedInput, store.IssueCommentTriggerRequest{SuppressImplicit: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if suppressed.Comment.ImplicitTrigger != nil {
+		t.Fatalf("suppressed no-route comment gained trigger=%+v", suppressed.Comment.ImplicitTrigger)
+	}
+	if _, err := f.store.CreateIssueCommentWithTriggers(
+		ctx, f.project.ID, suppressedInput, store.IssueCommentTriggerRequest{},
+	); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("removed suppression retry error=%v want conflict", err)
 	}
 }
 
