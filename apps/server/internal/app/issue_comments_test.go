@@ -499,10 +499,23 @@ func TestIssueCommentTriggerApplicationPreviewUsesSharedCapabilityAndErrors(t *t
 		ControlPlaneStore: fake,
 		IssueCommentStore: fake,
 	}
-	if _, err := New(withoutTriggers).PreviewIssueCommentTriggers(
+	withoutTriggerService := New(withoutTriggers)
+	if _, err := withoutTriggerService.PreviewIssueCommentTriggers(
 		t.Context(), projectID, issueID, nil, "body", store.IssueCommentTriggerRequest{},
 	); err == nil {
 		t.Fatal("trigger preview unexpectedly succeeded without trigger capability")
+	}
+	if _, err := withoutTriggerService.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "human trigger requires capability", RequestKey: "trigger-capability",
+	}, "author"); err == nil {
+		t.Fatal("human comment unexpectedly succeeded without trigger capability")
+	}
+
+	fake.commentErr = store.ErrConflict
+	if _, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "propagate trigger store failure", RequestKey: "trigger-store-error",
+	}, "author"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("trigger create error=%v want conflict", err)
 	}
 }
 

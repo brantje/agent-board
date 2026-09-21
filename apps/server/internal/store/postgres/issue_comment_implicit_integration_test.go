@@ -209,6 +209,19 @@ func TestIssueCommentImplicitWorkflowSuppressionAndExplicitPrecedence(t *testing
 				`, f.project.ID, guardedIssue.ID, f.parent.ID); err != nil {
 					t.Fatal(err)
 				}
+				preview, err := f.store.PreviewIssueCommentTriggers(
+					ctx, f.project.ID, guardedIssue.ID, nil,
+					"Do not wake parked or finished work.", store.IssueCommentTriggerRequest{},
+				)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if preview.Implicit == nil || preview.Implicit.TargetAgentID != f.parent.ID ||
+					preview.Implicit.Eligible || preview.Implicit.Suppressed ||
+					preview.Implicit.ReasonCode == nil || *preview.Implicit.ReasonCode != store.IssueCommentImplicitReasonWorkflowBlocked {
+					t.Fatalf("%s preview=%+v", status, preview)
+				}
+
 				key := "guard-" + status
 				result, err := f.store.CreateIssueCommentWithTriggers(ctx, f.project.ID, store.IssueComment{
 					IssueID: guardedIssue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
