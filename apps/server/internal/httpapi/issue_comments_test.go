@@ -468,7 +468,7 @@ func TestIssueCommentLowLevelRouterReadCompatibilityAndWriteFailClosed(t *testin
 	}
 
 	create := httptest.NewRecorder()
-	router.ServeHTTP(create, httptest.NewRequest(http.MethodPost, base+"/comments", strings.NewReader(`{"body":"cannot forge unauthenticated write"}`)))
+	router.ServeHTTP(create, httptest.NewRequest(http.MethodPost, base+"/comments", strings.NewReader(`{"body":"cannot forge unauthenticated write","requestId":"45454545-4545-4454-8454-454545454545"}`)))
 	if create.Code != http.StatusUnauthorized {
 		t.Fatalf("low-level create status=%d body=%s", create.Code, create.Body.String())
 	}

@@ -194,12 +194,22 @@ func TestIssueCommentImplicitWorkflowSuppressionAndExplicitPrecedence(t *testing
 				if err != nil {
 					t.Fatal(err)
 				}
-				if _, err := f.store.pool.Exec(ctx, `UPDATE issues SET status=$3 WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID, status); err != nil {
+				guardedIssue, err := f.store.CreateIssue(ctx, store.Issue{
+					ProjectID: f.project.ID, Title: "Guard "+status, Status: status,
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.store.pool.Exec(ctx, `
+					UPDATE issues
+					SET assignee_type='AGENT', assignee_id=$3
+					WHERE project_id=$1 AND id=$2
+				`, f.project.ID, guardedIssue.ID, f.parent.ID); err != nil {
 					t.Fatal(err)
 				}
 				key := "guard-" + status
 				result, err := f.store.CreateIssueCommentWithTriggers(ctx, f.project.ID, store.IssueComment{
-					IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+					IssueID: guardedIssue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
 					SourceActionKey: &key, Body: "Do not wake parked or finished work.",
 				}, store.IssueCommentTriggerRequest{})
 				if err != nil {
@@ -217,8 +227,10 @@ func TestIssueCommentImplicitWorkflowSuppressionAndExplicitPrecedence(t *testing
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(runs) != 1 {
-					t.Fatalf("%s implicit wake created execution: %+v", status, runs)
+				for _, run := range runs {
+					if run.IssueID == guardedIssue.ID {
+						t.Fatalf("%s implicit wake created execution: %+v", status, runs)
+					}
 				}
 			})
 		}
@@ -298,7 +310,11 @@ func TestIssueCommentImplicitOwnerFallbackExcludesUserAndUnassignedIssues(t *tes
 					t.Fatal(err)
 				}
 			} else {
-				if _, err := f.store.pool.Exec(ctx, `UPDATE issues SET assignee_type='USER', assignee_id=gen_random_uuid() WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID); err != nil {
+				owner, err := f.store.CreateUser(ctx, authUser("assigned-"+test.name, "assigned-"+test.name+"@example.com", store.UserStatusActive))
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.store.pool.Exec(ctx, `UPDATE issues SET assignee_type='USER', assignee_id=$3 WHERE project_id=$1 AND id=$2`, f.project.ID, f.issue.ID, owner.ID); err != nil {
 					t.Fatal(err)
 				}
 			}
