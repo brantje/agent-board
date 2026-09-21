@@ -14,6 +14,8 @@ const root = {
   resolvedAt: null,
   resolvedBy: null,
   reactions: [],
+  mentions: [],
+  implicitTrigger: null,
   createdAt: '2026-09-19T08:00:00Z',
   updatedAt: '2026-09-19T08:00:00Z'
 }
@@ -29,6 +31,8 @@ const reply = {
   resolvedAt: null,
   resolvedBy: null,
   reactions: [],
+  mentions: [],
+  implicitTrigger: null,
   createdAt: '2026-09-19T08:01:00Z',
   updatedAt: '2026-09-19T08:01:00Z'
 }
@@ -60,6 +64,8 @@ function stubAuth(userId = 'user-1') {
 describe('IssueDiscussionTimeline', () => {
   it('renders activity, threaded comments, posts replies, and reloads durable state', async () => {
     stubAuth()
+    const requestId = '77777777-7777-4777-8777-777777777777'
+    vi.stubGlobal('crypto', { randomUUID: () => requestId })
     let timeline = [
       { kind: 'activity' as const, id: activity.id, occurredAt: activity.occurredAt, comment: null, activity },
       { kind: 'comment' as const, id: root.id, occurredAt: root.createdAt, comment: root, activity: null },
@@ -112,7 +118,12 @@ describe('IssueDiscussionTimeline', () => {
 
     const post = fetch.mock.calls.find(([path, options]) => String(path).endsWith('/comments') && options?.method === 'POST')
     expect(post).toBeTruthy()
-    expect(JSON.parse(String(post![1]?.body))).toEqual({ body: 'Follow-up', parentCommentId: root.id })
+    expect(JSON.parse(String(post![1]?.body))).toEqual({
+      body: 'Follow-up',
+      parentCommentId: root.id,
+      requestId,
+      suppressImplicitAgentTrigger: false
+    })
     expect(wrapper.text()).toContain('Follow-up')
     expect(fetch.mock.calls.filter(([path]) => String(path).endsWith('/timeline')).length).toBeGreaterThanOrEqual(2)
     wrapper.unmount()
@@ -356,15 +367,18 @@ describe('IssueDiscussionTimeline', () => {
       const method = options.method || 'GET'
       if (url.endsWith('/timeline')) return new Response(JSON.stringify(timeline))
       if (url.endsWith('/agents') && method === 'GET') return new Response(JSON.stringify([verifier]))
-      if (url.endsWith('/comments/mention-preview') && method === 'POST') {
+      if (url.endsWith('/comments/trigger-preview') && method === 'POST') {
         const input = JSON.parse(String(options.body)) as { mentionAgentIds: string[] }
         expect(input.mentionAgentIds).toEqual([verifier.id])
-        return new Response(JSON.stringify([{
-          targetAgentId: verifier.id,
-          targetAgentName: verifier.name,
-          eligible: true,
-          reasonCode: null
-        }]))
+        return new Response(JSON.stringify({
+          mentions: [{
+            targetAgentId: verifier.id,
+            targetAgentName: verifier.name,
+            eligible: true,
+            reasonCode: null
+          }],
+          implicit: null
+        }))
       }
       if (url.endsWith('/comments') && method === 'POST') {
         const input = JSON.parse(String(options.body)) as {
@@ -377,7 +391,8 @@ describe('IssueDiscussionTimeline', () => {
           body: 'Please verify this change',
           parentCommentId: null,
           requestId,
-          mentionAgentIds: [verifier.id]
+          mentionAgentIds: [verifier.id],
+          suppressImplicitAgentTrigger: false
         })
         const created = {
           ...root,
@@ -500,13 +515,16 @@ describe('IssueDiscussionTimeline', () => {
       const url = String(path)
       if (url.endsWith('/timeline')) return new Response(JSON.stringify([]))
       if (url.endsWith('/agents')) return new Response(JSON.stringify(agents))
-      if (url.endsWith('/comments/mention-preview') && options.method === 'POST') {
-        return new Response(JSON.stringify([{
-          targetAgentId: agents[0]!.id,
-          targetAgentName: agents[0]!.name,
-          eligible: false,
-          reasonCode: 'TARGET_BUSY'
-        }]))
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        return new Response(JSON.stringify({
+          mentions: [{
+            targetAgentId: agents[0]!.id,
+            targetAgentName: agents[0]!.name,
+            eligible: false,
+            reasonCode: 'TARGET_BUSY'
+          }],
+          implicit: null
+        }))
       }
       throw new Error(`unexpected request ${url}`)
     })
@@ -560,7 +578,7 @@ describe('IssueDiscussionTimeline', () => {
         }
         return new Response(JSON.stringify([agent]))
       }
-      if (url.endsWith('/comments/mention-preview') && options.method === 'POST') {
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
         return new Response(JSON.stringify({ error: { code: 'internal_error' } }), { status: 500 })
       }
       throw new Error(`unexpected request ${url}`)
@@ -592,9 +610,112 @@ describe('IssueDiscussionTimeline', () => {
     await flushPromises()
     await second.findAll('button').find(button => button.text() === '@Verifier')!.trigger('click')
     await flushPromises()
-    expect(second.text()).toContain('Mention preview unavailable')
+    expect(second.text()).toContain('Trigger preview unavailable')
     expect((second.get('textarea').element as HTMLTextAreaElement).value).toBe('Still here')
     second.unmount()
+  })
+
+  it('previews and suppresses a direct-reply implicit Agent trigger while preserving the comment', async () => {
+    stubAuth()
+    const requestId = '88888888-8888-4888-8888-888888888888'
+    vi.stubGlobal('crypto', { randomUUID: () => requestId })
+    const agentComment = {
+      ...root,
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      sourceRunId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      author: { type: 'AGENT' as const, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'Builder Agent' },
+      body: 'I checked the implementation.'
+    }
+    let timeline: unknown[] = [
+      { kind: 'comment', id: agentComment.id, occurredAt: agentComment.createdAt, comment: agentComment, activity: null }
+    ]
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      const method = options.method || 'GET'
+      if (url.endsWith('/timeline')) return new Response(JSON.stringify(timeline))
+      if (url.endsWith('/comments/trigger-preview') && method === 'POST') {
+        const input = JSON.parse(String(options.body)) as { parentCommentId: string | null, suppressImplicitAgentTrigger: boolean, mentionAgentIds: string[] }
+        if (input.parentCommentId !== agentComment.id) {
+          return new Response(JSON.stringify({ mentions: [], implicit: null }))
+        }
+        return new Response(JSON.stringify({
+          mentions: [],
+          implicit: {
+            targetAgentId: agentComment.author.id,
+            targetAgentName: agentComment.author.name,
+            routingReason: 'DIRECT_AGENT_REPLY',
+            eligible: !input.suppressImplicitAgentTrigger,
+            suppressed: input.suppressImplicitAgentTrigger,
+            reasonCode: null
+          }
+        }))
+      }
+      if (url.endsWith('/comments') && method === 'POST') {
+        const input = JSON.parse(String(options.body)) as {
+          body: string
+          parentCommentId: string | null
+          requestId: string
+          suppressImplicitAgentTrigger: boolean
+        }
+        expect(input).toEqual({
+          body: 'Thanks, no need to run again.',
+          parentCommentId: agentComment.id,
+          requestId,
+          suppressImplicitAgentTrigger: true
+        })
+        const created = {
+          ...reply,
+          id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          parentCommentId: agentComment.id,
+          body: input.body,
+          implicitTrigger: {
+            targetAgentId: agentComment.author.id,
+            targetAgentName: agentComment.author.name,
+            routingReason: 'DIRECT_AGENT_REPLY' as const,
+            outcome: 'SUPPRESSED' as const,
+            reasonCode: null,
+            delegationId: null,
+            delegatedRunId: null
+          }
+        }
+        timeline = [...timeline, { kind: 'comment', id: created.id, occurredAt: created.createdAt, comment: created, activity: null }]
+        return new Response(JSON.stringify(created), { status: 201 })
+      }
+      throw new Error(`unexpected request ${method} ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: {
+        stubs: {
+          ...uiStubs,
+          IssueDiscussionTimeline: false,
+          IdentityAvatar: true
+        }
+      }
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'Reply')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Builder Agent')
+    expect(wrapper.text()).toContain('replying directly to this Agent')
+    expect(wrapper.text()).toContain('Will queue work')
+
+    const suppress = wrapper.find('input[type="checkbox"]')
+    expect(suppress.exists()).toBe(true)
+    await suppress.setValue(true)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Automatic Agent trigger suppressed')
+
+    await wrapper.get('textarea').setValue('Thanks, no need to run again.')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Automatic Agent trigger suppressed')
+    expect(wrapper.text()).not.toContain('Open delegated Run')
+    wrapper.unmount()
   })
 
 })
