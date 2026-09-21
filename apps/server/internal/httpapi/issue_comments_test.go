@@ -82,7 +82,15 @@ func (s *issueCommentHTTPStore) PreviewIssueCommentTriggers(ctx context.Context,
 	if err != nil {
 		return store.IssueCommentTriggerPreview{}, err
 	}
-	return store.IssueCommentTriggerPreview{Mentions: mentions}, nil
+	result := store.IssueCommentTriggerPreview{Mentions: mentions}
+	if len(request.MentionAgentIDs) == 0 {
+		result.Implicit = &store.IssueCommentImplicitTriggerPreview{
+			TargetAgentID: agentID, TargetAgentName: "Agent",
+			RoutingReason: store.IssueCommentImplicitRoutingReasonIssueAssignee,
+			Eligible: !request.SuppressImplicit, Suppressed: request.SuppressImplicit,
+		}
+	}
+	return result, nil
 }
 
 func (s *issueCommentHTTPStore) PreviewIssueCommentMentions(_ context.Context, pid, id string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
@@ -349,6 +357,37 @@ func TestIssueCommentHTTPTriggerPreviewUsesAuthorizedSharedRoutingContract(t *te
 	}
 	if len(value.Mentions) != 1 || value.Mentions[0].TargetAgentID != agentID || !value.Mentions[0].Eligible || value.Implicit != nil {
 		t.Fatalf("trigger preview=%+v", value)
+	}
+
+	implicitPreview := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint,
+		`{"body":"Implicit preview"}`, bearer(token))
+	if implicitPreview.Code != http.StatusOK {
+		t.Fatalf("implicit trigger preview status=%d body=%s", implicitPreview.Code, implicitPreview.Body.String())
+	}
+	var implicitValue IssueCommentTriggerPreviewDTO
+	if err := json.Unmarshal(implicitPreview.Body.Bytes(), &implicitValue); err != nil {
+		t.Fatal(err)
+	}
+	if len(implicitValue.Mentions) != 0 || implicitValue.Implicit == nil ||
+		implicitValue.Implicit.TargetAgentID != agentID ||
+		implicitValue.Implicit.RoutingReason != store.IssueCommentImplicitRoutingReasonIssueAssignee ||
+		!implicitValue.Implicit.Eligible || implicitValue.Implicit.Suppressed {
+		t.Fatalf("implicit trigger preview=%+v", implicitValue)
+	}
+
+	tooManyIDs := make([]string, store.MaxIssueCommentMentions+1)
+	for index := range tooManyIDs {
+		tooManyIDs[index] = agentID
+	}
+	tooManyBody, err := json.Marshal(PreviewIssueCommentTriggersRequest{
+		Body: "Too many targets", MentionAgentIDs: tooManyIDs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooMany := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint, string(tooManyBody), bearer(token))
+	if tooMany.Code != http.StatusBadRequest {
+		t.Fatalf("too-many trigger preview status=%d body=%s", tooMany.Code, tooMany.Body.String())
 	}
 
 	for name, body := range map[string]string{
