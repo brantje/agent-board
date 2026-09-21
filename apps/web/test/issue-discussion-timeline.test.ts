@@ -615,6 +615,69 @@ describe('IssueDiscussionTimeline', () => {
     second.unmount()
   })
 
+  it('renders queued and workflow-blocked implicit routing outcomes with their reasons', async () => {
+    stubAuth()
+    const queued = {
+      ...root,
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      body: 'Queued implicit route',
+      implicitTrigger: {
+        targetAgentId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        targetAgentName: 'Thread Agent',
+        routingReason: 'UNIQUE_THREAD_AGENT' as const,
+        outcome: 'QUEUED' as const,
+        reasonCode: null,
+        delegationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        delegatedRunId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+      }
+    }
+    const blocked = {
+      ...root,
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      body: 'Blocked implicit route',
+      implicitTrigger: {
+        targetAgentId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        targetAgentName: '',
+        routingReason: 'ISSUE_ASSIGNEE' as const,
+        outcome: 'BLOCKED' as const,
+        reasonCode: 'WORKFLOW_BLOCKED' as const,
+        delegationId: null,
+        delegatedRunId: null
+      }
+    }
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (String(path).endsWith('/timeline')) {
+        return new Response(JSON.stringify([
+          { kind: 'comment', id: queued.id, occurredAt: queued.createdAt, comment: queued, activity: null },
+          { kind: 'comment', id: blocked.id, occurredAt: blocked.createdAt, comment: blocked, activity: null }
+        ]))
+      }
+      throw new Error(`unexpected request ${path}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: {
+        stubs: {
+          ...uiStubs,
+          IssueDiscussionTimeline: false,
+          IdentityAvatar: true,
+          NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' }
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('@Thread Agent')
+    expect(wrapper.text()).toContain('only Agent participating in this discussion')
+    expect(wrapper.text()).toContain('Work queued')
+    expect(wrapper.find('a').attributes('href')).toBe('/projects/p/runs/cccccccc-cccc-4ccc-8ccc-cccccccccccc')
+    expect(wrapper.text()).toContain('@Unavailable Agent')
+    expect(wrapper.text()).toContain('current Issue Agent assignee')
+    expect(wrapper.text()).toContain('Issue workflow does not allow an implicit Agent wakeup')
+    wrapper.unmount()
+  })
+
   it('previews and suppresses a direct-reply implicit Agent trigger while preserving the comment', async () => {
     stubAuth()
     const requestId = '88888888-8888-4888-8888-888888888888'
