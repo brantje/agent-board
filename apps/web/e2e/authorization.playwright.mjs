@@ -260,6 +260,7 @@ try {
     const previewResponsePromise = page.waitForResponse(response => (
       response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments/trigger-preview')
       && response.request().method() === 'POST'
+      && response.request().postDataJSON()?.mentionAgentIds?.includes(mentionAgent.id)
     ), { timeout: 15_000 })
     await page.getByRole('button', { name: '@Mention E2E Target' }).click()
     const previewResponse = await previewResponsePromise
@@ -318,6 +319,7 @@ try {
     const busyPreviewPromise = page.waitForResponse(response => (
       response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments/trigger-preview')
       && response.request().method() === 'POST'
+      && response.request().postDataJSON()?.mentionAgentIds?.includes(mentionAgent.id)
     ), { timeout: 15_000 })
     await page.getByRole('button', { name: '@Mention E2E Target' }).click()
     const busyPreviewResponse = await busyPreviewPromise
