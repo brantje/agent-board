@@ -268,6 +268,9 @@ func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 		comment.SourceRunID == nil || *comment.SourceRunID != run.ID || comment.Body != expectedBody {
 		t.Fatalf("trusted Agent comment=%+v run=%+v", comment, run)
 	}
+	if comment.ImplicitTrigger != nil {
+		t.Fatalf("Agent-authored comment acquired implicit routing: %+v", comment.ImplicitTrigger)
+	}
 
 	reloadedDatabase, err := postgres.Open(fixture.ctx, fixture.env.databaseURL)
 	if err != nil {
