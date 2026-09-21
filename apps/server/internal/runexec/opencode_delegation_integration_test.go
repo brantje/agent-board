@@ -248,6 +248,10 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 	if parentRun.ID == "" {
 		t.Fatal("Agent assignment did not create the authoritative parent Run")
 	}
+	beforeIssue, err := fixture.database.GetIssue(fixture.ctx, project.ID, setup.Issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	fixture.startScheduler(t)
 	delegation := waitForOpenCodeDelegation(t, fixture, project.ID, parentRun.ID)
@@ -359,6 +363,16 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 		t.Fatalf("parent continuation status=%s failure=%q", parentFinal.Status, openCodeFailureReason(parentFinal.FailureReason))
 	}
 	assertOpenCodeWorkspaceFile(t, fixture.ctx, fixture.database, project.ID, parentFinal.WorkspaceID, "parent-after-mention.txt", "parent-after-mention-ok")
+
+	afterIssue, err := fixture.database.GetIssue(fixture.ctx, project.ID, setup.Issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterIssue.Status != beforeIssue.Status ||
+		afterIssue.AssigneeType == nil || beforeIssue.AssigneeType == nil || *afterIssue.AssigneeType != *beforeIssue.AssigneeType ||
+		afterIssue.AssigneeID == nil || beforeIssue.AssigneeID == nil || *afterIssue.AssigneeID != *beforeIssue.AssigneeID {
+		t.Fatalf("structured mention changed Issue assignment/status: before=%+v after=%+v", beforeIssue, afterIssue)
+	}
 }
 
 

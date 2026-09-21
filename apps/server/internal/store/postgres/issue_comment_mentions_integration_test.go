@@ -96,6 +96,10 @@ func TestHumanIssueCommentMultipleMentionsPersistMixedOutcomesAndRetryWithoutDup
 	if _, err := f.store.UpdateAgent(ctx, &scope, disabledTarget); err != nil {
 		t.Fatal(err)
 	}
+	beforeIssue, err := f.store.GetIssue(ctx, f.project.ID, f.issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	requestKey := "human-plural-mention-request"
 	body := "Queue the available Agent and preserve the blocked outcome for the unavailable Agent."
@@ -159,6 +163,37 @@ func TestHumanIssueCommentMultipleMentionsPersistMixedOutcomesAndRetryWithoutDup
 	}
 	if len(comments) != 1 || comments[0].ID != result.Comment.ID {
 		t.Fatalf("comments=%+v want one durable plural-mention comment", comments)
+	}
+
+	reloaded, err := New(f.store.pool).GetIssueComment(ctx, f.project.ID, f.issue.ID, result.Comment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Mentions) != 2 {
+		t.Fatalf("reloaded mentions=%+v want two persisted outcomes", reloaded.Mentions)
+	}
+	reloadedQueued, reloadedBlocked := reloaded.Mentions[0], reloaded.Mentions[1]
+	if reloadedQueued.TargetAgentID != f.target.ID ||
+		reloadedQueued.Outcome != store.IssueCommentMentionOutcomeQueued ||
+		reloadedQueued.DelegationID == nil || *reloadedQueued.DelegationID != *queued.DelegationID ||
+		reloadedQueued.DelegatedRunID == nil || *reloadedQueued.DelegatedRunID != *queued.DelegatedRunID {
+		t.Fatalf("reloaded queued mention=%+v want persisted queued delegation", reloadedQueued)
+	}
+	if reloadedBlocked.TargetAgentID != disabledTarget.ID ||
+		reloadedBlocked.Outcome != store.IssueCommentMentionOutcomeBlocked ||
+		reloadedBlocked.ReasonCode == nil || *reloadedBlocked.ReasonCode != store.IssueCommentMentionReasonTargetUnavailable ||
+		reloadedBlocked.DelegationID != nil || reloadedBlocked.DelegatedRunID != nil {
+		t.Fatalf("reloaded blocked mention=%+v want persisted blocked outcome", reloadedBlocked)
+	}
+
+	afterIssue, err := f.store.GetIssue(ctx, f.project.ID, f.issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if afterIssue.Status != beforeIssue.Status ||
+		afterIssue.AssigneeType == nil || beforeIssue.AssigneeType == nil || *afterIssue.AssigneeType != *beforeIssue.AssigneeType ||
+		afterIssue.AssigneeID == nil || beforeIssue.AssigneeID == nil || *afterIssue.AssigneeID != *beforeIssue.AssigneeID {
+		t.Fatalf("plural mention changed Issue assignment/status: before=%+v after=%+v", beforeIssue, afterIssue)
 	}
 }
 
