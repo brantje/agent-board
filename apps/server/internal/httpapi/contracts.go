@@ -87,6 +87,30 @@ type IssueCommentMentionPreviewDTO struct {
 	ReasonCode      *string `json:"reasonCode"`
 }
 
+type IssueCommentImplicitTriggerDTO struct {
+	TargetAgentID   string  `json:"targetAgentId"`
+	TargetAgentName string  `json:"targetAgentName"`
+	RoutingReason   string  `json:"routingReason"`
+	Outcome         string  `json:"outcome"`
+	ReasonCode      *string `json:"reasonCode"`
+	DelegationID    *string `json:"delegationId"`
+	DelegatedRunID  *string `json:"delegatedRunId"`
+}
+
+type IssueCommentImplicitTriggerPreviewDTO struct {
+	TargetAgentID   string  `json:"targetAgentId"`
+	TargetAgentName string  `json:"targetAgentName"`
+	RoutingReason   string  `json:"routingReason"`
+	Eligible        bool    `json:"eligible"`
+	Suppressed      bool    `json:"suppressed"`
+	ReasonCode      *string `json:"reasonCode"`
+}
+
+type IssueCommentTriggerPreviewDTO struct {
+	Mentions []IssueCommentMentionPreviewDTO        `json:"mentions"`
+	Implicit *IssueCommentImplicitTriggerPreviewDTO `json:"implicit"`
+}
+
 type IssueCommentDTO struct {
 	ID              string                           `json:"id"`
 	IssueID         string                           `json:"issueId"`
@@ -99,15 +123,24 @@ type IssueCommentDTO struct {
 	ResolvedBy      *IssueCommentResolverDTO         `json:"resolvedBy"`
 	Reactions       []IssueCommentReactionSummaryDTO `json:"reactions"`
 	Mentions        []IssueCommentMentionDTO          `json:"mentions"`
+	ImplicitTrigger *IssueCommentImplicitTriggerDTO   `json:"implicitTrigger"`
 	CreatedAt       time.Time                        `json:"createdAt"`
 	UpdatedAt       time.Time                        `json:"updatedAt"`
 }
 
 type CreateIssueCommentRequest struct {
-	ParentCommentID *string  `json:"parentCommentId"`
-	Body            string   `json:"body"`
-	RequestID       string   `json:"requestId"`
-	MentionAgentIDs []string `json:"mentionAgentIds"`
+	ParentCommentID         *string  `json:"parentCommentId"`
+	Body                    string   `json:"body"`
+	RequestID               string   `json:"requestId"`
+	MentionAgentIDs         []string `json:"mentionAgentIds"`
+	SuppressImplicitTrigger bool     `json:"suppressImplicitAgentTrigger"`
+}
+
+type PreviewIssueCommentTriggersRequest struct {
+	ParentCommentID         *string  `json:"parentCommentId"`
+	Body                    string   `json:"body"`
+	MentionAgentIDs         []string `json:"mentionAgentIds"`
+	SuppressImplicitTrigger bool     `json:"suppressImplicitAgentTrigger"`
 }
 
 type PreviewIssueCommentMentionsRequest struct {
