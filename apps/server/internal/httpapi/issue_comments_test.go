@@ -324,6 +324,46 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 }
 
 
+func TestIssueCommentHTTPTriggerPreviewUsesAuthorizedSharedRoutingContract(t *testing.T) {
+	fixture, _ := newIssueCommentHTTPFixture(t)
+	member, token := fixture.createUser(t, "trigger-preview-member", store.DeploymentRoleMember)
+	viewer, viewerToken := fixture.createUser(t, "trigger-preview-viewer", store.DeploymentRoleMember)
+	fixture.access.roles[projectGrantKey(projectID, member.ID)] = store.ProjectRoleMember
+	fixture.access.roles[projectGrantKey(projectID, viewer.ID)] = store.ProjectRoleViewer
+	endpoint := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments/trigger-preview"
+
+	denied := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint,
+		`{"body":"Preview","mentionAgentIds":["`+agentID+`"]}`, bearer(viewerToken))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("viewer trigger preview status=%d body=%s", denied.Code, denied.Body.String())
+	}
+
+	preview := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint,
+		`{"body":"Preview","mentionAgentIds":["`+agentID+`"],"suppressImplicitAgentTrigger":true}`, bearer(token))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("trigger preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var value IssueCommentTriggerPreviewDTO
+	if err := json.Unmarshal(preview.Body.Bytes(), &value); err != nil {
+		t.Fatal(err)
+	}
+	if len(value.Mentions) != 1 || value.Mentions[0].TargetAgentID != agentID || !value.Mentions[0].Eligible || value.Implicit != nil {
+		t.Fatalf("trigger preview=%+v", value)
+	}
+
+	for name, body := range map[string]string{
+		"invalid parent": `{"parentCommentId":"not-a-uuid","body":"Preview"}`,
+		"invalid target": `{"body":"Preview","mentionAgentIds":["not-a-uuid"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint, body, bearer(token))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
+
 func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	fixture, _ := newIssueCommentHTTPFixture(t)
 	member, token := fixture.createUser(t, "mention-http-member", store.DeploymentRoleMember)
