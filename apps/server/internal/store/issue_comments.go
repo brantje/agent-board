@@ -61,6 +61,17 @@ type IssueCommentMention struct {
 	CreatedAt       time.Time
 }
 
+type IssueCommentImplicitTrigger struct {
+	TargetAgentID   string
+	TargetAgentName string
+	RoutingReason   string
+	Outcome         string
+	ReasonCode      *string
+	DelegationID    *string
+	DelegatedRunID  *string
+	CreatedAt       time.Time
+}
+
 // IssueComment is durable Issue-domain collaboration. Presentation names are
 // resolved fields and are never authoritative identity.
 type IssueComment struct {
@@ -79,6 +90,7 @@ type IssueComment struct {
 	ResolvedByName   string
 	Reactions        []IssueCommentReactionSummary
 	Mentions         []IssueCommentMention
+	ImplicitTrigger  *IssueCommentImplicitTrigger
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -97,6 +109,30 @@ type IssueCommentMentionPreview struct {
 	TargetAgentName string
 	Eligible        bool
 	ReasonCode      *string
+}
+
+type IssueCommentImplicitTriggerPreview struct {
+	TargetAgentID   string
+	TargetAgentName string
+	RoutingReason   string
+	Eligible        bool
+	Suppressed      bool
+	ReasonCode      *string
+}
+
+type IssueCommentTriggerRequest struct {
+	MentionAgentIDs  []string
+	SuppressImplicit bool
+}
+
+type IssueCommentTriggerPreview struct {
+	Mentions []IssueCommentMentionPreview
+	Implicit *IssueCommentImplicitTriggerPreview
+}
+
+type IssueCommentTriggerStore interface {
+	CreateIssueCommentWithTriggers(context.Context, string, IssueComment, IssueCommentTriggerRequest) (IssueCommentMutationResult, error)
+	PreviewIssueCommentTriggers(context.Context, string, string, *string, string, IssueCommentTriggerRequest) (IssueCommentTriggerPreview, error)
 }
 
 type IssueCommentMentionStore interface {

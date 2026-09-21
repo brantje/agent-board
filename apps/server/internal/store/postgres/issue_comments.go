@@ -53,6 +53,9 @@ func (s *Store) ListIssueComments(ctx context.Context, projectID, issueID string
 	if err := s.loadIssueCommentMentions(ctx, projectID, issueID, values); err != nil {
 		return nil, err
 	}
+	if err := s.loadIssueCommentImplicitTriggers(ctx, projectID, issueID, values); err != nil {
+		return nil, err
+	}
 	return values, nil
 }
 
@@ -83,15 +86,22 @@ func (s *Store) GetIssueComment(ctx context.Context, projectID, issueID, comment
 	if err := s.loadIssueCommentMentions(ctx, projectID, issueID, values); err != nil {
 		return store.IssueComment{}, err
 	}
+	if err := s.loadIssueCommentImplicitTriggers(ctx, projectID, issueID, values); err != nil {
+		return store.IssueComment{}, err
+	}
 	return values[0], nil
 }
 
 func (s *Store) CreateIssueComment(ctx context.Context, projectID string, input store.IssueComment) (store.IssueCommentMutationResult, error) {
-	return s.createIssueComment(ctx, projectID, input, nil)
+	return s.createIssueComment(ctx, projectID, input, nil, false, false)
 }
 
 func (s *Store) CreateIssueCommentWithMentions(ctx context.Context, projectID string, input store.IssueComment, mentionAgentIDs []string) (store.IssueCommentMutationResult, error) {
-	return s.createIssueComment(ctx, projectID, input, mentionAgentIDs)
+	return s.createIssueComment(ctx, projectID, input, mentionAgentIDs, false, false)
+}
+
+func (s *Store) CreateIssueCommentWithTriggers(ctx context.Context, projectID string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	return s.createIssueComment(ctx, projectID, input, request.MentionAgentIDs, true, request.SuppressImplicit)
 }
 
 func (s *Store) PreviewIssueCommentMentions(ctx context.Context, projectID, issueID string, mentionAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
@@ -126,7 +136,7 @@ func (s *Store) PreviewIssueCommentMentions(ctx context.Context, projectID, issu
 	return result, nil
 }
 
-func (s *Store) createIssueComment(ctx context.Context, projectID string, input store.IssueComment, mentionAgentIDs []string) (store.IssueCommentMutationResult, error) {
+func (s *Store) createIssueComment(ctx context.Context, projectID string, input store.IssueComment, mentionAgentIDs []string, implicitRouting, suppressImplicit bool) (store.IssueCommentMutationResult, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(input.IssueID) == "" || strings.TrimSpace(input.AuthorID) == "" || strings.TrimSpace(input.Body) == "" || !store.ValidActorType(input.AuthorType) {
 		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 	}
@@ -144,7 +154,10 @@ func (s *Store) createIssueComment(ctx context.Context, projectID string, input 
 		}
 		input.SourceActionKey = &value
 	}
-	if len(mentions) != 0 && input.SourceActionKey == nil {
+	if (len(mentions) != 0 || implicitRouting) && input.SourceActionKey == nil {
+		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
+	}
+	if implicitRouting && input.AuthorType != store.ActorTypeHuman {
 		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 	}
 	switch input.AuthorType {
@@ -225,7 +238,11 @@ func (s *Store) createIssueComment(ctx context.Context, projectID string, input 
 		if err := loadIssueCommentMentionsWith(ctx, tx, projectID, issueID, values); err != nil {
 			return store.IssueCommentMutationResult{}, err
 		}
-		if !sameIssueCommentMentionTargets(values[0].Mentions, mentions) {
+		if err := loadIssueCommentImplicitTriggersWith(ctx, tx, projectID, issueID, values); err != nil {
+			return store.IssueCommentMutationResult{}, err
+		}
+		if !sameIssueCommentMentionTargets(values[0].Mentions, mentions) ||
+			!sameIssueCommentImplicitRequest(values[0], implicitRouting, suppressImplicit, len(mentions) != 0) {
 			return store.IssueCommentMutationResult{}, store.ErrConflict
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -266,6 +283,15 @@ func (s *Store) createIssueComment(ctx context.Context, projectID string, input 
 		return store.IssueCommentMutationResult{}, err
 	}
 	comment.Mentions = mentionValues
+
+	if implicitRouting && len(mentions) == 0 {
+		implicit, implicitEvents, err := s.createIssueCommentImplicitTriggerTx(ctx, tx, projectID, comment, suppressImplicit)
+		if err != nil {
+			return store.IssueCommentMutationResult{}, err
+		}
+		comment.ImplicitTrigger = implicit
+		delegationEvents = append(delegationEvents, implicitEvents...)
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return store.IssueCommentMutationResult{}, err
@@ -531,6 +557,9 @@ func (s *Store) DeleteIssueComment(ctx context.Context, projectID, issueID, comm
 			WHERE issue_id = $1 AND parent_comment_id = $2
 		) OR EXISTS (
 			SELECT 1 FROM issue_comment_mentions
+			WHERE issue_id = $1 AND comment_id = $2
+		) OR EXISTS (
+			SELECT 1 FROM issue_comment_implicit_triggers
 			WHERE issue_id = $1 AND comment_id = $2
 		)
 	`, issueID, commentID).Scan(&preserveComment); err != nil {

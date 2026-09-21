@@ -510,6 +510,33 @@ CREATE TABLE issue_comment_mentions (
 CREATE INDEX issue_comment_mentions_comment_idx ON issue_comment_mentions (project_id, issue_id, comment_id, ordinal);
 CREATE INDEX issue_comment_mentions_delegation_idx ON issue_comment_mentions (project_id, delegation_id) WHERE delegation_id IS NOT NULL;
 
+CREATE TABLE issue_comment_implicit_triggers (
+    project_id uuid NOT NULL,
+    issue_id uuid NOT NULL,
+    comment_id uuid NOT NULL,
+    target_agent_id uuid NOT NULL,
+    routing_reason text NOT NULL CHECK (routing_reason IN ('DIRECT_AGENT_REPLY', 'UNIQUE_THREAD_AGENT', 'ISSUE_ASSIGNEE')),
+    outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'BLOCKED', 'SUPPRESSED')),
+    reason_code text CHECK (reason_code IS NULL OR btrim(reason_code) <> ''),
+    delegation_id uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT issue_comment_implicit_triggers_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT issue_comment_implicit_triggers_comment_fk FOREIGN KEY (issue_id, comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE RESTRICT,
+    CONSTRAINT issue_comment_implicit_triggers_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
+    CHECK (
+        (outcome = 'QUEUED' AND delegation_id IS NOT NULL AND reason_code IS NULL)
+        OR (outcome = 'BLOCKED' AND delegation_id IS NULL AND reason_code IS NOT NULL)
+        OR (outcome = 'SUPPRESSED' AND delegation_id IS NULL AND reason_code IS NULL)
+    ),
+    PRIMARY KEY (issue_id, comment_id),
+    UNIQUE (project_id, issue_id, comment_id)
+);
+
+CREATE INDEX issue_comment_implicit_triggers_project_idx
+    ON issue_comment_implicit_triggers (project_id, issue_id, comment_id);
+CREATE INDEX issue_comment_implicit_triggers_delegation_idx
+    ON issue_comment_implicit_triggers (project_id, delegation_id) WHERE delegation_id IS NOT NULL;
+
 CREATE TABLE scheduler_jobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL,
