@@ -101,6 +101,31 @@ Expected denial never discards the collaboration record: the comment and durable
 
 Retry safety follows existing request identity conventions. Human clients send one stable request ID for a mention-bearing draft; OpenCode uses the durable native tool-part ID. The backend binds that identity to the same comment/target set so retries return the original result and changed retries fail closed instead of multiplying delegated work.
 
+## Deterministic implicit Issue-comment routing
+
+Human Issue discussions also support a convenience routing layer over the same comment-origin delegation path used by structured mentions. It does not parse prose, change ownership, or introduce a second execution lifecycle.
+
+For a newly posted human comment with no explicit structured Agent mentions, the server resolves at most one target using this fixed precedence:
+
+1. a direct reply to an Agent-authored comment routes to that Agent;
+2. otherwise a reply routes when exactly one Agent has authored a comment anywhere in that discussion thread;
+3. otherwise a top-level comment routes to the current `AGENT` Issue assignee;
+4. otherwise no implicit execution target exists.
+
+Explicit structured mentions always disable the fallback. A multi-Agent thread never fans out and does not fall through to the Issue assignee. User, Squad and unassigned Issue ownership do not provide an implicit owner target. Agent-authored comments are intentionally excluded from implicit routing so ordinary Agent publication cannot become hidden Agent-to-Agent recursion.
+
+The composer uses the same server-owned routing and eligibility helpers as posting to preview the selected Agent, the routing reason, and known blocked state. Preview is advisory; posting re-evaluates current state transactionally. The human can suppress the implicit trigger for that comment without changing its text. Suppression is per-request intent, not a Project or user preference.
+
+A durable implicit-trigger record is distinct from an explicit mention. It stores one target Agent, the routing reason, a posting outcome, a safe blocked reason when applicable, and optional canonical delegation/Run correlation. Current outcomes are:
+
+```text
+QUEUED
+BLOCKED
+SUPPRESSED
+```
+
+`BACKLOG` and `DONE` never implicitly wake an Agent merely because a comment was posted; the comment persists with a blocked workflow outcome when a route could otherwise be explained. Target usability, active-run conflicts and canonical execution policy remain authoritative in their existing layers. Retry safety uses the comment's stable human request identity, so one logical post cannot multiply the same implicit delegation.
+
 ## Workspace inheritance and handoff
 
 Delegated execution reuses the exact durable Issue Workspace and existing Issue branch. There is no child Workspace, delegation branch or merge/reconciliation layer in this phase.
@@ -226,6 +251,7 @@ complete v0.1 coding flow
  -> delegated outcomes + durable parent continuation/recovery [implemented]
  -> Squad-aware delegation/member context [implemented]
  -> structured Issue-comment Agent mentions [implemented]
+ -> deterministic implicit Issue-comment routing [implemented]
  -> broader messaging/wake policy if needed
  -> worker registry/pools
  -> warm/spot optimizations

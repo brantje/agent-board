@@ -96,7 +96,11 @@ Resolution is explicit thread state on a top-level comment only. A resolved root
 
 Reactions use the fixed lightweight vocabulary `THUMBS_UP | THUMBS_DOWN | LAUGH | HOORAY | CONFUSED | HEART | ROCKET | EYES`. Each authenticated User may hold at most one row for one reaction key on one comment. Add/remove operations are idempotent and carry no notification or execution semantics.
 
-Ordinary comment create/edit/delete/resolve/reopen/reaction behavior remains Issue collaboration only. Execution is requested only by explicit structured mention IDs supplied through the trusted create/tool contract; no prose parsing or implicit routing exists.
+Ordinary edit/delete/resolve/reopen/reaction behavior remains Issue collaboration only. A human comment create may request execution in one of two structured ways: explicit Agent mention IDs, or the deterministic implicit routing fallback described below. Plain prose is never reparsed for routing.
+
+When no explicit structured Agent mention exists, a human comment may resolve at most one implicit Agent target. Routing is deterministic: a direct reply to an Agent-authored comment routes to that Agent; otherwise a reply routes only when exactly one Agent has authored a comment in that discussion thread; otherwise a top-level comment may fall back to the current `AGENT` Issue assignee. Ambiguous multi-Agent threads, User/Squad/unassigned ownership, and replies with no unique Agent participant have no implicit target. Agent-authored comments never gain this implicit behavior; they continue to require explicit structured mention intent across the trusted Run boundary.
+
+Implicit routing stores separate provenance from structured mentions: target Agent ID, routing reason, outcome, safe reason when blocked, and optional canonical delegation linkage. The human may suppress the implicit wakeup for one comment without changing its text; that durable comment records a `SUPPRESSED` outcome when a target exists. `BACKLOG` and `DONE` comments may retain a resolved target for explanation but record `BLOCKED / WORKFLOW_BLOCKED` and create no execution. Accepted implicit routing reuses the same comment-origin delegation command, ordinary Run, scheduler and Workspace lifecycle as explicit human mentions. It never changes Issue assignment or Board status.
 
 ### Issue Relationship
 
