@@ -374,16 +374,20 @@ try {
     await page.getByRole('button', { name: 'Post comment' }).click()
     await page.getByText('Durable root comment').waitFor()
 
-    await page.getByRole('button', { name: 'Reply' }).first().click()
+    let rootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
+    await rootArticle.getByRole('button', { name: 'Reply' }).click()
     await page.getByText('Replying to authz-collaborator').waitFor()
     await page.locator('textarea').fill('Durable reply')
     await page.getByRole('button', { name: 'Post reply' }).click()
     await page.getByText('Durable reply').waitFor()
 
     let comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
-    assert.equal(comments.length, 2, 'comment API did not persist root + reply')
-    assert.equal(comments[1].parentCommentId, comments[0].id, 'reply parent relation was not durable')
-    const rootCommentId = comments[0].id
+    const rootComment = comments.find(comment => comment.body === 'Durable **root** comment')
+    const replyComment = comments.find(comment => comment.body === 'Durable reply')
+    assert.ok(rootComment, 'comment API did not persist the lifecycle root comment')
+    assert.ok(replyComment, 'comment API did not persist the lifecycle reply')
+    assert.equal(replyComment.parentCommentId, rootComment.id, 'reply parent relation was not durable')
+    const rootCommentId = rootComment.id
 
     await call('PATCH', `/api/projects/${project.id}/issues/${issue.id}/comments/${rootCommentId}`, {
       token: creator.tokens.accessToken,
@@ -395,9 +399,9 @@ try {
       status: 403
     })
 
-    let rootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
+    rootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
     await rootArticle.getByRole('button', { name: 'Edit' }).click()
-    const editingRootArticle = page.locator('article').first()
+    const editingRootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
     await editingRootArticle.locator('textarea').fill('Durable edited root')
     await editingRootArticle.getByRole('button', { name: 'Save edit' }).click()
     await page.getByText('Durable edited root').waitFor()
@@ -417,12 +421,13 @@ try {
     await rootArticle.getByRole('button', { name: '❤️ 1' }).waitFor()
 
     comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
-    assert.equal(comments[0].body, 'Durable edited root', 'edited comment did not survive reload')
-    assert.ok(comments[0].resolvedAt, 'resolved timestamp did not persist')
-    assert.equal(comments[0].resolvedBy.id, collaborator.user.id, 'resolver identity was not durable')
-    assert.equal(comments[0].reactions.length, 1, 'reaction did not persist')
-    assert.equal(comments[0].reactions[0].count, 1, 'reaction count was not idempotent')
-    assert.equal(comments[0].reactions[0].reactedByCurrentUser, true, 'reaction actor projection was incorrect')
+    const persistedRoot = comments.find(comment => comment.id === rootCommentId)
+    assert.equal(persistedRoot?.body, 'Durable edited root', 'edited comment did not survive reload')
+    assert.ok(persistedRoot?.resolvedAt, 'resolved timestamp did not persist')
+    assert.equal(persistedRoot?.resolvedBy.id, collaborator.user.id, 'resolver identity was not durable')
+    assert.equal(persistedRoot?.reactions.length, 1, 'reaction did not persist')
+    assert.equal(persistedRoot?.reactions[0].count, 1, 'reaction count was not idempotent')
+    assert.equal(persistedRoot?.reactions[0].reactedByCurrentUser, true, 'reaction actor projection was incorrect')
 
     await rootArticle.getByRole('button', { name: '❤️ 1' }).click()
     await rootArticle.getByRole('button', { name: 'Reopen' }).click()
@@ -431,12 +436,15 @@ try {
     await page.getByText('Durable reply').waitFor()
 
     comments = await call('GET', `/api/projects/${project.id}/issues/${issue.id}/comments`, { token: collaborator.tokens.accessToken })
-    assert.equal(comments.length, 2, 'tombstoning a parent destroyed its reply')
-    assert.equal(comments[0].body, null, 'deleted parent body remained exposed')
-    assert.ok(comments[0].deletedAt, 'deleted parent did not expose tombstone state')
-    assert.equal(comments[0].reactions.length, 0, 'tombstoned comment retained reactions')
-    assert.equal(comments[0].resolvedAt, null, 'tombstoned comment retained resolution')
-    assert.equal(comments[1].parentCommentId, rootCommentId, 'tombstoning changed reply parent identity')
+    const tombstonedRoot = comments.find(comment => comment.id === rootCommentId)
+    const persistedReply = comments.find(comment => comment.body === 'Durable reply')
+    assert.ok(tombstonedRoot, 'tombstoning removed the parent comment')
+    assert.ok(persistedReply, 'tombstoning a parent destroyed its reply')
+    assert.equal(tombstonedRoot.body, null, 'deleted parent body remained exposed')
+    assert.ok(tombstonedRoot.deletedAt, 'deleted parent did not expose tombstone state')
+    assert.equal(tombstonedRoot.reactions.length, 0, 'tombstoned comment retained reactions')
+    assert.equal(tombstonedRoot.resolvedAt, null, 'tombstoned comment retained resolution')
+    assert.equal(persistedReply.parentCommentId, rootCommentId, 'tombstoning changed reply parent identity')
 
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.getByText('Comment deleted').waitFor()
