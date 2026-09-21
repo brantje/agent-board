@@ -82,6 +82,86 @@ func TestHumanIssueCommentMentionsPersistStableTargetsDispatchAndRetryIdempotent
 	}
 }
 
+
+func TestHumanIssueCommentMultipleMentionsPersistMixedOutcomesAndRetryWithoutDuplicateDelegation(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("plural-mention-author", "plural-mention@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabledTarget := createDelegationAgent(t, ctx, f.store, f.project, "Disabled mention target", false)
+	disabledTarget.State = "DISABLED"
+	scope := f.project.ID
+	if _, err := f.store.UpdateAgent(ctx, &scope, disabledTarget); err != nil {
+		t.Fatal(err)
+	}
+
+	requestKey := "human-plural-mention-request"
+	body := "Queue the available Agent and preserve the blocked outcome for the unavailable Agent."
+	targets := []string{f.target.ID, disabledTarget.ID}
+	result, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+		SourceActionKey: &requestKey, Body: body,
+	}, targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Comment.Mentions) != 2 {
+		t.Fatalf("mentions=%+v want two deterministic outcomes", result.Comment.Mentions)
+	}
+	queued, blocked := result.Comment.Mentions[0], result.Comment.Mentions[1]
+	if queued.TargetAgentID != f.target.ID || queued.Outcome != store.IssueCommentMentionOutcomeQueued ||
+		queued.ReasonCode != nil || queued.DelegationID == nil || queued.DelegatedRunID == nil {
+		t.Fatalf("queued mention=%+v", queued)
+	}
+	if blocked.TargetAgentID != disabledTarget.ID || blocked.Outcome != store.IssueCommentMentionOutcomeBlocked ||
+		blocked.ReasonCode == nil || *blocked.ReasonCode != store.IssueCommentMentionReasonTargetUnavailable ||
+		blocked.DelegationID != nil || blocked.DelegatedRunID != nil {
+		t.Fatalf("blocked mention=%+v", blocked)
+	}
+
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, *queued.DelegatedRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.SourceCommentID == nil || *delegation.SourceCommentID != result.Comment.ID ||
+		delegation.ParentRunID != "" || delegation.TargetAgentID != f.target.ID {
+		t.Fatalf("queued human mention delegation=%+v", delegation)
+	}
+
+	retry, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+		SourceActionKey: &requestKey, Body: body,
+	}, targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retry.Comment.ID != result.Comment.ID || len(retry.Events) != 0 || len(retry.Comment.Mentions) != 2 {
+		t.Fatalf("idempotent retry=%+v", retry)
+	}
+	if retry.Comment.Mentions[0].DelegationID == nil || *retry.Comment.Mentions[0].DelegationID != *queued.DelegationID ||
+		retry.Comment.Mentions[1].Outcome != store.IssueCommentMentionOutcomeBlocked ||
+		retry.Comment.Mentions[1].ReasonCode == nil || *retry.Comment.Mentions[1].ReasonCode != store.IssueCommentMentionReasonTargetUnavailable {
+		t.Fatalf("retry changed mention outcomes=%+v", retry.Comment.Mentions)
+	}
+
+	runs, err := f.store.ListRuns(ctx, f.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("Runs=%+v want parent plus exactly one delegated Run", runs)
+	}
+	comments, err := f.store.ListIssueComments(ctx, f.project.ID, f.issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 || comments[0].ID != result.Comment.ID {
+		t.Fatalf("comments=%+v want one durable plural-mention comment", comments)
+	}
+}
+
 func TestIssueCommentMentionBlockedTargetPreservesCommentAndSafeOutcome(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
