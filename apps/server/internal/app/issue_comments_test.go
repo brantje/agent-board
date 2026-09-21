@@ -81,6 +81,21 @@ func (s *issueCommentTestStore) CreateIssueCommentWithMentions(ctx context.Conte
 	return result, nil
 }
 
+func (s *issueCommentTestStore) CreateIssueCommentWithTriggers(ctx context.Context, projectID string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	if len(request.MentionAgentIDs) != 0 {
+		return s.CreateIssueCommentWithMentions(ctx, projectID, input, request.MentionAgentIDs)
+	}
+	return s.CreateIssueComment(ctx, projectID, input)
+}
+
+func (s *issueCommentTestStore) PreviewIssueCommentTriggers(ctx context.Context, projectID, issueID string, _ *string, _ string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
+	mentions, err := s.PreviewIssueCommentMentions(ctx, projectID, issueID, request.MentionAgentIDs)
+	if err != nil {
+		return store.IssueCommentTriggerPreview{}, err
+	}
+	return store.IssueCommentTriggerPreview{Mentions: mentions}, nil
+}
+
 func (s *issueCommentTestStore) PreviewIssueCommentMentions(_ context.Context, projectID, issueID string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
 	if s.mentionErr != nil {
 		return nil, s.mentionErr
@@ -323,6 +338,7 @@ func TestProjectAccessIssueCommentsUseAuthenticatedHumanAndMemberPolicy(t *testi
 		IssueID:         issueID,
 		ParentCommentID: &parentID,
 		Body:            "Please inspect @name literally",
+		RequestKey:      "comment-request",
 	})
 	if err != nil {
 		t.Fatal(err)

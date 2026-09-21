@@ -70,6 +70,21 @@ func (s *issueCommentHTTPStore) CreateIssueCommentWithMentions(ctx context.Conte
 	return result, nil
 }
 
+func (s *issueCommentHTTPStore) CreateIssueCommentWithTriggers(ctx context.Context, pid string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	if len(request.MentionAgentIDs) != 0 {
+		return s.CreateIssueCommentWithMentions(ctx, pid, input, request.MentionAgentIDs)
+	}
+	return s.CreateIssueComment(ctx, pid, input)
+}
+
+func (s *issueCommentHTTPStore) PreviewIssueCommentTriggers(ctx context.Context, pid, id string, _ *string, _ string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
+	mentions, err := s.PreviewIssueCommentMentions(ctx, pid, id, request.MentionAgentIDs)
+	if err != nil {
+		return store.IssueCommentTriggerPreview{}, err
+	}
+	return store.IssueCommentTriggerPreview{Mentions: mentions}, nil
+}
+
 func (s *issueCommentHTTPStore) PreviewIssueCommentMentions(_ context.Context, pid, id string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
 	if pid != projectID || id != issueID {
 		return nil, store.ErrNotFound
@@ -238,12 +253,12 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 	fixture.access.roles[projectGrantKey(projectID, viewer.ID)] = store.ProjectRoleViewer
 
 	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
-	denied := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"viewer cannot post"}`, bearer(viewerToken))
+	denied := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"viewer cannot post","requestId":"10101010-1010-4010-8010-101010101010"}`, bearer(viewerToken))
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("viewer status=%d body=%s", denied.Code, denied.Body.String())
 	}
 
-	created := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"Hello **world** @nobody"}`, bearer(memberToken))
+	created := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"Hello **world** @nobody","requestId":"11111111-1111-4111-8111-111111111111"}`, bearer(memberToken))
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
 	}
@@ -255,7 +270,7 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 		t.Fatalf("root=%+v", root)
 	}
 
-	reply := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"parentCommentId":"`+httpCommentID+`","body":"Reply"}`, bearer(memberToken))
+	reply := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"parentCommentId":"`+httpCommentID+`","body":"Reply","requestId":"22222222-2222-4222-8222-222222222222"}`, bearer(memberToken))
 	if reply.Code != http.StatusCreated {
 		t.Fatalf("reply status=%d body=%s", reply.Code, reply.Body.String())
 	}
@@ -380,7 +395,7 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 			}
 		})
 	}
-	plain := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"plain @Agent text only"}`, bearer(token))
+	plain := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"plain @Agent text only","requestId":"34343434-3434-4434-8434-343434343434"}`, bearer(token))
 	if plain.Code != http.StatusCreated {
 		t.Fatalf("plain status=%d body=%s", plain.Code, plain.Body.String())
 	}
