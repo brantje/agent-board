@@ -401,7 +401,7 @@ try {
 
     rootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
     await rootArticle.getByRole('button', { name: 'Edit' }).click()
-    const editingRootArticle = page.locator('article').filter({ hasText: 'Durable root comment' })
+    const editingRootArticle = page.locator('article').filter({ has: page.locator('textarea') })
     await editingRootArticle.locator('textarea').fill('Durable edited root')
     await editingRootArticle.getByRole('button', { name: 'Save edit' }).click()
     await page.getByText('Durable edited root').waitFor()
