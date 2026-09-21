@@ -191,6 +191,20 @@ func (s *ProjectAccessService) PreviewIssueCommentMentions(ctx context.Context, 
 	return s.controlPlane.PreviewIssueCommentMentions(ctx, projectID, issueID, targetAgentIDs)
 }
 
+func (s *ProjectAccessService) PreviewIssueCommentTriggers(
+	ctx context.Context,
+	actor AuthenticatedUser,
+	projectID, issueID string,
+	parentCommentID *string,
+	body string,
+	request store.IssueCommentTriggerRequest,
+) (store.IssueCommentTriggerPreview, error) {
+	if err := s.AuthorizeWorkflowMutation(ctx, actor, projectID); err != nil {
+		return store.IssueCommentTriggerPreview{}, err
+	}
+	return s.controlPlane.PreviewIssueCommentTriggers(ctx, projectID, issueID, parentCommentID, body, request)
+}
+
 func (s *ProjectAccessService) CreateIssueComment(ctx context.Context, actor AuthenticatedUser, input CreateIssueCommentInput) (store.IssueComment, error) {
 	if err := s.AuthorizeWorkflowMutation(ctx, actor, input.ProjectID); err != nil {
 		return store.IssueComment{}, err

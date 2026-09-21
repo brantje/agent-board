@@ -11,12 +11,13 @@ import (
 )
 
 type CreateIssueCommentInput struct {
-	ProjectID       string
-	IssueID         string
-	ParentCommentID *string
-	Body            string
-	RequestKey      string
-	MentionAgentIDs []string
+	ProjectID        string
+	IssueID          string
+	ParentCommentID  *string
+	Body             string
+	RequestKey       string
+	MentionAgentIDs  []string
+	SuppressImplicit bool
 }
 
 type issueCommentCreateInput struct {
@@ -64,6 +65,27 @@ func (s *Service) PreviewIssueCommentMentions(ctx context.Context, projectID, is
 	return values, nil
 }
 
+func (s *Service) PreviewIssueCommentTriggers(
+	ctx context.Context,
+	projectID, issueID string,
+	parentCommentID *string,
+	body string,
+	request store.IssueCommentTriggerRequest,
+) (store.IssueCommentTriggerPreview, error) {
+	if _, err := s.GetIssue(ctx, projectID, issueID); err != nil {
+		return store.IssueCommentTriggerPreview{}, err
+	}
+	triggers, ok := any(s.issueComments).(store.IssueCommentTriggerStore)
+	if !ok {
+		return store.IssueCommentTriggerPreview{}, errors.New("issue comment triggers are unavailable")
+	}
+	value, err := triggers.PreviewIssueCommentTriggers(ctx, projectID, issueID, parentCommentID, body, request)
+	if err != nil {
+		return store.IssueCommentTriggerPreview{}, translateStoreError(err, "issue_comment_trigger")
+	}
+	return value, nil
+}
+
 func (s *Service) GetIssueComment(ctx context.Context, projectID, issueID, commentID string) (store.IssueComment, error) {
 	if _, err := s.GetIssue(ctx, projectID, issueID); err != nil {
 		return store.IssueComment{}, err
@@ -76,10 +98,11 @@ func (s *Service) GetIssueComment(ctx context.Context, projectID, issueID, comme
 }
 
 func (s *Service) CreateHumanIssueComment(ctx context.Context, input CreateIssueCommentInput, authorID string) (store.IssueComment, error) {
-	var sourceActionKey *string
-	if requestKey := strings.TrimSpace(input.RequestKey); requestKey != "" {
-		sourceActionKey = &requestKey
+	requestKey := strings.TrimSpace(input.RequestKey)
+	if requestKey == "" {
+		return store.IssueComment{}, invalid("comment request key is required")
 	}
+	sourceActionKey := &requestKey
 	return s.createIssueComment(ctx, issueCommentCreateInput{
 		CreateIssueCommentInput: input,
 		AuthorType:              store.ActorTypeHuman,
@@ -143,7 +166,15 @@ func (s *Service) createIssueComment(ctx context.Context, input issueCommentCrea
 	}
 	var result store.IssueCommentMutationResult
 	var err error
-	if len(input.MentionAgentIDs) != 0 {
+	if input.AuthorType == store.ActorTypeHuman {
+		triggers, ok := any(s.issueComments).(store.IssueCommentTriggerStore)
+		if !ok {
+			return store.IssueComment{}, errors.New("issue comment triggers are unavailable")
+		}
+		result, err = triggers.CreateIssueCommentWithTriggers(ctx, input.ProjectID, commentInput, store.IssueCommentTriggerRequest{
+			MentionAgentIDs: input.MentionAgentIDs, SuppressImplicit: input.SuppressImplicit,
+		})
+	} else if len(input.MentionAgentIDs) != 0 {
 		if input.SourceActionKey == nil {
 			return store.IssueComment{}, invalid("structured Agent mentions require a stable request key")
 		}
