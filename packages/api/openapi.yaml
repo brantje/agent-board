@@ -154,6 +154,8 @@ paths:
     $ref: ./paths/issue-comments.yaml#/comments
   /api/projects/{projectID}/issues/{issueID}/comments/mention-preview:
     $ref: ./paths/issue-comments.yaml#/mentionPreview
+  /api/projects/{projectID}/issues/{issueID}/comments/trigger-preview:
+    $ref: ./paths/issue-comments.yaml#/triggerPreview
   /api/projects/{projectID}/issues/{issueID}/comments/discussions:
     $ref: ./paths/issue-comments.yaml#/discussions
   /api/projects/{projectID}/issues/{issueID}/comments/updates:

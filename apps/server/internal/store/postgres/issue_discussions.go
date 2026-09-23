@@ -538,7 +538,11 @@ func (s *Store) issueCommentAncestorIDs(ctx context.Context, projectID, issueID,
 }
 
 func (s *Store) issueCommentAncestorIDsBounded(ctx context.Context, projectID, issueID, anchorID string, maxDepth int) ([]string, bool, error) {
-	rows, err := s.pool.Query(ctx, `
+	return issueCommentAncestorIDsBoundedWith(ctx, s.pool, projectID, issueID, anchorID, maxDepth)
+}
+
+func issueCommentAncestorIDsBoundedWith(ctx context.Context, q issueCommentRowsQuerier, projectID, issueID, anchorID string, maxDepth int) ([]string, bool, error) {
+	rows, err := q.Query(ctx, `
 		WITH RECURSIVE ancestors(id, parent_comment_id, depth) AS (
 			SELECT c.id, c.parent_comment_id, 0
 			FROM issue_comments AS c
@@ -638,6 +642,9 @@ func (s *Store) listIssueCommentsByIDs(ctx context.Context, projectID, issueID s
 		return nil, err
 	}
 	if err := s.loadIssueCommentMentions(ctx, projectID, issueID, values); err != nil {
+		return nil, err
+	}
+	if err := s.loadIssueCommentImplicitTriggers(ctx, projectID, issueID, values); err != nil {
 		return nil, err
 	}
 	return values, nil

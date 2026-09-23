@@ -3,9 +3,12 @@ import { computed, ref, watch } from 'vue'
 import type {
   Agent,
   IssueComment,
-  IssueCommentMentionPreview,
+  IssueCommentImplicitReasonCode,
+  IssueCommentImplicitRoutingReason,
+  IssueCommentImplicitTrigger,
   IssueCommentMentionReasonCode,
   IssueCommentReactionKey,
+  IssueCommentTriggerPreview,
   IssueTimelineEntry
 } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
@@ -30,10 +33,11 @@ const mentionLoadError = ref<Error>()
 const mentionQuery = ref('')
 const mentionAgents = ref<Agent[]>([])
 const selectedMentionAgentIDs = ref<string[]>([])
-const mentionPreview = ref<IssueCommentMentionPreview[]>([])
-const mentionPreviewError = ref<Error>()
+const triggerPreview = ref<IssueCommentTriggerPreview>({ mentions: [], implicit: null })
+const triggerPreviewError = ref<Error>()
+const suppressImplicitAgentTrigger = ref(false)
 const draftRequestId = ref('')
-let mentionPreviewGeneration = 0
+let triggerPreviewGeneration = 0
 
 const reactionOptions: Array<{ key: IssueCommentReactionKey; emoji: string; label: string }> = [
   { key: 'THUMBS_UP', emoji: '👍', label: 'Thumbs up' },
@@ -87,30 +91,72 @@ function resetDraftRequestIdentity() {
   if (!submitting.value) draftRequestId.value = ''
 }
 
-watch(body, resetDraftRequestIdentity)
+function routingInputChanged() {
+  resetDraftRequestIdentity()
+  triggerPreviewGeneration++
+  triggerPreview.value = { mentions: [], implicit: null }
+  triggerPreviewError.value = undefined
+}
+
+watch(body, (_value, _oldValue, onCleanup) => {
+  routingInputChanged()
+  const timer = globalThis.setTimeout(() => {
+    void refreshTriggerPreview()
+  }, 250)
+  onCleanup(() => globalThis.clearTimeout(timer))
+})
+watch(suppressImplicitAgentTrigger, () => {
+  routingInputChanged()
+  void refreshTriggerPreview()
+})
 
 function beginReply(comment: IssueComment) {
   if (comment.deletedAt) return
   replyTo.value = comment
-  resetDraftRequestIdentity()
+  routingInputChanged()
+  void refreshTriggerPreview()
 }
 
 function cancelReply() {
   replyTo.value = undefined
-  resetDraftRequestIdentity()
+  routingInputChanged()
+  void refreshTriggerPreview()
 }
 
-function mentionReasonLabel(reason: IssueCommentMentionReasonCode | null | undefined) {
+function mentionReasonLabel(reason: IssueCommentMentionReasonCode | IssueCommentImplicitReasonCode | null | undefined) {
   switch (reason) {
     case 'TARGET_UNAVAILABLE': return 'Agent unavailable'
     case 'TARGET_BUSY': return 'Agent already has active work on this Issue'
     case 'DELEGATION_BLOCKED': return 'Delegation policy blocked this request'
+    case 'WORKFLOW_BLOCKED': return 'Issue workflow does not allow an implicit Agent wakeup'
     default: return 'Unable to queue work'
   }
 }
 
+function routingReasonLabel(reason: IssueCommentImplicitRoutingReason) {
+  switch (reason) {
+    case 'DIRECT_AGENT_REPLY': return 'replying directly to this Agent'
+    case 'UNIQUE_THREAD_AGENT': return 'only Agent participating in this discussion'
+    case 'ISSUE_ASSIGNEE': return 'current Issue Agent assignee'
+  }
+}
+
+function implicitPreviewStatus() {
+  const preview = triggerPreview.value.implicit
+  if (!preview) return ''
+  if (preview.suppressed) return 'Automatic Agent trigger suppressed'
+  if (preview.eligible) return 'Will queue work'
+  return mentionReasonLabel(preview.reasonCode)
+}
+
+function implicitTriggerStatus(trigger: IssueCommentImplicitTrigger) {
+  if (trigger.outcome === 'QUEUED') return 'Work queued'
+  if (trigger.outcome === 'SUPPRESSED') return 'Automatic Agent trigger suppressed'
+  return mentionReasonLabel(trigger.reasonCode)
+}
+
 function mentionPreviewFor(agentID: string) {
-  return mentionPreview.value.find(item => item.targetAgentId === agentID)
+  return triggerPreview.value.mentions.find(item => item.targetAgentId === agentID)
 }
 
 function mentionPreviewLabel(agentID: string) {
@@ -133,22 +179,29 @@ async function loadMentionAgents() {
   }
 }
 
-async function refreshMentionPreview() {
+async function refreshTriggerPreview() {
   const targetAgentIDs = [...selectedMentionAgentIDs.value]
-  const generation = ++mentionPreviewGeneration
-  mentionPreviewError.value = undefined
-  if (!targetAgentIDs.length) {
-    mentionPreview.value = []
-    return
-  }
+  const generation = ++triggerPreviewGeneration
+  triggerPreviewError.value = undefined
   try {
-    const values = await apiRequest<IssueCommentMentionPreview[]>(
-      `${apiPath('issues', props.projectId, props.issueId)}/comments/mention-preview`,
-      { method: 'POST', body: { mentionAgentIds: targetAgentIDs } }
+    const value = await apiRequest<IssueCommentTriggerPreview>(
+      `${apiPath('issues', props.projectId, props.issueId)}/comments/trigger-preview`,
+      {
+        method: 'POST',
+        body: {
+          parentCommentId: replyTo.value?.id ?? null,
+          body: body.value.trim(),
+          mentionAgentIds: targetAgentIDs,
+          suppressImplicitAgentTrigger: suppressImplicitAgentTrigger.value
+        }
+      }
     )
-    if (generation === mentionPreviewGeneration) mentionPreview.value = values
+    if (generation === triggerPreviewGeneration) triggerPreview.value = value
   } catch (failure) {
-    if (generation === mentionPreviewGeneration) mentionPreviewError.value = failure as Error
+    if (generation === triggerPreviewGeneration) {
+      triggerPreview.value = { mentions: [], implicit: null }
+      triggerPreviewError.value = failure as Error
+    }
   }
 }
 
@@ -156,14 +209,14 @@ async function addMention(agent: Agent) {
   if (selectedMentionAgentIDs.value.includes(agent.id)) return
   selectedMentionAgentIDs.value = [...selectedMentionAgentIDs.value, agent.id]
   mentionQuery.value = ''
-  resetDraftRequestIdentity()
-  await refreshMentionPreview()
+  routingInputChanged()
+  await refreshTriggerPreview()
 }
 
 async function removeMention(agentID: string) {
   selectedMentionAgentIDs.value = selectedMentionAgentIDs.value.filter(id => id !== agentID)
-  resetDraftRequestIdentity()
-  await refreshMentionPreview()
+  routingInputChanged()
+  await refreshTriggerPreview()
 }
 
 function beginEdit(comment: IssueComment) {
@@ -270,20 +323,22 @@ async function submit() {
   if (!props.canMutate || !content || submitting.value) return
 
   const mentionAgentIds = [...selectedMentionAgentIDs.value]
-  if (mentionAgentIds.length && !draftRequestId.value) {
+  if (!draftRequestId.value) {
     draftRequestId.value = globalThis.crypto.randomUUID()
   }
   const requestBody: {
     body: string
     parentCommentId: string | null
-    requestId?: string
+    requestId: string
     mentionAgentIds?: string[]
+    suppressImplicitAgentTrigger: boolean
   } = {
     body: content,
-    parentCommentId: replyTo.value?.id ?? null
+    parentCommentId: replyTo.value?.id ?? null,
+    requestId: draftRequestId.value,
+    suppressImplicitAgentTrigger: suppressImplicitAgentTrigger.value
   }
   if (mentionAgentIds.length) {
-    requestBody.requestId = draftRequestId.value
     requestBody.mentionAgentIds = mentionAgentIds
   }
 
@@ -299,8 +354,9 @@ async function submit() {
     mentionPickerOpen.value = false
     mentionQuery.value = ''
     selectedMentionAgentIDs.value = []
-    mentionPreview.value = []
-    mentionPreviewError.value = undefined
+    triggerPreview.value = { mentions: [], implicit: null }
+    triggerPreviewError.value = undefined
+    suppressImplicitAgentTrigger.value = false
     draftRequestId.value = ''
     await timeline.refresh()
   } catch (failure) {
@@ -400,6 +456,23 @@ defineExpose({ refresh: timeline.refresh })
               </div>
             </div>
 
+            <div
+              v-if="entry.comment.implicitTrigger"
+              class="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-elevated px-2 py-1 text-xs"
+              aria-label="Implicit Agent trigger"
+            >
+              <UBadge :label="`@${entry.comment.implicitTrigger.targetAgentName || 'Unavailable Agent'}`" size="xs" variant="subtle" />
+              <span>{{ implicitTriggerStatus(entry.comment.implicitTrigger) }}</span>
+              <span class="text-muted">· {{ routingReasonLabel(entry.comment.implicitTrigger.routingReason) }}</span>
+              <NuxtLink
+                v-if="entry.comment.implicitTrigger.delegatedRunId"
+                :to="`/projects/${projectId}/runs/${entry.comment.implicitTrigger.delegatedRunId}`"
+                class="text-primary hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+              >
+                Open delegated Run
+              </NuxtLink>
+            </div>
+
             <div v-if="!entry.comment.deletedAt" class="mt-2 flex flex-wrap gap-2">
               <UButton
                 v-if="canMutate"
@@ -491,7 +564,7 @@ defineExpose({ refresh: timeline.refresh })
       </div>
       <UAlert v-if="submitError" title="Unable to post comment" :description="submitError.message" color="error" />
       <UFormField label="Comment" name="issue-comment">
-        <UTextarea v-model="body" :disabled="submitting" placeholder="Write a comment…" class="w-full" />
+        <UTextarea v-model="body" :disabled="submitting" placeholder="Write a comment…" class="w-full" @focus="refreshTriggerPreview" />
       </UFormField>
 
       <div class="space-y-2">
@@ -521,11 +594,26 @@ defineExpose({ refresh: timeline.refresh })
           </div>
         </div>
 
-        <UAlert v-if="mentionPreviewError" title="Mention preview unavailable" :description="mentionPreviewError.message" color="warning" />
+        <UAlert v-if="triggerPreviewError" title="Trigger preview unavailable" :description="triggerPreviewError.message" color="warning" />
         <div v-if="selectedMentionAgents.length" class="space-y-1 text-xs text-muted" aria-label="Agent mention preview">
           <p v-for="agent in selectedMentionAgents" :key="agent.id">
             @{{ agent.name }} · {{ mentionPreviewLabel(agent.id) }}
           </p>
+        </div>
+        <div
+          v-else-if="triggerPreview.implicit"
+          class="space-y-2 rounded-md bg-elevated p-2 text-xs"
+          aria-label="Implicit Agent routing preview"
+        >
+          <p>
+            @{{ triggerPreview.implicit.targetAgentName || 'Unavailable Agent' }}
+            · {{ routingReasonLabel(triggerPreview.implicit.routingReason) }}
+            · {{ implicitPreviewStatus() }}
+          </p>
+          <label class="flex items-center gap-2">
+            <UCheckbox v-model="suppressImplicitAgentTrigger" :disabled="submitting" />
+            <span>Don’t notify Agent for this comment</span>
+          </label>
         </div>
       </div>
 

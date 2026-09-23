@@ -98,7 +98,7 @@ func TestOpenCodeDockerReadsTrustedIssueDiscussion(t *testing.T) {
 		t.Fatal(err)
 	}
 	seededComment, err := fixture.services.ControlPlane.CreateHumanIssueComment(fixture.ctx, app.CreateIssueCommentInput{
-		ProjectID: setup.Project.ID, IssueID: setup.Issue.ID, Body: expectedBody,
+		ProjectID: setup.Project.ID, IssueID: setup.Issue.ID, Body: expectedBody, RequestKey: "discussion-context-seed",
 	}, author.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -267,6 +267,9 @@ func TestOpenCodeDockerPublishesTrustedIssueComment(t *testing.T) {
 	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != *run.AgentID ||
 		comment.SourceRunID == nil || *comment.SourceRunID != run.ID || comment.Body != expectedBody {
 		t.Fatalf("trusted Agent comment=%+v run=%+v", comment, run)
+	}
+	if comment.ImplicitTrigger != nil {
+		t.Fatalf("Agent-authored comment acquired implicit routing: %+v", comment.ImplicitTrigger)
 	}
 
 	reloadedDatabase, err := postgres.Open(fixture.ctx, fixture.env.databaseURL)

@@ -344,6 +344,7 @@ CREATE TABLE issue_comments (
     source_run_id uuid,
     source_action_key text,
     body text,
+    suppress_implicit_agent_trigger boolean NOT NULL DEFAULT false,
     deleted_at timestamptz,
     resolved_at timestamptz,
     resolved_by_user_id uuid,
@@ -359,6 +360,7 @@ CREATE TABLE issue_comments (
     ),
     CHECK ((resolved_at IS NULL) = (resolved_by_user_id IS NULL)),
     CHECK (parent_comment_id IS NULL OR (resolved_at IS NULL AND resolved_by_user_id IS NULL)),
+    CHECK (author_type = 'HUMAN' OR NOT suppress_implicit_agent_trigger),
     CHECK (
         (author_type = 'HUMAN' AND source_run_id IS NULL AND (source_action_key IS NULL OR btrim(source_action_key) <> ''))
         OR (author_type = 'AGENT' AND source_run_id IS NOT NULL AND source_action_key IS NOT NULL AND btrim(source_action_key) <> '')
@@ -509,6 +511,33 @@ CREATE TABLE issue_comment_mentions (
 
 CREATE INDEX issue_comment_mentions_comment_idx ON issue_comment_mentions (project_id, issue_id, comment_id, ordinal);
 CREATE INDEX issue_comment_mentions_delegation_idx ON issue_comment_mentions (project_id, delegation_id) WHERE delegation_id IS NOT NULL;
+
+CREATE TABLE issue_comment_implicit_triggers (
+    project_id uuid NOT NULL,
+    issue_id uuid NOT NULL,
+    comment_id uuid NOT NULL,
+    target_agent_id uuid NOT NULL,
+    routing_reason text NOT NULL CHECK (routing_reason IN ('DIRECT_AGENT_REPLY', 'UNIQUE_THREAD_AGENT', 'ISSUE_ASSIGNEE')),
+    outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'BLOCKED', 'SUPPRESSED')),
+    reason_code text CHECK (reason_code IS NULL OR btrim(reason_code) <> ''),
+    delegation_id uuid,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT issue_comment_implicit_triggers_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT issue_comment_implicit_triggers_comment_fk FOREIGN KEY (issue_id, comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE RESTRICT,
+    CONSTRAINT issue_comment_implicit_triggers_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
+    CHECK (
+        (outcome = 'QUEUED' AND delegation_id IS NOT NULL AND reason_code IS NULL)
+        OR (outcome = 'BLOCKED' AND delegation_id IS NULL AND reason_code IS NOT NULL)
+        OR (outcome = 'SUPPRESSED' AND delegation_id IS NULL AND reason_code IS NULL)
+    ),
+    PRIMARY KEY (issue_id, comment_id),
+    UNIQUE (project_id, issue_id, comment_id)
+);
+
+CREATE INDEX issue_comment_implicit_triggers_project_idx
+    ON issue_comment_implicit_triggers (project_id, issue_id, comment_id);
+CREATE INDEX issue_comment_implicit_triggers_delegation_idx
+    ON issue_comment_implicit_triggers (project_id, delegation_id) WHERE delegation_id IS NOT NULL;
 
 CREATE TABLE scheduler_jobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

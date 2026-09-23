@@ -70,6 +70,29 @@ func (s *issueCommentHTTPStore) CreateIssueCommentWithMentions(ctx context.Conte
 	return result, nil
 }
 
+func (s *issueCommentHTTPStore) CreateIssueCommentWithTriggers(ctx context.Context, pid string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	if len(request.MentionAgentIDs) != 0 {
+		return s.CreateIssueCommentWithMentions(ctx, pid, input, request.MentionAgentIDs)
+	}
+	return s.CreateIssueComment(ctx, pid, input)
+}
+
+func (s *issueCommentHTTPStore) PreviewIssueCommentTriggers(ctx context.Context, pid, id string, _ *string, _ string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
+	mentions, err := s.PreviewIssueCommentMentions(ctx, pid, id, request.MentionAgentIDs)
+	if err != nil {
+		return store.IssueCommentTriggerPreview{}, err
+	}
+	result := store.IssueCommentTriggerPreview{Mentions: mentions}
+	if len(request.MentionAgentIDs) == 0 {
+		result.Implicit = &store.IssueCommentImplicitTriggerPreview{
+			TargetAgentID: agentID, TargetAgentName: "Agent",
+			RoutingReason: store.IssueCommentImplicitRoutingReasonIssueAssignee,
+			Eligible: !request.SuppressImplicit, Suppressed: request.SuppressImplicit,
+		}
+	}
+	return result, nil
+}
+
 func (s *issueCommentHTTPStore) PreviewIssueCommentMentions(_ context.Context, pid, id string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
 	if pid != projectID || id != issueID {
 		return nil, store.ErrNotFound
@@ -238,12 +261,12 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 	fixture.access.roles[projectGrantKey(projectID, viewer.ID)] = store.ProjectRoleViewer
 
 	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
-	denied := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"viewer cannot post"}`, bearer(viewerToken))
+	denied := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"viewer cannot post","requestId":"10101010-1010-4010-8010-101010101010"}`, bearer(viewerToken))
 	if denied.Code != http.StatusForbidden {
 		t.Fatalf("viewer status=%d body=%s", denied.Code, denied.Body.String())
 	}
 
-	created := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"Hello **world** @nobody"}`, bearer(memberToken))
+	created := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"Hello **world** @nobody","requestId":"11111111-1111-4111-8111-111111111111"}`, bearer(memberToken))
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status=%d body=%s", created.Code, created.Body.String())
 	}
@@ -255,7 +278,7 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 		t.Fatalf("root=%+v", root)
 	}
 
-	reply := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"parentCommentId":"`+httpCommentID+`","body":"Reply"}`, bearer(memberToken))
+	reply := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"parentCommentId":"`+httpCommentID+`","body":"Reply","requestId":"22222222-2222-4222-8222-222222222222"}`, bearer(memberToken))
 	if reply.Code != http.StatusCreated {
 		t.Fatalf("reply status=%d body=%s", reply.Code, reply.Body.String())
 	}
@@ -308,6 +331,77 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 	}
 }
 
+
+func TestIssueCommentHTTPTriggerPreviewUsesAuthorizedSharedRoutingContract(t *testing.T) {
+	fixture, _ := newIssueCommentHTTPFixture(t)
+	member, token := fixture.createUser(t, "trigger-preview-member", store.DeploymentRoleMember)
+	viewer, viewerToken := fixture.createUser(t, "trigger-preview-viewer", store.DeploymentRoleMember)
+	fixture.access.roles[projectGrantKey(projectID, member.ID)] = store.ProjectRoleMember
+	fixture.access.roles[projectGrantKey(projectID, viewer.ID)] = store.ProjectRoleViewer
+	endpoint := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments/trigger-preview"
+
+	denied := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint,
+		`{"body":"Preview","mentionAgentIds":["`+agentID+`"]}`, bearer(viewerToken))
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("viewer trigger preview status=%d body=%s", denied.Code, denied.Body.String())
+	}
+
+	preview := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint,
+		`{"body":"Preview","mentionAgentIds":["`+agentID+`"],"suppressImplicitAgentTrigger":true}`, bearer(token))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("trigger preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var value IssueCommentTriggerPreviewDTO
+	if err := json.Unmarshal(preview.Body.Bytes(), &value); err != nil {
+		t.Fatal(err)
+	}
+	if len(value.Mentions) != 1 || value.Mentions[0].TargetAgentID != agentID || !value.Mentions[0].Eligible || value.Implicit != nil {
+		t.Fatalf("trigger preview=%+v", value)
+	}
+
+	implicitPreview := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint,
+		`{"body":"Implicit preview"}`, bearer(token))
+	if implicitPreview.Code != http.StatusOK {
+		t.Fatalf("implicit trigger preview status=%d body=%s", implicitPreview.Code, implicitPreview.Body.String())
+	}
+	var implicitValue IssueCommentTriggerPreviewDTO
+	if err := json.Unmarshal(implicitPreview.Body.Bytes(), &implicitValue); err != nil {
+		t.Fatal(err)
+	}
+	if len(implicitValue.Mentions) != 0 || implicitValue.Implicit == nil ||
+		implicitValue.Implicit.TargetAgentID != agentID ||
+		implicitValue.Implicit.RoutingReason != store.IssueCommentImplicitRoutingReasonIssueAssignee ||
+		!implicitValue.Implicit.Eligible || implicitValue.Implicit.Suppressed {
+		t.Fatalf("implicit trigger preview=%+v", implicitValue)
+	}
+
+	tooManyIDs := make([]string, store.MaxIssueCommentMentions+1)
+	for index := range tooManyIDs {
+		tooManyIDs[index] = agentID
+	}
+	tooManyBody, err := json.Marshal(PreviewIssueCommentTriggersRequest{
+		Body: "Too many targets", MentionAgentIDs: tooManyIDs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooMany := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint, string(tooManyBody), bearer(token))
+	if tooMany.Code != http.StatusBadRequest {
+		t.Fatalf("too-many trigger preview status=%d body=%s", tooMany.Code, tooMany.Body.String())
+	}
+
+	for name, body := range map[string]string{
+		"invalid parent": `{"parentCommentId":"not-a-uuid","body":"Preview"}`,
+		"invalid target": `{"body":"Preview","mentionAgentIds":["not-a-uuid"]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			response := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint, body, bearer(token))
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+			}
+		})
+	}
+}
 
 func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	fixture, _ := newIssueCommentHTTPFixture(t)
@@ -380,7 +474,7 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 			}
 		})
 	}
-	plain := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"plain @Agent text only"}`, bearer(token))
+	plain := authHTTPRequest(t, fixture.handler, http.MethodPost, base, `{"body":"plain @Agent text only","requestId":"34343434-3434-4434-8434-343434343434"}`, bearer(token))
 	if plain.Code != http.StatusCreated {
 		t.Fatalf("plain status=%d body=%s", plain.Code, plain.Body.String())
 	}
@@ -453,7 +547,7 @@ func TestIssueCommentLowLevelRouterReadCompatibilityAndWriteFailClosed(t *testin
 	}
 
 	create := httptest.NewRecorder()
-	router.ServeHTTP(create, httptest.NewRequest(http.MethodPost, base+"/comments", strings.NewReader(`{"body":"cannot forge unauthenticated write"}`)))
+	router.ServeHTTP(create, httptest.NewRequest(http.MethodPost, base+"/comments", strings.NewReader(`{"body":"cannot forge unauthenticated write","requestId":"45454545-4545-4454-8454-454545454545"}`)))
 	if create.Code != http.StatusUnauthorized {
 		t.Fatalf("low-level create status=%d body=%s", create.Code, create.Body.String())
 	}

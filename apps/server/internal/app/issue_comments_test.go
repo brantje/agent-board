@@ -81,6 +81,21 @@ func (s *issueCommentTestStore) CreateIssueCommentWithMentions(ctx context.Conte
 	return result, nil
 }
 
+func (s *issueCommentTestStore) CreateIssueCommentWithTriggers(ctx context.Context, projectID string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	if len(request.MentionAgentIDs) != 0 {
+		return s.CreateIssueCommentWithMentions(ctx, projectID, input, request.MentionAgentIDs)
+	}
+	return s.CreateIssueComment(ctx, projectID, input)
+}
+
+func (s *issueCommentTestStore) PreviewIssueCommentTriggers(ctx context.Context, projectID, issueID string, _ *string, _ string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
+	mentions, err := s.PreviewIssueCommentMentions(ctx, projectID, issueID, request.MentionAgentIDs)
+	if err != nil {
+		return store.IssueCommentTriggerPreview{}, err
+	}
+	return store.IssueCommentTriggerPreview{Mentions: mentions}, nil
+}
+
 func (s *issueCommentTestStore) PreviewIssueCommentMentions(_ context.Context, projectID, issueID string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
 	if s.mentionErr != nil {
 		return nil, s.mentionErr
@@ -323,6 +338,7 @@ func TestProjectAccessIssueCommentsUseAuthenticatedHumanAndMemberPolicy(t *testi
 		IssueID:         issueID,
 		ParentCommentID: &parentID,
 		Body:            "Please inspect @name literally",
+		RequestKey:      "comment-request",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -430,6 +446,76 @@ func TestIssueCommentMentionApplicationPreviewAndCreate(t *testing.T) {
 	fake.mentionErr = store.ErrInvalidArgument
 	if _, err := service.PreviewIssueCommentMentions(t.Context(), projectID, issueID, []string{"agent-2"}); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("preview error=%v want invalid argument", err)
+	}
+}
+
+func TestIssueCommentTriggerApplicationPreviewUsesSharedCapabilityAndErrors(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	reason := store.IssueCommentMentionReasonTargetBusy
+	fake := &issueCommentTestStore{
+		projectWorkflowAuthorizationStore: base,
+		mentionPreview: []store.IssueCommentMentionPreview{{
+			TargetAgentID: "agent-2", TargetAgentName: "Verifier", Eligible: false, ReasonCode: &reason,
+		}},
+	}
+	service := New(fake)
+	parentID := "comment-parent"
+
+	preview, err := service.PreviewIssueCommentTriggers(
+		t.Context(), projectID, issueID, &parentID, "Please inspect this.",
+		store.IssueCommentTriggerRequest{MentionAgentIDs: []string{"agent-2"}, SuppressImplicit: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Mentions) != 1 || preview.Mentions[0].TargetAgentID != "agent-2" ||
+		preview.Mentions[0].ReasonCode == nil || *preview.Mentions[0].ReasonCode != reason || preview.Implicit != nil {
+		t.Fatalf("trigger preview=%+v", preview)
+	}
+
+	fake.mentionErr = store.ErrInvalidArgument
+	if _, err := service.PreviewIssueCommentTriggers(
+		t.Context(), projectID, issueID, nil, "body", store.IssueCommentTriggerRequest{},
+	); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("trigger preview error=%v want invalid argument", err)
+	}
+	fake.mentionErr = nil
+
+	if _, err := service.PreviewIssueCommentTriggers(
+		t.Context(), projectID, "missing", nil, "body", store.IssueCommentTriggerRequest{},
+	); err == nil {
+		t.Fatal("missing Issue trigger preview unexpectedly succeeded")
+	}
+
+	withoutTriggers := &issueCommentWithoutMentionsStore{
+		ControlPlaneStore: fake,
+		IssueCommentStore: fake,
+	}
+	withoutTriggerService := New(withoutTriggers)
+	if _, err := withoutTriggerService.PreviewIssueCommentTriggers(
+		t.Context(), projectID, issueID, nil, "body", store.IssueCommentTriggerRequest{},
+	); err == nil {
+		t.Fatal("trigger preview unexpectedly succeeded without trigger capability")
+	}
+	if _, err := withoutTriggerService.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "human trigger requires capability", RequestKey: "trigger-capability",
+	}, "author"); err == nil {
+		t.Fatal("human comment unexpectedly succeeded without trigger capability")
+	}
+
+	fake.commentErr = store.ErrConflict
+	if _, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "propagate trigger store failure", RequestKey: "trigger-store-error",
+	}, "author"); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("trigger create error=%v want conflict", err)
 	}
 }
 

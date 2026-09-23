@@ -129,6 +129,54 @@ func TestProjectAccessWorkflowWrappersFailBeforeUnavailableDependencies(t *testi
 	}
 }
 
+
+func TestProjectAccessCommentTriggerPreviewsUseWorkflowMutationBoundary(t *testing.T) {
+	const projectID = "project-comment-trigger-preview"
+	const issueID = "issue-1"
+	workflow := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, Name: "Project"},
+		roles: map[string]string{
+			"viewer": store.ProjectRoleViewer,
+			"member": store.ProjectRoleMember,
+		},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	commentStore := &issueCommentTestStore{projectWorkflowAuthorizationStore: workflow}
+	controlPlane := New(commentStore)
+	access, err := NewProjectAccessService(controlPlane, workflow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	viewer := activeProjectActor("viewer", store.DeploymentRoleMember)
+	member := activeProjectActor("member", store.DeploymentRoleMember)
+
+	request := store.IssueCommentTriggerRequest{MentionAgentIDs: []string{"agent-1"}}
+	preview, err := access.PreviewIssueCommentTriggers(t.Context(), member, projectID, issueID, nil, "Inspect this", request)
+	if err != nil {
+		t.Fatalf("member trigger preview error=%v", err)
+	}
+	if len(preview.Mentions) != 1 || preview.Mentions[0].TargetAgentID != "agent-1" || !preview.Mentions[0].Eligible {
+		t.Fatalf("trigger preview=%+v", preview)
+	}
+	if _, err := access.PreviewIssueCommentTriggers(t.Context(), viewer, projectID, issueID, nil, "Inspect this", request); appErrorCode(err) != "forbidden" {
+		t.Fatalf("viewer trigger preview error=%v", err)
+	}
+
+	mentions, err := access.PreviewIssueCommentMentions(t.Context(), member, projectID, issueID, []string{"agent-1"})
+	if err != nil {
+		t.Fatalf("member mention preview error=%v", err)
+	}
+	if len(mentions) != 1 || mentions[0].TargetAgentID != "agent-1" || !mentions[0].Eligible {
+		t.Fatalf("mention preview=%+v", mentions)
+	}
+	if _, err := access.PreviewIssueCommentMentions(t.Context(), viewer, projectID, issueID, []string{"agent-1"}); appErrorCode(err) != "forbidden" {
+		t.Fatalf("viewer mention preview error=%v", err)
+	}
+}
+
 func TestConfigureProjectAccessWiresOnlySupportingStores(t *testing.T) {
 	fake := newProjectAccessCRUDStore()
 	services := &Services{ControlPlane: New(fake)}

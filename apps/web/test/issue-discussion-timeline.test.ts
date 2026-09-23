@@ -14,6 +14,8 @@ const root = {
   resolvedAt: null,
   resolvedBy: null,
   reactions: [],
+  mentions: [],
+  implicitTrigger: null,
   createdAt: '2026-09-19T08:00:00Z',
   updatedAt: '2026-09-19T08:00:00Z'
 }
@@ -29,6 +31,8 @@ const reply = {
   resolvedAt: null,
   resolvedBy: null,
   reactions: [],
+  mentions: [],
+  implicitTrigger: null,
   createdAt: '2026-09-19T08:01:00Z',
   updatedAt: '2026-09-19T08:01:00Z'
 }
@@ -51,15 +55,28 @@ const activity = {
   payload: { message: 'Issue updated' }
 }
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 
 function stubAuth(userId = 'user-1') {
   vi.stubGlobal('useAuth', () => ({ user: { value: { id: userId } } }))
 }
 
+function deferredResponse() {
+  let resolve!: (response: Response) => void
+  const promise = new Promise<Response>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 describe('IssueDiscussionTimeline', () => {
   it('renders activity, threaded comments, posts replies, and reloads durable state', async () => {
     stubAuth()
+    const requestId = '77777777-7777-4777-8777-777777777777'
+    vi.stubGlobal('crypto', { randomUUID: () => requestId })
     let timeline = [
       { kind: 'activity' as const, id: activity.id, occurredAt: activity.occurredAt, comment: null, activity },
       { kind: 'comment' as const, id: root.id, occurredAt: root.createdAt, comment: root, activity: null },
@@ -112,7 +129,12 @@ describe('IssueDiscussionTimeline', () => {
 
     const post = fetch.mock.calls.find(([path, options]) => String(path).endsWith('/comments') && options?.method === 'POST')
     expect(post).toBeTruthy()
-    expect(JSON.parse(String(post![1]?.body))).toEqual({ body: 'Follow-up', parentCommentId: root.id })
+    expect(JSON.parse(String(post![1]?.body))).toEqual({
+      body: 'Follow-up',
+      parentCommentId: root.id,
+      requestId,
+      suppressImplicitAgentTrigger: false
+    })
     expect(wrapper.text()).toContain('Follow-up')
     expect(fetch.mock.calls.filter(([path]) => String(path).endsWith('/timeline')).length).toBeGreaterThanOrEqual(2)
     wrapper.unmount()
@@ -356,15 +378,18 @@ describe('IssueDiscussionTimeline', () => {
       const method = options.method || 'GET'
       if (url.endsWith('/timeline')) return new Response(JSON.stringify(timeline))
       if (url.endsWith('/agents') && method === 'GET') return new Response(JSON.stringify([verifier]))
-      if (url.endsWith('/comments/mention-preview') && method === 'POST') {
+      if (url.endsWith('/comments/trigger-preview') && method === 'POST') {
         const input = JSON.parse(String(options.body)) as { mentionAgentIds: string[] }
         expect(input.mentionAgentIds).toEqual([verifier.id])
-        return new Response(JSON.stringify([{
-          targetAgentId: verifier.id,
-          targetAgentName: verifier.name,
-          eligible: true,
-          reasonCode: null
-        }]))
+        return new Response(JSON.stringify({
+          mentions: [{
+            targetAgentId: verifier.id,
+            targetAgentName: verifier.name,
+            eligible: true,
+            reasonCode: null
+          }],
+          implicit: null
+        }))
       }
       if (url.endsWith('/comments') && method === 'POST') {
         const input = JSON.parse(String(options.body)) as {
@@ -377,7 +402,8 @@ describe('IssueDiscussionTimeline', () => {
           body: 'Please verify this change',
           parentCommentId: null,
           requestId,
-          mentionAgentIds: [verifier.id]
+          mentionAgentIds: [verifier.id],
+          suppressImplicitAgentTrigger: false
         })
         const created = {
           ...root,
@@ -500,13 +526,16 @@ describe('IssueDiscussionTimeline', () => {
       const url = String(path)
       if (url.endsWith('/timeline')) return new Response(JSON.stringify([]))
       if (url.endsWith('/agents')) return new Response(JSON.stringify(agents))
-      if (url.endsWith('/comments/mention-preview') && options.method === 'POST') {
-        return new Response(JSON.stringify([{
-          targetAgentId: agents[0]!.id,
-          targetAgentName: agents[0]!.name,
-          eligible: false,
-          reasonCode: 'TARGET_BUSY'
-        }]))
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        return new Response(JSON.stringify({
+          mentions: [{
+            targetAgentId: agents[0]!.id,
+            targetAgentName: agents[0]!.name,
+            eligible: false,
+            reasonCode: 'TARGET_BUSY'
+          }],
+          implicit: null
+        }))
       }
       throw new Error(`unexpected request ${url}`)
     })
@@ -560,7 +589,7 @@ describe('IssueDiscussionTimeline', () => {
         }
         return new Response(JSON.stringify([agent]))
       }
-      if (url.endsWith('/comments/mention-preview') && options.method === 'POST') {
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
         return new Response(JSON.stringify({ error: { code: 'internal_error' } }), { status: 500 })
       }
       throw new Error(`unexpected request ${url}`)
@@ -592,9 +621,419 @@ describe('IssueDiscussionTimeline', () => {
     await flushPromises()
     await second.findAll('button').find(button => button.text() === '@Verifier')!.trigger('click')
     await flushPromises()
-    expect(second.text()).toContain('Mention preview unavailable')
+    expect(second.text()).toContain('Trigger preview unavailable')
     expect((second.get('textarea').element as HTMLTextAreaElement).value).toBe('Still here')
     second.unmount()
+  })
+
+  it('renders queued and workflow-blocked implicit routing outcomes with their reasons', async () => {
+    stubAuth()
+    const queued = {
+      ...root,
+      id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+      body: 'Queued implicit route',
+      implicitTrigger: {
+        targetAgentId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        targetAgentName: 'Thread Agent',
+        routingReason: 'UNIQUE_THREAD_AGENT' as const,
+        outcome: 'QUEUED' as const,
+        reasonCode: null,
+        delegationId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        delegatedRunId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+      }
+    }
+    const blocked = {
+      ...root,
+      id: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+      body: 'Blocked implicit route',
+      implicitTrigger: {
+        targetAgentId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+        targetAgentName: '',
+        routingReason: 'ISSUE_ASSIGNEE' as const,
+        outcome: 'BLOCKED' as const,
+        reasonCode: 'WORKFLOW_BLOCKED' as const,
+        delegationId: null,
+        delegatedRunId: null
+      }
+    }
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (String(path).endsWith('/timeline')) {
+        return new Response(JSON.stringify([
+          { kind: 'comment', id: queued.id, occurredAt: queued.createdAt, comment: queued, activity: null },
+          { kind: 'comment', id: blocked.id, occurredAt: blocked.createdAt, comment: blocked, activity: null }
+        ]))
+      }
+      throw new Error(`unexpected request ${path}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: {
+        stubs: {
+          ...uiStubs,
+          IssueDiscussionTimeline: false,
+          IdentityAvatar: true,
+          NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' }
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('@Thread Agent')
+    expect(wrapper.text()).toContain('only Agent participating in this discussion')
+    expect(wrapper.text()).toContain('Work queued')
+    expect(wrapper.find('a').attributes('href')).toBe('/projects/p/runs/cccccccc-cccc-4ccc-8ccc-cccccccccccc')
+    expect(wrapper.text()).toContain('@Unavailable Agent')
+    expect(wrapper.text()).toContain('current Issue Agent assignee')
+    expect(wrapper.text()).toContain('Issue workflow does not allow an implicit Agent wakeup')
+    wrapper.unmount()
+  })
+
+  it('invalidates an in-flight preview immediately when the draft body changes', async () => {
+    stubAuth()
+    vi.useFakeTimers()
+    const previewA = deferredResponse()
+    const previewB = deferredResponse()
+    const previewBodies: string[] = []
+    vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) return Promise.resolve(new Response(JSON.stringify([])))
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        const input = JSON.parse(String(options.body)) as { body: string }
+        previewBodies.push(input.body)
+        if (input.body === 'draft A') return previewA.promise
+        if (input.body === 'draft B') return previewB.promise
+        return Promise.resolve(new Response(JSON.stringify({ mentions: [], implicit: null })))
+      }
+      throw new Error(`unexpected request ${url}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('draft A')
+    await vi.advanceTimersByTimeAsync(250)
+    expect(previewBodies).toEqual(['draft A'])
+
+    await wrapper.get('textarea').setValue('draft B')
+    expect(wrapper.text()).not.toContain('@Draft A Agent')
+
+    previewA.resolve(new Response(JSON.stringify({
+      mentions: [],
+      implicit: {
+        targetAgentId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        targetAgentName: 'Draft A Agent',
+        routingReason: 'ISSUE_ASSIGNEE',
+        eligible: true,
+        suppressed: false,
+        reasonCode: null
+      }
+    })))
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('@Draft A Agent')
+    expect(previewBodies).toEqual(['draft A'])
+
+    await vi.advanceTimersByTimeAsync(250)
+    expect(previewBodies).toEqual(['draft A', 'draft B'])
+
+    previewB.resolve(new Response(JSON.stringify({
+      mentions: [],
+      implicit: {
+        targetAgentId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        targetAgentName: 'Draft B Agent',
+        routingReason: 'ISSUE_ASSIGNEE',
+        eligible: true,
+        suppressed: false,
+        reasonCode: null
+      }
+    })))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('@Draft B Agent')
+    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).not.toContain('@Draft A Agent')
+    wrapper.unmount()
+  })
+
+  it('clears a direct-reply preview immediately when switching reply targets', async () => {
+    stubAuth()
+    const agentA = {
+      ...root,
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      sourceRunId: 'abababab-abab-4aba-8aba-abababababab',
+      author: { type: 'AGENT' as const, id: 'acacacac-acac-4aca-8aca-acacacacacac', name: 'Agent A' },
+      body: 'Agent A response'
+    }
+    const agentB = {
+      ...root,
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      sourceRunId: 'bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc',
+      author: { type: 'AGENT' as const, id: 'bdbdbdbd-bdbd-4bdb-8bdb-bdbdbdbdbdbd', name: 'Agent B' },
+      body: 'Agent B response'
+    }
+    const previewB = deferredResponse()
+    vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) {
+        return Promise.resolve(new Response(JSON.stringify([
+          { kind: 'comment', id: agentA.id, occurredAt: agentA.createdAt, comment: agentA, activity: null },
+          { kind: 'comment', id: agentB.id, occurredAt: agentB.createdAt, comment: agentB, activity: null }
+        ])))
+      }
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        const input = JSON.parse(String(options.body)) as { parentCommentId: string | null }
+        const target = input.parentCommentId === agentA.id ? agentA : agentB
+        if (target === agentB) return previewB.promise
+        return Promise.resolve(new Response(JSON.stringify({
+          mentions: [],
+          implicit: {
+            targetAgentId: target.author.id,
+            targetAgentName: target.author.name,
+            routingReason: 'DIRECT_AGENT_REPLY',
+            eligible: true,
+            suppressed: false,
+            reasonCode: null
+          }
+        })))
+      }
+      throw new Error(`unexpected request ${url}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    const replyButtons = wrapper.findAll('button').filter(button => button.text() === 'Reply')
+    expect(replyButtons).toHaveLength(2)
+
+    await replyButtons[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Agent A')
+    expect(wrapper.text()).toContain('Will queue work')
+
+    await replyButtons[1]!.trigger('click')
+    expect(wrapper.text()).toContain('Replying to Agent B')
+    expect(wrapper.text()).not.toContain('@Agent A')
+    expect(wrapper.text()).not.toContain('Will queue work')
+
+    previewB.resolve(new Response(JSON.stringify({
+      mentions: [],
+      implicit: {
+        targetAgentId: agentB.author.id,
+        targetAgentName: agentB.author.name,
+        routingReason: 'DIRECT_AGENT_REPLY',
+        eligible: true,
+        suppressed: false,
+        reasonCode: null
+      }
+    })))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('@Agent B')
+    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).not.toContain('@Agent A')
+    wrapper.unmount()
+  })
+
+  it('debounces trigger previews from the current draft body', async () => {
+    stubAuth()
+    vi.useFakeTimers()
+    const previewBodies: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) return new Response(JSON.stringify([]))
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        const input = JSON.parse(String(options.body)) as { body: string }
+        previewBodies.push(input.body)
+        return new Response(JSON.stringify({ mentions: [], implicit: null }))
+      }
+      throw new Error(`unexpected request ${url}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('first draft')
+    await wrapper.get('textarea').setValue('current draft')
+    expect(previewBodies).toEqual([])
+
+    await vi.advanceTimersByTimeAsync(249)
+    expect(previewBodies).toEqual([])
+    await vi.advanceTimersByTimeAsync(1)
+    await flushPromises()
+
+    expect(previewBodies).toEqual(['current draft'])
+    wrapper.unmount()
+  })
+
+  it('clears stale routing when the current trigger preview fails', async () => {
+    stubAuth()
+    const agentComment = {
+      ...root,
+      id: 'abababab-abab-4aba-8aba-abababababab',
+      sourceRunId: 'bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc',
+      author: { type: 'AGENT' as const, id: 'cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd', name: 'Routing Agent' },
+      body: 'Agent response'
+    }
+    let previewCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) {
+        return new Response(JSON.stringify([
+          { kind: 'comment', id: agentComment.id, occurredAt: agentComment.createdAt, comment: agentComment, activity: null }
+        ]))
+      }
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        previewCalls++
+        if (previewCalls === 1) {
+          return new Response(JSON.stringify({
+            mentions: [],
+            implicit: {
+              targetAgentId: agentComment.author.id,
+              targetAgentName: agentComment.author.name,
+              routingReason: 'DIRECT_AGENT_REPLY',
+              eligible: true,
+              suppressed: false,
+              reasonCode: null
+            }
+          }))
+        }
+        return new Response(JSON.stringify({ error: { code: 'internal_error', message: 'preview failed' } }), { status: 500 })
+      }
+      throw new Error(`unexpected request ${url}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'Reply')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Routing Agent')
+    expect(wrapper.text()).toContain('Will queue work')
+
+    const suppress = wrapper.find('input[type="checkbox"]')
+    await suppress.setValue(true)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Trigger preview unavailable')
+    expect(wrapper.text()).not.toContain('@Routing Agent')
+    expect(wrapper.text()).not.toContain('Will queue work')
+    wrapper.unmount()
+  })
+
+  it('previews and suppresses a direct-reply implicit Agent trigger while preserving the comment', async () => {
+    stubAuth()
+    const requestId = '88888888-8888-4888-8888-888888888888'
+    vi.stubGlobal('crypto', { randomUUID: () => requestId })
+    const agentComment = {
+      ...root,
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      sourceRunId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      author: { type: 'AGENT' as const, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', name: 'Builder Agent' },
+      body: 'I checked the implementation.'
+    }
+    let timeline: unknown[] = [
+      { kind: 'comment', id: agentComment.id, occurredAt: agentComment.createdAt, comment: agentComment, activity: null }
+    ]
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      const method = options.method || 'GET'
+      if (url.endsWith('/timeline')) return new Response(JSON.stringify(timeline))
+      if (url.endsWith('/comments/trigger-preview') && method === 'POST') {
+        const input = JSON.parse(String(options.body)) as { parentCommentId: string | null, suppressImplicitAgentTrigger: boolean, mentionAgentIds: string[] }
+        if (input.parentCommentId !== agentComment.id) {
+          return new Response(JSON.stringify({ mentions: [], implicit: null }))
+        }
+        return new Response(JSON.stringify({
+          mentions: [],
+          implicit: {
+            targetAgentId: agentComment.author.id,
+            targetAgentName: agentComment.author.name,
+            routingReason: 'DIRECT_AGENT_REPLY',
+            eligible: !input.suppressImplicitAgentTrigger,
+            suppressed: input.suppressImplicitAgentTrigger,
+            reasonCode: null
+          }
+        }))
+      }
+      if (url.endsWith('/comments') && method === 'POST') {
+        const input = JSON.parse(String(options.body)) as {
+          body: string
+          parentCommentId: string | null
+          requestId: string
+          suppressImplicitAgentTrigger: boolean
+        }
+        expect(input).toEqual({
+          body: 'Thanks, no need to run again.',
+          parentCommentId: agentComment.id,
+          requestId,
+          suppressImplicitAgentTrigger: true
+        })
+        const created = {
+          ...reply,
+          id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+          parentCommentId: agentComment.id,
+          body: input.body,
+          implicitTrigger: {
+            targetAgentId: agentComment.author.id,
+            targetAgentName: agentComment.author.name,
+            routingReason: 'DIRECT_AGENT_REPLY' as const,
+            outcome: 'SUPPRESSED' as const,
+            reasonCode: null,
+            delegationId: null,
+            delegatedRunId: null
+          }
+        }
+        timeline = [...timeline, { kind: 'comment', id: created.id, occurredAt: created.createdAt, comment: created, activity: null }]
+        return new Response(JSON.stringify(created), { status: 201 })
+      }
+      throw new Error(`unexpected request ${method} ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: {
+        stubs: {
+          ...uiStubs,
+          IssueDiscussionTimeline: false,
+          IdentityAvatar: true
+        }
+      }
+    })
+    await flushPromises()
+
+    await wrapper.findAll('button').find(button => button.text() === 'Reply')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Builder Agent')
+    expect(wrapper.text()).toContain('replying directly to this Agent')
+    expect(wrapper.text()).toContain('Will queue work')
+
+    const suppress = wrapper.find('input[type="checkbox"]')
+    expect(suppress.exists()).toBe(true)
+    await suppress.setValue(true)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Automatic Agent trigger suppressed')
+
+    await wrapper.get('textarea').setValue('Thanks, no need to run again.')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Automatic Agent trigger suppressed')
+    expect(wrapper.text()).not.toContain('Open delegated Run')
+    wrapper.unmount()
   })
 
 })

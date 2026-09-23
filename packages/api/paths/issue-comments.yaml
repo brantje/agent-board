@@ -17,7 +17,7 @@ comments:
         $ref: ../components/api-components.yaml#/responses/Error
   post:
     operationId: createIssueComment
-    description: Creates a human-authored Issue comment or reply. Only explicit structured mentionAgentIds can request Agent work; mention-looking text alone has no execution semantics.
+    description: Creates a human-authored Issue comment or reply. Structured mentions take precedence; otherwise deterministic implicit routing may request one Agent unless suppressed. Mention-looking prose alone has no execution semantics.
     requestBody:
       required: true
       content:
@@ -29,6 +29,27 @@ comments:
         content:
           application/json:
             schema: {$ref: ../schemas/control-plane.yaml#/IssueComment}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+triggerPreview:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  post:
+    operationId: previewIssueCommentTriggers
+    description: Advisory preview of explicit structured mentions and deterministic implicit Agent routing. Posting revalidates routing and execution policy authoritatively.
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: ../schemas/control-plane.yaml#/IssueCommentTriggerPreviewInput}
+    responses:
+      '200':
+        description: Comment trigger preview
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/IssueCommentTriggerPreview}
       default:
         $ref: ../components/api-components.yaml#/responses/Error
 

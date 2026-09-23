@@ -75,6 +75,15 @@ func issueCommentDTO(v store.IssueComment, issueKey, viewerID string) IssueComme
 			Outcome: mention.Outcome, ReasonCode: mention.ReasonCode, DelegationID: mention.DelegationID, DelegatedRunID: mention.DelegatedRunID,
 		})
 	}
+	var implicit *IssueCommentImplicitTriggerDTO
+	if v.ImplicitTrigger != nil {
+		implicit = &IssueCommentImplicitTriggerDTO{
+			TargetAgentID: v.ImplicitTrigger.TargetAgentID, TargetAgentName: v.ImplicitTrigger.TargetAgentName,
+			RoutingReason: v.ImplicitTrigger.RoutingReason, Outcome: v.ImplicitTrigger.Outcome,
+			ReasonCode: v.ImplicitTrigger.ReasonCode, DelegationID: v.ImplicitTrigger.DelegationID,
+			DelegatedRunID: v.ImplicitTrigger.DelegatedRunID,
+		}
+	}
 	return IssueCommentDTO{
 		ID:              v.ID,
 		IssueID:         issueKey,
@@ -87,6 +96,7 @@ func issueCommentDTO(v store.IssueComment, issueKey, viewerID string) IssueComme
 		ResolvedBy:      resolvedBy,
 		Reactions:       reactions,
 		Mentions:        mentions,
+		ImplicitTrigger: implicit,
 		CreatedAt:       v.CreatedAt,
 		UpdatedAt:       v.UpdatedAt,
 	}

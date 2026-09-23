@@ -258,24 +258,26 @@ try {
     await page.getByRole('button', { name: 'Mention Agent' }).click()
     await page.getByPlaceholder('Filter Agents…').fill('Mention E2E Target')
     const previewResponsePromise = page.waitForResponse(response => (
-      response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments/mention-preview')
+      response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments/trigger-preview')
       && response.request().method() === 'POST'
+      && response.request().postDataJSON()?.mentionAgentIds?.includes(mentionAgent.id)
     ), { timeout: 15_000 })
     await page.getByRole('button', { name: '@Mention E2E Target' }).click()
     const previewResponse = await previewResponsePromise
     assert.equal(previewResponse.status(), 200, 'real mention preview request failed')
     assert.deepEqual(previewResponse.request().postDataJSON().mentionAgentIds, [mentionAgent.id])
     const preview = await previewResponse.json()
-    assert.equal(preview.length, 1)
-    assert.equal(preview[0].targetAgentId, mentionAgent.id)
-    assert.equal(preview[0].eligible, true)
-    assert.equal(preview[0].reasonCode, null)
+    assert.equal(preview.mentions.length, 1)
+    assert.equal(preview.mentions[0].targetAgentId, mentionAgent.id)
+    assert.equal(preview.mentions[0].eligible, true)
+    assert.equal(preview.mentions[0].reasonCode, null)
+    assert.equal(preview.implicit, null)
     await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Eligible to queue work').waitFor()
 
     await page.locator('textarea').fill(mentionBody)
     const mentionPostPromise = page.waitForResponse(response => (
       response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments')
-      && !response.url().includes('/mention-preview')
+      && !response.url().includes('/trigger-preview')
       && response.request().method() === 'POST'
     ), { timeout: 15_000 })
     await page.getByRole('button', { name: 'Post comment' }).click()
@@ -315,24 +317,26 @@ try {
     await page.getByRole('button', { name: 'Mention Agent' }).click()
     await page.getByPlaceholder('Filter Agents…').fill('Mention E2E Target')
     const busyPreviewPromise = page.waitForResponse(response => (
-      response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments/mention-preview')
+      response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments/trigger-preview')
       && response.request().method() === 'POST'
+      && response.request().postDataJSON()?.mentionAgentIds?.includes(mentionAgent.id)
     ), { timeout: 15_000 })
     await page.getByRole('button', { name: '@Mention E2E Target' }).click()
     const busyPreviewResponse = await busyPreviewPromise
     assert.equal(busyPreviewResponse.status(), 200, 'real busy mention preview request failed')
     const busyPreview = await busyPreviewResponse.json()
-    assert.equal(busyPreview.length, 1)
-    assert.equal(busyPreview[0].targetAgentId, mentionAgent.id)
-    assert.equal(busyPreview[0].eligible, false)
-    assert.equal(busyPreview[0].reasonCode, 'TARGET_BUSY')
+    assert.equal(busyPreview.mentions.length, 1)
+    assert.equal(busyPreview.mentions[0].targetAgentId, mentionAgent.id)
+    assert.equal(busyPreview.mentions[0].eligible, false)
+    assert.equal(busyPreview.mentions[0].reasonCode, 'TARGET_BUSY')
+    assert.equal(busyPreview.implicit, null)
     await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Agent already has active work on this Issue').waitFor()
 
     const blockedBody = 'Browser blocked structured mention proof.'
     await page.locator('textarea').fill(blockedBody)
     const blockedPostPromise = page.waitForResponse(response => (
       response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments')
-      && !response.url().includes('/mention-preview')
+      && !response.url().includes('/trigger-preview')
       && response.request().method() === 'POST'
     ), { timeout: 15_000 })
     await page.getByRole('button', { name: 'Post comment' }).click()
