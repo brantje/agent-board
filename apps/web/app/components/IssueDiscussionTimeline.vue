@@ -91,28 +91,35 @@ function resetDraftRequestIdentity() {
   if (!submitting.value) draftRequestId.value = ''
 }
 
-watch(body, (_value, _oldValue, onCleanup) => {
+function routingInputChanged() {
   resetDraftRequestIdentity()
+  triggerPreviewGeneration++
+  triggerPreview.value = { mentions: [], implicit: null }
+  triggerPreviewError.value = undefined
+}
+
+watch(body, (_value, _oldValue, onCleanup) => {
+  routingInputChanged()
   const timer = globalThis.setTimeout(() => {
     void refreshTriggerPreview()
   }, 250)
   onCleanup(() => globalThis.clearTimeout(timer))
 })
 watch(suppressImplicitAgentTrigger, () => {
-  resetDraftRequestIdentity()
+  routingInputChanged()
   void refreshTriggerPreview()
 })
 
 function beginReply(comment: IssueComment) {
   if (comment.deletedAt) return
   replyTo.value = comment
-  resetDraftRequestIdentity()
+  routingInputChanged()
   void refreshTriggerPreview()
 }
 
 function cancelReply() {
   replyTo.value = undefined
-  resetDraftRequestIdentity()
+  routingInputChanged()
   void refreshTriggerPreview()
 }
 
@@ -202,13 +209,13 @@ async function addMention(agent: Agent) {
   if (selectedMentionAgentIDs.value.includes(agent.id)) return
   selectedMentionAgentIDs.value = [...selectedMentionAgentIDs.value, agent.id]
   mentionQuery.value = ''
-  resetDraftRequestIdentity()
+  routingInputChanged()
   await refreshTriggerPreview()
 }
 
 async function removeMention(agentID: string) {
   selectedMentionAgentIDs.value = selectedMentionAgentIDs.value.filter(id => id !== agentID)
-  resetDraftRequestIdentity()
+  routingInputChanged()
   await refreshTriggerPreview()
 }
 

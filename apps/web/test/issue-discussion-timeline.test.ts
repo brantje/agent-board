@@ -64,6 +64,14 @@ function stubAuth(userId = 'user-1') {
   vi.stubGlobal('useAuth', () => ({ user: { value: { id: userId } } }))
 }
 
+function deferredResponse() {
+  let resolve!: (response: Response) => void
+  const promise = new Promise<Response>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 describe('IssueDiscussionTimeline', () => {
   it('renders activity, threaded comments, posts replies, and reloads durable state', async () => {
     stubAuth()
@@ -678,6 +686,158 @@ describe('IssueDiscussionTimeline', () => {
     expect(wrapper.text()).toContain('@Unavailable Agent')
     expect(wrapper.text()).toContain('current Issue Agent assignee')
     expect(wrapper.text()).toContain('Issue workflow does not allow an implicit Agent wakeup')
+    wrapper.unmount()
+  })
+
+  it('invalidates an in-flight preview immediately when the draft body changes', async () => {
+    stubAuth()
+    vi.useFakeTimers()
+    const previewA = deferredResponse()
+    const previewB = deferredResponse()
+    const previewBodies: string[] = []
+    vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) return Promise.resolve(new Response(JSON.stringify([])))
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        const input = JSON.parse(String(options.body)) as { body: string }
+        previewBodies.push(input.body)
+        if (input.body === 'draft A') return previewA.promise
+        if (input.body === 'draft B') return previewB.promise
+        return Promise.resolve(new Response(JSON.stringify({ mentions: [], implicit: null })))
+      }
+      throw new Error(`unexpected request ${url}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    await wrapper.get('textarea').setValue('draft A')
+    await vi.advanceTimersByTimeAsync(250)
+    expect(previewBodies).toEqual(['draft A'])
+
+    await wrapper.get('textarea').setValue('draft B')
+    expect(wrapper.text()).not.toContain('@Draft A Agent')
+
+    previewA.resolve(new Response(JSON.stringify({
+      mentions: [],
+      implicit: {
+        targetAgentId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        targetAgentName: 'Draft A Agent',
+        routingReason: 'ISSUE_ASSIGNEE',
+        eligible: true,
+        suppressed: false,
+        reasonCode: null
+      }
+    })))
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('@Draft A Agent')
+    expect(previewBodies).toEqual(['draft A'])
+
+    await vi.advanceTimersByTimeAsync(250)
+    expect(previewBodies).toEqual(['draft A', 'draft B'])
+
+    previewB.resolve(new Response(JSON.stringify({
+      mentions: [],
+      implicit: {
+        targetAgentId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+        targetAgentName: 'Draft B Agent',
+        routingReason: 'ISSUE_ASSIGNEE',
+        eligible: true,
+        suppressed: false,
+        reasonCode: null
+      }
+    })))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('@Draft B Agent')
+    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).not.toContain('@Draft A Agent')
+    wrapper.unmount()
+  })
+
+  it('clears a direct-reply preview immediately when switching reply targets', async () => {
+    stubAuth()
+    const agentA = {
+      ...root,
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      sourceRunId: 'abababab-abab-4aba-8aba-abababababab',
+      author: { type: 'AGENT' as const, id: 'acacacac-acac-4aca-8aca-acacacacacac', name: 'Agent A' },
+      body: 'Agent A response'
+    }
+    const agentB = {
+      ...root,
+      id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      sourceRunId: 'bcbcbcbc-bcbc-4bcb-8bcb-bcbcbcbcbcbc',
+      author: { type: 'AGENT' as const, id: 'bdbdbdbd-bdbd-4bdb-8bdb-bdbdbdbdbdbd', name: 'Agent B' },
+      body: 'Agent B response'
+    }
+    const previewB = deferredResponse()
+    vi.stubGlobal('fetch', vi.fn((path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) {
+        return Promise.resolve(new Response(JSON.stringify([
+          { kind: 'comment', id: agentA.id, occurredAt: agentA.createdAt, comment: agentA, activity: null },
+          { kind: 'comment', id: agentB.id, occurredAt: agentB.createdAt, comment: agentB, activity: null }
+        ])))
+      }
+      if (url.endsWith('/comments/trigger-preview') && options.method === 'POST') {
+        const input = JSON.parse(String(options.body)) as { parentCommentId: string | null }
+        const target = input.parentCommentId === agentA.id ? agentA : agentB
+        if (target === agentB) return previewB.promise
+        return Promise.resolve(new Response(JSON.stringify({
+          mentions: [],
+          implicit: {
+            targetAgentId: target.author.id,
+            targetAgentName: target.author.name,
+            routingReason: 'DIRECT_AGENT_REPLY',
+            eligible: true,
+            suppressed: false,
+            reasonCode: null
+          }
+        })))
+      }
+      throw new Error(`unexpected request ${url}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: { stubs: { ...uiStubs, IssueDiscussionTimeline: false, IdentityAvatar: true } }
+    })
+    await flushPromises()
+
+    const replyButtons = wrapper.findAll('button').filter(button => button.text() === 'Reply')
+    expect(replyButtons).toHaveLength(2)
+
+    await replyButtons[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Agent A')
+    expect(wrapper.text()).toContain('Will queue work')
+
+    await replyButtons[1]!.trigger('click')
+    expect(wrapper.text()).toContain('Replying to Agent B')
+    expect(wrapper.text()).not.toContain('@Agent A')
+    expect(wrapper.text()).not.toContain('Will queue work')
+
+    previewB.resolve(new Response(JSON.stringify({
+      mentions: [],
+      implicit: {
+        targetAgentId: agentB.author.id,
+        targetAgentName: agentB.author.name,
+        routingReason: 'DIRECT_AGENT_REPLY',
+        eligible: true,
+        suppressed: false,
+        reasonCode: null
+      }
+    })))
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('@Agent B')
+    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).not.toContain('@Agent A')
     wrapper.unmount()
   })
 
