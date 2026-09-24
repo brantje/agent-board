@@ -812,7 +812,7 @@ describe('IssueDiscussionTimeline', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('@Draft B Agent')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
     expect(wrapper.text()).not.toContain('@Draft A Agent')
     wrapper.unmount()
   })
@@ -873,12 +873,12 @@ describe('IssueDiscussionTimeline', () => {
     await replyButtons[0]!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('@Agent A')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
 
     await replyButtons[1]!.trigger('click')
     expect(wrapper.text()).toContain('Replying to Agent B')
     expect(wrapper.text()).not.toContain('@Agent A')
-    expect(wrapper.text()).not.toContain('Will queue work')
+    expect(wrapper.text()).not.toContain('Will request Agent work')
 
     previewB.resolve(new Response(JSON.stringify({
       mentions: [],
@@ -894,7 +894,7 @@ describe('IssueDiscussionTimeline', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('@Agent B')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
     expect(wrapper.text()).not.toContain('@Agent A')
     wrapper.unmount()
   })
@@ -979,7 +979,7 @@ describe('IssueDiscussionTimeline', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Reply')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('@Routing Agent')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
 
     const suppress = wrapper.find('input[type="checkbox"]')
     await suppress.setValue(true)
@@ -987,7 +987,7 @@ describe('IssueDiscussionTimeline', () => {
 
     expect(wrapper.text()).toContain('Trigger preview unavailable')
     expect(wrapper.text()).not.toContain('@Routing Agent')
-    expect(wrapper.text()).not.toContain('Will queue work')
+    expect(wrapper.text()).not.toContain('Will request Agent work')
     wrapper.unmount()
   })
 
@@ -1077,7 +1077,7 @@ describe('IssueDiscussionTimeline', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('@Builder Agent')
     expect(wrapper.text()).toContain('replying directly to this Agent')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
 
     const suppress = wrapper.find('input[type="checkbox"]')
     expect(suppress.exists()).toBe(true)
