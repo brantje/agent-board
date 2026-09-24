@@ -108,6 +108,15 @@ func (s *Store) requestAgentWorkTx(ctx context.Context, tx pgx.Tx, input agentWo
 		return agentWorkRequestResult{}, err
 	}
 
+	// Scheduler admission locks the target Run before sealing its work request.
+	// Follow the same order here so a comment racing QUEUED -> STARTING cannot
+	// deadlock with admission by holding the work-request row while waiting for
+	// the Run row.
+	active, activeErr := lockActiveRunForAgentWork(ctx, tx, input.ProjectID, input.IssueID, input.TargetAgentID)
+	if activeErr != nil && !errors.Is(activeErr, store.ErrNotFound) {
+		return agentWorkRequestResult{}, activeErr
+	}
+
 	existing, found, err := findOpenAgentWorkRequestTx(ctx, tx, input, workspace.ID)
 	if err != nil {
 		return agentWorkRequestResult{}, err
@@ -116,20 +125,18 @@ func (s *Store) requestAgentWorkTx(ctx context.Context, tx pgx.Tx, input agentWo
 		if existing.RunID == nil {
 			return agentWorkRequestResult{WorkRequest: existing, Outcome: agentWorkRequestOutcomeCoalesced}, nil
 		}
-		run, err := lockRunForAgentWork(ctx, tx, input.ProjectID, *existing.RunID)
-		if err != nil {
-			return agentWorkRequestResult{}, err
-		}
-		if run.Status == "QUEUED" {
+		if activeErr == nil && active.ID == *existing.RunID && active.Status == "QUEUED" {
 			return agentWorkRequestResult{WorkRequest: existing, Outcome: agentWorkRequestOutcomeCoalesced}, nil
 		}
+		// An unsealed request whose associated Run has already crossed the safe
+		// boundary is stale. Seal it before evaluating the current active Run so
+		// this comment becomes a separate follow-up rather than mutating live input.
 		if err := sealAgentWorkRequestTx(ctx, tx, existing.ID); err != nil {
 			return agentWorkRequestResult{}, err
 		}
 	}
 
-	active, err := lockActiveRunForAgentWork(ctx, tx, input.ProjectID, input.IssueID, input.TargetAgentID)
-	if err == nil {
+	if activeErr == nil {
 		if active.Status == "QUEUED" {
 			delegationID, compatible, compatErr := queuedRunAgentWorkCompatibility(ctx, tx, input, active)
 			if compatErr != nil {
@@ -155,9 +162,6 @@ func (s *Store) requestAgentWorkTx(ctx context.Context, tx pgx.Tx, input agentWo
 			return agentWorkRequestResult{}, err
 		}
 		return agentWorkRequestResult{WorkRequest: request, Outcome: agentWorkRequestOutcomeDeferred}, nil
-	}
-	if !errors.Is(err, store.ErrNotFound) {
-		return agentWorkRequestResult{}, err
 	}
 
 	var requestID string

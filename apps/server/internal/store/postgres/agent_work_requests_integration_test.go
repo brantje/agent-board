@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -198,6 +199,83 @@ func requestAgentWorkForTest(t *testing.T, f delegationFixture, comment store.Is
 	return result
 }
 
+
+
+func TestCommentCoalescingRacingSchedulerAdmissionDoesNotDeadlock(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	if _, err := f.store.pool.Exec(ctx, `UPDATE runs SET status='COMPLETED', completed_at=now(), updated_at=now() WHERE project_id=$1 AND id=$2`, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	author, err := f.store.CreateUser(ctx, authUser("work-race-author", "work-race-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := createHumanMentionWork(t, f, author.ID, "race-first", "Initial queued work")
+	if first.Outcome != store.IssueCommentMentionOutcomeQueued || first.DelegatedRunID == nil {
+		t.Fatalf("first=%+v", first)
+	}
+
+	runner, err := f.store.CreateRunner(ctx, store.Runner{Name: "comment coalescing race runner", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ObserveRunner(ctx, runner.ID, []byte(`{"max_active_sessions":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	f.store.SetRunnerCandidates(func(string) []string { return []string{runner.ID} })
+
+	raceCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	start := make(chan struct{})
+	admitResult := make(chan error, 1)
+	commentResult := make(chan struct {
+		comment store.IssueComment
+		err     error
+	}, 1)
+
+	go func() {
+		<-start
+		_, err := f.store.AdmitNextJob(raceCtx, "comment-work-race", time.Minute, time.Millisecond)
+		admitResult <- err
+	}()
+	go func() {
+		<-start
+		actionKey := "race-second"
+		result, err := f.store.CreateIssueCommentWithMentions(raceCtx, f.project.ID, store.IssueComment{
+			IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+			SourceActionKey: &actionKey, Body: "Concurrent follow-up",
+		}, []string{f.target.ID})
+		commentResult <- struct {
+			comment store.IssueComment
+			err     error
+		}{comment: result.Comment, err: err}
+	}()
+	close(start)
+
+	if err := <-admitResult; err != nil {
+		t.Fatalf("scheduler admission failed during comment race: %v", err)
+	}
+	posted := <-commentResult
+	if posted.err != nil {
+		t.Fatalf("comment failed during scheduler admission race: %v", posted.err)
+	}
+	if len(posted.comment.Mentions) != 1 {
+		t.Fatalf("mentions=%+v", posted.comment.Mentions)
+	}
+	outcome := posted.comment.Mentions[0].Outcome
+	if outcome != store.IssueCommentMentionOutcomeCoalesced && outcome != store.IssueCommentMentionOutcomeDeferred {
+		t.Fatalf("race outcome=%s want COALESCED or DEFERRED", outcome)
+	}
+
+	runs, err := f.store.ListRuns(ctx, f.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("scheduler/comment race multiplied Runs: %+v", runs)
+	}
+}
 
 func TestSchedulerAdmissionSealsAgentWorkRequestBoundary(t *testing.T) {
 	f := newDelegationFixture(t, true)
