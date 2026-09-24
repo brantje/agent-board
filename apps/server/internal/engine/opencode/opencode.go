@@ -660,10 +660,71 @@ func initialTaskPromptForRequest(request engine.Request) string {
 		delegationContext = request.DelegationContext
 	}
 	prompt := initialTaskPromptWithDelegationToolContext(request.Context, delegationContext, request.DelegationContinuation)
+	if commentWork := commentWorkPrompt(request.CommentWork); commentWork != "" {
+		prompt += "\n\n" + commentWork
+	}
 	if request.IssueComments != nil {
 		prompt += "\n\n" + issueCommentPromptGuidance
 	}
 	return prompt
+}
+
+func commentWorkPrompt(context *engine.CommentWorkContext) string {
+	if context == nil || len(context.Comments) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("Comment-triggered work admitted for this Run:")
+	builder.WriteString("\nWork request ID: ")
+	builder.WriteString(strings.TrimSpace(context.WorkRequestID))
+	builder.WriteString("\nAddress every comment below as an independently attributable request. The canonical delegated task may duplicate one comment; do not treat that duplicate as separate work.")
+	for index, comment := range context.Comments {
+		builder.WriteString(fmt.Sprintf("\n\nComment %d:", index+1))
+		builder.WriteString("\nComment ID: ")
+		builder.WriteString(strings.TrimSpace(comment.CommentID))
+		builder.WriteString("\nAuthor: ")
+		builder.WriteString(strings.TrimSpace(comment.AuthorType))
+		builder.WriteString(" ")
+		builder.WriteString(strings.TrimSpace(comment.AuthorID))
+		if name := strings.TrimSpace(comment.AuthorName); name != "" {
+			builder.WriteString(" (")
+			builder.WriteString(name)
+			builder.WriteString(")")
+		}
+		builder.WriteString("\nTrigger: ")
+		switch comment.TriggerKind {
+		case engine.CommentWorkTriggerMention:
+			builder.WriteString("structured Agent mention")
+		case engine.CommentWorkTriggerImplicit:
+			builder.WriteString("implicit Issue-discussion route")
+			if comment.RoutingReason != nil && strings.TrimSpace(*comment.RoutingReason) != "" {
+				builder.WriteString(" (")
+				builder.WriteString(strings.TrimSpace(*comment.RoutingReason))
+				builder.WriteString(")")
+			}
+		default:
+			builder.WriteString(strings.TrimSpace(comment.TriggerKind))
+		}
+		builder.WriteString("\nParent comment ID: ")
+		if comment.ParentCommentID == nil {
+			builder.WriteString("none")
+		} else {
+			builder.WriteString(strings.TrimSpace(*comment.ParentCommentID))
+		}
+		builder.WriteString("\nThread root comment ID: ")
+		if comment.RootCommentID == nil {
+			builder.WriteString("unresolved; use read_issue_discussion with the comment ID if more thread context is needed")
+		} else {
+			builder.WriteString(strings.TrimSpace(*comment.RootCommentID))
+		}
+		builder.WriteString("\nBody:\n")
+		if comment.Deleted {
+			builder.WriteString("[comment deleted before execution]")
+		} else {
+			builder.WriteString(strings.TrimSpace(comment.Body))
+		}
+	}
+	return builder.String()
 }
 
 func initialTaskPrompt(safe executioncontext.SafeContext) string {

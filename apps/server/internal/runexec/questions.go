@@ -30,7 +30,13 @@ func (p *Processor) engineRequest(ctx context.Context, safe executioncontext.Saf
 }
 
 func (p *Processor) engineRequestWithDelegationContinuation(ctx context.Context, safe executioncontext.SafeContext, launcher *processLauncher, runtimeInstanceID string, delegationContinuation *engine.DelegationContinuation) (engine.Request, error) {
-	request := engine.Request{Context: safe, Launcher: launcher, DelegationContinuation: delegationContinuation}
+	commentWork, err := loadAgentWorkRequestContext(ctx, p.store, safe)
+	if err != nil {
+		return engine.Request{}, err
+	}
+	request := engine.Request{
+		Context: safe, Launcher: launcher, DelegationContinuation: delegationContinuation, CommentWork: commentWork,
+	}
 	request.IssueComments = newIssueCommentPublisher(p.issueComments, safe)
 	request.IssueDiscussions = newIssueDiscussionReader(p.issueDiscussions, safe)
 	if safe.Delegation == nil {
@@ -72,6 +78,27 @@ func (p *Processor) engineRequestWithDelegationContinuation(ctx context.Context,
 	}
 	request.Continuation = continuation
 	return request, nil
+}
+
+func loadAgentWorkRequestContext(ctx context.Context, source any, safe executioncontext.SafeContext) (*engine.CommentWorkContext, error) {
+	contexts, ok := source.(store.AgentWorkRequestExecutionContextStore)
+	if !ok {
+		return nil, nil
+	}
+	value, err := contexts.GetAgentWorkRequestExecutionContext(ctx, safe.Project.ID, safe.Run.ID)
+	if err != nil || value == nil {
+		return nil, err
+	}
+	result := &engine.CommentWorkContext{WorkRequestID: value.WorkRequestID, Comments: make([]engine.CommentWorkInput, 0, len(value.Comments))}
+	for _, comment := range value.Comments {
+		result.Comments = append(result.Comments, engine.CommentWorkInput{
+			CommentID: comment.CommentID, AuthorType: comment.AuthorType, AuthorID: comment.AuthorID,
+			AuthorName: comment.AuthorName, Body: comment.Body, Deleted: comment.Deleted,
+			ParentCommentID: comment.ParentCommentID, RootCommentID: comment.RootCommentID,
+			TriggerKind: comment.TriggerKind, RoutingReason: comment.RoutingReason,
+		})
+	}
+	return result, nil
 }
 
 func loadContinuation(ctx context.Context, questions store.QuestionStore, safe executioncontext.SafeContext) (*engine.Continuation, error) {

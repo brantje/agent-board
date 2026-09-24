@@ -51,6 +51,43 @@ func SameAgentWorkRequestCompatibility(left, right AgentWorkRequest) bool {
 }
 
 
+const (
+	AgentWorkRequestTriggerMention  = "MENTION"
+	AgentWorkRequestTriggerImplicit = "IMPLICIT"
+)
+
+// AgentWorkRequestComment is one durable Issue comment whose trigger intent was
+// admitted into a comment-work request. Comment state remains authoritative in
+// the Issue domain; this projection only carries the provenance needed by the
+// executing Run.
+type AgentWorkRequestComment struct {
+	CommentID       string
+	AuthorType      string
+	AuthorID        string
+	AuthorName      string
+	Body            string
+	Deleted         bool
+	ParentCommentID *string
+	RootCommentID   *string
+	TriggerKind     string
+	RoutingReason   *string
+	CreatedAt       time.Time
+}
+
+// AgentWorkRequestExecutionContext is execution-time input for the one Run
+// associated with a comment-work request. It is not immutable Run provenance.
+type AgentWorkRequestExecutionContext struct {
+	WorkRequestID string
+	Comments      []AgentWorkRequestComment
+}
+
+// AgentWorkRequestExecutionContextStore resolves comment-work input for a Run.
+// Stores that do not support comment-trigger coalescing simply do not implement
+// this optional capability.
+type AgentWorkRequestExecutionContextStore interface {
+	GetAgentWorkRequestExecutionContext(context.Context, string, string) (*AgentWorkRequestExecutionContext, error)
+}
+
 // AgentWorkRequestReconciliationResult reports one durable scheduler-side
 // reconciliation step. Handled is true when a pending request was promoted or
 // terminalized, allowing the coordinator to immediately re-scan durable work.

@@ -110,6 +110,59 @@ func TestRequestAgentWorkTxDefersAfterQueuedRunCrossesSafeBoundary(t *testing.T)
 	}
 }
 
+
+func TestAgentWorkRequestExecutionContextPreservesFoldedCommentProvenance(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-context-author", "work-context-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := createPlainWorkRequestComment(t, f, author.ID, "root collaboration context")
+	first := createHumanMentionComment(t, f, author.ID, "context-first", "first requested change")
+	if len(first.Mentions) != 1 || first.Mentions[0].WorkRequestID == nil || first.Mentions[0].DelegatedRunID == nil {
+		t.Fatalf("first=%+v", first)
+	}
+	parentID := root.ID
+	actionKey := "context-second"
+	secondResult, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, ParentCommentID: &parentID, AuthorType: store.ActorTypeHuman,
+		AuthorID: author.ID, SourceActionKey: &actionKey, Body: "second folded reply",
+	}, []string{f.target.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := secondResult.Comment
+	if len(second.Mentions) != 1 || second.Mentions[0].Outcome != store.IssueCommentMentionOutcomeCoalesced ||
+		second.Mentions[0].WorkRequestID == nil || *second.Mentions[0].WorkRequestID != *first.Mentions[0].WorkRequestID {
+		t.Fatalf("second=%+v first=%+v", second, first)
+	}
+
+	context, err := f.store.GetAgentWorkRequestExecutionContext(ctx, f.project.ID, *first.Mentions[0].DelegatedRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if context == nil || context.WorkRequestID != *first.Mentions[0].WorkRequestID || len(context.Comments) != 2 {
+		t.Fatalf("context=%+v", context)
+	}
+	byID := map[string]store.AgentWorkRequestComment{}
+	for _, comment := range context.Comments {
+		byID[comment.CommentID] = comment
+	}
+	firstInput, ok := byID[first.ID]
+	if !ok || firstInput.Body != first.Body || firstInput.AuthorType != store.ActorTypeHuman ||
+		firstInput.AuthorID != author.ID || firstInput.TriggerKind != store.AgentWorkRequestTriggerMention ||
+		firstInput.RootCommentID == nil || *firstInput.RootCommentID != first.ID {
+		t.Fatalf("first input=%+v", firstInput)
+	}
+	secondInput, ok := byID[second.ID]
+	if !ok || secondInput.Body != second.Body || secondInput.ParentCommentID == nil || *secondInput.ParentCommentID != root.ID ||
+		secondInput.RootCommentID == nil || *secondInput.RootCommentID != root.ID ||
+		secondInput.TriggerKind != store.AgentWorkRequestTriggerMention {
+		t.Fatalf("second input=%+v", secondInput)
+	}
+}
+
 func createPlainWorkRequestComment(t *testing.T, f delegationFixture, authorID, body string) store.IssueComment {
 	t.Helper()
 	result, err := f.store.CreateIssueComment(t.Context(), f.project.ID, store.IssueComment{

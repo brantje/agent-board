@@ -208,6 +208,29 @@ type AcceptedDelegationResolver interface {
 	ResolveAcceptedDelegation(context.Context, DelegationRequest) (Delegation, bool, error)
 }
 
+const (
+	CommentWorkTriggerMention  = "MENTION"
+	CommentWorkTriggerImplicit = "IMPLICIT"
+)
+
+type CommentWorkInput struct {
+	CommentID       string
+	AuthorType      string
+	AuthorID        string
+	AuthorName      string
+	Body            string
+	Deleted         bool
+	ParentCommentID *string
+	RootCommentID   *string
+	TriggerKind     string
+	RoutingReason   *string
+}
+
+type CommentWorkContext struct {
+	WorkRequestID string
+	Comments      []CommentWorkInput
+}
+
 type Request struct {
 	Context                executioncontext.SafeContext
 	Launcher               ProcessLauncher
@@ -215,6 +238,7 @@ type Request struct {
 	InteractiveQuestions   InteractiveQuestioner
 	IssueComments          IssueCommentPublisher
 	IssueDiscussions       IssueDiscussionReader
+	CommentWork            *CommentWorkContext
 	IssueStatus            IssueStatusUpdater
 	Delegation             DelegationRequester
 	DelegationContext      *DelegationToolContext

@@ -301,6 +301,104 @@ func queuedRunAgentWorkCompatibility(ctx context.Context, tx pgx.Tx, input agent
 	return &delegation.ID, input.ParentRunID != nil && delegation.ParentRunID == *input.ParentRunID, nil
 }
 
+// GetAgentWorkRequestExecutionContext resolves the durable comment inputs
+// associated with one Run. The work request is the coalescing identity; Issue
+// comments remain the authoritative collaboration content.
+func (s *Store) GetAgentWorkRequestExecutionContext(ctx context.Context, projectID, runID string) (*store.AgentWorkRequestExecutionContext, error) {
+	projectID = strings.TrimSpace(projectID)
+	runID = strings.TrimSpace(runID)
+	if projectID == "" || runID == "" {
+		return nil, store.ErrInvalidArgument
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	request, err := scanAgentWorkRequest(tx.QueryRow(ctx, `
+		SELECT `+agentWorkRequestSelectColumns+`
+		FROM agent_work_requests
+		WHERE project_id=$1 AND run_id=$2 AND closed_at IS NULL
+		FOR SHARE
+	`, projectID, runID))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := tx.Query(ctx, `
+		WITH triggers AS (
+			SELECT m.comment_id, 'MENTION'::text AS trigger_kind, NULL::text AS routing_reason
+			FROM issue_comment_mentions AS m
+			WHERE m.project_id=$1 AND m.issue_id=$2 AND m.work_request_id=$3
+			UNION ALL
+			SELECT t.comment_id, 'IMPLICIT'::text AS trigger_kind, t.routing_reason
+			FROM issue_comment_implicit_triggers AS t
+			WHERE t.project_id=$1 AND t.issue_id=$2 AND t.work_request_id=$3
+		)
+		SELECT c.id::text, c.author_type, c.author_id::text,
+		       COALESCE(
+		           CASE
+		               WHEN c.author_type='HUMAN' THEN (SELECT u.display_name FROM users AS u WHERE u.id=c.author_id)
+		               WHEN c.author_type='AGENT' THEN (SELECT a.name FROM agents AS a WHERE a.id=c.author_id AND (a.project_id IS NULL OR a.project_id=$1))
+		           END,
+		           ''
+		       ),
+		       COALESCE(c.body, ''), c.deleted_at IS NOT NULL, c.parent_comment_id::text,
+		       triggers.trigger_kind, triggers.routing_reason, c.created_at
+		FROM triggers
+		JOIN issue_comments AS c ON c.issue_id=$2 AND c.id=triggers.comment_id
+		ORDER BY c.created_at, c.id, triggers.trigger_kind
+	`, projectID, request.IssueID, request.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	comments := make([]store.AgentWorkRequestComment, 0)
+	for rows.Next() {
+		var comment store.AgentWorkRequestComment
+		if err := rows.Scan(
+			&comment.CommentID, &comment.AuthorType, &comment.AuthorID, &comment.AuthorName,
+			&comment.Body, &comment.Deleted, &comment.ParentCommentID,
+			&comment.TriggerKind, &comment.RoutingReason, &comment.CreatedAt,
+		); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		comments = append(comments, comment)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+	if len(comments) == 0 {
+		return nil, store.ErrConflict
+	}
+
+	for index := range comments {
+		chain, truncated, err := issueCommentAncestorIDsBoundedWith(
+			ctx, tx, projectID, request.IssueID, comments[index].CommentID, issueDiscussionRootTraversalDepth,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if !truncated && len(chain) != 0 {
+			root := chain[0]
+			comments[index].RootCommentID = &root
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return &store.AgentWorkRequestExecutionContext{WorkRequestID: request.ID, Comments: comments}, nil
+}
+
 // ReconcilePendingAgentWorkRequest promotes at most one durable Issue-origin
 // follow-up request through canonical delegation. It is called by the existing
 // scheduler loop, so restart recovery does not need a comment-owned worker.
