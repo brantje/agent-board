@@ -1,0 +1,311 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"unicode/utf8"
+
+	"github.com/brantje/agent-board/apps/server/internal/store"
+	"github.com/jackc/pgx/v5"
+)
+
+const (
+	agentWorkRequestOutcomeQueued    = "QUEUED"
+	agentWorkRequestOutcomeCoalesced = "COALESCED"
+	agentWorkRequestOutcomeDeferred  = "DEFERRED"
+)
+
+type agentWorkRequestInput struct {
+	ProjectID       string
+	IssueID         string
+	SourceCommentID string
+	TargetAgentID   string
+	Task            string
+	AuthorityKind   string
+	ParentRunID     *string
+}
+
+type agentWorkRequestResult struct {
+	WorkRequest store.AgentWorkRequest
+	Outcome     string
+	Delegation  *store.RequestDelegationResult
+	Events      []store.Event
+}
+
+const agentWorkRequestSelectColumns = `
+	id::text,
+	project_id::text,
+	issue_id::text,
+	workspace_id::text,
+	target_agent_id::text,
+	authority_kind,
+	parent_run_id::text,
+	run_id::text,
+	delegation_id::text,
+	sealed_at,
+	closed_at,
+	created_at,
+	updated_at
+`
+
+// requestAgentWorkTx is the single transaction-local admission/coalescing
+// policy for comment-triggered Agent work. It decides whether a trigger creates
+// canonical delegation work, joins a compatible queued/pending request, or is
+// durably deferred behind active execution. It never injects input into a live
+// Engine session.
+func (s *Store) requestAgentWorkTx(ctx context.Context, tx pgx.Tx, input agentWorkRequestInput) (agentWorkRequestResult, error) {
+	input.ProjectID = strings.TrimSpace(input.ProjectID)
+	input.IssueID = strings.TrimSpace(input.IssueID)
+	input.SourceCommentID = strings.TrimSpace(input.SourceCommentID)
+	input.TargetAgentID = strings.TrimSpace(input.TargetAgentID)
+	input.Task = strings.TrimSpace(input.Task)
+	if input.ParentRunID != nil {
+		value := strings.TrimSpace(*input.ParentRunID)
+		input.ParentRunID = &value
+	}
+	if input.ProjectID == "" || input.IssueID == "" || input.SourceCommentID == "" || input.TargetAgentID == "" || input.Task == "" || utf8.RuneCountInString(input.Task) > store.MaxDelegationTaskCharacters {
+		return agentWorkRequestResult{}, store.ErrInvalidArgument
+	}
+	if input.AuthorityKind != store.AgentWorkRequestAuthorityIssue && input.AuthorityKind != store.AgentWorkRequestAuthorityParentRun {
+		return agentWorkRequestResult{}, store.ErrInvalidArgument
+	}
+	if (input.AuthorityKind == store.AgentWorkRequestAuthorityIssue) != (input.ParentRunID == nil) || (input.ParentRunID != nil && *input.ParentRunID == "") {
+		return agentWorkRequestResult{}, store.ErrInvalidArgument
+	}
+
+	var parent *store.Run
+	if input.ParentRunID != nil {
+		value, err := lockRunForAgentWork(ctx, tx, input.ProjectID, *input.ParentRunID)
+		if err != nil {
+			return agentWorkRequestResult{}, err
+		}
+		if value.IssueID != input.IssueID {
+			return agentWorkRequestResult{}, store.ErrConflict
+		}
+		parent = &value
+	}
+
+	issue, repositoryPath, defaultBranch, err := lockAssignmentIssue(ctx, tx, input.ProjectID, input.IssueID)
+	if err != nil {
+		return agentWorkRequestResult{}, err
+	}
+	workspace, err := workspaceForAssignment(ctx, tx, input.ProjectID, issue.ID, issue.Key, repositoryPath, defaultBranch)
+	if err != nil {
+		return agentWorkRequestResult{}, err
+	}
+	if parent != nil && parent.WorkspaceID != workspace.ID {
+		return agentWorkRequestResult{}, store.ErrConflict
+	}
+	if err := validateAgentWorkSourceComment(ctx, tx, input, parent); err != nil {
+		return agentWorkRequestResult{}, err
+	}
+	if err := s.verifyRunnableAgent(ctx, tx, input.ProjectID, input.TargetAgentID); err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
+			return agentWorkRequestResult{}, store.ErrConflict
+		}
+		return agentWorkRequestResult{}, err
+	}
+
+	existing, found, err := findOpenAgentWorkRequestTx(ctx, tx, input, workspace.ID)
+	if err != nil {
+		return agentWorkRequestResult{}, err
+	}
+	if found {
+		if existing.RunID == nil {
+			return agentWorkRequestResult{WorkRequest: existing, Outcome: agentWorkRequestOutcomeCoalesced}, nil
+		}
+		run, err := lockRunForAgentWork(ctx, tx, input.ProjectID, *existing.RunID)
+		if err != nil {
+			return agentWorkRequestResult{}, err
+		}
+		if run.Status == "QUEUED" {
+			return agentWorkRequestResult{WorkRequest: existing, Outcome: agentWorkRequestOutcomeCoalesced}, nil
+		}
+		if err := sealAgentWorkRequestTx(ctx, tx, existing.ID); err != nil {
+			return agentWorkRequestResult{}, err
+		}
+	}
+
+	active, err := lockActiveRunForAgentWork(ctx, tx, input.ProjectID, input.IssueID, input.TargetAgentID)
+	if err == nil {
+		if active.Status == "QUEUED" {
+			delegationID, compatible, compatErr := queuedRunAgentWorkCompatibility(ctx, tx, input, active)
+			if compatErr != nil {
+				return agentWorkRequestResult{}, compatErr
+			}
+			if compatible {
+				request, err := insertAgentWorkRequestTx(ctx, tx, input, workspace.ID, &active.ID, delegationID)
+				if err != nil {
+					return agentWorkRequestResult{}, err
+				}
+				return agentWorkRequestResult{WorkRequest: request, Outcome: agentWorkRequestOutcomeCoalesced}, nil
+			}
+		}
+		request, err := insertAgentWorkRequestTx(ctx, tx, input, workspace.ID, nil, nil)
+		if err != nil {
+			return agentWorkRequestResult{}, err
+		}
+		return agentWorkRequestResult{WorkRequest: request, Outcome: agentWorkRequestOutcomeDeferred}, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return agentWorkRequestResult{}, err
+	}
+
+	var requestID string
+	if err := tx.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&requestID); err != nil {
+		return agentWorkRequestResult{}, err
+	}
+	requestKey := agentWorkRequestDelegationKey(requestID)
+	var delegation store.RequestDelegationResult
+	if input.AuthorityKind == store.AgentWorkRequestAuthorityParentRun {
+		delegation, err = s.requestDelegationTx(ctx, tx, store.RequestDelegationCommand{
+			ProjectID: input.ProjectID, ParentRunID: *input.ParentRunID, TargetAgentID: input.TargetAgentID,
+			Task: input.Task, RequestKey: requestKey,
+		})
+	} else {
+		delegation, err = s.requestIssueDelegationTx(ctx, tx, store.RequestIssueDelegationCommand{
+			ProjectID: input.ProjectID, IssueID: input.IssueID, SourceCommentID: input.SourceCommentID,
+			TargetAgentID: input.TargetAgentID, Task: input.Task, RequestKey: requestKey,
+		})
+	}
+	if err != nil {
+		return agentWorkRequestResult{}, err
+	}
+	request, err := insertAgentWorkRequestWithIDTx(ctx, tx, requestID, input, workspace.ID, &delegation.DelegatedRun.ID, &delegation.Delegation.ID)
+	if err != nil {
+		return agentWorkRequestResult{}, err
+	}
+	return agentWorkRequestResult{
+		WorkRequest: request,
+		Outcome:     agentWorkRequestOutcomeQueued,
+		Delegation:  &delegation,
+		Events:      delegation.Events,
+	}, nil
+}
+
+func validateAgentWorkSourceComment(ctx context.Context, tx pgx.Tx, input agentWorkRequestInput, parent *store.Run) error {
+	var authorType string
+	var sourceRunID *string
+	var body string
+	if err := tx.QueryRow(ctx, `
+		SELECT author_type, source_run_id::text, COALESCE(body, '')
+		FROM issue_comments
+		WHERE issue_id=$1 AND id=$2 AND deleted_at IS NULL
+		FOR KEY SHARE
+	`, input.IssueID, input.SourceCommentID).Scan(&authorType, &sourceRunID, &body); err != nil {
+		return notFound(err)
+	}
+	if strings.TrimSpace(body) != input.Task {
+		return store.ErrConflict
+	}
+	if input.AuthorityKind == store.AgentWorkRequestAuthorityIssue {
+		if authorType != store.ActorTypeHuman || sourceRunID != nil {
+			return store.ErrConflict
+		}
+		return nil
+	}
+	if parent == nil || authorType != store.ActorTypeAgent || sourceRunID == nil || *sourceRunID != parent.ID || parent.Status != "RUNNING" {
+		return store.ErrConflict
+	}
+	return nil
+}
+
+func findOpenAgentWorkRequestTx(ctx context.Context, tx pgx.Tx, input agentWorkRequestInput, workspaceID string) (store.AgentWorkRequest, bool, error) {
+	query := `SELECT ` + agentWorkRequestSelectColumns + ` FROM agent_work_requests
+		WHERE project_id=$1 AND issue_id=$2 AND workspace_id=$3 AND target_agent_id=$4
+		  AND authority_kind=$5 AND sealed_at IS NULL`
+	args := []any{input.ProjectID, input.IssueID, workspaceID, input.TargetAgentID, input.AuthorityKind}
+	if input.ParentRunID == nil {
+		query += ` AND parent_run_id IS NULL`
+	} else {
+		query += ` AND parent_run_id=$6`
+		args = append(args, *input.ParentRunID)
+	}
+	query += ` FOR UPDATE`
+	value, err := scanAgentWorkRequest(tx.QueryRow(ctx, query, args...))
+	if errors.Is(err, store.ErrNotFound) {
+		return store.AgentWorkRequest{}, false, nil
+	}
+	if err != nil {
+		return store.AgentWorkRequest{}, false, err
+	}
+	return value, true, nil
+}
+
+func insertAgentWorkRequestTx(ctx context.Context, tx pgx.Tx, input agentWorkRequestInput, workspaceID string, runID, delegationID *string) (store.AgentWorkRequest, error) {
+	return insertAgentWorkRequestWithIDTx(ctx, tx, "", input, workspaceID, runID, delegationID)
+}
+
+func insertAgentWorkRequestWithIDTx(ctx context.Context, tx pgx.Tx, id string, input agentWorkRequestInput, workspaceID string, runID, delegationID *string) (store.AgentWorkRequest, error) {
+	return scanAgentWorkRequest(tx.QueryRow(ctx, `
+		INSERT INTO agent_work_requests (id, project_id, issue_id, workspace_id, target_agent_id, authority_kind, parent_run_id, run_id, delegation_id)
+		VALUES (COALESCE(NULLIF($1, '')::uuid, gen_random_uuid()),$2,$3,$4,$5,$6,$7,$8,$9)
+		RETURNING `+agentWorkRequestSelectColumns,
+		id, input.ProjectID, input.IssueID, workspaceID, input.TargetAgentID, input.AuthorityKind, input.ParentRunID, runID, delegationID,
+	))
+}
+
+func sealAgentWorkRequestTx(ctx context.Context, tx pgx.Tx, requestID string) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE agent_work_requests
+		SET sealed_at=COALESCE(sealed_at, now()), updated_at=now()
+		WHERE id=$1 AND sealed_at IS NULL
+	`, requestID)
+	return err
+}
+
+func lockRunForAgentWork(ctx context.Context, tx pgx.Tx, projectID, runID string) (store.Run, error) {
+	return scanRun(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		       status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+		FROM runs WHERE project_id=$1 AND id=$2 FOR UPDATE
+	`, projectID, runID))
+}
+
+func lockActiveRunForAgentWork(ctx context.Context, tx pgx.Tx, projectID, issueID, agentID string) (store.Run, error) {
+	return scanRun(tx.QueryRow(ctx, `
+		SELECT id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		       status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+		FROM runs
+		WHERE project_id=$1 AND issue_id=$2 AND agent_id=$3 AND status = ANY($4::text[])
+		ORDER BY attempt DESC
+		LIMIT 1
+		FOR UPDATE
+	`, projectID, issueID, agentID, activeRunStatuses))
+}
+
+func queuedRunAgentWorkCompatibility(ctx context.Context, tx pgx.Tx, input agentWorkRequestInput, run store.Run) (*string, bool, error) {
+	delegation, err := scanDelegation(tx.QueryRow(ctx, `
+		SELECT `+delegationSelectColumns+`
+		FROM delegations
+		WHERE project_id=$1 AND delegated_run_id=$2
+	`, input.ProjectID, run.ID))
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, input.AuthorityKind == store.AgentWorkRequestAuthorityIssue, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if input.AuthorityKind == store.AgentWorkRequestAuthorityIssue {
+		return &delegation.ID, delegation.SourceCommentID != nil && delegation.ParentRunID == "", nil
+	}
+	return &delegation.ID, input.ParentRunID != nil && delegation.ParentRunID == *input.ParentRunID, nil
+}
+
+func scanAgentWorkRequest(row pgx.Row) (store.AgentWorkRequest, error) {
+	var value store.AgentWorkRequest
+	if err := row.Scan(
+		&value.ID, &value.ProjectID, &value.IssueID, &value.WorkspaceID, &value.TargetAgentID,
+		&value.AuthorityKind, &value.ParentRunID, &value.RunID, &value.DelegationID,
+		&value.SealedAt, &value.ClosedAt, &value.CreatedAt, &value.UpdatedAt,
+	); err != nil {
+		return store.AgentWorkRequest{}, notFound(err)
+	}
+	return value, nil
+}
+
+func agentWorkRequestDelegationKey(requestID string) string {
+	return fmt.Sprintf("agent-work-request:%s", requestID)
+}

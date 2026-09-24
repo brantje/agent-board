@@ -495,6 +495,7 @@ CREATE TABLE agent_work_requests (
     target_agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
     authority_kind text NOT NULL CHECK (authority_kind IN ('ISSUE', 'PARENT_RUN')),
     parent_run_id uuid,
+    run_id uuid,
     delegation_id uuid,
     sealed_at timestamptz,
     closed_at timestamptz,
@@ -503,12 +504,14 @@ CREATE TABLE agent_work_requests (
     CONSTRAINT agent_work_requests_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
     CONSTRAINT agent_work_requests_workspace_fk FOREIGN KEY (project_id, issue_id, workspace_id) REFERENCES workspaces(project_id, issue_id, id) ON DELETE RESTRICT,
     CONSTRAINT agent_work_requests_parent_run_fk FOREIGN KEY (project_id, issue_id, parent_run_id) REFERENCES runs(project_id, issue_id, id) ON DELETE CASCADE,
+    CONSTRAINT agent_work_requests_run_fk FOREIGN KEY (project_id, issue_id, run_id) REFERENCES runs(project_id, issue_id, id) ON DELETE CASCADE,
     CONSTRAINT agent_work_requests_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
     CHECK (
         (authority_kind = 'ISSUE' AND parent_run_id IS NULL)
         OR (authority_kind = 'PARENT_RUN' AND parent_run_id IS NOT NULL)
     ),
     CHECK (closed_at IS NULL OR sealed_at IS NOT NULL),
+    CHECK (delegation_id IS NULL OR run_id IS NOT NULL),
     UNIQUE (project_id, id)
 );
 
@@ -521,6 +524,8 @@ CREATE UNIQUE INDEX agent_work_requests_open_parent_uq
 CREATE INDEX agent_work_requests_pending_idx
     ON agent_work_requests (created_at, id)
     WHERE delegation_id IS NULL AND sealed_at IS NULL;
+CREATE INDEX agent_work_requests_run_idx
+    ON agent_work_requests (project_id, run_id) WHERE run_id IS NOT NULL;
 CREATE INDEX agent_work_requests_delegation_idx
     ON agent_work_requests (project_id, delegation_id) WHERE delegation_id IS NOT NULL;
 

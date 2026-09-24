@@ -18,6 +18,7 @@ type AgentWorkRequest struct {
 	TargetAgentID string
 	AuthorityKind string
 	ParentRunID   *string
+	RunID         *string
 	DelegationID  *string
 	SealedAt      *time.Time
 	ClosedAt      *time.Time
