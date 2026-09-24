@@ -376,6 +376,22 @@ func TestDeferredAgentWorkRequestReconcilesAfterRestartWithoutReplay(t *testing.
 		t.Fatalf("promotion rewrote per-trigger outcomes: deferred=%+v folded=%+v", left, right)
 	}
 
+	executionContext, err := restarted.GetAgentWorkRequestExecutionContext(ctx, f.project.ID, *left.DelegatedRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executionContext == nil || executionContext.WorkRequestID != *left.WorkRequestID || len(executionContext.Comments) != 2 {
+		t.Fatalf("promoted execution context=%+v", executionContext)
+	}
+	commentIDs := map[string]bool{}
+	for _, comment := range executionContext.Comments {
+		commentIDs[comment.CommentID] = true
+	}
+	if !commentIDs[deferredComment.ID] || !commentIDs[foldedComment.ID] {
+		t.Fatalf("promoted execution context lost folded provenance: %+v", executionContext.Comments)
+	}
+
+	completeRunAndFinalizeWorkRequest(t, f, *left.DelegatedRunID)
 	again, err := restarted.ReconcilePendingAgentWorkRequest(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -390,6 +406,83 @@ func TestDeferredAgentWorkRequestReconcilesAfterRestartWithoutReplay(t *testing.
 	if len(runs) != 3 {
 		t.Fatalf("restart reconciliation multiplied Runs: %+v", runs)
 	}
+}
+
+
+func TestFailedActiveCommentRunReleasesDeferredFollowUp(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-failure-author", "work-failure-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := createHumanMentionWork(t, f, author.ID, "failure-first", "Initial work that fails")
+	if first.DelegatedRunID == nil || first.WorkRequestID == nil {
+		t.Fatalf("first=%+v", first)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE runs
+		SET status='RUNNING', started_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, *first.DelegatedRunID); err != nil {
+		t.Fatal(err)
+	}
+	deferred := createHumanMentionWork(t, f, author.ID, "failure-deferred", "Follow up after failure")
+	if deferred.Outcome != store.IssueCommentMentionOutcomeDeferred || deferred.WorkRequestID == nil || deferred.DelegatedRunID != nil {
+		t.Fatalf("deferred=%+v", deferred)
+	}
+
+	tx, err := f.store.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	failedRun, err := scanRun(tx.QueryRow(ctx, `
+		UPDATE runs
+		SET status='FAILED', failure_reason='test failure', completed_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2
+		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+	`, f.project.ID, *first.DelegatedRunID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := finalizeDelegatedRunTx(ctx, tx, failedRun); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	reconciled, err := f.store.ReconcilePendingAgentWorkRequest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reconciled.Handled || len(reconciled.Events) != 1 || reconciled.Events[0].Type != "run.created" {
+		t.Fatalf("failed active work stranded deferred follow-up: %+v", reconciled)
+	}
+	reloaded, err := f.store.GetIssueComment(ctx, f.project.ID, f.issue.ID, findMentionCommentIDByWorkRequest(t, f, *deferred.WorkRequestID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Mentions) != 1 || reloaded.Mentions[0].DelegatedRunID == nil {
+		t.Fatalf("deferred follow-up was not promoted after failure: %+v", reloaded.Mentions)
+	}
+}
+
+func findMentionCommentIDByWorkRequest(t *testing.T, f delegationFixture, workRequestID string) string {
+	t.Helper()
+	var commentID string
+	if err := f.store.pool.QueryRow(t.Context(), `
+		SELECT comment_id::text
+		FROM issue_comment_mentions
+		WHERE project_id=$1 AND work_request_id=$2
+		ORDER BY created_at, id
+		LIMIT 1
+	`, f.project.ID, workRequestID).Scan(&commentID); err != nil {
+		t.Fatal(err)
+	}
+	return commentID
 }
 
 func TestCancellingQueuedCommentRunClosesRequestAndAllowsFreshWork(t *testing.T) {
