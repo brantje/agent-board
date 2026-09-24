@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"testing"
+	"time"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -142,4 +143,224 @@ func requestAgentWorkForTest(t *testing.T, f delegationFixture, comment store.Is
 		t.Fatal(err)
 	}
 	return result
+}
+
+
+func TestSchedulerAdmissionSealsAgentWorkRequestBoundary(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	if _, err := f.store.pool.Exec(ctx, `UPDATE runs SET status='COMPLETED', completed_at=now(), updated_at=now() WHERE project_id=$1 AND id=$2`, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	author, err := f.store.CreateUser(ctx, authUser("work-boundary-author", "work-boundary-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := createHumanMentionWork(t, f, author.ID, "boundary-first", "Start this work")
+	if first.Outcome != store.IssueCommentMentionOutcomeQueued || first.WorkRequestID == nil || first.DelegatedRunID == nil {
+		t.Fatalf("first mention=%+v", first)
+	}
+
+	runner, err := f.store.CreateRunner(ctx, store.Runner{Name: "work request boundary runner", TokenHash: make([]byte, 32)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.ObserveRunner(ctx, runner.ID, []byte(`{"max_active_sessions":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	f.store.SetRunnerCandidates(func(string) []string { return []string{runner.ID} })
+	claim, err := f.store.AdmitNextJob(ctx, "work-request-boundary", time.Minute, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if claim == nil || claim.Run.ID != *first.DelegatedRunID || claim.Run.Status != "STARTING" {
+		t.Fatalf("admission=%+v first=%+v", claim, first)
+	}
+
+	var sealed bool
+	if err := f.store.pool.QueryRow(ctx, `SELECT sealed_at IS NOT NULL FROM agent_work_requests WHERE project_id=$1 AND id=$2`, f.project.ID, *first.WorkRequestID).Scan(&sealed); err != nil {
+		t.Fatal(err)
+	}
+	if !sealed {
+		t.Fatal("admitted Run left its comment work request open for coalescing")
+	}
+
+	followUp := createHumanMentionWork(t, f, author.ID, "boundary-follow-up", "Follow up after admission")
+	if followUp.Outcome != store.IssueCommentMentionOutcomeDeferred || followUp.WorkRequestID == nil || *followUp.WorkRequestID == *first.WorkRequestID || followUp.DelegatedRunID != nil {
+		t.Fatalf("follow-up=%+v first=%+v", followUp, first)
+	}
+}
+
+func TestDeferredAgentWorkRequestReconcilesAfterRestartWithoutReplay(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-restart-author", "work-restart-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := createHumanMentionWork(t, f, author.ID, "restart-first", "Initial work")
+	if first.DelegatedRunID == nil || first.WorkRequestID == nil {
+		t.Fatalf("first mention=%+v", first)
+	}
+	if _, err := f.store.pool.Exec(ctx, `UPDATE runs SET status='RUNNING', started_at=now(), updated_at=now() WHERE project_id=$1 AND id=$2`, f.project.ID, *first.DelegatedRunID); err != nil {
+		t.Fatal(err)
+	}
+	deferredComment := createHumanMentionComment(t, f, author.ID, "restart-deferred", "Deferred after current execution")
+	deferred := deferredComment.Mentions[0]
+	if deferred.Outcome != store.IssueCommentMentionOutcomeDeferred || deferred.WorkRequestID == nil {
+		t.Fatalf("deferred mention=%+v", deferred)
+	}
+	foldedComment := createHumanMentionComment(t, f, author.ID, "restart-folded", "Folded into deferred follow-up")
+	folded := foldedComment.Mentions[0]
+	if folded.Outcome != store.IssueCommentMentionOutcomeCoalesced || folded.WorkRequestID == nil || *folded.WorkRequestID != *deferred.WorkRequestID {
+		t.Fatalf("folded=%+v deferred=%+v", folded, deferred)
+	}
+
+	completeRunAndFinalizeWorkRequest(t, f, *first.DelegatedRunID)
+
+	restarted := New(f.store.pool)
+	result, err := restarted.ReconcilePendingAgentWorkRequest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Handled || len(result.Events) != 1 || result.Events[0].Type != "run.created" {
+		t.Fatalf("reconciliation=%+v", result)
+	}
+
+	reloadedDeferred, err := restarted.GetIssueComment(ctx, f.project.ID, f.issue.ID, deferredComment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadedFolded, err := restarted.GetIssueComment(ctx, f.project.ID, f.issue.ID, foldedComment.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	left, right := reloadedDeferred.Mentions[0], reloadedFolded.Mentions[0]
+	if left.WorkRequestID == nil || right.WorkRequestID == nil || *left.WorkRequestID != *right.WorkRequestID ||
+		left.DelegationID == nil || right.DelegationID == nil || *left.DelegationID != *right.DelegationID ||
+		left.DelegatedRunID == nil || right.DelegatedRunID == nil || *left.DelegatedRunID != *right.DelegatedRunID {
+		t.Fatalf("promoted provenance deferred=%+v folded=%+v", left, right)
+	}
+	if left.Outcome != store.IssueCommentMentionOutcomeDeferred || right.Outcome != store.IssueCommentMentionOutcomeCoalesced {
+		t.Fatalf("promotion rewrote per-trigger outcomes: deferred=%+v folded=%+v", left, right)
+	}
+
+	again, err := restarted.ReconcilePendingAgentWorkRequest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Handled {
+		t.Fatalf("completed deferred request replayed: %+v", again)
+	}
+	runs, err := restarted.ListRuns(ctx, f.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 3 {
+		t.Fatalf("restart reconciliation multiplied Runs: %+v", runs)
+	}
+}
+
+func TestCancellingQueuedCommentRunClosesRequestAndAllowsFreshWork(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-cancel-author", "work-cancel-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := createHumanMentionWork(t, f, author.ID, "cancel-first", "Work that will be cancelled")
+	if first.DelegatedRunID == nil || first.WorkRequestID == nil {
+		t.Fatalf("first=%+v", first)
+	}
+	if _, err := f.store.CancelInactiveRun(ctx, f.project.ID, *first.DelegatedRunID); err != nil {
+		t.Fatal(err)
+	}
+	var sealed, closed bool
+	if err := f.store.pool.QueryRow(ctx, `SELECT sealed_at IS NOT NULL, closed_at IS NOT NULL FROM agent_work_requests WHERE project_id=$1 AND id=$2`, f.project.ID, *first.WorkRequestID).Scan(&sealed, &closed); err != nil {
+		t.Fatal(err)
+	}
+	if !sealed || !closed {
+		t.Fatalf("cancelled work request sealed=%v closed=%v", sealed, closed)
+	}
+
+	second := createHumanMentionWork(t, f, author.ID, "cancel-second", "Fresh work after cancellation")
+	if second.Outcome != store.IssueCommentMentionOutcomeQueued || second.WorkRequestID == nil || *second.WorkRequestID == *first.WorkRequestID || second.DelegatedRunID == nil {
+		t.Fatalf("fresh work=%+v first=%+v", second, first)
+	}
+}
+
+func TestAgentCommentDoesNotDeferAcrossIncompatibleParentAuthority(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-parent-author", "work-parent-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := createHumanMentionWork(t, f, author.ID, "parent-busy-first", "Human work already queued")
+	if first.Outcome != store.IssueCommentMentionOutcomeQueued {
+		t.Fatalf("first=%+v", first)
+	}
+
+	actionKey := "parent-agent-comment"
+	sourceRunID := f.parentRun.ID
+	result, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: f.parent.ID,
+		SourceRunID: &sourceRunID, SourceActionKey: &actionKey, Body: "Parent-authority request while incompatible work is queued",
+	}, []string{f.target.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Comment.Mentions) != 1 {
+		t.Fatalf("mentions=%+v", result.Comment.Mentions)
+	}
+	mention := result.Comment.Mentions[0]
+	if mention.Outcome != store.IssueCommentMentionOutcomeBlocked || mention.WorkRequestID != nil || mention.ReasonCode == nil || *mention.ReasonCode != store.IssueCommentMentionReasonDelegationBlocked {
+		t.Fatalf("parent-authority mention=%+v", mention)
+	}
+}
+
+func createHumanMentionWork(t *testing.T, f delegationFixture, authorID, actionKey, body string) store.IssueCommentMention {
+	t.Helper()
+	comment := createHumanMentionComment(t, f, authorID, actionKey, body)
+	if len(comment.Mentions) != 1 {
+		t.Fatalf("mentions=%+v", comment.Mentions)
+	}
+	return comment.Mentions[0]
+}
+
+func createHumanMentionComment(t *testing.T, f delegationFixture, authorID, actionKey, body string) store.IssueComment {
+	t.Helper()
+	result, err := f.store.CreateIssueCommentWithMentions(t.Context(), f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: authorID, SourceActionKey: &actionKey, Body: body,
+	}, []string{f.target.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result.Comment
+}
+
+func completeRunAndFinalizeWorkRequest(t *testing.T, f delegationFixture, runID string) {
+	t.Helper()
+	ctx := t.Context()
+	tx, err := f.store.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	run, err := scanRun(tx.QueryRow(ctx, `
+		UPDATE runs
+		SET status='COMPLETED', completed_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2
+		RETURNING id::text, project_id::text, issue_id::text, workspace_id::text, agent_id::text, attempt,
+		          status, queue_reason, failure_reason, created_at, started_at, completed_at, updated_at
+	`, f.project.ID, runID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := finalizeDelegatedRunTx(ctx, tx, run); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
 }

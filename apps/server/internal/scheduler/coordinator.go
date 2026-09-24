@@ -182,6 +182,18 @@ func (c *Coordinator) Run(ctx context.Context) error {
 			continue
 		}
 
+		handled, err = c.reconcilePendingAgentWorkRequest(ctx)
+		if err != nil {
+			c.config.ReportError(err)
+			if !waitFor(ctx, c.config.PollInterval) {
+				return nil
+			}
+			continue
+		}
+		if handled {
+			continue
+		}
+
 		if !c.reserveSlot(ctx, slots) {
 			return nil
 		}
@@ -229,6 +241,19 @@ func (c *Coordinator) launchWorker(ctx context.Context, workers *sync.WaitGroup,
 		defer func() { <-slots }()
 		c.process(ctx, claim)
 	}(claim)
+}
+
+func (c *Coordinator) reconcilePendingAgentWorkRequest(ctx context.Context) (bool, error) {
+	reconciler, ok := c.store.(store.AgentWorkRequestReconciliationStore)
+	if !ok {
+		return false, nil
+	}
+	result, err := reconciler.ReconcilePendingAgentWorkRequest(ctx)
+	if err != nil {
+		return false, err
+	}
+	c.publishPersistedEvents(ctx, result.Events)
+	return result.Handled, nil
 }
 
 func (c *Coordinator) reconcileOne(ctx context.Context) (*store.SchedulerAdmission, bool, error) {

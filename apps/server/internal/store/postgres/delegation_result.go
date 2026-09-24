@@ -14,6 +14,13 @@ func finalizeDelegatedRunTx(ctx context.Context, tx pgx.Tx, child store.Run) ([]
 	if child.Status != "COMPLETED" && child.Status != "FAILED" && child.Status != "CANCELLED" {
 		return nil, nil
 	}
+	// Closing the execution request is independent from delegation lineage:
+	// ordinary queued Runs can also carry coalesced comment work. Keep this
+	// in the canonical terminal transaction so cancellation/failure/restart
+	// paths cannot strand an open coalescing bucket.
+	if err := closeAgentWorkRequestsForRunTx(ctx, tx, child.ProjectID, child.ID); err != nil {
+		return nil, err
+	}
 	delegation, err := scanDelegation(tx.QueryRow(ctx, `
 		SELECT `+delegationSelectColumns+`
 		FROM delegations

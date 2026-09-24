@@ -220,6 +220,13 @@ func (s *Store) AdmitNextJob(ctx context.Context, ownerID string, leaseDuration,
 	if err != nil {
 		return nil, err
 	}
+	// The Run row is already locked by scheduler admission. Sealing linked
+	// work requests in the same transaction makes QUEUED -> STARTING the
+	// deterministic coalescing boundary: a concurrent comment either joins
+	// before this transition or observes active execution and defers.
+	if err := sealAgentWorkRequestsForRunTx(ctx, tx, run.ProjectID, run.ID); err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err

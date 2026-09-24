@@ -1,6 +1,9 @@
 package store
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 const (
 	AgentWorkRequestAuthorityIssue     = "ISSUE"
@@ -45,4 +48,20 @@ func SameAgentWorkRequestCompatibility(left, right AgentWorkRequest) bool {
 	default:
 		return false
 	}
+}
+
+
+// AgentWorkRequestReconciliationResult reports one durable scheduler-side
+// reconciliation step. Handled is true when a pending request was promoted or
+// terminalized, allowing the coordinator to immediately re-scan durable work.
+type AgentWorkRequestReconciliationResult struct {
+	Handled bool
+	Events  []Event
+}
+
+// AgentWorkRequestReconciliationStore lets the existing scheduler coordinator
+// reconcile deferred comment work without introducing a comment-owned queue or
+// lifecycle.
+type AgentWorkRequestReconciliationStore interface {
+	ReconcilePendingAgentWorkRequest(context.Context) (AgentWorkRequestReconciliationResult, error)
 }

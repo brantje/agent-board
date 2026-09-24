@@ -143,6 +143,13 @@ func (s *Store) requestAgentWorkTx(ctx context.Context, tx pgx.Tx, input agentWo
 				return agentWorkRequestResult{WorkRequest: request, Outcome: agentWorkRequestOutcomeCoalesced}, nil
 			}
 		}
+		// Parent-Run authority cannot be silently reinterpreted as Issue-origin
+		// follow-up work. Without a compatible queued delegation, there is no
+		// later native handoff boundary that can safely pause the parent Engine
+		// session, so the canonical delegation policy remains authoritative.
+		if input.AuthorityKind == store.AgentWorkRequestAuthorityParentRun {
+			return agentWorkRequestResult{}, store.ErrConflict
+		}
 		request, err := insertAgentWorkRequestTx(ctx, tx, input, workspace.ID, nil, nil)
 		if err != nil {
 			return agentWorkRequestResult{}, err
@@ -292,6 +299,193 @@ func queuedRunAgentWorkCompatibility(ctx context.Context, tx pgx.Tx, input agent
 		return &delegation.ID, delegation.SourceCommentID != nil && delegation.ParentRunID == "", nil
 	}
 	return &delegation.ID, input.ParentRunID != nil && delegation.ParentRunID == *input.ParentRunID, nil
+}
+
+// ReconcilePendingAgentWorkRequest promotes at most one durable Issue-origin
+// follow-up request through canonical delegation. It is called by the existing
+// scheduler loop, so restart recovery does not need a comment-owned worker.
+func (s *Store) ReconcilePendingAgentWorkRequest(ctx context.Context) (store.AgentWorkRequestReconciliationResult, error) {
+	candidate, err := scanAgentWorkRequest(s.pool.QueryRow(ctx, `
+		SELECT `+agentWorkRequestSelectColumns+`
+		FROM agent_work_requests AS wr
+		WHERE wr.authority_kind='ISSUE'
+		  AND wr.run_id IS NULL
+		  AND wr.delegation_id IS NULL
+		  AND wr.sealed_at IS NULL
+		  AND wr.closed_at IS NULL
+		  AND NOT EXISTS (
+			SELECT 1 FROM runs AS active
+			WHERE active.project_id=wr.project_id
+			  AND active.issue_id=wr.issue_id
+			  AND active.agent_id=wr.target_agent_id
+			  AND active.status = ANY($1::text[])
+		  )
+		ORDER BY wr.updated_at, wr.created_at, wr.id
+		LIMIT 1
+	`, activeRunStatuses))
+	if errors.Is(err, store.ErrNotFound) {
+		return store.AgentWorkRequestReconciliationResult{}, nil
+	}
+	if err != nil {
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	if err != nil {
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	issue, _, _, err := lockAssignmentIssue(ctx, tx, candidate.ProjectID, candidate.IssueID)
+	if err != nil {
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+	current, err := scanAgentWorkRequest(tx.QueryRow(ctx, `
+		SELECT `+agentWorkRequestSelectColumns+`
+		FROM agent_work_requests
+		WHERE project_id=$1 AND id=$2
+		FOR UPDATE
+	`, candidate.ProjectID, candidate.ID))
+	if err != nil {
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+	if current.AuthorityKind != store.AgentWorkRequestAuthorityIssue || current.RunID != nil || current.DelegationID != nil || current.SealedAt != nil || current.ClosedAt != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return store.AgentWorkRequestReconciliationResult{}, err
+		}
+		return store.AgentWorkRequestReconciliationResult{Handled: true}, nil
+	}
+	if current.IssueID != issue.ID {
+		return store.AgentWorkRequestReconciliationResult{}, store.ErrConflict
+	}
+	if _, err := lockActiveRunForAgentWork(ctx, tx, current.ProjectID, current.IssueID, current.TargetAgentID); err == nil {
+		if err := touchAgentWorkRequestTx(ctx, tx, current.ID); err != nil {
+			return store.AgentWorkRequestReconciliationResult{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return store.AgentWorkRequestReconciliationResult{}, err
+		}
+		return store.AgentWorkRequestReconciliationResult{}, nil
+	} else if !errors.Is(err, store.ErrNotFound) {
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+	if err := s.verifyRunnableAgent(ctx, tx, current.ProjectID, current.TargetAgentID); err != nil {
+		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
+			if err := touchAgentWorkRequestTx(ctx, tx, current.ID); err != nil {
+				return store.AgentWorkRequestReconciliationResult{}, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return store.AgentWorkRequestReconciliationResult{}, err
+			}
+			return store.AgentWorkRequestReconciliationResult{}, nil
+		}
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+
+	commentID, task, found, err := agentWorkRequestAnchorTx(ctx, tx, current.ProjectID, current.IssueID, current.ID)
+	if err != nil {
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+	if !found || strings.TrimSpace(task) == "" || utf8.RuneCountInString(strings.TrimSpace(task)) > store.MaxDelegationTaskCharacters {
+		if err := closeAgentWorkRequestTx(ctx, tx, current.ID); err != nil {
+			return store.AgentWorkRequestReconciliationResult{}, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return store.AgentWorkRequestReconciliationResult{}, err
+		}
+		return store.AgentWorkRequestReconciliationResult{Handled: true}, nil
+	}
+	delegation, err := s.requestIssueDelegationTx(ctx, tx, store.RequestIssueDelegationCommand{
+		ProjectID: current.ProjectID, IssueID: current.IssueID, SourceCommentID: commentID,
+		TargetAgentID: current.TargetAgentID, Task: strings.TrimSpace(task), RequestKey: agentWorkRequestDelegationKey(current.ID),
+	})
+	if err != nil {
+		if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) {
+			if err := touchAgentWorkRequestTx(ctx, tx, current.ID); err != nil {
+				return store.AgentWorkRequestReconciliationResult{}, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return store.AgentWorkRequestReconciliationResult{}, err
+			}
+			return store.AgentWorkRequestReconciliationResult{}, nil
+		}
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+	updated, err := scanAgentWorkRequest(tx.QueryRow(ctx, `
+		UPDATE agent_work_requests
+		SET run_id=$3, delegation_id=$4, updated_at=now()
+		WHERE project_id=$1 AND id=$2 AND run_id IS NULL AND delegation_id IS NULL AND sealed_at IS NULL AND closed_at IS NULL
+		RETURNING `+agentWorkRequestSelectColumns,
+		current.ProjectID, current.ID, delegation.DelegatedRun.ID, delegation.Delegation.ID,
+	))
+	if err != nil {
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+	if updated.RunID == nil || *updated.RunID != delegation.DelegatedRun.ID {
+		return store.AgentWorkRequestReconciliationResult{}, store.ErrConflict
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return store.AgentWorkRequestReconciliationResult{}, err
+	}
+	return store.AgentWorkRequestReconciliationResult{Handled: true, Events: delegation.Events}, nil
+}
+
+func agentWorkRequestAnchorTx(ctx context.Context, tx pgx.Tx, projectID, issueID, requestID string) (string, string, bool, error) {
+	var commentID, body string
+	err := tx.QueryRow(ctx, `
+		WITH linked AS (
+			SELECT comment_id FROM issue_comment_mentions
+			WHERE project_id=$1 AND issue_id=$2 AND work_request_id=$3
+			UNION
+			SELECT comment_id FROM issue_comment_implicit_triggers
+			WHERE project_id=$1 AND issue_id=$2 AND work_request_id=$3
+		)
+		SELECT c.id::text, COALESCE(c.body, '')
+		FROM linked
+		JOIN issue_comments AS c ON c.issue_id=$2 AND c.id=linked.comment_id
+		WHERE c.author_type='HUMAN' AND c.deleted_at IS NULL
+		ORDER BY c.created_at, c.id
+		LIMIT 1
+	`, projectID, issueID, requestID).Scan(&commentID, &body)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", "", false, nil
+	}
+	if err != nil {
+		return "", "", false, err
+	}
+	return commentID, body, true, nil
+}
+
+func sealAgentWorkRequestsForRunTx(ctx context.Context, tx pgx.Tx, projectID, runID string) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE agent_work_requests
+		SET sealed_at=COALESCE(sealed_at, now()), updated_at=now()
+		WHERE project_id=$1 AND run_id=$2 AND sealed_at IS NULL
+	`, projectID, runID)
+	return err
+}
+
+func closeAgentWorkRequestsForRunTx(ctx context.Context, tx pgx.Tx, projectID, runID string) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE agent_work_requests
+		SET sealed_at=COALESCE(sealed_at, now()), closed_at=COALESCE(closed_at, now()), updated_at=now()
+		WHERE project_id=$1 AND run_id=$2 AND closed_at IS NULL
+	`, projectID, runID)
+	return err
+}
+
+func closeAgentWorkRequestTx(ctx context.Context, tx pgx.Tx, requestID string) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE agent_work_requests
+		SET sealed_at=COALESCE(sealed_at, now()), closed_at=COALESCE(closed_at, now()), updated_at=now()
+		WHERE id=$1 AND closed_at IS NULL
+	`, requestID)
+	return err
+}
+
+func touchAgentWorkRequestTx(ctx context.Context, tx pgx.Tx, requestID string) error {
+	_, err := tx.Exec(ctx, `UPDATE agent_work_requests SET updated_at=now() WHERE id=$1`, requestID)
+	return err
 }
 
 func scanAgentWorkRequest(row pgx.Row) (store.AgentWorkRequest, error) {

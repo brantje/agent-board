@@ -522,7 +522,7 @@ CREATE UNIQUE INDEX agent_work_requests_open_parent_uq
     ON agent_work_requests (project_id, issue_id, workspace_id, target_agent_id, parent_run_id)
     WHERE authority_kind = 'PARENT_RUN' AND sealed_at IS NULL;
 CREATE INDEX agent_work_requests_pending_idx
-    ON agent_work_requests (created_at, id)
+    ON agent_work_requests (updated_at, created_at, id)
     WHERE delegation_id IS NULL AND sealed_at IS NULL;
 CREATE INDEX agent_work_requests_run_idx
     ON agent_work_requests (project_id, run_id) WHERE run_id IS NOT NULL;
