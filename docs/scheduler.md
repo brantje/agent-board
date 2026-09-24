@@ -173,7 +173,9 @@ Routine healthy Provider probes do not trigger assignment scans.
 
 ## Delegation / Automation compatibility
 
-Delegated work and Automation-created Issues use this same scheduler. Delegation creates an ordinary child START job that remains held until the parent completes the normal Workspace hand-back and atomically yields scheduler ownership; there is no private delegation queue or second scheduler. For a Squad-owned Issue, only the resolved leader's normal parent Run is created automatically. Agent members become ordinary child Runs only after an explicit canonical delegation request; Squad membership, role context, and target discovery never enqueue or fan out work.
+Delegated work, comment-triggered Agent work and Automation-created Issues use this same scheduler. Delegation creates an ordinary child START job that remains held until the parent completes the normal Workspace hand-back and atomically yields scheduler ownership; there is no private delegation queue or second scheduler. For a Squad-owned Issue, only the resolved leader's normal parent Run is created automatically. Agent members become ordinary child Runs only after an explicit canonical delegation request; Squad membership, role context, and target discovery never enqueue or fan out work.
+
+Comment-triggered requests may share one durable `AgentWorkRequest` while the associated Run remains `QUEUED`. Admission locks the Run first and seals linked work requests in the same transaction as `QUEUED -> STARTING`; comment admission uses the same Run-before-work-request lock order so racing comments cannot deadlock scheduler admission. Once sealed, new Issue-authority comment work is stored as a separate deferred request rather than injected into active execution. The existing coordinator performs bounded reconciliation of those durable requests and promotes them through canonical delegation when the target becomes inactive. No comment-specific polling loop, scheduler job kind or lifecycle state exists.
 
 ## Invariants
 
