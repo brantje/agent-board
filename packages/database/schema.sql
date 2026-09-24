@@ -486,6 +486,44 @@ CREATE UNIQUE INDEX delegations_comment_request_uq
 CREATE INDEX delegations_parent_run_idx ON delegations (project_id, parent_run_id, created_at, id) WHERE parent_run_id IS NOT NULL;
 CREATE INDEX delegations_source_comment_idx ON delegations (project_id, source_comment_id, created_at, id) WHERE source_comment_id IS NOT NULL;
 CREATE INDEX delegations_target_agent_idx ON delegations (project_id, target_agent_id, created_at, id);
+
+CREATE TABLE agent_work_requests (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid NOT NULL,
+    issue_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    target_agent_id uuid NOT NULL REFERENCES agents(id) ON DELETE RESTRICT,
+    authority_kind text NOT NULL CHECK (authority_kind IN ('ISSUE', 'PARENT_RUN')),
+    parent_run_id uuid,
+    delegation_id uuid,
+    sealed_at timestamptz,
+    closed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    CONSTRAINT agent_work_requests_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT agent_work_requests_workspace_fk FOREIGN KEY (project_id, issue_id, workspace_id) REFERENCES workspaces(project_id, issue_id, id) ON DELETE RESTRICT,
+    CONSTRAINT agent_work_requests_parent_run_fk FOREIGN KEY (project_id, issue_id, parent_run_id) REFERENCES runs(project_id, issue_id, id) ON DELETE CASCADE,
+    CONSTRAINT agent_work_requests_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
+    CHECK (
+        (authority_kind = 'ISSUE' AND parent_run_id IS NULL)
+        OR (authority_kind = 'PARENT_RUN' AND parent_run_id IS NOT NULL)
+    ),
+    CHECK (closed_at IS NULL OR sealed_at IS NOT NULL),
+    UNIQUE (project_id, id)
+);
+
+CREATE UNIQUE INDEX agent_work_requests_open_issue_uq
+    ON agent_work_requests (project_id, issue_id, workspace_id, target_agent_id)
+    WHERE authority_kind = 'ISSUE' AND sealed_at IS NULL;
+CREATE UNIQUE INDEX agent_work_requests_open_parent_uq
+    ON agent_work_requests (project_id, issue_id, workspace_id, target_agent_id, parent_run_id)
+    WHERE authority_kind = 'PARENT_RUN' AND sealed_at IS NULL;
+CREATE INDEX agent_work_requests_pending_idx
+    ON agent_work_requests (created_at, id)
+    WHERE delegation_id IS NULL AND sealed_at IS NULL;
+CREATE INDEX agent_work_requests_delegation_idx
+    ON agent_work_requests (project_id, delegation_id) WHERE delegation_id IS NOT NULL;
+
 CREATE TABLE issue_comment_mentions (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid NOT NULL,
@@ -496,10 +534,12 @@ CREATE TABLE issue_comment_mentions (
     outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'BLOCKED')),
     reason_code text CHECK (reason_code IS NULL OR btrim(reason_code) <> ''),
     delegation_id uuid,
+    work_request_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT issue_comment_mentions_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
     CONSTRAINT issue_comment_mentions_comment_fk FOREIGN KEY (issue_id, comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE RESTRICT,
     CONSTRAINT issue_comment_mentions_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
+    CONSTRAINT issue_comment_mentions_work_request_fk FOREIGN KEY (project_id, work_request_id) REFERENCES agent_work_requests(project_id, id) ON DELETE RESTRICT,
     CHECK (
         (outcome = 'QUEUED' AND delegation_id IS NOT NULL AND reason_code IS NULL)
         OR (outcome = 'BLOCKED' AND delegation_id IS NULL AND reason_code IS NOT NULL)
@@ -511,6 +551,7 @@ CREATE TABLE issue_comment_mentions (
 
 CREATE INDEX issue_comment_mentions_comment_idx ON issue_comment_mentions (project_id, issue_id, comment_id, ordinal);
 CREATE INDEX issue_comment_mentions_delegation_idx ON issue_comment_mentions (project_id, delegation_id) WHERE delegation_id IS NOT NULL;
+CREATE INDEX issue_comment_mentions_work_request_idx ON issue_comment_mentions (project_id, work_request_id) WHERE work_request_id IS NOT NULL;
 
 CREATE TABLE issue_comment_implicit_triggers (
     project_id uuid NOT NULL,
@@ -521,10 +562,12 @@ CREATE TABLE issue_comment_implicit_triggers (
     outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'BLOCKED', 'SUPPRESSED')),
     reason_code text CHECK (reason_code IS NULL OR btrim(reason_code) <> ''),
     delegation_id uuid,
+    work_request_id uuid,
     created_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT issue_comment_implicit_triggers_issue_fk FOREIGN KEY (project_id, issue_id) REFERENCES issues(project_id, id) ON DELETE CASCADE,
     CONSTRAINT issue_comment_implicit_triggers_comment_fk FOREIGN KEY (issue_id, comment_id) REFERENCES issue_comments(issue_id, id) ON DELETE RESTRICT,
     CONSTRAINT issue_comment_implicit_triggers_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
+    CONSTRAINT issue_comment_implicit_triggers_work_request_fk FOREIGN KEY (project_id, work_request_id) REFERENCES agent_work_requests(project_id, id) ON DELETE RESTRICT,
     CHECK (
         (outcome = 'QUEUED' AND delegation_id IS NOT NULL AND reason_code IS NULL)
         OR (outcome = 'BLOCKED' AND delegation_id IS NULL AND reason_code IS NOT NULL)
@@ -538,6 +581,8 @@ CREATE INDEX issue_comment_implicit_triggers_project_idx
     ON issue_comment_implicit_triggers (project_id, issue_id, comment_id);
 CREATE INDEX issue_comment_implicit_triggers_delegation_idx
     ON issue_comment_implicit_triggers (project_id, delegation_id) WHERE delegation_id IS NOT NULL;
+CREATE INDEX issue_comment_implicit_triggers_work_request_idx
+    ON issue_comment_implicit_triggers (project_id, work_request_id) WHERE work_request_id IS NOT NULL;
 
 CREATE TABLE scheduler_jobs (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
