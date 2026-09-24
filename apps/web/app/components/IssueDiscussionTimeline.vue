@@ -145,14 +145,22 @@ function implicitPreviewStatus() {
   const preview = triggerPreview.value.implicit
   if (!preview) return ''
   if (preview.suppressed) return 'Automatic Agent trigger suppressed'
-  if (preview.eligible) return 'Will queue work'
+  if (preview.eligible) return 'Will request Agent work'
   return mentionReasonLabel(preview.reasonCode)
 }
 
+function triggerOutcomeLabel(outcome: string, reason: IssueCommentMentionReasonCode | IssueCommentImplicitReasonCode | null | undefined) {
+  switch (outcome) {
+    case 'QUEUED': return 'Work queued'
+    case 'COALESCED': return 'Folded into pending Agent work'
+    case 'DEFERRED': return 'Follow-up saved until current Agent work finishes'
+    case 'SUPPRESSED': return 'Automatic Agent trigger suppressed'
+    default: return mentionReasonLabel(reason)
+  }
+}
+
 function implicitTriggerStatus(trigger: IssueCommentImplicitTrigger) {
-  if (trigger.outcome === 'QUEUED') return 'Work queued'
-  if (trigger.outcome === 'SUPPRESSED') return 'Automatic Agent trigger suppressed'
-  return mentionReasonLabel(trigger.reasonCode)
+  return triggerOutcomeLabel(trigger.outcome, trigger.reasonCode)
 }
 
 function mentionPreviewFor(agentID: string) {
@@ -162,7 +170,7 @@ function mentionPreviewFor(agentID: string) {
 function mentionPreviewLabel(agentID: string) {
   const preview = mentionPreviewFor(agentID)
   if (!preview) return 'Checking eligibility…'
-  return preview.eligible ? 'Eligible to queue work' : mentionReasonLabel(preview.reasonCode)
+  return preview.eligible ? 'Eligible to request work' : mentionReasonLabel(preview.reasonCode)
 }
 
 async function loadMentionAgents() {
@@ -444,8 +452,7 @@ defineExpose({ refresh: timeline.refresh })
                 class="flex flex-wrap items-center gap-2 rounded-md bg-elevated px-2 py-1 text-xs"
               >
                 <UBadge :label="`@${mention.targetAgentName || 'Unavailable Agent'}`" size="xs" variant="subtle" />
-                <span v-if="mention.outcome === 'QUEUED'">Work queued</span>
-                <span v-else>{{ mentionReasonLabel(mention.reasonCode) }}</span>
+                <span>{{ triggerOutcomeLabel(mention.outcome, mention.reasonCode) }}</span>
                 <NuxtLink
                   v-if="mention.delegatedRunId"
                   :to="`/projects/${projectId}/runs/${mention.delegatedRunId}`"

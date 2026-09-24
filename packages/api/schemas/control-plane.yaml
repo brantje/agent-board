@@ -342,7 +342,7 @@ IssueCommentReactionSummary:
     reactedByCurrentUser: {type: boolean}
 IssueCommentMentionOutcome:
   type: string
-  enum: [QUEUED, BLOCKED]
+  enum: [QUEUED, COALESCED, DEFERRED, BLOCKED]
 IssueCommentMention:
   type: object
   additionalProperties: false
@@ -379,7 +379,7 @@ IssueCommentImplicitRoutingReason:
   enum: [DIRECT_AGENT_REPLY, UNIQUE_THREAD_AGENT, ISSUE_ASSIGNEE]
 IssueCommentImplicitOutcome:
   type: string
-  enum: [QUEUED, BLOCKED, SUPPRESSED]
+  enum: [QUEUED, COALESCED, DEFERRED, BLOCKED, SUPPRESSED]
 IssueCommentImplicitReasonCode:
   type: [string, 'null']
   enum: [TARGET_UNAVAILABLE, TARGET_BUSY, DELEGATION_BLOCKED, WORKFLOW_BLOCKED, null]
