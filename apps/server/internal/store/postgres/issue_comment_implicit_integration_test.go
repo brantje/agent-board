@@ -113,7 +113,7 @@ func TestIssueCommentImplicitReplyPrecedencePreviewAndAmbiguity(t *testing.T) {
 	if preview.Implicit == nil ||
 		preview.Implicit.TargetAgentID != f.parent.ID ||
 		preview.Implicit.RoutingReason != store.IssueCommentImplicitRoutingReasonDirectAgentReply ||
-		preview.Implicit.ReasonCode == nil || *preview.Implicit.ReasonCode != store.IssueCommentMentionReasonTargetBusy {
+		!preview.Implicit.Eligible || preview.Implicit.ReasonCode != nil {
 		t.Fatalf("direct preview=%+v", preview)
 	}
 	directKey := "direct-reply"
@@ -127,9 +127,8 @@ func TestIssueCommentImplicitReplyPrecedencePreviewAndAmbiguity(t *testing.T) {
 	if direct.Comment.ImplicitTrigger == nil ||
 		direct.Comment.ImplicitTrigger.TargetAgentID != preview.Implicit.TargetAgentID ||
 		direct.Comment.ImplicitTrigger.RoutingReason != preview.Implicit.RoutingReason ||
-		direct.Comment.ImplicitTrigger.Outcome != store.IssueCommentImplicitOutcomeBlocked ||
-		direct.Comment.ImplicitTrigger.ReasonCode == nil ||
-		*direct.Comment.ImplicitTrigger.ReasonCode != store.IssueCommentMentionReasonTargetBusy {
+		direct.Comment.ImplicitTrigger.Outcome != store.IssueCommentImplicitOutcomeDeferred ||
+		direct.Comment.ImplicitTrigger.WorkRequestID == nil || direct.Comment.ImplicitTrigger.ReasonCode != nil {
 		t.Fatalf("direct post=%+v preview=%+v", direct.Comment.ImplicitTrigger, preview.Implicit)
 	}
 

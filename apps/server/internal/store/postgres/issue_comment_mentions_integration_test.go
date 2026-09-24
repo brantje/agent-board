@@ -34,7 +34,7 @@ func TestHumanIssueCommentMentionsPersistStableTargetsDispatchAndRetryIdempotent
 	mention := result.Comment.Mentions[0]
 	if mention.TargetAgentID != f.target.ID || mention.TargetAgentName != f.target.Name ||
 		mention.Outcome != store.IssueCommentMentionOutcomeQueued || mention.ReasonCode != nil ||
-		mention.DelegationID == nil || mention.DelegatedRunID == nil {
+		mention.WorkRequestID == nil || mention.DelegationID == nil || mention.DelegatedRunID == nil {
 		t.Fatalf("queued mention=%+v", mention)
 	}
 	if len(result.Events) != 2 || result.Events[0].Type != "issue.comment_created" || result.Events[1].Type != "run.created" {
@@ -402,8 +402,8 @@ func TestIssueCommentMentionPreviewUsesPostingEligibility(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(busy) != 1 || busy[0].Eligible || busy[0].ReasonCode == nil || *busy[0].ReasonCode != store.IssueCommentMentionReasonTargetBusy {
-		t.Fatalf("busy preview=%+v", busy)
+	if len(busy) != 1 || !busy[0].Eligible || busy[0].ReasonCode != nil {
+		t.Fatalf("active-target preview should remain eligible for coalesced/deferred work: %+v", busy)
 	}
 }
 
@@ -468,5 +468,59 @@ func TestNormalizeIssueCommentMentionAgentIDsRejectsInvalidInput(t *testing.T) {
 				t.Fatalf("error=%v want invalid argument", err)
 			}
 		})
+	}
+}
+
+
+func TestHumanIssueCommentMentionsCoalesceQueuedAndDeferRunningTarget(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("coalesce-mention-author", "coalesce-mention@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	create := func(key, body string) store.IssueCommentMention {
+		t.Helper()
+		result, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
+			IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+			SourceActionKey: &key, Body: body,
+		}, []string{f.target.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Comment.Mentions) != 1 {
+			t.Fatalf("mentions=%+v", result.Comment.Mentions)
+		}
+		return result.Comment.Mentions[0]
+	}
+
+	first := create("coalesce-first", "First queued request")
+	if first.Outcome != store.IssueCommentMentionOutcomeQueued || first.WorkRequestID == nil || first.DelegatedRunID == nil {
+		t.Fatalf("first=%+v", first)
+	}
+	second := create("coalesce-second", "Second request before execution starts")
+	if second.Outcome != store.IssueCommentMentionOutcomeCoalesced || second.WorkRequestID == nil || *second.WorkRequestID != *first.WorkRequestID ||
+		second.DelegatedRunID == nil || *second.DelegatedRunID != *first.DelegatedRunID {
+		t.Fatalf("coalesced=%+v first=%+v", second, first)
+	}
+	if _, err := f.store.pool.Exec(ctx, `UPDATE runs SET status='RUNNING', started_at=now(), updated_at=now() WHERE project_id=$1 AND id=$2`, f.project.ID, *first.DelegatedRunID); err != nil {
+		t.Fatal(err)
+	}
+	deferred := create("coalesce-deferred", "Follow up after execution started")
+	if deferred.Outcome != store.IssueCommentMentionOutcomeDeferred || deferred.WorkRequestID == nil || *deferred.WorkRequestID == *first.WorkRequestID || deferred.DelegatedRunID != nil {
+		t.Fatalf("deferred=%+v first=%+v", deferred, first)
+	}
+	folded := create("coalesce-deferred-fold", "Another follow up while execution is active")
+	if folded.Outcome != store.IssueCommentMentionOutcomeCoalesced || folded.WorkRequestID == nil || *folded.WorkRequestID != *deferred.WorkRequestID || folded.DelegatedRunID != nil {
+		t.Fatalf("folded=%+v deferred=%+v", folded, deferred)
+	}
+
+	runs, err := f.store.ListRuns(ctx, f.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 {
+		t.Fatalf("comment burst created a Run storm: %+v", runs)
 	}
 }

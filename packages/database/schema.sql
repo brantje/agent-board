@@ -536,7 +536,7 @@ CREATE TABLE issue_comment_mentions (
     comment_id uuid NOT NULL,
     ordinal integer NOT NULL CHECK (ordinal >= 0),
     target_agent_id uuid NOT NULL,
-    outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'BLOCKED')),
+    outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'COALESCED', 'DEFERRED', 'BLOCKED')),
     reason_code text CHECK (reason_code IS NULL OR btrim(reason_code) <> ''),
     delegation_id uuid,
     work_request_id uuid,
@@ -546,8 +546,9 @@ CREATE TABLE issue_comment_mentions (
     CONSTRAINT issue_comment_mentions_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
     CONSTRAINT issue_comment_mentions_work_request_fk FOREIGN KEY (project_id, work_request_id) REFERENCES agent_work_requests(project_id, id) ON DELETE RESTRICT,
     CHECK (
-        (outcome = 'QUEUED' AND delegation_id IS NOT NULL AND reason_code IS NULL)
-        OR (outcome = 'BLOCKED' AND delegation_id IS NULL AND reason_code IS NOT NULL)
+        (outcome = 'QUEUED' AND work_request_id IS NOT NULL AND delegation_id IS NOT NULL AND reason_code IS NULL)
+        OR (outcome IN ('COALESCED', 'DEFERRED') AND work_request_id IS NOT NULL AND delegation_id IS NULL AND reason_code IS NULL)
+        OR (outcome = 'BLOCKED' AND work_request_id IS NULL AND delegation_id IS NULL AND reason_code IS NOT NULL)
     ),
     UNIQUE (issue_id, comment_id, target_agent_id),
     UNIQUE (issue_id, comment_id, ordinal),
@@ -564,7 +565,7 @@ CREATE TABLE issue_comment_implicit_triggers (
     comment_id uuid NOT NULL,
     target_agent_id uuid NOT NULL,
     routing_reason text NOT NULL CHECK (routing_reason IN ('DIRECT_AGENT_REPLY', 'UNIQUE_THREAD_AGENT', 'ISSUE_ASSIGNEE')),
-    outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'BLOCKED', 'SUPPRESSED')),
+    outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'COALESCED', 'DEFERRED', 'BLOCKED', 'SUPPRESSED')),
     reason_code text CHECK (reason_code IS NULL OR btrim(reason_code) <> ''),
     delegation_id uuid,
     work_request_id uuid,
@@ -574,9 +575,10 @@ CREATE TABLE issue_comment_implicit_triggers (
     CONSTRAINT issue_comment_implicit_triggers_delegation_fk FOREIGN KEY (project_id, delegation_id) REFERENCES delegations(project_id, id) ON DELETE RESTRICT,
     CONSTRAINT issue_comment_implicit_triggers_work_request_fk FOREIGN KEY (project_id, work_request_id) REFERENCES agent_work_requests(project_id, id) ON DELETE RESTRICT,
     CHECK (
-        (outcome = 'QUEUED' AND delegation_id IS NOT NULL AND reason_code IS NULL)
-        OR (outcome = 'BLOCKED' AND delegation_id IS NULL AND reason_code IS NOT NULL)
-        OR (outcome = 'SUPPRESSED' AND delegation_id IS NULL AND reason_code IS NULL)
+        (outcome = 'QUEUED' AND work_request_id IS NOT NULL AND delegation_id IS NOT NULL AND reason_code IS NULL)
+        OR (outcome IN ('COALESCED', 'DEFERRED') AND work_request_id IS NOT NULL AND delegation_id IS NULL AND reason_code IS NULL)
+        OR (outcome = 'BLOCKED' AND work_request_id IS NULL AND delegation_id IS NULL AND reason_code IS NOT NULL)
+        OR (outcome = 'SUPPRESSED' AND work_request_id IS NULL AND delegation_id IS NULL AND reason_code IS NULL)
     ),
     PRIMARY KEY (issue_id, comment_id),
     UNIQUE (project_id, issue_id, comment_id)
