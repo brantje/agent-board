@@ -3,9 +3,10 @@ package store
 import "strings"
 
 const (
-	IssueCommentImplicitRoutingReasonDirectAgentReply = "DIRECT_AGENT_REPLY"
-	IssueCommentImplicitRoutingReasonUniqueThreadAgent = "UNIQUE_THREAD_AGENT"
+	IssueCommentImplicitRoutingReasonDirectAgentReply   = "DIRECT_AGENT_REPLY"
+	IssueCommentImplicitRoutingReasonUniqueThreadAgent  = "UNIQUE_THREAD_AGENT"
 	IssueCommentImplicitRoutingReasonIssueAssignee      = "ISSUE_ASSIGNEE"
+	IssueCommentImplicitRoutingReasonIssueSquadAssignee = "ISSUE_SQUAD_ASSIGNEE"
 
 	IssueCommentImplicitOutcomeQueued     = "QUEUED"
 	IssueCommentImplicitOutcomeCoalesced  = "COALESCED"
@@ -27,6 +28,7 @@ type IssueCommentImplicitRoutingFacts struct {
 }
 
 type IssueCommentImplicitRoute struct {
+	Target        IssueCommentTarget
 	TargetAgentID string
 	RoutingReason string
 }
@@ -38,6 +40,7 @@ func ResolveIssueCommentImplicitRoute(facts IssueCommentImplicitRoutingFacts) (I
 	if facts.IsReply && facts.ParentAuthorType == ActorTypeAgent {
 		if target := strings.TrimSpace(facts.ParentAuthorID); target != "" {
 			return IssueCommentImplicitRoute{
+				Target:        IssueCommentTarget{Type: IssueCommentTargetTypeAgent, ID: target},
 				TargetAgentID: target,
 				RoutingReason: IssueCommentImplicitRoutingReasonDirectAgentReply,
 			}, true
@@ -47,6 +50,7 @@ func ResolveIssueCommentImplicitRoute(facts IssueCommentImplicitRoutingFacts) (I
 	if facts.IsReply {
 		if target, ok := uniqueNonEmptyString(facts.ThreadAgentIDs); ok {
 			return IssueCommentImplicitRoute{
+				Target:        IssueCommentTarget{Type: IssueCommentTargetTypeAgent, ID: target},
 				TargetAgentID: target,
 				RoutingReason: IssueCommentImplicitRoutingReasonUniqueThreadAgent,
 			}, true
@@ -57,8 +61,17 @@ func ResolveIssueCommentImplicitRoute(facts IssueCommentImplicitRoutingFacts) (I
 	if facts.AssigneeType != nil && facts.AssigneeID != nil && *facts.AssigneeType == "AGENT" {
 		if target := strings.TrimSpace(*facts.AssigneeID); target != "" {
 			return IssueCommentImplicitRoute{
+				Target:        IssueCommentTarget{Type: IssueCommentTargetTypeAgent, ID: target},
 				TargetAgentID: target,
 				RoutingReason: IssueCommentImplicitRoutingReasonIssueAssignee,
+			}, true
+		}
+	}
+	if facts.AssigneeType != nil && facts.AssigneeID != nil && *facts.AssigneeType == "SQUAD" {
+		if target := strings.TrimSpace(*facts.AssigneeID); target != "" {
+			return IssueCommentImplicitRoute{
+				Target:        IssueCommentTarget{Type: IssueCommentTargetTypeSquad, ID: target},
+				RoutingReason: IssueCommentImplicitRoutingReasonIssueSquadAssignee,
 			}, true
 		}
 	}

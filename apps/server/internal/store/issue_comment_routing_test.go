@@ -7,17 +7,18 @@ func TestResolveIssueCommentImplicitRoute(t *testing.T) {
 	agentType, userType := "AGENT", "USER"
 
 	tests := []struct {
-		name   string
-		facts  IssueCommentImplicitRoutingFacts
-		target string
-		reason string
-		ok     bool
+		name       string
+		facts      IssueCommentImplicitRoutingFacts
+		target     string
+		targetType string
+		reason     string
+		ok         bool
 	}{
 		{
 			name: "explicit mention disables implicit routing",
 			facts: IssueCommentImplicitRoutingFacts{
 				HasExplicitMentions: true,
-				IsReply: true, ParentAuthorType: ActorTypeAgent, ParentAuthorID: agentA,
+				IsReply:             true, ParentAuthorType: ActorTypeAgent, ParentAuthorID: agentA,
 				ThreadAgentIDs: []string{agentA}, AssigneeType: &agentType, AssigneeID: &agentB,
 			},
 		},
@@ -59,6 +60,13 @@ func TestResolveIssueCommentImplicitRoute(t *testing.T) {
 			target: agentA, reason: IssueCommentImplicitRoutingReasonIssueAssignee, ok: true,
 		},
 		{
+			name: "top level falls back to Squad assignee",
+			facts: IssueCommentImplicitRoutingFacts{
+				AssigneeType: func() *string { v := "SQUAD"; return &v }(), AssigneeID: func() *string { v := "squad-a"; return &v }(),
+			},
+			target: "squad-a", targetType: IssueCommentTargetTypeSquad, reason: IssueCommentImplicitRoutingReasonIssueSquadAssignee, ok: true,
+		},
+		{
 			name: "top level User assignee has no implicit target",
 			facts: IssueCommentImplicitRoutingFacts{
 				AssigneeType: &userType, AssigneeID: &agentA,
@@ -73,7 +81,10 @@ func TestResolveIssueCommentImplicitRoute(t *testing.T) {
 			if ok != test.ok {
 				t.Fatalf("ok=%v want %v route=%+v", ok, test.ok, got)
 			}
-			if got.TargetAgentID != test.target || got.RoutingReason != test.reason {
+			if got.TargetAgentID != test.target && got.Target.ID != test.target {
+				t.Fatalf("route=%+v want target=%q reason=%q", got, test.target, test.reason)
+			}
+			if test.targetType != "" && (got.Target.Type != test.targetType || got.Target.ID != test.target) {
 				t.Fatalf("route=%+v want target=%q reason=%q", got, test.target, test.reason)
 			}
 		})

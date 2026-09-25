@@ -27,6 +27,9 @@ const (
 	IssueCommentMentionReasonTargetBusy        = "TARGET_BUSY"
 	IssueCommentMentionReasonDelegationBlocked = "DELEGATION_BLOCKED"
 
+	IssueCommentTargetTypeAgent = "AGENT"
+	IssueCommentTargetTypeSquad = "SQUAD"
+
 	MaxIssueCommentMentions = 10
 )
 
@@ -52,28 +55,48 @@ type IssueCommentReactionSummary struct {
 	ActorIDs []string
 }
 
+// IssueCommentTarget identifies the durable collaboration target selected for
+// a comment. A Squad target is resolved to an Agent only when work is
+// dispatched; the Squad identity remains the target for history and display.
+type IssueCommentTarget struct {
+	Type string
+	ID   string
+}
+
+func (t IssueCommentTarget) Valid() bool {
+	return (t.Type == IssueCommentTargetTypeAgent || t.Type == IssueCommentTargetTypeSquad) && t.ID != ""
+}
+
 type IssueCommentMention struct {
-	ID              string
-	TargetAgentID   string
-	TargetAgentName string
-	Outcome         string
-	ReasonCode      *string
-	DelegationID    *string
-	DelegatedRunID  *string
-	WorkRequestID   *string
-	CreatedAt       time.Time
+	ID                string
+	Target            IssueCommentTarget
+	TargetName        string
+	ResolvedAgentID   string
+	ResolvedAgentName string
+	TargetAgentID     string
+	TargetAgentName   string
+	Outcome           string
+	ReasonCode        *string
+	DelegationID      *string
+	DelegatedRunID    *string
+	WorkRequestID     *string
+	CreatedAt         time.Time
 }
 
 type IssueCommentImplicitTrigger struct {
-	TargetAgentID   string
-	TargetAgentName string
-	RoutingReason   string
-	Outcome         string
-	ReasonCode      *string
-	DelegationID    *string
-	DelegatedRunID  *string
-	WorkRequestID   *string
-	CreatedAt       time.Time
+	Target            IssueCommentTarget
+	TargetName        string
+	ResolvedAgentID   string
+	ResolvedAgentName string
+	TargetAgentID     string
+	TargetAgentName   string
+	RoutingReason     string
+	Outcome           string
+	ReasonCode        *string
+	DelegationID      *string
+	DelegatedRunID    *string
+	WorkRequestID     *string
+	CreatedAt         time.Time
 }
 
 // IssueComment is durable Issue-domain collaboration. Presentation names are
@@ -109,22 +132,31 @@ type IssueCommentDeleteResult struct {
 }
 
 type IssueCommentMentionPreview struct {
-	TargetAgentID   string
-	TargetAgentName string
-	Eligible        bool
-	ReasonCode      *string
+	Target            IssueCommentTarget
+	TargetName        string
+	ResolvedAgentID   string
+	ResolvedAgentName string
+	TargetAgentID     string
+	TargetAgentName   string
+	Eligible          bool
+	ReasonCode        *string
 }
 
 type IssueCommentImplicitTriggerPreview struct {
-	TargetAgentID   string
-	TargetAgentName string
-	RoutingReason   string
-	Eligible        bool
-	Suppressed      bool
-	ReasonCode      *string
+	Target            IssueCommentTarget
+	TargetName        string
+	ResolvedAgentID   string
+	ResolvedAgentName string
+	TargetAgentID     string
+	TargetAgentName   string
+	RoutingReason     string
+	Eligible          bool
+	Suppressed        bool
+	ReasonCode        *string
 }
 
 type IssueCommentTriggerRequest struct {
+	MentionTargets   []IssueCommentTarget
 	MentionAgentIDs  []string
 	SuppressImplicit bool
 }
@@ -142,6 +174,14 @@ type IssueCommentTriggerStore interface {
 type IssueCommentMentionStore interface {
 	CreateIssueCommentWithMentions(context.Context, string, IssueComment, []string) (IssueCommentMutationResult, error)
 	PreviewIssueCommentMentions(context.Context, string, string, []string) ([]IssueCommentMentionPreview, error)
+}
+
+// TypedIssueCommentMentionStore is the Squad-aware extension of the original
+// Agent-only comment store contract. The legacy methods remain available for
+// compatibility with existing test doubles and older callers.
+type TypedIssueCommentMentionStore interface {
+	CreateIssueCommentWithTargets(context.Context, string, IssueComment, []IssueCommentTarget) (IssueCommentMutationResult, error)
+	PreviewIssueCommentTargets(context.Context, string, string, []IssueCommentTarget) ([]IssueCommentMentionPreview, error)
 }
 
 type IssueCommentStore interface {
