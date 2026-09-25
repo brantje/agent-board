@@ -19,10 +19,10 @@ async function load(showPending = false) {
   if (!auth.user.value) return
   const current = ++generation
   if (showPending) pending.value = true
-  error.value = undefined
   try {
     const value = await apiRequest<UserNotificationsResponse>(apiPath('notifications'))
     if (current !== generation) return
+    error.value = undefined
     page.value = value
     projectIds.value = [...new Set(value.notifications.map(notification => notification.projectId))]
   } catch (failure) {
@@ -68,9 +68,13 @@ async function openNotification(notification: UserNotification) {
 
 async function markAllRead() {
   if (!page.value.unreadCount) return
+  const initiatingUserID = auth.user.value?.id
+  const initiatingGeneration = generation
+  if (!initiatingUserID) return
   mutationError.value = undefined
   try {
     await apiRequest<void>(`${apiPath('notifications')}/read-all`, { method: 'POST' })
+    if (auth.user.value?.id !== initiatingUserID || generation !== initiatingGeneration) return
     const now = new Date().toISOString()
     for (const notification of page.value.notifications) notification.readAt ||= now
     page.value.unreadCount = 0
@@ -90,6 +94,10 @@ watch(auth.user, user => {
     page.value = { notifications: [], unreadCount: 0 }
     projectIds.value = []
   }
+})
+
+watch(open, value => {
+  if (value && !pending.value) void load(false)
 })
 
 onMounted(() => {

@@ -107,6 +107,25 @@ describe('NotificationCenter', () => {
     wrapper.unmount()
   })
 
+  it('refreshes when the inbox opens so the first notification is not missed', async () => {
+    auth()
+    let requests = 0
+    const fetch = vi.fn(async (path: string) => {
+      if (path !== '/api/notifications') throw new Error(`unexpected request ${path}`)
+      requests++
+      return new Response(JSON.stringify(requests === 1 ? { notifications: [], unreadCount: 0 } : { notifications: [first], unreadCount: 1 }))
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(NotificationCenter, { global })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Sam replied to your comment')
+    await wrapper.get('[data-testid="notification-center-trigger"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Sam replied to your comment')
+    expect(requests).toBe(2)
+    wrapper.unmount()
+  })
+
   it('renders a recoverable load error', async () => {
     auth()
     let failed = true
@@ -209,7 +228,32 @@ describe('NotificationCenter', () => {
     await flushPromises()
     await wrapper.get('[data-testid="notification-center-trigger"]').trigger('click')
     expect(wrapper.text()).toContain('No notifications yet.')
-    expect(calls).toBe(2)
+    expect(calls).toBe(3)
+    wrapper.unmount()
+  })
+
+  it('does not apply a bulk-read response after the authenticated user changes', async () => {
+    const user = ref<{ id: string } | null>({ id: 'user-1' })
+    vi.stubGlobal('useAuth', () => ({ user }))
+    let resolveReadAll!: (response: Response) => void
+    const readAll = new Promise<Response>(resolve => { resolveReadAll = resolve })
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      if (path === '/api/notifications') return new Response(JSON.stringify({ notifications: [first], unreadCount: 1 }))
+      if (path.endsWith('/read-all') && options.method === 'POST') return readAll
+      throw new Error(`unexpected request ${options.method || 'GET'} ${path}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(NotificationCenter, { global })
+    await flushPromises()
+    await wrapper.get('[data-testid="notification-center-trigger"]').trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Mark all read')!.trigger('click')
+    user.value = { id: 'user-2' }
+    await flushPromises()
+    resolveReadAll(new Response(JSON.stringify({ updated: 1 })))
+    await flushPromises()
+    expect(wrapper.text()).toContain('Mark read')
+    expect(wrapper.text()).not.toContain('Mark unread')
     wrapper.unmount()
   })
 })
