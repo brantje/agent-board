@@ -487,12 +487,13 @@ func (s *Store) issueCommentTargetTx(ctx context.Context, tx pgx.Tx, projectID, 
 		return store.IssueCommentMentionPreview{}, store.ErrInvalidArgument
 	}
 	preview := store.IssueCommentMentionPreview{Target: target}
+	var leaderAgentID string
 	if err := tx.QueryRow(ctx, `
 		SELECT name, leader_agent_id::text
 		FROM squads
 		WHERE project_id=$1 AND id=$2
 		FOR SHARE
-	`, projectID, target.ID).Scan(&preview.TargetName, &preview.ResolvedAgentID); err != nil {
+	`, projectID, target.ID).Scan(&preview.TargetName, &leaderAgentID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			reason := store.IssueCommentMentionReasonTargetUnavailable
 			preview.ReasonCode = &reason
@@ -500,16 +501,18 @@ func (s *Store) issueCommentTargetTx(ctx context.Context, tx pgx.Tx, projectID, 
 		}
 		return store.IssueCommentMentionPreview{}, err
 	}
-	preview.TargetAgentID = preview.ResolvedAgentID
-	preview.TargetAgentName = preview.ResolvedAgentName
-	agentPreview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, issueID, preview.ResolvedAgentID)
+	preview.TargetAgentID = leaderAgentID
+	agentPreview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, issueID, leaderAgentID)
 	if err != nil {
 		return store.IssueCommentMentionPreview{}, err
 	}
 	preview.Eligible = agentPreview.Eligible
 	preview.ReasonCode = agentPreview.ReasonCode
-	preview.ResolvedAgentName = agentPreview.TargetAgentName
-	preview.TargetAgentName = preview.ResolvedAgentName
+	preview.TargetAgentName = agentPreview.TargetAgentName
+	if preview.Eligible {
+		preview.ResolvedAgentID = leaderAgentID
+		preview.ResolvedAgentName = agentPreview.TargetAgentName
+	}
 	return preview, nil
 }
 

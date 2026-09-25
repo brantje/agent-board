@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -119,6 +120,235 @@ func TestHumanIssueCommentSquadMentionPersistsSquadIdentityAndLeaderProvenance(t
 	if delegation.TargetAgentID != f.target.ID || delegation.SourceCommentID == nil || *delegation.SourceCommentID != result.Comment.ID {
 		t.Fatalf("squad delegation=%+v", delegation)
 	}
+}
+
+func TestHumanIssueCommentImplicitSquadOwnerRoutesThroughCanonicalAgentWork(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("implicit-squad-author", "implicit-squad@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	squad, err := app.New(f.store).CreateSquad(ctx, store.Squad{
+		ProjectID:     f.project.ID,
+		Name:          "Backend Squad",
+		LeaderAgentID: f.parent.ID,
+		Members:       []store.SquadMember{{Type: store.SquadMemberTypeAgent, ID: f.target.ID}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.SetIssueAssignee(ctx, f.project.ID, f.issue.ID, &store.Assignee{Type: "SQUAD", ID: squad.ID}, store.EmptyObject); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.store.GetIssue(ctx, f.project.ID, f.issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "implicit-squad-owner"
+	result, err := app.New(f.store).CreateHumanIssueComment(ctx, app.CreateIssueCommentInput{
+		ProjectID: f.project.ID, IssueID: f.issue.ID, Body: "Please continue the backend work.", RequestKey: key,
+	}, author.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := result.ImplicitTrigger
+	if len(result.Mentions) != 0 || trigger == nil || trigger.Target.Type != store.IssueCommentTargetTypeSquad ||
+		trigger.Target.ID != squad.ID || trigger.ResolvedAgentID != f.parent.ID ||
+		trigger.RoutingReason != store.IssueCommentImplicitRoutingReasonIssueSquadAssignee ||
+		trigger.Outcome != store.IssueCommentImplicitOutcomeDeferred || trigger.WorkRequestID == nil ||
+		trigger.DelegationID != nil || trigger.DelegatedRunID != nil {
+		t.Fatalf("implicit Squad trigger=%+v", trigger)
+	}
+	var targetAgentID, authorityKind string
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT target_agent_id::text, authority_kind
+		FROM agent_work_requests
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, *trigger.WorkRequestID).Scan(&targetAgentID, &authorityKind); err != nil {
+		t.Fatal(err)
+	}
+	if targetAgentID != f.parent.ID || authorityKind != store.AgentWorkRequestAuthorityIssue {
+		t.Fatalf("work request target=%q authority=%q", targetAgentID, authorityKind)
+	}
+	comments, err := f.store.ListIssueComments(ctx, f.project.ID, f.issue.ID)
+	if err != nil || len(comments) != 1 || comments[0].ID != result.ID {
+		t.Fatalf("comments=%+v err=%v", comments, err)
+	}
+	if owner := before.AssignedTo(); owner == nil || owner.Type != "SQUAD" || owner.ID != squad.ID {
+		t.Fatalf("before owner=%+v", owner)
+	}
+	after, err := f.store.GetIssue(ctx, f.project.ID, f.issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != before.Status || after.AssignedTo() == nil || after.AssignedTo().Type != "SQUAD" || after.AssignedTo().ID != squad.ID {
+		t.Fatalf("implicit comment changed Issue state: before=%+v after=%+v", before, after)
+	}
+	if count := countIssueRunsForAgent(t, f.store, f.issue.ID, f.target.ID); count != 0 {
+		t.Fatalf("Squad member received implicit fanout Run count=%d", count)
+	}
+}
+
+func TestHumanIssueCommentSquadMentionPreservesHistoricalLeaderProvenance(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("leader-history-author", "leader-history@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := f.store.CreateIssue(ctx, store.Issue{ProjectID: f.project.ID, Title: "Squad leader history", Status: "BACKLOG"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	squad, err := app.New(f.store).CreateSquad(ctx, store.Squad{ProjectID: f.project.ID, Name: "Backend Squad", LeaderAgentID: f.parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.SetIssueAssignee(ctx, f.project.ID, issue.ID, &store.Assignee{Type: "SQUAD", ID: squad.ID}, store.EmptyObject); err != nil {
+		t.Fatal(err)
+	}
+	create := func(key string) store.IssueComment {
+		t.Helper()
+		result, err := app.New(f.store).CreateHumanIssueComment(ctx, app.CreateIssueCommentInput{
+			ProjectID: f.project.ID, IssueID: issue.ID, Body: "Please handle this Squad request.", RequestKey: key,
+			MentionTargets: []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeSquad, ID: squad.ID}},
+		}, author.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(result.Mentions) != 1 {
+			t.Fatalf("mentions=%+v", result.Mentions)
+		}
+		return result
+	}
+	first := create("leader-history-first")
+	firstMention := first.Mentions[0]
+	if firstMention.Target.Type != store.IssueCommentTargetTypeSquad || firstMention.Target.ID != squad.ID ||
+		firstMention.ResolvedAgentID != f.parent.ID || firstMention.DelegatedRunID == nil || firstMention.DelegationID == nil {
+		t.Fatalf("first mention=%+v", firstMention)
+	}
+	firstDelegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, *firstMention.DelegatedRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstDelegation.TargetAgentID != f.parent.ID || firstDelegation.SourceCommentID == nil || *firstDelegation.SourceCommentID != first.ID {
+		t.Fatalf("first delegation=%+v", firstDelegation)
+	}
+
+	squad.LeaderAgentID = f.target.ID
+	if _, err := app.New(f.store).UpdateSquad(ctx, squad); err != nil {
+		t.Fatal(err)
+	}
+	second := create("leader-history-second")
+	secondMention := second.Mentions[0]
+	if secondMention.Target.Type != store.IssueCommentTargetTypeSquad || secondMention.Target.ID != squad.ID ||
+		secondMention.ResolvedAgentID != f.target.ID || secondMention.DelegatedRunID == nil || secondMention.DelegationID == nil {
+		t.Fatalf("second mention=%+v", secondMention)
+	}
+	secondDelegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, *secondMention.DelegatedRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondDelegation.TargetAgentID != f.target.ID || secondDelegation.SourceCommentID == nil || *secondDelegation.SourceCommentID != second.ID {
+		t.Fatalf("second delegation=%+v", secondDelegation)
+	}
+
+	reloaded, err := f.store.GetIssueComment(ctx, f.project.ID, issue.ID, first.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reloaded.Mentions) != 1 || reloaded.Mentions[0].Target.Type != store.IssueCommentTargetTypeSquad ||
+		reloaded.Mentions[0].Target.ID != squad.ID || reloaded.Mentions[0].ResolvedAgentID != f.parent.ID {
+		t.Fatalf("historical first mention=%+v", reloaded.Mentions)
+	}
+	owner, err := f.store.GetIssue(ctx, f.project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if owner.Status != "BACKLOG" || owner.AssignedTo() == nil || owner.AssignedTo().Type != "SQUAD" || owner.AssignedTo().ID != squad.ID {
+		t.Fatalf("Squad ownership/status changed: %+v", owner)
+	}
+}
+
+func TestHumanIssueCommentUnavailableSquadPersistsBlockedWithoutResolvedAgent(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("unavailable-squad-author", "unavailable-squad@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := f.store.CreateIssue(ctx, store.Issue{ProjectID: f.project.ID, Title: "Unavailable Squad", Status: "BACKLOG"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	squad, err := app.New(f.store).CreateSquad(ctx, store.Squad{ProjectID: f.project.ID, Name: "Backend Squad", LeaderAgentID: f.parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.SetIssueAssignee(ctx, f.project.ID, issue.ID, &store.Assignee{Type: "SQUAD", ID: squad.ID}, store.EmptyObject); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, `UPDATE agents SET state='DISABLED' WHERE id=$1`, f.parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	target := store.IssueCommentTarget{Type: store.IssueCommentTargetTypeSquad, ID: squad.ID}
+	preview, err := f.store.PreviewIssueCommentTargets(ctx, f.project.ID, issue.ID, []store.IssueCommentTarget{target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview) != 1 || preview[0].Eligible || preview[0].ResolvedAgentID != "" || preview[0].ReasonCode == nil ||
+		*preview[0].ReasonCode != store.IssueCommentMentionReasonTargetUnavailable {
+		t.Fatalf("unavailable Squad preview=%+v", preview)
+	}
+	before, err := f.store.GetIssue(ctx, f.project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := "unavailable-squad-request"
+	result, err := app.New(f.store).CreateHumanIssueComment(ctx, app.CreateIssueCommentInput{
+		ProjectID: f.project.ID, IssueID: issue.ID, Body: "Please ask the unavailable Squad.", RequestKey: key, MentionTargets: []store.IssueCommentTarget{target},
+	}, author.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Mentions) != 1 {
+		t.Fatalf("mentions=%+v", result.Mentions)
+	}
+	mention := result.Mentions[0]
+	if mention.Target != target || mention.ResolvedAgentID != "" || mention.Outcome != store.IssueCommentMentionOutcomeBlocked ||
+		mention.ReasonCode == nil || *mention.ReasonCode != store.IssueCommentMentionReasonTargetUnavailable ||
+		mention.WorkRequestID != nil || mention.DelegationID != nil || mention.DelegatedRunID != nil {
+		t.Fatalf("unavailable Squad mention=%+v", mention)
+	}
+	if countIssueRuns(t, f.store, issue.ID) != 0 {
+		t.Fatalf("unavailable Squad created a Run")
+	}
+	after, err := f.store.GetIssue(ctx, f.project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != before.Status || after.AssignedTo() == nil || after.AssignedTo().Type != "SQUAD" || after.AssignedTo().ID != squad.ID {
+		t.Fatalf("blocked mention changed Issue state: before=%+v after=%+v", before, after)
+	}
+}
+
+func countIssueRuns(t *testing.T, s *Store, issueID string) int {
+	t.Helper()
+	var count int
+	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM runs WHERE issue_id=$1`, issueID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func countIssueRunsForAgent(t *testing.T, s *Store, issueID, agentID string) int {
+	t.Helper()
+	var count int
+	if err := s.pool.QueryRow(t.Context(), `SELECT count(*) FROM runs WHERE issue_id=$1 AND agent_id=$2`, issueID, agentID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
 }
 
 func TestHumanIssueCommentMultipleMentionsPersistMixedOutcomesAndRetryWithoutDuplicateDelegation(t *testing.T) {

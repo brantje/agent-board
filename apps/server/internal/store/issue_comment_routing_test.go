@@ -28,7 +28,7 @@ func TestResolveIssueCommentImplicitRoute(t *testing.T) {
 				IsReply: true, ParentAuthorType: ActorTypeAgent, ParentAuthorID: agentB,
 				ThreadAgentIDs: []string{agentA, agentB}, AssigneeType: &agentType, AssigneeID: &agentA,
 			},
-			target: agentB, reason: IssueCommentImplicitRoutingReasonDirectAgentReply, ok: true,
+			target: agentB, targetType: IssueCommentTargetTypeAgent, reason: IssueCommentImplicitRoutingReasonDirectAgentReply, ok: true,
 		},
 		{
 			name: "unique thread Agent wins over assignee",
@@ -36,7 +36,7 @@ func TestResolveIssueCommentImplicitRoute(t *testing.T) {
 				IsReply: true, ParentAuthorType: ActorTypeHuman, ParentAuthorID: "user",
 				ThreadAgentIDs: []string{agentA, agentA}, AssigneeType: &agentType, AssigneeID: &agentB,
 			},
-			target: agentA, reason: IssueCommentImplicitRoutingReasonUniqueThreadAgent, ok: true,
+			target: agentA, targetType: IssueCommentTargetTypeAgent, reason: IssueCommentImplicitRoutingReasonUniqueThreadAgent, ok: true,
 		},
 		{
 			name: "ambiguous thread does not fall back to assignee",
@@ -57,7 +57,7 @@ func TestResolveIssueCommentImplicitRoute(t *testing.T) {
 			facts: IssueCommentImplicitRoutingFacts{
 				AssigneeType: &agentType, AssigneeID: &agentA,
 			},
-			target: agentA, reason: IssueCommentImplicitRoutingReasonIssueAssignee, ok: true,
+			target: agentA, targetType: IssueCommentTargetTypeAgent, reason: IssueCommentImplicitRoutingReasonIssueAssignee, ok: true,
 		},
 		{
 			name: "top level falls back to Squad assignee",
@@ -81,11 +81,11 @@ func TestResolveIssueCommentImplicitRoute(t *testing.T) {
 			if ok != test.ok {
 				t.Fatalf("ok=%v want %v route=%+v", ok, test.ok, got)
 			}
-			if got.TargetAgentID != test.target && got.Target.ID != test.target {
-				t.Fatalf("route=%+v want target=%q reason=%q", got, test.target, test.reason)
+			if !test.ok {
+				return
 			}
-			if test.targetType != "" && (got.Target.Type != test.targetType || got.Target.ID != test.target) {
-				t.Fatalf("route=%+v want target=%q reason=%q", got, test.target, test.reason)
+			if got.Target.ID != test.target || got.Target.Type != test.targetType || got.RoutingReason != test.reason {
+				t.Fatalf("route=%+v want target=%s/%q reason=%q", got, test.targetType, test.target, test.reason)
 			}
 		})
 	}
