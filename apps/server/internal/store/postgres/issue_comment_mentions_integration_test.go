@@ -171,9 +171,23 @@ func TestHumanIssueCommentImplicitSquadOwnerRoutesThroughCanonicalAgentWork(t *t
 	if targetAgentID != f.parent.ID || authorityKind != store.AgentWorkRequestAuthorityIssue {
 		t.Fatalf("work request target=%q authority=%q", targetAgentID, authorityKind)
 	}
+	var sourceCommentID string
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT comment_id::text
+		FROM issue_comment_implicit_triggers
+		WHERE project_id=$1 AND issue_id=$2 AND work_request_id=$3
+	`, f.project.ID, f.issue.ID, *trigger.WorkRequestID).Scan(&sourceCommentID); err != nil {
+		t.Fatal(err)
+	}
+	if sourceCommentID != result.ID {
+		t.Fatalf("work request source comment=%q want %q", sourceCommentID, result.ID)
+	}
 	comments, err := f.store.ListIssueComments(ctx, f.project.ID, f.issue.ID)
 	if err != nil || len(comments) != 1 || comments[0].ID != result.ID {
 		t.Fatalf("comments=%+v err=%v", comments, err)
+	}
+	if len(comments[0].Mentions) != 0 {
+		t.Fatalf("implicit comment gained explicit mentions: %+v", comments[0].Mentions)
 	}
 	if owner := before.AssignedTo(); owner == nil || owner.Type != "SQUAD" || owner.ID != squad.ID {
 		t.Fatalf("before owner=%+v", owner)
@@ -187,6 +201,9 @@ func TestHumanIssueCommentImplicitSquadOwnerRoutesThroughCanonicalAgentWork(t *t
 	}
 	if count := countIssueRunsForAgent(t, f.store, f.issue.ID, f.target.ID); count != 0 {
 		t.Fatalf("Squad member received implicit fanout Run count=%d", count)
+	}
+	if count := countIssueRuns(t, f.store, f.issue.ID); count != 1 {
+		t.Fatalf("implicit Squad routing created an unexpected Run count=%d", count)
 	}
 }
 
