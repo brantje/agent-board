@@ -75,7 +75,7 @@ type IssueCommentMentionDTO struct {
 	TargetType        string  `json:"targetType"`
 	TargetID          string  `json:"targetId"`
 	TargetName        string  `json:"targetName"`
-	ResolvedAgentID   string  `json:"resolvedAgentId"`
+	ResolvedAgentID   *string `json:"resolvedAgentId"`
 	ResolvedAgentName string  `json:"resolvedAgentName"`
 	TargetAgentID     string  `json:"targetAgentId"`
 	TargetAgentName   string  `json:"targetAgentName"`
@@ -89,7 +89,7 @@ type IssueCommentMentionPreviewDTO struct {
 	TargetType        string  `json:"targetType"`
 	TargetID          string  `json:"targetId"`
 	TargetName        string  `json:"targetName"`
-	ResolvedAgentID   string  `json:"resolvedAgentId"`
+	ResolvedAgentID   *string `json:"resolvedAgentId"`
 	ResolvedAgentName string  `json:"resolvedAgentName"`
 	TargetAgentID     string  `json:"targetAgentId"`
 	TargetAgentName   string  `json:"targetAgentName"`
@@ -101,7 +101,7 @@ type IssueCommentImplicitTriggerDTO struct {
 	TargetType        string  `json:"targetType"`
 	TargetID          string  `json:"targetId"`
 	TargetName        string  `json:"targetName"`
-	ResolvedAgentID   string  `json:"resolvedAgentId"`
+	ResolvedAgentID   *string `json:"resolvedAgentId"`
 	ResolvedAgentName string  `json:"resolvedAgentName"`
 	TargetAgentID     string  `json:"targetAgentId"`
 	TargetAgentName   string  `json:"targetAgentName"`
@@ -116,7 +116,7 @@ type IssueCommentImplicitTriggerPreviewDTO struct {
 	TargetType        string  `json:"targetType"`
 	TargetID          string  `json:"targetId"`
 	TargetName        string  `json:"targetName"`
-	ResolvedAgentID   string  `json:"resolvedAgentId"`
+	ResolvedAgentID   *string `json:"resolvedAgentId"`
 	ResolvedAgentName string  `json:"resolvedAgentName"`
 	TargetAgentID     string  `json:"targetAgentId"`
 	TargetAgentName   string  `json:"targetAgentName"`

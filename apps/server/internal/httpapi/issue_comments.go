@@ -85,16 +85,16 @@ func (a *api) createIssueComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "parentCommentId must be a UUID")
 		return
 	}
-	if len(req.MentionAgentIDs) > store.MaxIssueCommentMentions {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "too many Agent mentions")
-		return
-	}
 	mentionTargets, ok := issueCommentTargetRequests(req.MentionTargets)
-	if !ok || len(mentionTargets)+len(req.MentionAgentIDs) > store.MaxIssueCommentMentions {
+	mentionAgentIDs := req.MentionAgentIDs
+	if len(mentionTargets) != 0 {
+		mentionAgentIDs = nil
+	}
+	if !ok || len(mentionAgentIDs) > store.MaxIssueCommentMentions {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "mentionTargets must contain valid Agent or Squad UUIDs")
 		return
 	}
-	for _, targetAgentID := range req.MentionAgentIDs {
+	for _, targetAgentID := range mentionAgentIDs {
 		if !validUUID(targetAgentID) {
 			writeError(w, http.StatusBadRequest, "invalid_argument", "mentionAgentIds must contain UUIDs")
 			return
@@ -114,7 +114,7 @@ func (a *api) createIssueComment(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := a.projectAccess.CreateIssueComment(r.Context(), actor, app.CreateIssueCommentInput{
 		ProjectID: projectID, IssueID: issueUUID, ParentCommentID: req.ParentCommentID, Body: req.Body,
-		RequestKey: req.RequestID, MentionTargets: mentionTargets, MentionAgentIDs: req.MentionAgentIDs, SuppressImplicit: req.SuppressImplicitTrigger,
+		RequestKey: req.RequestID, MentionTargets: mentionTargets, MentionAgentIDs: mentionAgentIDs, SuppressImplicit: req.SuppressImplicitTrigger,
 	})
 	if err != nil {
 		writeProjectAccessError(w, err)
@@ -140,16 +140,16 @@ func (a *api) previewIssueCommentTriggers(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid_argument", "parentCommentId must be a UUID")
 		return
 	}
-	if len(req.MentionAgentIDs) > store.MaxIssueCommentMentions {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "too many Agent mentions")
-		return
-	}
 	mentionTargets, ok := issueCommentTargetRequests(req.MentionTargets)
-	if !ok || len(mentionTargets)+len(req.MentionAgentIDs) > store.MaxIssueCommentMentions {
+	mentionAgentIDs := req.MentionAgentIDs
+	if len(mentionTargets) != 0 {
+		mentionAgentIDs = nil
+	}
+	if !ok || len(mentionAgentIDs) > store.MaxIssueCommentMentions {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "mentionTargets must contain valid Agent or Squad UUIDs")
 		return
 	}
-	for _, targetAgentID := range req.MentionAgentIDs {
+	for _, targetAgentID := range mentionAgentIDs {
 		if !validUUID(targetAgentID) {
 			writeError(w, http.StatusBadRequest, "invalid_argument", "mentionAgentIds must contain UUIDs")
 			return
@@ -162,7 +162,7 @@ func (a *api) previewIssueCommentTriggers(w http.ResponseWriter, r *http.Request
 	value, err := a.projectAccess.PreviewIssueCommentTriggers(
 		r.Context(), actor, projectID, issueUUID, req.ParentCommentID, req.Body,
 		store.IssueCommentTriggerRequest{
-			MentionTargets: mentionTargets, MentionAgentIDs: req.MentionAgentIDs, SuppressImplicit: req.SuppressImplicitTrigger,
+			MentionTargets: mentionTargets, MentionAgentIDs: mentionAgentIDs, SuppressImplicit: req.SuppressImplicitTrigger,
 		},
 	)
 	if err != nil {
@@ -175,7 +175,7 @@ func (a *api) previewIssueCommentTriggers(w http.ResponseWriter, r *http.Request
 	for _, mention := range value.Mentions {
 		out.Mentions = append(out.Mentions, IssueCommentMentionPreviewDTO{
 			TargetType: mention.Target.Type, TargetID: mention.Target.ID, TargetName: mention.TargetName,
-			ResolvedAgentID: mention.ResolvedAgentID, ResolvedAgentName: mention.ResolvedAgentName,
+			ResolvedAgentID: nullableIssueCommentAgentID(mention.ResolvedAgentID), ResolvedAgentName: mention.ResolvedAgentName,
 			TargetAgentID: mention.TargetAgentID, TargetAgentName: mention.TargetAgentName,
 			Eligible: mention.Eligible, ReasonCode: mention.ReasonCode,
 		})
@@ -183,7 +183,7 @@ func (a *api) previewIssueCommentTriggers(w http.ResponseWriter, r *http.Request
 	if value.Implicit != nil {
 		out.Implicit = &IssueCommentImplicitTriggerPreviewDTO{
 			TargetType: value.Implicit.Target.Type, TargetID: value.Implicit.Target.ID, TargetName: value.Implicit.TargetName,
-			ResolvedAgentID: value.Implicit.ResolvedAgentID, ResolvedAgentName: value.Implicit.ResolvedAgentName,
+			ResolvedAgentID: nullableIssueCommentAgentID(value.Implicit.ResolvedAgentID), ResolvedAgentName: value.Implicit.ResolvedAgentName,
 			TargetAgentID: value.Implicit.TargetAgentID, TargetAgentName: value.Implicit.TargetAgentName,
 			RoutingReason: value.Implicit.RoutingReason, Eligible: value.Implicit.Eligible,
 			Suppressed: value.Implicit.Suppressed, ReasonCode: value.Implicit.ReasonCode,
@@ -205,16 +205,16 @@ func (a *api) previewIssueCommentMentions(w http.ResponseWriter, r *http.Request
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	if len(req.MentionAgentIDs) > store.MaxIssueCommentMentions {
-		writeError(w, http.StatusBadRequest, "invalid_argument", "too many Agent mentions")
-		return
-	}
 	mentionTargets, ok := issueCommentTargetRequests(req.MentionTargets)
-	if !ok || len(mentionTargets)+len(req.MentionAgentIDs) > store.MaxIssueCommentMentions {
+	mentionAgentIDs := req.MentionAgentIDs
+	if len(mentionTargets) != 0 {
+		mentionAgentIDs = nil
+	}
+	if !ok || len(mentionAgentIDs) > store.MaxIssueCommentMentions {
 		writeError(w, http.StatusBadRequest, "invalid_argument", "mentionTargets must contain valid Agent or Squad UUIDs")
 		return
 	}
-	for _, targetAgentID := range req.MentionAgentIDs {
+	for _, targetAgentID := range mentionAgentIDs {
 		if !validUUID(targetAgentID) {
 			writeError(w, http.StatusBadRequest, "invalid_argument", "mentionAgentIds must contain UUIDs")
 			return
@@ -229,7 +229,7 @@ func (a *api) previewIssueCommentMentions(w http.ResponseWriter, r *http.Request
 	if len(mentionTargets) != 0 {
 		values, err = a.projectAccess.PreviewIssueCommentTargets(r.Context(), actor, projectID, issueUUID, mentionTargets)
 	} else {
-		values, err = a.projectAccess.PreviewIssueCommentMentions(r.Context(), actor, projectID, issueUUID, req.MentionAgentIDs)
+		values, err = a.projectAccess.PreviewIssueCommentMentions(r.Context(), actor, projectID, issueUUID, mentionAgentIDs)
 	}
 	if err != nil {
 		writeProjectAccessError(w, err)
@@ -239,7 +239,7 @@ func (a *api) previewIssueCommentMentions(w http.ResponseWriter, r *http.Request
 	for _, value := range values {
 		out = append(out, IssueCommentMentionPreviewDTO{
 			TargetType: value.Target.Type, TargetID: value.Target.ID, TargetName: value.TargetName,
-			ResolvedAgentID: value.ResolvedAgentID, ResolvedAgentName: value.ResolvedAgentName,
+			ResolvedAgentID: nullableIssueCommentAgentID(value.ResolvedAgentID), ResolvedAgentName: value.ResolvedAgentName,
 			TargetAgentID: value.TargetAgentID, TargetAgentName: value.TargetAgentName,
 			Eligible: value.Eligible, ReasonCode: value.ReasonCode,
 		})

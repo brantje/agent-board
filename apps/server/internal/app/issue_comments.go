@@ -91,6 +91,11 @@ func (s *Service) PreviewIssueCommentTriggers(
 	if _, err := s.GetIssue(ctx, projectID, issueID); err != nil {
 		return store.IssueCommentTriggerPreview{}, err
 	}
+	if len(request.MentionTargets) != 0 {
+		if _, ok := any(s.issueComments).(store.TypedIssueCommentMentionStore); !ok {
+			return store.IssueCommentTriggerPreview{}, errors.New("typed issue comment mentions are unavailable")
+		}
+	}
 	triggers, ok := any(s.issueComments).(store.IssueCommentTriggerStore)
 	if !ok {
 		return store.IssueCommentTriggerPreview{}, errors.New("issue comment triggers are unavailable")
@@ -210,6 +215,11 @@ func (s *Service) createIssueComment(ctx context.Context, input issueCommentCrea
 	var result store.IssueCommentMutationResult
 	var err error
 	if input.AuthorType == store.ActorTypeHuman {
+		if len(input.MentionTargets) != 0 {
+			if _, ok := any(s.issueComments).(store.TypedIssueCommentMentionStore); !ok {
+				return store.IssueComment{}, errors.New("typed issue comment mentions are unavailable")
+			}
+		}
 		triggers, ok := any(s.issueComments).(store.IssueCommentTriggerStore)
 		if !ok {
 			return store.IssueComment{}, errors.New("issue comment triggers are unavailable")
@@ -225,7 +235,11 @@ func (s *Service) createIssueComment(ctx context.Context, input issueCommentCrea
 		if !ok {
 			return store.IssueComment{}, errors.New("issue comment mentions are unavailable")
 		}
-		if typed, ok := any(s.issueComments).(store.TypedIssueCommentMentionStore); ok && len(input.MentionTargets) != 0 {
+		if len(input.MentionTargets) != 0 {
+			typed, ok := any(s.issueComments).(store.TypedIssueCommentMentionStore)
+			if !ok {
+				return store.IssueComment{}, errors.New("typed issue comment mentions are unavailable")
+			}
 			result, err = typed.CreateIssueCommentWithTargets(ctx, input.ProjectID, commentInput, input.MentionTargets)
 		} else {
 			result, err = mentions.CreateIssueCommentWithMentions(ctx, input.ProjectID, commentInput, input.MentionAgentIDs)

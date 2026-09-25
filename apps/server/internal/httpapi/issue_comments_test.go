@@ -111,12 +111,18 @@ func (s *issueCommentHTTPStore) CreateIssueCommentWithTargets(ctx context.Contex
 }
 
 func (s *issueCommentHTTPStore) PreviewIssueCommentTriggers(ctx context.Context, pid, id string, _ *string, _ string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
-	mentions, err := s.PreviewIssueCommentMentions(ctx, pid, id, request.MentionAgentIDs)
+	var mentions []store.IssueCommentMentionPreview
+	var err error
+	if len(request.MentionTargets) != 0 {
+		mentions, err = s.PreviewIssueCommentTargets(ctx, pid, id, request.MentionTargets)
+	} else {
+		mentions, err = s.PreviewIssueCommentMentions(ctx, pid, id, request.MentionAgentIDs)
+	}
 	if err != nil {
 		return store.IssueCommentTriggerPreview{}, err
 	}
 	result := store.IssueCommentTriggerPreview{Mentions: mentions}
-	if len(request.MentionAgentIDs) == 0 {
+	if len(request.MentionTargets) == 0 && len(request.MentionAgentIDs) == 0 {
 		result.Implicit = &store.IssueCommentImplicitTriggerPreview{
 			TargetAgentID: agentID, TargetAgentName: "Agent",
 			RoutingReason: store.IssueCommentImplicitRoutingReasonIssueAssignee,
@@ -483,7 +489,8 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	squadID := "56565656-5656-4565-8565-565656565656"
 	squadPreview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview",
 		`{"mentionTargets":[{"type":"SQUAD","id":"`+squadID+`"}]}`, bearer(token))
-	if squadPreview.Code != http.StatusOK || !strings.Contains(squadPreview.Body.String(), `"targetType":"SQUAD"`) {
+	if squadPreview.Code != http.StatusOK || !strings.Contains(squadPreview.Body.String(), `"targetType":"SQUAD"`) ||
+		!strings.Contains(squadPreview.Body.String(), `"resolvedAgentId":null`) || strings.Contains(squadPreview.Body.String(), `"resolvedAgentId":""`) {
 		t.Fatalf("Squad preview status=%d body=%s", squadPreview.Code, squadPreview.Body.String())
 	}
 
@@ -503,8 +510,16 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	}
 	squadCreated := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
 		`{"body":"Please ask the Squad","requestId":"66666666-6666-4666-8666-666666666666","mentionTargets":[{"type":"SQUAD","id":"`+squadID+`"}]}`, bearer(token))
-	if squadCreated.Code != http.StatusCreated || !strings.Contains(squadCreated.Body.String(), `"targetType":"SQUAD"`) {
+	if squadCreated.Code != http.StatusCreated || !strings.Contains(squadCreated.Body.String(), `"targetType":"SQUAD"`) ||
+		!strings.Contains(squadCreated.Body.String(), `"resolvedAgentId":null`) || strings.Contains(squadCreated.Body.String(), `"resolvedAgentId":""`) {
 		t.Fatalf("Squad create status=%d body=%s", squadCreated.Code, squadCreated.Body.String())
+	}
+	var squadComment IssueCommentDTO
+	if err := json.Unmarshal(squadCreated.Body.Bytes(), &squadComment); err != nil {
+		t.Fatal(err)
+	}
+	if len(squadComment.Mentions) != 1 || squadComment.Mentions[0].ResolvedAgentID != nil {
+		t.Fatalf("unresolved Squad mention=%+v", squadComment.Mentions)
 	}
 
 	missingRequest := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
@@ -548,6 +563,120 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	}
 	if len(plainComment.Mentions) != 0 {
 		t.Fatalf("plain mention-looking text gained structured mentions: %+v", plainComment.Mentions)
+	}
+}
+
+func TestIssueCommentHTTPTypedMentionTargetsAreAuthoritativeForLimits(t *testing.T) {
+	fixture, _ := newIssueCommentHTTPFixture(t)
+	member, token := fixture.createUser(t, "typed-limit-member", store.DeploymentRoleMember)
+	fixture.access.roles[projectGrantKey(projectID, member.ID)] = store.ProjectRoleMember
+	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
+	requestID := "78787878-7878-4787-8787-787878787878"
+	agentIDs := []string{
+		"10101010-1010-4010-8010-101010101010",
+		"20202020-2020-4020-8020-202020202020",
+		"30303030-3030-4030-8030-303030303030",
+		"40404040-4040-4040-8040-404040404040",
+		"50505050-5050-4050-8050-505050505050",
+	}
+	squadIDs := []string{
+		"60606060-6060-4060-8060-606060606060",
+		"70707070-7070-4070-8070-707070707070",
+		"80808080-8080-4080-8080-808080808080",
+		"90909090-9090-4090-8090-909090909090",
+		"abababab-abab-4aba-8aba-abababababab",
+	}
+	targets := make([]IssueCommentTargetRequest, 0, len(agentIDs)+len(squadIDs))
+	for _, id := range agentIDs {
+		targets = append(targets, IssueCommentTargetRequest{Type: store.IssueCommentTargetTypeAgent, ID: id})
+	}
+	for _, id := range squadIDs {
+		targets = append(targets, IssueCommentTargetRequest{Type: store.IssueCommentTargetTypeSquad, ID: id})
+	}
+
+	createBody, err := json.Marshal(CreateIssueCommentRequest{
+		Body: "mixed typed targets", RequestID: requestID, MentionTargets: targets, MentionAgentIDs: agentIDs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := authHTTPRequest(t, fixture.handler, http.MethodPost, base, string(createBody), bearer(token))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("mixed typed create status=%d body=%s", created.Code, created.Body.String())
+	}
+	var comment IssueCommentDTO
+	if err := json.Unmarshal(created.Body.Bytes(), &comment); err != nil {
+		t.Fatal(err)
+	}
+	if len(comment.Mentions) != len(targets) {
+		t.Fatalf("mixed typed mentions=%d want %d: %+v", len(comment.Mentions), len(targets), comment.Mentions)
+	}
+	seen := make(map[string]bool, len(comment.Mentions))
+	for _, mention := range comment.Mentions {
+		key := mention.TargetType + ":" + mention.TargetID
+		if seen[key] {
+			t.Fatalf("duplicate typed mention %s: %+v", key, comment.Mentions)
+		}
+		seen[key] = true
+	}
+
+	previewBody, err := json.Marshal(PreviewIssueCommentTriggersRequest{Body: "mixed preview", MentionTargets: targets, MentionAgentIDs: agentIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/trigger-preview", string(previewBody), bearer(token))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("mixed trigger preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var triggerPreview IssueCommentTriggerPreviewDTO
+	if err := json.Unmarshal(preview.Body.Bytes(), &triggerPreview); err != nil {
+		t.Fatal(err)
+	}
+	if len(triggerPreview.Mentions) != len(targets) {
+		t.Fatalf("mixed trigger preview mentions=%d want %d", len(triggerPreview.Mentions), len(targets))
+	}
+
+	mentionPreviewBody, err := json.Marshal(PreviewIssueCommentMentionsRequest{MentionTargets: targets, MentionAgentIDs: agentIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mentionPreview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview", string(mentionPreviewBody), bearer(token))
+	if mentionPreview.Code != http.StatusOK {
+		t.Fatalf("mixed mention preview status=%d body=%s", mentionPreview.Code, mentionPreview.Body.String())
+	}
+	var mentionPreviews []IssueCommentMentionPreviewDTO
+	if err := json.Unmarshal(mentionPreview.Body.Bytes(), &mentionPreviews); err != nil {
+		t.Fatal(err)
+	}
+	if len(mentionPreviews) != len(targets) {
+		t.Fatalf("mixed mention preview=%d want %d", len(mentionPreviews), len(targets))
+	}
+
+	tooManyTargets := append(append([]IssueCommentTargetRequest(nil), targets...), IssueCommentTargetRequest{
+		Type: store.IssueCommentTargetTypeSquad, ID: "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd",
+	})
+	tooManyBody, err := json.Marshal(CreateIssueCommentRequest{Body: "too many", RequestID: "89898989-8989-4898-8989-898989898989", MentionTargets: tooManyTargets, MentionAgentIDs: agentIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooMany := authHTTPRequest(t, fixture.handler, http.MethodPost, base, string(tooManyBody), bearer(token))
+	if tooMany.Code != http.StatusBadRequest {
+		t.Fatalf("too-many typed create status=%d body=%s", tooMany.Code, tooMany.Body.String())
+	}
+}
+
+func TestIssueCommentDTOUnresolvedAgentIDsSerializeAsNull(t *testing.T) {
+	comment := store.IssueComment{
+		Mentions:        []store.IssueCommentMention{{ResolvedAgentID: ""}},
+		ImplicitTrigger: &store.IssueCommentImplicitTrigger{ResolvedAgentID: ""},
+	}
+	payload, err := json.Marshal(issueCommentDTO(comment, "AB-1", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(payload)
+	if !strings.Contains(body, `"resolvedAgentId":null`) || strings.Contains(body, `"resolvedAgentId":""`) {
+		t.Fatalf("unresolved Agent IDs serialized incorrectly: %s", body)
 	}
 }
 

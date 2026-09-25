@@ -14,6 +14,32 @@ type issueCommentWithoutMentionsStore struct {
 	store.IssueCommentStore
 }
 
+type legacyIssueCommentMentionStore struct {
+	*issueCommentWithoutMentionsStore
+	legacyCreateCalls int
+}
+
+func (s *legacyIssueCommentMentionStore) CreateIssueCommentWithMentions(ctx context.Context, projectID string, input store.IssueComment, targetAgentIDs []string) (store.IssueCommentMutationResult, error) {
+	s.legacyCreateCalls++
+	return s.CreateIssueComment(ctx, projectID, input)
+}
+
+func (s *legacyIssueCommentMentionStore) PreviewIssueCommentMentions(ctx context.Context, projectID, issueID string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
+	return nil, nil
+}
+
+func (s *legacyIssueCommentMentionStore) CreateIssueCommentWithTriggers(ctx context.Context, projectID string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	if len(request.MentionAgentIDs) != 0 {
+		return s.CreateIssueCommentWithMentions(ctx, projectID, input, request.MentionAgentIDs)
+	}
+	return s.CreateIssueComment(ctx, projectID, input)
+}
+
+func (s *legacyIssueCommentMentionStore) PreviewIssueCommentTriggers(ctx context.Context, projectID, issueID string, parentCommentID *string, body string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
+	mentions, err := s.PreviewIssueCommentMentions(ctx, projectID, issueID, request.MentionAgentIDs)
+	return store.IssueCommentTriggerPreview{Mentions: mentions}, err
+}
+
 type issueCommentTestStore struct {
 	*projectWorkflowAuthorizationStore
 	comments            []store.IssueComment
@@ -437,6 +463,46 @@ func TestIssueCommentMentionApplicationFailsClosedWithoutMentionStore(t *testing
 		ProjectID: projectID, IssueID: issueID, Body: "body",
 	}, "author"); err == nil {
 		t.Fatal("comment creation unexpectedly succeeded without Issue comment store")
+	}
+}
+
+func TestIssueCommentTypedMentionsFailClosedWithoutTypedStore(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	full := &issueCommentTestStore{projectWorkflowAuthorizationStore: base}
+	legacy := &legacyIssueCommentMentionStore{issueCommentWithoutMentionsStore: &issueCommentWithoutMentionsStore{
+		ControlPlaneStore: full,
+		IssueCommentStore: full,
+	}}
+	service := New(legacy)
+	targets := []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeSquad, ID: "squad-1"}}
+
+	if _, err := service.PreviewIssueCommentTriggers(t.Context(), projectID, issueID, nil, "ask the Squad", store.IssueCommentTriggerRequest{MentionTargets: targets}); err == nil {
+		t.Fatal("typed trigger preview unexpectedly used the legacy store")
+	}
+	if _, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "ask the Squad", RequestKey: "typed-request", MentionTargets: targets,
+	}, "author"); err == nil {
+		t.Fatal("typed comment unexpectedly used the legacy store")
+	}
+	if legacy.legacyCreateCalls != 0 || len(full.comments) != 0 {
+		t.Fatalf("typed request was not rejected before legacy persistence: calls=%d comments=%d", legacy.legacyCreateCalls, len(full.comments))
+	}
+
+	if _, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "ask the Agent", RequestKey: "legacy-request", MentionAgentIDs: []string{"agent-1"},
+	}, "author"); err != nil {
+		t.Fatalf("legacy Agent-only request failed: %v", err)
+	}
+	if legacy.legacyCreateCalls != 1 {
+		t.Fatalf("legacy Agent-only request calls=%d want 1", legacy.legacyCreateCalls)
 	}
 }
 
