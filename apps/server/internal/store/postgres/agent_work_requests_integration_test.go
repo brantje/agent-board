@@ -725,6 +725,26 @@ func TestRequestAgentWorkTxValidatesAuthorityAndSourceComment(t *testing.T) {
 	if err := requestErr(missingParent); !errors.Is(err, store.ErrInvalidArgument) {
 		t.Fatalf("missing parent error=%v", err)
 	}
+
+	missingParentRunID := "00000000-0000-4000-8000-000000000901"
+	missingParentRun := base
+	missingParentRun.AuthorityKind = store.AgentWorkRequestAuthorityParentRun
+	missingParentRun.ParentRunID = &missingParentRunID
+	if err := requestErr(missingParentRun); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing parent Run error=%v", err)
+	}
+
+	missingIssue := base
+	missingIssue.IssueID = "00000000-0000-4000-8000-000000000902"
+	if err := requestErr(missingIssue); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing Issue error=%v", err)
+	}
+
+	missingSource := base
+	missingSource.SourceCommentID = "00000000-0000-4000-8000-000000000903"
+	if err := requestErr(missingSource); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("missing source comment error=%v", err)
+	}
 	bodyMismatch := base
 	bodyMismatch.Task = "different body"
 	if err := requestErr(bodyMismatch); !errors.Is(err, store.ErrConflict) {
