@@ -15,15 +15,20 @@ func TestAgentWorkRequestExecutionContextSurvivesProductionRedactingStore(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstComment := createPlainWorkRequestComment(t, f, author.ID, "first wrapped request")
-	first := requestAgentWorkForTest(t, f, firstComment, nil)
-	if first.Outcome != agentWorkRequestOutcomeQueued || first.WorkRequest.RunID == nil {
-		t.Fatalf("first request=%+v", first)
+
+	firstComment := createHumanMentionComment(t, f, author.ID, "wrapped-first", "first wrapped request")
+	first := firstComment.Mentions[0]
+	if first.Outcome != store.IssueCommentMentionOutcomeQueued || first.DelegatedRunID == nil || first.WorkRequestID == nil {
+		t.Fatalf("first mention=%+v", first)
 	}
-	secondComment := createPlainWorkRequestComment(t, f, author.ID, "second wrapped request")
-	second := requestAgentWorkForTest(t, f, secondComment, nil)
-	if second.Outcome != agentWorkRequestOutcomeCoalesced || second.WorkRequest.ID != first.WorkRequest.ID {
-		t.Fatalf("second request=%+v first=%+v", second, first)
+
+	secondComment := createHumanMentionComment(t, f, author.ID, "wrapped-second", "second wrapped request")
+	second := secondComment.Mentions[0]
+	if second.Outcome != store.IssueCommentMentionOutcomeCoalesced || second.WorkRequestID == nil || *second.WorkRequestID != *first.WorkRequestID {
+		t.Fatalf("second mention=%+v first=%+v", second, first)
+	}
+	if second.DelegatedRunID == nil || *second.DelegatedRunID != *first.DelegatedRunID {
+		t.Fatalf("coalesced mention changed Run: first=%+v second=%+v", first, second)
 	}
 
 	wrapped := evidence.NewRedactingStore(f.store, redaction.NewRegistry())
@@ -31,19 +36,20 @@ func TestAgentWorkRequestExecutionContextSurvivesProductionRedactingStore(t *tes
 	if !ok {
 		t.Fatal("production RedactingStore lost Agent work request execution-context capability")
 	}
-	executionContext, err := contextStore.GetAgentWorkRequestExecutionContext(ctx, f.project.ID, *first.WorkRequest.RunID)
+	executionContext, err := contextStore.GetAgentWorkRequestExecutionContext(ctx, f.project.ID, *first.DelegatedRunID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if executionContext == nil || executionContext.WorkRequestID != first.WorkRequest.ID || len(executionContext.Comments) != 2 {
+	if executionContext == nil || executionContext.WorkRequestID != *first.WorkRequestID || len(executionContext.Comments) != 2 {
 		t.Fatalf("wrapped execution context=%+v", executionContext)
 	}
+
 	byID := make(map[string]store.AgentWorkRequestComment, len(executionContext.Comments))
 	for _, comment := range executionContext.Comments {
 		byID[comment.CommentID] = comment
 	}
 	for _, expected := range []struct {
-		id string
+		id   string
 		body string
 	}{
 		{id: firstComment.ID, body: firstComment.Body},
@@ -53,10 +59,12 @@ func TestAgentWorkRequestExecutionContextSurvivesProductionRedactingStore(t *tes
 		if !ok {
 			t.Fatalf("wrapped execution context missing comment %s: %+v", expected.id, executionContext.Comments)
 		}
-		if comment.Body != expected.body || comment.AuthorID != author.ID || comment.AuthorType != store.ActorTypeHuman || comment.TriggerKind == "" {
+		if comment.Body != expected.body || comment.AuthorID != author.ID || comment.AuthorType != store.ActorTypeHuman ||
+			comment.TriggerKind != store.AgentWorkRequestTriggerMention {
 			t.Fatalf("wrapped comment provenance=%+v", comment)
 		}
 	}
+
 	runs, err := f.store.ListRuns(ctx, f.project.ID)
 	if err != nil {
 		t.Fatal(err)
