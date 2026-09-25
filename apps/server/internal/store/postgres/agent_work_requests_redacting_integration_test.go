@@ -73,3 +73,25 @@ func TestAgentWorkRequestExecutionContextSurvivesProductionRedactingStore(t *tes
 		t.Fatalf("Runs=%+v want parent plus one target", runs)
 	}
 }
+
+
+func TestGetAgentWorkRequestExecutionContextReturnsNilWithoutWorkRequest(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	got, err := f.store.GetAgentWorkRequestExecutionContext(t.Context(), f.project.ID, f.parentRun.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("execution context=%+v want nil", got)
+	}
+}
+
+func TestGetAgentWorkRequestExecutionContextRejectsInvalidIdentifiers(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	if _, err := f.store.GetAgentWorkRequestExecutionContext(t.Context(), "", f.parentRun.ID); err != store.ErrInvalidArgument {
+		t.Fatalf("empty project error=%v want %v", err, store.ErrInvalidArgument)
+	}
+	if _, err := f.store.GetAgentWorkRequestExecutionContext(t.Context(), f.project.ID, ""); err != store.ErrInvalidArgument {
+		t.Fatalf("empty Run error=%v want %v", err, store.ErrInvalidArgument)
+	}
+}
