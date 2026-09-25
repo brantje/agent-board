@@ -42,7 +42,7 @@ func (s *Store) CreateIssueCommentNotifications(ctx context.Context, projectID, 
 			SELECT parent.author_id AS recipient_user_id, 2 AS priority
 			FROM source s
 			JOIN issue_comments parent ON parent.issue_id = s.issue_id AND parent.id = s.parent_comment_id
-			WHERE s.author_type = 'HUMAN' AND parent.author_type = 'HUMAN'
+			WHERE parent.author_type = 'HUMAN'
 			UNION ALL
 			SELECT sub.user_id AS recipient_user_id, 1 AS priority
 			FROM source s

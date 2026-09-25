@@ -110,6 +110,11 @@ func TestIssueSubscriptionsAndNotificationsAreScopedIdempotentAndDurable(t *test
 		t.Fatalf("actor page=%+v err=%v", otherPage, err)
 	}
 
+	// A direct reply must win over a generic subscription for the same recipient/source pair.
+	if err := s.SetIssueSubscription(ctx, project.ID, issue.ID, author.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
 	agentKey := "agent-reply-request"
 	agentReply, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
 		IssueID: issue.ID, ParentCommentID: &root.Comment.ID, AuthorType: store.ActorTypeAgent,
@@ -122,20 +127,37 @@ func TestIssueSubscriptionsAndNotificationsAreScopedIdempotentAndDurable(t *test
 		t.Fatal(err)
 	}
 	authorPage, err = s.ListUserNotifications(ctx, author.ID)
-	if err != nil || len(authorPage.Notifications) != 1 {
+	if err != nil || len(authorPage.Notifications) != 2 || authorPage.UnreadCount != 2 {
 		t.Fatalf("agent direct-reply page=%+v err=%v", authorPage, err)
 	}
+	agentNotificationID := ""
+	for _, notification := range authorPage.Notifications {
+		if notification.SourceCommentID == agentReply.Comment.ID {
+			if notification.Kind != store.NotificationKindCommentReply {
+				t.Fatalf("agent direct-reply notification=%+v", notification)
+			}
+			agentNotificationID = notification.ID
+		}
+	}
+	if agentNotificationID == "" {
+		t.Fatalf("agent direct-reply notification missing from %+v", authorPage)
+	}
 	subscriberPage, err = s.ListUserNotifications(ctx, subscriber.ID)
-	if err != nil || len(subscriberPage.Notifications) != 2 || subscriberPage.Notifications[0].Kind != store.NotificationKindIssueComment {
+	if err != nil || len(subscriberPage.Notifications) != 2 || subscriberPage.Notifications[0].Kind != store.NotificationKindIssueComment || subscriberPage.Notifications[0].SourceCommentID != agentReply.Comment.ID {
 		t.Fatalf("agent subscribed page=%+v err=%v", subscriberPage, err)
 	}
 
-	if err := s.SetNotificationRead(ctx, author.ID, authorPage.Notifications[0].ID, true); err != nil {
+	if err := s.SetNotificationRead(ctx, author.ID, agentNotificationID, true); err != nil {
 		t.Fatal(err)
 	}
 	authorPage, err = s.ListUserNotifications(ctx, author.ID)
-	if err != nil || authorPage.UnreadCount != 0 || authorPage.Notifications[0].ReadAt == nil {
+	if err != nil || authorPage.UnreadCount != 1 {
 		t.Fatalf("read author page=%+v err=%v", authorPage, err)
+	}
+	for _, notification := range authorPage.Notifications {
+		if notification.ID == agentNotificationID && notification.ReadAt == nil {
+			t.Fatalf("read agent notification=%+v", notification)
+		}
 	}
 	if updated, err := s.MarkAllNotificationsRead(ctx, subscriber.ID); err != nil || updated != 2 {
 		t.Fatalf("mark all updated=%d err=%v", updated, err)
