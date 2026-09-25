@@ -274,6 +274,12 @@ try {
     assert.equal(preview.implicit, null)
     await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Eligible to request work').waitFor()
 
+    const pausedRunnerProject = await call('PATCH', '/api/projects/' + project.id, {
+      token: creator.tokens.accessToken,
+      body: { allowInternalRunner: false }
+    })
+    assert.equal(pausedRunnerProject.allowInternalRunner, false, 'failed to pause internal runner admission for coalescing proof')
+
     await page.locator('textarea').fill(mentionBody)
     const mentionPostPromise = page.waitForResponse(response => (
       response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments')
@@ -348,6 +354,13 @@ try {
     assert.equal(coalescedComment.mentions[0].outcome, 'COALESCED')
     assert.equal(coalescedComment.mentions[0].reasonCode, null)
     assert.equal(coalescedComment.mentions[0].delegatedRunId, postedMentionComment.mentions[0].delegatedRunId)
+
+    const resumedRunnerProject = await call('PATCH', '/api/projects/' + project.id, {
+      token: creator.tokens.accessToken,
+      body: { allowInternalRunner: true }
+    })
+    assert.equal(resumedRunnerProject.allowInternalRunner, true, 'failed to resume internal runner admission after coalescing proof')
+
     const coalescedArticle = page.locator('article').filter({ hasText: coalescedBody })
     await coalescedArticle.getByText('@Mention E2E Target', { exact: true }).waitFor()
     await coalescedArticle.getByText('Folded into pending Agent work').waitFor()
