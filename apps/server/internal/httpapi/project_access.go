@@ -124,6 +124,9 @@ func (a *api) authorizeProjectRequest(r *http.Request, actor app.AuthenticatedUs
 		}
 		return a.projectAccess.AuthorizeAdministration(r.Context(), actor, projectID)
 	}
+	if tail[len(tail)-1] == "subscription" {
+		return a.projectAccess.AuthorizeRead(r.Context(), actor, projectID)
+	}
 
 	if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
 		return a.projectAccess.AuthorizeRead(r.Context(), actor, projectID)

@@ -187,6 +187,40 @@ type IssueTimelineEntryDTO struct {
 	Activity   *EventEvidenceDTO `json:"activity"`
 }
 
+type UserNotificationDTO struct {
+	ID                string     `json:"id"`
+	Kind              string     `json:"kind"`
+	ProjectID         string     `json:"projectId"`
+	ProjectName       string     `json:"projectName"`
+	IssueID           string     `json:"issueId"`
+	IssueKey          string     `json:"issueKey"`
+	IssueTitle        string     `json:"issueTitle"`
+	SourceCommentID   string     `json:"sourceCommentId"`
+	CommentAuthorType string     `json:"commentAuthorType"`
+	CommentAuthorID   string     `json:"commentAuthorId"`
+	CommentAuthorName string     `json:"commentAuthorName"`
+	Preview           string     `json:"preview"`
+	CreatedAt         time.Time  `json:"createdAt"`
+	ReadAt            *time.Time `json:"readAt"`
+}
+
+type UserNotificationsDTO struct {
+	Notifications []UserNotificationDTO `json:"notifications"`
+	UnreadCount   int                   `json:"unreadCount"`
+}
+
+type NotificationReadRequest struct {
+	Read *bool `json:"read"`
+}
+
+type NotificationReadAllDTO struct {
+	Updated int `json:"updated"`
+}
+
+type IssueSubscriptionDTO struct {
+	Subscribed bool `json:"subscribed"`
+}
+
 type IssueRelationshipDTO struct {
 	ID            string    `json:"id"`
 	ProjectID     string    `json:"projectId"`

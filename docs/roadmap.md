@@ -30,8 +30,10 @@ Canonical delegation, serialized Workspace handoff, delegated result/parent cont
 
 Remaining collaboration work should be added only where a concrete workflow needs it:
 
-- human handoff/notification behavior;
+- human handoff behavior;
 - broader Agent messaging/wake behavior.
+
+Issue discussion subscriptions, durable in-app notifications and the authenticated navbar notification control are implemented in #122. They remain bounded collaboration behavior over the existing Issue comment, Project authorization and SSE read models; this does not introduce email/push/digest delivery or a generic notification platform.
 
 Do not add a Squad scheduler, delegation queue or alternate Workspace model.
 

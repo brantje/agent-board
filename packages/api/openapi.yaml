@@ -60,6 +60,12 @@ paths:
     $ref: ./paths/groups.yaml#/members
   /api/groups/{groupID}/members/{userID}:
     $ref: ./paths/groups.yaml#/member
+  /api/notifications:
+    $ref: ./paths/notifications.yaml#/collection
+  /api/notifications/{notificationID}:
+    $ref: ./paths/notifications.yaml#/read
+  /api/notifications/read-all:
+    $ref: ./paths/notifications.yaml#/readAll
   /api/runners:
     $ref: ./paths/runners.yaml#/collection
   /api/runner/register:
@@ -152,6 +158,8 @@ paths:
     $ref: ./paths/issues-runs.yaml#/path2
   /api/projects/{projectID}/issues/{issueID}/comments:
     $ref: ./paths/issue-comments.yaml#/comments
+  /api/projects/{projectID}/issues/{issueID}/subscription:
+    $ref: ./paths/issue-comments.yaml#/subscription
   /api/projects/{projectID}/issues/{issueID}/comments/mention-preview:
     $ref: ./paths/issue-comments.yaml#/mentionPreview
   /api/projects/{projectID}/issues/{issueID}/comments/trigger-preview:

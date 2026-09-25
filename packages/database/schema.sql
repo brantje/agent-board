@@ -376,6 +376,40 @@ CREATE UNIQUE INDEX issue_comments_human_action_uq
     ON issue_comments (issue_id, author_id, source_action_key)
     WHERE author_type = 'HUMAN' AND source_action_key IS NOT NULL;
 
+CREATE TABLE issue_subscriptions (
+    project_id uuid NOT NULL,
+    issue_id uuid NOT NULL,
+    user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (issue_id, user_id),
+    CONSTRAINT issue_subscriptions_issue_fk FOREIGN KEY (project_id, issue_id)
+        REFERENCES issues(project_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX issue_subscriptions_user_idx ON issue_subscriptions (user_id, created_at DESC, issue_id);
+
+CREATE TABLE user_notifications (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    recipient_user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    project_id uuid NOT NULL,
+    issue_id uuid NOT NULL,
+    source_comment_id uuid NOT NULL,
+    kind text NOT NULL CHECK (kind IN ('COMMENT_REPLY', 'ISSUE_COMMENT')),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    read_at timestamptz,
+    CONSTRAINT user_notifications_issue_fk FOREIGN KEY (project_id, issue_id)
+        REFERENCES issues(project_id, id) ON DELETE CASCADE,
+    CONSTRAINT user_notifications_comment_fk FOREIGN KEY (issue_id, source_comment_id)
+        REFERENCES issue_comments(issue_id, id) ON DELETE CASCADE,
+    UNIQUE (recipient_user_id, source_comment_id)
+);
+
+CREATE INDEX user_notifications_recipient_idx
+    ON user_notifications (recipient_user_id, created_at DESC, id DESC);
+CREATE INDEX user_notifications_unread_idx
+    ON user_notifications (recipient_user_id, created_at DESC, id DESC)
+    WHERE read_at IS NULL;
+
 CREATE TABLE issue_comment_reactions (
     issue_id uuid NOT NULL,
     comment_id uuid NOT NULL,

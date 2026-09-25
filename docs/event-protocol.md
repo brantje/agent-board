@@ -116,6 +116,8 @@ Issue ownership and Board-status Events describe those Issue mutations only. Ass
 
 `issue.comment_changed` is the equivalent lightweight persist-before-publish notification for an actual edit, delete/tombstone, resolve, reopen, reaction-add or reaction-remove mutation. Its payload contains `commentId`, a bounded `change` discriminator and, for reaction changes, the reaction key; comment body content is never copied into Events. Idempotent no-op requests emit no Event. Like `issue.comment_created`, it is suppressed from the visible Issue timeline and exists to drive durable Project-event revalidation. Lifecycle changes to an existing comment do not create, resume or cancel Runs and never change Issue assignment or Board status; only comment creation with an accepted explicit structured mention or deterministic implicit route can request canonical delegated work.
 
+Issue discussion notifications are a separate durable read projection, not a new Event family. After the comment and `issue.comment_created` Event commit, the shared comment application path may persist deduplicated recipient notifications. The existing Project comment Event can prompt the browser to re-read its notification projection, but notification rows remain authoritative for listing/read state. Notification generation never changes the comment outcome, creates a Run or synthesizes an Issue status Event; failures are nonfatal after the source comment commit.
+
 ### Run
 
 ```text

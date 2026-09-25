@@ -1,0 +1,47 @@
+collection:
+  get:
+    operationId: listNotifications
+    description: Lists all currently accessible in-app Issue collaboration notifications for the authenticated User, newest first. Access and display previews are resolved at read time.
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Available notifications and the current unread count.
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/UserNotifications}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+read:
+  parameters:
+  - name: notificationID
+    in: path
+    required: true
+    schema: {type: string, format: uuid}
+  patch:
+    operationId: setNotificationRead
+    description: Sets one accessible notification's durable read state.
+    security: [{BearerAuth: []}]
+    requestBody:
+      required: true
+      content:
+        application/json:
+          schema: {$ref: ../schemas/control-plane.yaml#/NotificationReadInput}
+    responses:
+      '204': {description: Notification read state updated.}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+
+readAll:
+  post:
+    operationId: markAllNotificationsRead
+    description: Marks all currently accessible unread notifications as read.
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Number of notifications updated.
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/NotificationReadAll}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error

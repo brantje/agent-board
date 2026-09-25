@@ -163,6 +163,20 @@ func (s *ProjectAccessService) ListIssueComments(ctx context.Context, actor Auth
 	return s.controlPlane.ListIssueComments(ctx, projectID, issueID)
 }
 
+func (s *ProjectAccessService) GetIssueSubscription(ctx context.Context, actor AuthenticatedUser, projectID, issueID string) (bool, error) {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return false, err
+	}
+	return s.controlPlane.GetIssueSubscription(ctx, projectID, issueID, actor.ID)
+}
+
+func (s *ProjectAccessService) SetIssueSubscription(ctx context.Context, actor AuthenticatedUser, projectID, issueID string, subscribed bool) error {
+	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
+		return err
+	}
+	return s.controlPlane.SetIssueSubscription(ctx, projectID, issueID, actor.ID, subscribed)
+}
+
 func (s *ProjectAccessService) ListRecentIssueDiscussions(ctx context.Context, actor AuthenticatedUser, projectID, issueID string, limit int) ([]store.IssueDiscussionRoot, error) {
 	if err := s.AuthorizeRead(ctx, actor, projectID); err != nil {
 		return nil, err

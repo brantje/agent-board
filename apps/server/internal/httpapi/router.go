@@ -125,6 +125,7 @@ func newRouterWithProjectAccess(service *app.Service, runEvidence *app.RunEviden
 			a.registerAuthRoutes(r)
 			a.registerAuthManagementRoutes(r)
 			a.registerGroupRoutes(r)
+			a.registerNotificationRoutes(r)
 		}
 		if a.projectAccess != nil {
 			a.registerProjectAccessRoutes(r)
