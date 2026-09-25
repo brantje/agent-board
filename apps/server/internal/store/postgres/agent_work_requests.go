@@ -125,7 +125,7 @@ func (s *Store) requestAgentWorkTx(ctx context.Context, tx pgx.Tx, input agentWo
 		if existing.RunID == nil {
 			return agentWorkRequestResult{WorkRequest: existing, Outcome: agentWorkRequestOutcomeCoalesced}, nil
 		}
-		if activeErr == nil && active.ID == *existing.RunID && active.Status == "QUEUED" {
+		if activeErr == nil && active.ID == *existing.RunID && active.Status == "QUEUED" && active.StartedAt == nil {
 			return agentWorkRequestResult{WorkRequest: existing, Outcome: agentWorkRequestOutcomeCoalesced}, nil
 		}
 		// An unsealed request whose associated Run has already crossed the safe
@@ -137,7 +137,7 @@ func (s *Store) requestAgentWorkTx(ctx context.Context, tx pgx.Tx, input agentWo
 	}
 
 	if activeErr == nil {
-		if active.Status == "QUEUED" {
+		if active.Status == "QUEUED" && active.StartedAt == nil {
 			delegationID, compatible, compatErr := queuedRunAgentWorkCompatibility(ctx, tx, input, active)
 			if compatErr != nil {
 				return agentWorkRequestResult{}, compatErr

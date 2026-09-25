@@ -277,6 +277,43 @@ func TestCommentCoalescingRacingSchedulerAdmissionDoesNotDeadlock(t *testing.T) 
 	}
 }
 
+
+func TestResumedQueuedRunDefersNewCommentWork(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	if _, err := f.store.pool.Exec(ctx, `UPDATE runs SET status='COMPLETED', completed_at=now(), updated_at=now() WHERE project_id=$1 AND id=$2`, f.project.ID, f.parentRun.ID); err != nil {
+		t.Fatal(err)
+	}
+	author, err := f.store.CreateUser(ctx, authUser("work-resumed-author", "work-resumed-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := createHumanMentionWork(t, f, author.ID, "resumed-first", "Initial queued work")
+	if first.Outcome != store.IssueCommentMentionOutcomeQueued || first.WorkRequestID == nil || first.DelegatedRunID == nil {
+		t.Fatalf("first=%+v", first)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE runs
+		SET status='QUEUED', started_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, *first.DelegatedRunID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE agent_work_requests
+		SET sealed_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, *first.WorkRequestID); err != nil {
+		t.Fatal(err)
+	}
+
+	followUp := createHumanMentionWork(t, f, author.ID, "resumed-follow-up", "Follow-up after prior admission")
+	if followUp.Outcome != store.IssueCommentMentionOutcomeDeferred || followUp.WorkRequestID == nil ||
+		*followUp.WorkRequestID == *first.WorkRequestID || followUp.DelegatedRunID != nil {
+		t.Fatalf("resumed follow-up=%+v first=%+v", followUp, first)
+	}
+}
+
 func TestSchedulerAdmissionSealsAgentWorkRequestBoundary(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
