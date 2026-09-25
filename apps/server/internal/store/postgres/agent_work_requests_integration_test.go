@@ -616,6 +616,167 @@ func TestDeferredAgentWorkRequestWaitsForTemporarilyUnavailableTarget(t *testing
 	}
 }
 
+func TestRequestAgentWorkTxValidatesAuthorityAndSourceComment(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-policy-author", "work-policy-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	human := createPlainWorkRequestComment(t, f, author.ID, "human source")
+	base := agentWorkRequestInput{
+		ProjectID: f.project.ID, IssueID: f.issue.ID, SourceCommentID: human.ID,
+		TargetAgentID: f.target.ID, Task: human.Body, AuthorityKind: store.AgentWorkRequestAuthorityIssue,
+	}
+	requestErr := func(input agentWorkRequestInput) error {
+		t.Helper()
+		tx, err := f.store.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		_, err = f.store.requestAgentWorkTx(ctx, tx, input)
+		return err
+	}
+
+	if err := requestErr(agentWorkRequestInput{}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("empty request error=%v", err)
+	}
+	invalidAuthority := base
+	invalidAuthority.AuthorityKind = "OTHER"
+	if err := requestErr(invalidAuthority); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid authority error=%v", err)
+	}
+	missingParent := base
+	missingParent.AuthorityKind = store.AgentWorkRequestAuthorityParentRun
+	if err := requestErr(missingParent); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("missing parent error=%v", err)
+	}
+	bodyMismatch := base
+	bodyMismatch.Task = "different body"
+	if err := requestErr(bodyMismatch); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("body mismatch error=%v", err)
+	}
+
+	parentRunID := f.parentRun.ID
+	humanAsParent := base
+	humanAsParent.AuthorityKind = store.AgentWorkRequestAuthorityParentRun
+	humanAsParent.ParentRunID = &parentRunID
+	if err := requestErr(humanAsParent); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("human parent-authority error=%v", err)
+	}
+
+	actionKey := "work-policy-agent-source"
+	sourceRunID := f.parentRun.ID
+	agentResult, err := f.store.CreateIssueComment(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: f.parent.ID,
+		SourceRunID: &sourceRunID, SourceActionKey: &actionKey, Body: "agent source",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentAsIssue := base
+	agentAsIssue.SourceCommentID = agentResult.Comment.ID
+	agentAsIssue.Task = agentResult.Comment.Body
+	if err := requestErr(agentAsIssue); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("Agent comment under Issue authority error=%v", err)
+	}
+
+	otherIssue, err := f.store.CreateIssue(ctx, store.Issue{ProjectID: f.project.ID, Title: "Other work request Issue", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongIssue := humanAsParent
+	wrongIssue.IssueID = otherIssue.ID
+	if err := requestErr(wrongIssue); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("cross-Issue parent error=%v", err)
+	}
+
+	if _, err := f.store.pool.Exec(ctx, `UPDATE agents SET state='DISABLED' WHERE id=$1`, f.target.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := requestErr(base); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("disabled target error=%v", err)
+	}
+	if _, err := f.store.pool.Exec(ctx, `UPDATE agents SET state='ENABLED' WHERE id=$1`, f.target.ID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRequestAgentWorkTxParentAuthorityUsesCanonicalDelegation(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	actionKey := "parent-authority-source"
+	sourceRunID := f.parentRun.ID
+	commentResult, err := f.store.CreateIssueComment(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeAgent, AuthorID: f.parent.ID,
+		SourceRunID: &sourceRunID, SourceActionKey: &actionKey, Body: "Delegate this bounded follow-up",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentRunID := f.parentRun.ID
+	input := agentWorkRequestInput{
+		ProjectID: f.project.ID, IssueID: f.issue.ID, SourceCommentID: commentResult.Comment.ID,
+		TargetAgentID: f.target.ID, Task: commentResult.Comment.Body,
+		AuthorityKind: store.AgentWorkRequestAuthorityParentRun, ParentRunID: &parentRunID,
+	}
+	tx, err := f.store.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	result, err := f.store.requestAgentWorkTx(ctx, tx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Outcome != agentWorkRequestOutcomeQueued || result.Delegation == nil ||
+		result.WorkRequest.ParentRunID == nil || *result.WorkRequest.ParentRunID != f.parentRun.ID ||
+		result.WorkRequest.RunID == nil || result.WorkRequest.DelegationID == nil {
+		t.Fatalf("parent-authority result=%+v", result)
+	}
+	delegationID, compatible, err := queuedRunAgentWorkCompatibility(ctx, tx, input, result.Delegation.DelegatedRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !compatible || delegationID == nil || *delegationID != result.Delegation.Delegation.ID {
+		t.Fatalf("same-parent compatibility id=%v compatible=%v", delegationID, compatible)
+	}
+	otherParent := "00000000-0000-4000-8000-000000000888"
+	incompatible := input
+	incompatible.ParentRunID = &otherParent
+	_, compatible, err = queuedRunAgentWorkCompatibility(ctx, tx, incompatible, result.Delegation.DelegatedRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compatible {
+		t.Fatal("delegated Run accepted different parent authority")
+	}
+}
+
+func TestAgentWorkRequestExecutionContextRejectsInvalidAndOrphanBindings(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	if _, err := f.store.GetAgentWorkRequestExecutionContext(ctx, "", f.parentRun.ID); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("invalid context error=%v", err)
+	}
+	missing, err := f.store.GetAgentWorkRequestExecutionContext(ctx, f.project.ID, "00000000-0000-4000-8000-000000000999")
+	if err != nil || missing != nil {
+		t.Fatalf("missing context=%+v err=%v", missing, err)
+	}
+	var requestID string
+	if err := f.store.pool.QueryRow(ctx, `
+		INSERT INTO agent_work_requests (project_id, issue_id, workspace_id, target_agent_id, authority_kind, run_id)
+		VALUES ($1,$2,$3,$4,'ISSUE',$5)
+		RETURNING id::text
+	`, f.project.ID, f.issue.ID, f.parentRun.WorkspaceID, f.target.ID, f.parentRun.ID).Scan(&requestID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.GetAgentWorkRequestExecutionContext(ctx, f.project.ID, f.parentRun.ID); !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("orphan work request %s context error=%v", requestID, err)
+	}
+}
+
 func findMentionCommentIDByWorkRequest(t *testing.T, f delegationFixture, workRequestID string) string {
 	t.Helper()
 	var commentID string
