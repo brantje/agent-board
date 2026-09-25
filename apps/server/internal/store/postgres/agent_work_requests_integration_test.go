@@ -470,6 +470,115 @@ func TestFailedActiveCommentRunReleasesDeferredFollowUp(t *testing.T) {
 	}
 }
 
+func TestDeferredAgentWorkRequestClosesWhenTriggerCommentIsDeleted(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-deleted-author", "work-deleted-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := createHumanMentionWork(t, f, author.ID, "deleted-first", "Initial active work")
+	if first.DelegatedRunID == nil {
+		t.Fatalf("first=%+v", first)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE runs
+		SET status='RUNNING', started_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, *first.DelegatedRunID); err != nil {
+		t.Fatal(err)
+	}
+	deferredComment := createHumanMentionComment(t, f, author.ID, "deleted-deferred", "Follow-up that is withdrawn")
+	deferred := deferredComment.Mentions[0]
+	if deferred.Outcome != store.IssueCommentMentionOutcomeDeferred || deferred.WorkRequestID == nil {
+		t.Fatalf("deferred=%+v", deferred)
+	}
+
+	completeRunAndFinalizeWorkRequest(t, f, *first.DelegatedRunID)
+	if _, err := f.store.DeleteIssueComment(ctx, f.project.ID, f.issue.ID, deferredComment.ID, author.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	reconciled, err := f.store.ReconcilePendingAgentWorkRequest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reconciled.Handled || len(reconciled.Events) != 0 {
+		t.Fatalf("deleted trigger reconciliation=%+v", reconciled)
+	}
+
+	var sealed, closed bool
+	var runID, delegationID *string
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT sealed_at IS NOT NULL, closed_at IS NOT NULL, run_id::text, delegation_id::text
+		FROM agent_work_requests
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, *deferred.WorkRequestID).Scan(&sealed, &closed, &runID, &delegationID); err != nil {
+		t.Fatal(err)
+	}
+	if !sealed || !closed || runID != nil || delegationID != nil {
+		t.Fatalf("withdrawn work request sealed=%v closed=%v run=%v delegation=%v", sealed, closed, runID, delegationID)
+	}
+}
+
+func TestDeferredAgentWorkRequestWaitsForTemporarilyUnavailableTarget(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-unavailable-author", "work-unavailable-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := createHumanMentionWork(t, f, author.ID, "unavailable-first", "Initial active work")
+	if first.DelegatedRunID == nil {
+		t.Fatalf("first=%+v", first)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE runs
+		SET status='RUNNING', started_at=now(), updated_at=now()
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, *first.DelegatedRunID); err != nil {
+		t.Fatal(err)
+	}
+	deferred := createHumanMentionWork(t, f, author.ID, "unavailable-deferred", "Follow-up after the target is available again")
+	if deferred.Outcome != store.IssueCommentMentionOutcomeDeferred || deferred.WorkRequestID == nil {
+		t.Fatalf("deferred=%+v", deferred)
+	}
+	completeRunAndFinalizeWorkRequest(t, f, *first.DelegatedRunID)
+
+	if _, err := f.store.pool.Exec(ctx, `UPDATE agents SET state='DISABLED' WHERE id=$1`, f.target.ID); err != nil {
+		t.Fatal(err)
+	}
+	blocked, err := f.store.ReconcilePendingAgentWorkRequest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Handled || len(blocked.Events) != 0 {
+		t.Fatalf("temporarily unavailable target should leave work pending: %+v", blocked)
+	}
+	var open bool
+	if err := f.store.pool.QueryRow(ctx, `
+		SELECT sealed_at IS NULL AND closed_at IS NULL AND run_id IS NULL AND delegation_id IS NULL
+		FROM agent_work_requests
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, *deferred.WorkRequestID).Scan(&open); err != nil {
+		t.Fatal(err)
+	}
+	if !open {
+		t.Fatal("temporarily unavailable target terminalized deferred work")
+	}
+
+	if _, err := f.store.pool.Exec(ctx, `UPDATE agents SET state='ENABLED' WHERE id=$1`, f.target.ID); err != nil {
+		t.Fatal(err)
+	}
+	reconciled, err := f.store.ReconcilePendingAgentWorkRequest(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reconciled.Handled || len(reconciled.Events) != 1 || reconciled.Events[0].Type != "run.created" {
+		t.Fatalf("restored target did not receive deferred work: %+v", reconciled)
+	}
+}
+
 func findMentionCommentIDByWorkRequest(t *testing.T, f delegationFixture, workRequestID string) string {
 	t.Helper()
 	var commentID string
