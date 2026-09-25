@@ -428,6 +428,9 @@ func TestIssueCommentMentionApplicationFailsClosedWithoutMentionStore(t *testing
 	if _, err := service.PreviewIssueCommentMentions(t.Context(), projectID, issueID, []string{"agent-2"}); err == nil {
 		t.Fatal("preview unexpectedly succeeded without structured mention store")
 	}
+	if _, err := service.PreviewIssueCommentTargets(t.Context(), projectID, issueID, []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeSquad, ID: "squad-2"}}); err == nil {
+		t.Fatal("typed preview unexpectedly succeeded without structured mention store")
+	}
 
 	noComments := New(base)
 	if _, err := noComments.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
