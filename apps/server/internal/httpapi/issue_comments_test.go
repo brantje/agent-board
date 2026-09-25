@@ -18,6 +18,25 @@ const (
 	httpReplyID   = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 )
 
+func TestIssueCommentTargetRequestsValidation(t *testing.T) {
+	validID := "11111111-1111-4111-8111-111111111111"
+	if targets, ok := issueCommentTargetRequests([]IssueCommentTargetRequest{{Type: store.IssueCommentTargetTypeAgent, ID: validID}, {Type: store.IssueCommentTargetTypeSquad, ID: validID}}); !ok || len(targets) != 2 {
+		t.Fatalf("valid typed targets=%+v ok=%v", targets, ok)
+	}
+	cases := []IssueCommentTargetRequest{
+		{Type: "USER", ID: validID},
+		{Type: store.IssueCommentTargetTypeAgent, ID: "not-a-uuid"},
+	}
+	for _, value := range cases {
+		if targets, ok := issueCommentTargetRequests([]IssueCommentTargetRequest{value}); ok || targets != nil {
+			t.Fatalf("invalid typed target accepted: %+v", value)
+		}
+	}
+	if targets, ok := issueCommentTargetRequests([]IssueCommentTargetRequest{{Type: store.IssueCommentTargetTypeAgent, ID: validID}, {Type: store.IssueCommentTargetTypeAgent, ID: validID}}); ok || targets != nil {
+		t.Fatal("duplicate typed target accepted")
+	}
+}
+
 type issueCommentHTTPStore struct {
 	*fakeControlPlaneStore
 	comments []store.IssueComment
