@@ -348,6 +348,55 @@ func TestIssueCommentImplicitOwnerFallbackExcludesUserAndUnassignedIssues(t *tes
 	}
 }
 
+
+func TestIssueCommentImplicitUnavailableTargetPersistsBlockedWithoutExecution(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("unavailable-implicit-author", "unavailable-implicit@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := f.store.CreateIssue(ctx, store.Issue{ProjectID: f.project.ID, Title: "Unavailable implicit target", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, `
+		UPDATE issues
+		SET assignee_type='AGENT', assignee_id=$3
+		WHERE project_id=$1 AND id=$2
+	`, f.project.ID, issue.ID, f.target.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.store.pool.Exec(ctx, `UPDATE agents SET state='DISABLED' WHERE id=$1`, f.target.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	key := "unavailable-implicit-request"
+	result, err := f.store.CreateIssueCommentWithTriggers(ctx, f.project.ID, store.IssueComment{
+		IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+		SourceActionKey: &key, Body: "Please continue when this Agent is available.",
+	}, store.IssueCommentTriggerRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger := result.Comment.ImplicitTrigger
+	if trigger == nil || trigger.TargetAgentID != f.target.ID ||
+		trigger.Outcome != store.IssueCommentImplicitOutcomeBlocked ||
+		trigger.ReasonCode == nil || *trigger.ReasonCode != store.IssueCommentMentionReasonTargetUnavailable ||
+		trigger.WorkRequestID != nil || trigger.DelegationID != nil || trigger.DelegatedRunID != nil {
+		t.Fatalf("unavailable implicit trigger=%+v", trigger)
+	}
+	runs, err := f.store.ListRuns(ctx, f.project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range runs {
+		if run.IssueID == issue.ID {
+			t.Fatalf("unavailable implicit trigger created execution: %+v", runs)
+		}
+	}
+}
+
 func TestIssueCommentImplicitOversizedBodyPersistsBlockedWithoutExecution(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
