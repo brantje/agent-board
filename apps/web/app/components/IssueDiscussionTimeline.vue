@@ -203,12 +203,13 @@ async function loadMentionAgents() {
   mentionLoading.value = true
   mentionLoadError.value = undefined
   try {
-    const [agents, squads] = await Promise.all([
-      apiRequest<Agent[]>(apiPath('agents', props.projectId)),
-      apiRequest<Squad[]>(apiPath('squads', props.projectId))
-    ])
-    mentionAgents.value = agents
-    mentionSquads.value = squads
+    mentionAgents.value = await apiRequest<Agent[]>(apiPath('agents', props.projectId))
+    try {
+      mentionSquads.value = await apiRequest<Squad[]>(apiPath('squads', props.projectId))
+    } catch {
+      // Agent selection remains usable when an older deployment does not yet expose Squads.
+      mentionSquads.value = []
+    }
   } catch (failure) {
     mentionLoadError.value = failure as Error
   } finally {
@@ -228,7 +229,7 @@ async function refreshTriggerPreview() {
         body: {
           parentCommentId: replyTo.value?.id ?? null,
           body: body.value.trim(),
-          mentionTargets: selectedMentionTargets.value.map(({ type, id }) => ({ type, id })),
+          ...(selectedMentionSquads.value.length ? { mentionTargets: selectedMentionTargets.value.map(({ type, id }) => ({ type, id })) } : {}),
           mentionAgentIds: targetAgentIDs,
           suppressImplicitAgentTrigger: suppressImplicitAgentTrigger.value
         }
@@ -394,7 +395,7 @@ async function submit() {
   if (mentionAgentIds.length) {
     requestBody.mentionAgentIds = mentionAgentIds
   }
-  if (selectedMentionTargets.value.length) {
+  if (selectedMentionSquads.value.length) {
     requestBody.mentionTargets = selectedMentionTargets.value.map(({ type, id }) => ({ type, id }))
   }
 
