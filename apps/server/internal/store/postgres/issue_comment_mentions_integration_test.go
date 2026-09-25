@@ -83,6 +83,43 @@ func TestHumanIssueCommentMentionsPersistStableTargetsDispatchAndRetryIdempotent
 	}
 }
 
+func TestHumanIssueCommentSquadMentionPersistsSquadIdentityAndLeaderProvenance(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("squad-mention-author", "squad-mention@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	squad, err := f.store.CreateSquad(ctx, store.Squad{ProjectID: f.project.ID, Name: "Backend Squad", LeaderAgentID: f.target.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestKey := "squad-mention-request"
+	result, err := f.store.CreateIssueCommentWithTargets(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+		SourceActionKey: &requestKey, Body: "Please ask the backend squad.",
+	}, []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeSquad, ID: squad.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Comment.Mentions) != 1 {
+		t.Fatalf("mentions=%+v", result.Comment.Mentions)
+	}
+	mention := result.Comment.Mentions[0]
+	if mention.Target.Type != store.IssueCommentTargetTypeSquad || mention.Target.ID != squad.ID ||
+		mention.TargetName != squad.Name || mention.ResolvedAgentID != f.target.ID ||
+		mention.ResolvedAgentName != f.target.Name || mention.Outcome != store.IssueCommentMentionOutcomeQueued ||
+		mention.DelegationID == nil || mention.DelegatedRunID == nil {
+		t.Fatalf("squad mention=%+v", mention)
+	}
+	delegation, err := f.store.GetDelegationByRun(ctx, f.project.ID, *mention.DelegatedRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.TargetAgentID != f.target.ID || delegation.SourceCommentID == nil || *delegation.SourceCommentID != result.Comment.ID {
+		t.Fatalf("squad delegation=%+v", delegation)
+	}
+}
 
 func TestHumanIssueCommentMultipleMentionsPersistMixedOutcomesAndRetryWithoutDuplicateDelegation(t *testing.T) {
 	f := newDelegationFixture(t, true)
@@ -202,14 +239,18 @@ func TestIssueCommentMentionOversizedBodyPersistsBlockedWithoutExecution(t *test
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
 	author, err := f.store.CreateUser(ctx, authUser("oversized-mention-author", "oversized-mention@example.com", store.UserStatusActive))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	requestKey := "oversized-mention-request"
 	body := strings.Repeat("x", store.MaxDelegationTaskCharacters+1)
 	result, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
 		IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
 		SourceActionKey: &requestKey, Body: body,
 	}, []string{f.target.ID})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if result.Comment.ID == "" || len(result.Comment.Mentions) != 1 {
 		t.Fatalf("comment=%+v", result.Comment)
 	}
@@ -220,7 +261,9 @@ func TestIssueCommentMentionOversizedBodyPersistsBlockedWithoutExecution(t *test
 		t.Fatalf("oversized mention=%+v", mention)
 	}
 	runs, err := f.store.ListRuns(ctx, f.project.ID)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(runs) != 1 {
 		t.Fatalf("oversized mention created execution: %+v", runs)
 	}
@@ -479,7 +522,6 @@ func TestIssueCommentMentionTargetIsProjectScoped(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeIssueCommentMentionAgentIDsRejectsInvalidInput(t *testing.T) {
 	valid := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	tooMany := make([]string, store.MaxIssueCommentMentions+1)
@@ -487,9 +529,9 @@ func TestNormalizeIssueCommentMentionAgentIDsRejectsInvalidInput(t *testing.T) {
 		tooMany[index] = valid
 	}
 	for name, values := range map[string][]string{
-		"too many": tooMany,
-		"blank":    {""},
-		"invalid":  {"not-a-uuid"},
+		"too many":  tooMany,
+		"blank":     {""},
+		"invalid":   {"not-a-uuid"},
 		"duplicate": {valid, valid},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -499,7 +541,6 @@ func TestNormalizeIssueCommentMentionAgentIDsRejectsInvalidInput(t *testing.T) {
 		})
 	}
 }
-
 
 func TestHumanIssueCommentMentionsCoalesceQueuedAndDeferRunningTarget(t *testing.T) {
 	f := newDelegationFixture(t, true)
