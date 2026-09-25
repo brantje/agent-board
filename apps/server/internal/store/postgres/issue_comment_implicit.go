@@ -150,7 +150,7 @@ func (s *Store) createIssueCommentImplicitTriggerTx(
 			project_id, issue_id, comment_id, target_agent_id, target_type, target_id, resolved_agent_id, routing_reason, outcome, reason_code, delegation_id, work_request_id
 		)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-		RETURNING target_agent_id::text, target_type, target_id::text, resolved_agent_id::text, routing_reason, outcome, reason_code, delegation_id::text, work_request_id::text, created_at
+		RETURNING target_agent_id::text, target_type, target_id::text, COALESCE(resolved_agent_id::text, ''), routing_reason, outcome, reason_code, delegation_id::text, work_request_id::text, created_at
 	`, projectID, comment.IssueID, comment.ID, storedAgentID, route.Target.Type, route.Target.ID, nullableString(target.ResolvedAgentID), route.RoutingReason, outcome, reasonCode, persistedDelegationID, workRequestID).Scan(
 		&value.TargetAgentID, &value.Target.Type, &value.Target.ID, &value.ResolvedAgentID, &value.RoutingReason, &value.Outcome, &value.ReasonCode, &value.DelegationID, &value.WorkRequestID, &value.CreatedAt,
 	); err != nil {
@@ -313,7 +313,7 @@ func loadIssueCommentImplicitTriggersWith(ctx context.Context, q issueCommentRow
 	rows, err := q.Query(ctx, `
 		SELECT t.comment_id::text, t.target_agent_id::text, t.target_type, t.target_id::text,
 		       COALESCE(CASE WHEN t.target_type='SQUAD' THEN s.name ELSE a.name END, ''),
-		       t.resolved_agent_id::text, COALESCE(ra.name, a.name, ''),
+		       COALESCE(t.resolved_agent_id::text, ''), COALESCE(ra.name, a.name, ''),
 		       t.routing_reason, t.outcome, t.reason_code,
 		       COALESCE(t.delegation_id, wr.delegation_id)::text, t.work_request_id::text,
 		       d.delegated_run_id::text, t.created_at

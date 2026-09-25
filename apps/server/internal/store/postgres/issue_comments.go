@@ -156,6 +156,11 @@ func (s *Store) PreviewIssueCommentTargets(ctx context.Context, projectID, issue
 }
 
 func (s *Store) createIssueComment(ctx context.Context, projectID string, input store.IssueComment, mentions []store.IssueCommentTarget, implicitRouting, suppressImplicit bool) (store.IssueCommentMutationResult, error) {
+	var err error
+	mentions, err = normalizeIssueCommentTargets(mentions, nil)
+	if err != nil {
+		return store.IssueCommentMutationResult{}, err
+	}
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(input.IssueID) == "" || strings.TrimSpace(input.AuthorID) == "" || strings.TrimSpace(input.Body) == "" || !store.ValidActorType(input.AuthorType) {
 		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 	}
@@ -424,7 +429,7 @@ func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, pro
 				project_id, issue_id, comment_id, ordinal, target_agent_id, target_type, target_id, resolved_agent_id, outcome, reason_code, delegation_id, work_request_id
 			)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-			RETURNING id::text, target_agent_id::text, target_type, target_id::text, resolved_agent_id::text, outcome, reason_code, delegation_id::text, work_request_id::text, created_at
+			RETURNING id::text, target_agent_id::text, target_type, target_id::text, COALESCE(resolved_agent_id::text, ''), outcome, reason_code, delegation_id::text, work_request_id::text, created_at
 		`, projectID, comment.IssueID, comment.ID, index, storedAgentID, target.Type, target.ID, nullableString(preview.ResolvedAgentID), outcome, reasonCode, persistedDelegationID, workRequestID).Scan(
 			&mention.ID, &mention.TargetAgentID, &mention.Target.Type, &mention.Target.ID, &mention.ResolvedAgentID, &mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.WorkRequestID, &mention.CreatedAt,
 		); err != nil {
@@ -938,7 +943,7 @@ func loadIssueCommentMentionsWith(ctx context.Context, q issueCommentRowsQuerier
 	rows, err := q.Query(ctx, `
 		SELECT m.comment_id::text, m.id::text, m.target_agent_id::text, m.target_type, m.target_id::text,
 		       COALESCE(CASE WHEN m.target_type='SQUAD' THEN s.name ELSE a.name END, ''),
-		       m.resolved_agent_id::text, COALESCE(ra.name, a.name, ''), m.outcome, m.reason_code,
+		       COALESCE(m.resolved_agent_id::text, ''), COALESCE(ra.name, a.name, ''), m.outcome, m.reason_code,
 		       COALESCE(m.delegation_id, wr.delegation_id)::text, m.work_request_id::text,
 		       d.delegated_run_id::text, m.created_at
 		FROM issue_comment_mentions AS m
