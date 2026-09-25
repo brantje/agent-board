@@ -620,6 +620,14 @@ func TestPublishAgentIssueCommentDerivesTrustedRunContext(t *testing.T) {
 	if len(publisher.published) != 1 || publisher.published[0].Type != "issue.comment_created" {
 		t.Fatalf("published=%+v", publisher.published)
 	}
+	targetCreated, err := service.PublishAgentIssueCommentTargets(t.Context(), projectID, runID, "tool-call-target", "Targeted finding", []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeSquad, ID: "squad-2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetCreated.AuthorID != agentID || len(targetCreated.Mentions) != 1 || targetCreated.Mentions[0].Target.Type != store.IssueCommentTargetTypeSquad ||
+		fake.targetCreateCalls != 1 || len(fake.lastTargets) != 1 {
+		t.Fatalf("typed Agent comment=%+v calls=%d targets=%+v", targetCreated, fake.targetCreateCalls, fake.lastTargets)
+	}
 
 	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, "missing", "tool-call-2", "body", nil); err == nil {
 		t.Fatal("missing Run unexpectedly published a comment")

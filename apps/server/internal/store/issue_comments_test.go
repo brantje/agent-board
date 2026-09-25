@@ -22,3 +22,15 @@ func TestValidIssueCommentReaction(t *testing.T) {
 		t.Fatal("unsupported reaction was accepted")
 	}
 }
+
+func TestIssueCommentTargetValid(t *testing.T) {
+	if !(IssueCommentTarget{Type: IssueCommentTargetTypeAgent, ID: "agent"}).Valid() ||
+		!(IssueCommentTarget{Type: IssueCommentTargetTypeSquad, ID: "squad"}).Valid() {
+		t.Fatal("valid typed comment targets were rejected")
+	}
+	for _, target := range []IssueCommentTarget{{}, {Type: "USER", ID: "user"}, {Type: IssueCommentTargetTypeAgent}} {
+		if target.Valid() {
+			t.Fatalf("invalid typed comment target accepted: %+v", target)
+		}
+	}
+}
