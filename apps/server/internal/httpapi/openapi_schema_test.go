@@ -89,14 +89,33 @@ func TestIssueCommentTypedMentionTargetItemsRejectUnknownProperties(t *testing.T
 			if block == "" {
 				t.Fatalf("schema %s not found", schema)
 			}
-			if strings.Count(block, "additionalProperties: false") < 2 {
-				t.Fatalf("schema %s must close both the input and mentionTargets item objects: %s", schema, block)
+			mentionTargets := nestedYAMLMapping(block, "mentionTargets")
+			if mentionTargets == "" {
+				t.Fatalf("schema %s must define mentionTargets", schema)
 			}
-			if !strings.Contains(block, "required: [type, id]") {
-				t.Fatalf("schema %s must require typed target type and id", schema)
+			const expectedItemSchema = "      items:\n        type: object\n        additionalProperties: false\n        required: [type, id]"
+			if !strings.Contains(mentionTargets, expectedItemSchema) {
+				t.Fatalf("schema %s must close the mentionTargets item object and require typed target type and id: %s", schema, mentionTargets)
 			}
 		})
 	}
+}
+
+func nestedYAMLMapping(block, name string) string {
+	needle := "    " + name + ":\n"
+	start := strings.Index(block, needle)
+	if start < 0 {
+		return ""
+	}
+	end := len(block)
+	for offset, line := range strings.Split(block[start+len(needle):], "\n") {
+		if offset == 0 || line == "" || strings.HasPrefix(line, "      ") {
+			continue
+		}
+		end = start + len(needle) + strings.Index(block[start+len(needle):], line)
+		break
+	}
+	return block[start:end]
 }
 
 func topLevelYAMLBlock(doc, name string) string {
