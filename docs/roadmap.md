@@ -1,150 +1,197 @@
 # Product roadmap
 
-This roadmap defines ordering, not release dates. The guiding rule is: **reach the complete v0.1 coding-agent flow as quickly as possible.**
+This roadmap defines ordering, not release dates. GitHub issues track concrete implementation work; canonical docs define durable product and architecture behavior.
 
-## Phase 0 — complete v0.1 flow
+Agent Board should keep extending one execution model instead of creating parallel systems:
 
-Nothing below this phase should delay it.
+Issue → Agent / Squad → Run → scheduler → Runner → Issue Git branch / Workspace → Engine → Review → delivery.
 
-```text
-Local Project repository
- -> Issue
- -> Agent
-      -> Engine
-      -> Model Profile -> Provider
-      -> Runtime
- -> durable scheduler
- -> durable Issue Workspace
- -> Runtime Instance
- -> agent-runner
- -> Execution Session
- -> real coding Engine
- -> durable execution evidence
- -> Question/resume when needed
- -> Review
- -> human approval
-```
+## Implemented foundation
 
-Required work includes:
+The following are product baseline rather than future roadmap phases:
 
-- direct Agent -> Runtime configuration
-- durable asynchronous/restart-safe scheduling
-- Agent concurrency + Model Profile capacity admission
-- local repository-backed Issue Workspaces
-- Runtime Instance lifecycle with immutable same-Workspace binding
-- `agent-runner` binary in official Runtime images
-- versioned server/runner WebSocket transport
-- separate Runtime Instance / runner / Execution Session / Run identities
-- default Runner capacity of 5 concurrent Execution Sessions, with protocol support for advertised `max_active_sessions`
-- canonical execution context and ephemeral Provider secrets
-- immutable Run provenance
-- durable raw logs and first-class Artifacts
-- complete Run inspection and Review candidate evidence
-- Runtime policy truthfulness and whole-Agent preflight
-- first real coding Engine, OpenCode first
-- clean-room Nuxt 4 + Vue 3 + TypeScript + Tailwind CSS frontend using Nuxt UI v4 as the required component foundation
-- end-to-end crash/restart/security/integration proof
+- durable asynchronous Runs and restart-safe scheduling;
+- Agent + Model Profile capacity admission;
+- external and server-managed Runners over protocol v2;
+- Git-native Issue branches and SHA-pinned Review;
+- local repository execution and remote Git Runner caches/worktrees;
+- OpenCode execution, Questions/resume, evidence and Artifacts;
+- built-in Users, Groups and Project authorization;
+- Project-owned/shared Runner policy;
+- MCP as a thin transport over the same application behavior;
+- reusable Project-scoped Squads with mixed Agent/User membership and leader-only execution;
+- canonical Agent delegation with explicit Allow delegation, ordinary delegated Runs, durable parent/child lineage, serialized same-Workspace/same-branch handoff, restart-safe result/parent continuation and trusted Squad-aware Agent target/member context.
 
-Frontend implementation follows `frontend-implementation.md` and `frontend-theme.md`.
+Legacy Runtime/Runtime Instance support remains compatibility behavior where existing managed-compute code still uses it. It is not the canonical Agent/Runner configuration model.
 
-The scripted Engine is infrastructure validation, not the v0.1 destination.
+## Current — collaboration follow-through
 
-## Phase 1 — initiation, work structure, and remote repository access
+Canonical delegation, serialized Workspace handoff, delegated result/parent continuation and Squad-aware Agent target/member context are implemented on the normal Issue/Run/scheduler/Workspace path.
 
-After the local-repository v0.1 flow is proven:
+Remaining collaboration work should be added only where a concrete workflow needs it:
 
-- planning strategy: Auto / Always plan / Skip planning
-- Plan artifacts/read model
-- scheduled Project Automations creating normal Issues
-- Agent-created follow-up Issues under explicit Project policy
-- authenticated Source Connections for GitHub, GitLab, Bitbucket and Forgejo
-- remote repository clone/fetch using trusted ephemeral credentials
-- improved retry/operational UX
+- human handoff/notification behavior;
+- broader Agent messaging/wake behavior.
 
-These reuse normal Issues/Runs/scheduling and the same durable Workspace model.
+Do not add a Squad scheduler, delegation queue or alternate Workspace model.
 
-### Established collaboration foundation
+## Next major product area — Tier-1 Source Providers
 
-Reusable Project-scoped Squads are already implemented independently of delegation:
+GitHub, GitLab and Forgejo are first-class Source Providers and should receive deep product integration.
 
-- one durable Squad identity with one leader Agent and optional additional Agent/User members with descriptive roles
-- eligible human members reuse effective Project workflow access; Squad membership itself grants no Project access
-- Issue ownership can persist a Squad ID without rewriting ownership to an Agent
-- execution resolves only the current leader Agent through the normal shared Agent execution path; additional members are never implicit Run targets
-- leader changes reconcile eligible Squad-owned work through the existing Run/scheduler/Workspace lifecycle
-- Project configuration and Issue/Run UX distinguish Squad ownership, mixed collaboration membership and the executing leader Agent
+They are not merely remote clone URLs.
 
-Squad ownership does not implicitly delegate or fan work out to members. Canonical Agent delegation, serialized Workspace handoff, and trusted Squad-aware target/member context are implemented on the same normal execution path. Human handoff and notifications remain later work.
+See source-providers.md.
 
-## Phase 2 — delivery automation and Agent collaboration
+### Shared Source Provider foundation
 
-- explicit Project delivery policy
-- source-provider PR/MR creation and update actions
-- optional autonomous PR/MR delivery after a successful verified candidate
-- canonical Agent delegation with per-Agent `Allow delegation` [implemented]
-- serialized same-Workspace/same-branch delegation handoff [implemented]
-- delegated outcome/result lifecycle and automatic parent continuation [implemented]
-- Squad-aware delegation target/member context built on the existing Squad ownership model [implemented]
-- broader Agent messaging/wake semantics where useful
+Build the smallest shared application/domain model required by the three concrete providers:
 
-The default delivery policy remains human-gated. Creating/updating a PR/MR does not imply auto-merge or deployment; those require separate explicit policy.
+- Source Connection identity, health and encrypted credentials;
+- provider-backed repository identity and metadata;
+- Project selection of Source Connection + repository;
+- repository discovery/picker;
+- provider-backed ephemeral Git credentials for Runner clone/fetch/push;
+- provider-neutral Change Request identity;
+- webhook verification/normalization;
+- checks/pipeline and mergeability read models;
+- provider API reconciliation.
 
-Do not create a Squad scheduler or parallel Run lifecycle. Delegation must extend the normal Issue/Run/scheduler/Workspace model and must not rewrite canonical Squad ownership.
+Keep Git execution, Run scheduling, Issue branches, Workspaces and Review provider-neutral.
 
-## Phase 3 — execution topology and scale
+The existing generic git source remains available for unsupported Git servers and Runner-managed credentials.
 
-- Worker registry
-- Worker Pools
-- warm/permanent workers
-- spot/ephemeral execution and recovery
-- scheduling preferences/classes
-- higher runner session capacity where safe/useful
+### GitHub
 
-Agents remain independent from Worker identity. Worker, Runtime Instance, runner and Execution Session identities remain separate.
+Deep GitHub integration should include:
 
-The v0.1 runner contract is intentionally compatible with future fleets: a healthy Runtime Instance may already serve many sequential sessions against its one bound Workspace, while Worker Pools later decide where Runtime capacity comes from.
+- GitHub App installation/authorization;
+- installation-scoped repository discovery;
+- repository picker;
+- short-lived scoped credentials for Git/API operations;
+- native signature/token verification;
+- PR create/update/read;
+- PR association with Agent Board Issues;
+- checks/status rollup;
+- mergeability/conflict state;
+- external merge reconciliation.
 
-## Phase 4 — multi-user administration
+### GitLab
 
-The first fixed multi-user foundation is implemented by #74–#79:
+GitLab.com and self-hosted GitLab should support the same product surface where the API permits it:
 
-- local deployment-global Users with race-safe first-admin bootstrap
-- JWT access tokens plus hashed opaque refresh sessions and immediate invalidation
-- deployment roles `admin | member`
-- deployment-global human Groups
-- fixed Project roles `admin > member > viewer`
-- direct User and Group Project grants with highest-role resolution
-- private-by-default Projects with a race-safe direct-User-admin invariant
-- shared trusted Go authorization with not-found Project isolation
-- authenticated durable User IDs for existing human actor attribution
-- account/session, deployment administration and Project Access UI
+- authenticated instance connection;
+- project/repository discovery;
+- repository picker;
+- ephemeral Git authentication;
+- signed/token-authenticated webhooks;
+- MR create/update/read;
+- pipeline/status rollup;
+- mergeability/conflict state;
+- external merge reconciliation.
 
-The authoritative model is documented in `authorization.md`. OIDC, MFA, custom roles/permissions, organizations/tenants, generalized audit logging and other identity-provider/product expansion remain follow-up work rather than implicit extensions of this foundation.
+### Forgejo
 
-## Phase 5 — integrations/product breadth
+Self-hosted Forgejo should receive the same Tier-1 treatment:
 
-Examples:
+- authenticated instance connection;
+- repository discovery;
+- repository picker;
+- ephemeral Git authentication;
+- signed webhooks;
+- PR create/update/read;
+- status/check rollup where available;
+- mergeability/conflict state where available;
+- external merge reconciliation.
 
-- richer provider/account authorization
-- additional coding Engines
-- auto-merge/deploy policies where explicitly designed
-- external triggers/integrations
-- broader automation policy
+Bitbucket is not a Tier-1 requirement unless separately prioritized.
+
+## Delivery policy
+
+Source Providers unlock provider-aware delivery while preserving the existing Git/Review model.
+
+Required progression:
+
+- create/update a PR/MR from the existing agent-board/<issue-key> branch;
+- expose PR/MR state, CI and mergeability on Issue/Review surfaces;
+- reconcile external merge state through webhooks/API refresh;
+- keep remote target branch as integration truth;
+- add explicit Project delivery policy;
+- allow optional autonomous PR/MR creation after a verified candidate;
+- keep auto-merge/deploy/release as separate stronger permissions.
+
+The default remains human-gated.
+
+Provider webhook processing must not silently project external events into Issue Board state unless the Project explicitly enables that workflow policy.
+
+## Work initiation and orchestration
+
+Planning and automation continue to reuse normal Issues/Runs rather than introducing alternate task lifecycles:
+
+- planning strategy: Auto / Always plan / Skip planning;
+- Plan artifacts/read model;
+- scheduled Project Automations creating normal Issues;
+- Agent-created follow-up Issues under explicit Project policy;
+- comments/mentions and collaboration-triggered wake behavior through canonical Issue/Agent commands;
+- improved retry and operational UX.
+
+Ordering inside this area follows concrete user value and existing issue dependencies.
+
+## Execution topology and scale
+
+After the core collaboration and source/delivery experience is solid:
+
+- Worker registry;
+- Worker Pools;
+- warm/permanent capacity;
+- spot/ephemeral capacity and recovery;
+- scheduling preferences/classes where real placement needs require them;
+- higher Runner session capacity where safe/useful.
+
+Workers are compute, not Agents. Pools place capacity; they do not replace Run, Runner or Execution Session identity.
+
+## Identity and administration expansion
+
+The fixed local multi-user foundation is already implemented.
+
+Future identity work should be added only for concrete requirements:
+
+- external identity providers;
+- MFA/WebAuthn;
+- richer administration;
+- organizations/tenants only if a real deployment model needs them;
+- custom permissions only if the fixed deployment/Project roles prove insufficient.
+
+Do not replace the existing authorization model speculatively.
+
+## Product breadth
+
+Later breadth may include:
+
+- additional coding Engines;
+- richer external triggers/integrations;
+- broader automation policy;
+- provider-specific delivery actions beyond the Tier-1 Source Provider baseline;
+- explicit auto-merge/deploy/release workflows.
 
 Exact ordering follows demonstrated user value.
 
-## Phase 6 — Plugins last
+## Plugins last
 
-Plugin expansion is deliberately the final major roadmap area and does not compete with the v0.1 critical path or foundational users/groups/permissions work.
+Plugin expansion remains the final major roadmap area unless explicitly reprioritized by a concrete product requirement.
 
-Later Plugin work may include:
+Potential later Plugin work includes:
 
-- installation/activation management UX
-- typed Actions and triggers
-- sandboxed UI extensions
-- MCP tools/resources/skills
-- SDK/packaging/ecosystem work
+- installation/activation management;
+- typed Actions and triggers;
+- sandboxed UI extensions;
+- MCP tools/resources/skills;
+- SDK/packaging/ecosystem work.
+
+Plugins must not become a shortcut for implementing core Source Provider, execution, authorization or collaboration behavior that belongs in Agent Board itself.
 
 ## Roadmap rule
 
-GitHub issues track implementation. Canonical docs define the intended product/architecture. A change to durable product behavior updates the relevant canonical docs in the same work.
+A roadmap item should extend the existing authoritative model wherever possible.
+
+When durable behavior changes, update the relevant canonical docs in the same work. Avoid duplicate schedulers, Run lifecycles, Workspace/source models, authorization rules and delivery state.
