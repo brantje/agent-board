@@ -96,17 +96,37 @@ func (s *Store) CreateIssueComment(ctx context.Context, projectID string, input 
 }
 
 func (s *Store) CreateIssueCommentWithMentions(ctx context.Context, projectID string, input store.IssueComment, mentionAgentIDs []string) (store.IssueCommentMutationResult, error) {
-	return s.createIssueComment(ctx, projectID, input, mentionAgentIDs, false, false)
+	targets := make([]store.IssueCommentTarget, 0, len(mentionAgentIDs))
+	for _, id := range mentionAgentIDs {
+		targets = append(targets, store.IssueCommentTarget{Type: store.IssueCommentTargetTypeAgent, ID: id})
+	}
+	return s.createIssueComment(ctx, projectID, input, targets, false, false)
+}
+
+func (s *Store) CreateIssueCommentWithTargets(ctx context.Context, projectID string, input store.IssueComment, targets []store.IssueCommentTarget) (store.IssueCommentMutationResult, error) {
+	return s.createIssueComment(ctx, projectID, input, targets, false, false)
 }
 
 func (s *Store) CreateIssueCommentWithTriggers(ctx context.Context, projectID string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
-	return s.createIssueComment(ctx, projectID, input, request.MentionAgentIDs, true, request.SuppressImplicit)
+	targets, err := normalizeIssueCommentTargets(request.MentionTargets, request.MentionAgentIDs)
+	if err != nil {
+		return store.IssueCommentMutationResult{}, err
+	}
+	return s.createIssueComment(ctx, projectID, input, targets, true, request.SuppressImplicit)
 }
 
 func (s *Store) PreviewIssueCommentMentions(ctx context.Context, projectID, issueID string, mentionAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
+	targets := make([]store.IssueCommentTarget, 0, len(mentionAgentIDs))
+	for _, id := range mentionAgentIDs {
+		targets = append(targets, store.IssueCommentTarget{Type: store.IssueCommentTargetTypeAgent, ID: id})
+	}
+	return s.PreviewIssueCommentTargets(ctx, projectID, issueID, targets)
+}
+
+func (s *Store) PreviewIssueCommentTargets(ctx context.Context, projectID, issueID string, targets []store.IssueCommentTarget) ([]store.IssueCommentMentionPreview, error) {
 	projectID = strings.TrimSpace(projectID)
 	issueID = strings.TrimSpace(issueID)
-	mentions, err := normalizeIssueCommentMentionAgentIDs(mentionAgentIDs)
+	mentions, err := normalizeIssueCommentTargets(targets, nil)
 	if err != nil || projectID == "" || issueID == "" {
 		return nil, store.ErrInvalidArgument
 	}
@@ -125,8 +145,8 @@ func (s *Store) PreviewIssueCommentMentions(ctx context.Context, projectID, issu
 		return nil, store.ErrNotFound
 	}
 	result := make([]store.IssueCommentMentionPreview, 0, len(mentions))
-	for _, targetAgentID := range mentions {
-		preview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, issueID, targetAgentID)
+	for _, target := range mentions {
+		preview, err := s.issueCommentTargetTx(ctx, tx, projectID, issueID, target)
 		if err != nil {
 			return nil, err
 		}
@@ -135,16 +155,12 @@ func (s *Store) PreviewIssueCommentMentions(ctx context.Context, projectID, issu
 	return result, nil
 }
 
-func (s *Store) createIssueComment(ctx context.Context, projectID string, input store.IssueComment, mentionAgentIDs []string, implicitRouting, suppressImplicit bool) (store.IssueCommentMutationResult, error) {
+func (s *Store) createIssueComment(ctx context.Context, projectID string, input store.IssueComment, mentions []store.IssueCommentTarget, implicitRouting, suppressImplicit bool) (store.IssueCommentMutationResult, error) {
 	if strings.TrimSpace(projectID) == "" || strings.TrimSpace(input.IssueID) == "" || strings.TrimSpace(input.AuthorID) == "" || strings.TrimSpace(input.Body) == "" || !store.ValidActorType(input.AuthorType) {
 		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
 	}
 	if input.ParentCommentID != nil && strings.TrimSpace(*input.ParentCommentID) == "" {
 		return store.IssueCommentMutationResult{}, store.ErrInvalidArgument
-	}
-	mentions, err := normalizeIssueCommentMentionAgentIDs(mentionAgentIDs)
-	if err != nil {
-		return store.IssueCommentMutationResult{}, err
 	}
 	persistedSuppressImplicit := implicitRouting && len(mentions) == 0 && suppressImplicit
 	if input.SourceActionKey != nil {
@@ -347,14 +363,14 @@ func existingIssueCommentSuppressionIntent(ctx context.Context, tx pgx.Tx, issue
 	return suppressed, nil
 }
 
-func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, projectID string, comment store.IssueComment, mentionAgentIDs []string) ([]store.IssueCommentMention, []store.Event, error) {
-	if len(mentionAgentIDs) == 0 {
+func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, projectID string, comment store.IssueComment, targets []store.IssueCommentTarget) ([]store.IssueCommentMention, []store.Event, error) {
+	if len(targets) == 0 {
 		return nil, nil, nil
 	}
-	result := make([]store.IssueCommentMention, 0, len(mentionAgentIDs))
-	events := make([]store.Event, 0, len(mentionAgentIDs))
-	for index, targetAgentID := range mentionAgentIDs {
-		preview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, comment.IssueID, targetAgentID)
+	result := make([]store.IssueCommentMention, 0, len(targets))
+	events := make([]store.Event, 0, len(targets))
+	for index, target := range targets {
+		preview, err := s.issueCommentTargetTx(ctx, tx, projectID, comment.IssueID, target)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -377,7 +393,7 @@ func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, pro
 			}
 			requested, requestErr := s.requestAgentWorkTx(ctx, tx, agentWorkRequestInput{
 				ProjectID: projectID, IssueID: comment.IssueID, SourceCommentID: comment.ID,
-				TargetAgentID: targetAgentID, Task: comment.Body, AuthorityKind: authority, ParentRunID: parentRunID,
+				TargetAgentID: preview.ResolvedAgentID, Task: comment.Body, AuthorityKind: authority, ParentRunID: parentRunID,
 			})
 			if requestErr == nil {
 				outcome = requested.Outcome
@@ -399,18 +415,26 @@ func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, pro
 			workRequestID = &workRequest.ID
 		}
 		var mention store.IssueCommentMention
+		storedAgentID := preview.ResolvedAgentID
+		if storedAgentID == "" {
+			storedAgentID = target.ID
+		}
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO issue_comment_mentions (
-				project_id, issue_id, comment_id, ordinal, target_agent_id, outcome, reason_code, delegation_id, work_request_id
+				project_id, issue_id, comment_id, ordinal, target_agent_id, target_type, target_id, resolved_agent_id, outcome, reason_code, delegation_id, work_request_id
 			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-			RETURNING id::text, target_agent_id::text, outcome, reason_code, delegation_id::text, work_request_id::text, created_at
-		`, projectID, comment.IssueID, comment.ID, index, targetAgentID, outcome, reasonCode, persistedDelegationID, workRequestID).Scan(
-			&mention.ID, &mention.TargetAgentID, &mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.WorkRequestID, &mention.CreatedAt,
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+			RETURNING id::text, target_agent_id::text, target_type, target_id::text, resolved_agent_id::text, outcome, reason_code, delegation_id::text, work_request_id::text, created_at
+		`, projectID, comment.IssueID, comment.ID, index, storedAgentID, target.Type, target.ID, nullableString(preview.ResolvedAgentID), outcome, reasonCode, persistedDelegationID, workRequestID).Scan(
+			&mention.ID, &mention.TargetAgentID, &mention.Target.Type, &mention.Target.ID, &mention.ResolvedAgentID, &mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.WorkRequestID, &mention.CreatedAt,
 		); err != nil {
 			return nil, nil, err
 		}
-		mention.TargetAgentName = preview.TargetAgentName
+		mention.Target = target
+		mention.TargetName = preview.TargetName
+		mention.ResolvedAgentName = preview.ResolvedAgentName
+		mention.TargetAgentID = storedAgentID
+		mention.TargetAgentName = preview.ResolvedAgentName
 		if workRequest != nil && workRequest.DelegationID != nil {
 			mention.DelegationID = workRequest.DelegationID
 			mention.DelegatedRunID = workRequest.RunID
@@ -421,7 +445,7 @@ func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, pro
 }
 
 func (s *Store) issueCommentMentionTargetTx(ctx context.Context, tx pgx.Tx, projectID, issueID, targetAgentID string) (store.IssueCommentMentionPreview, error) {
-	preview := store.IssueCommentMentionPreview{TargetAgentID: targetAgentID}
+	preview := store.IssueCommentMentionPreview{Target: store.IssueCommentTarget{Type: store.IssueCommentTargetTypeAgent, ID: targetAgentID}, TargetAgentID: targetAgentID}
 	if err := tx.QueryRow(ctx, `
 		SELECT name
 		FROM agents
@@ -435,6 +459,9 @@ func (s *Store) issueCommentMentionTargetTx(ctx context.Context, tx pgx.Tx, proj
 		}
 		return store.IssueCommentMentionPreview{}, err
 	}
+	preview.TargetName = preview.TargetAgentName
+	preview.ResolvedAgentID = targetAgentID
+	preview.ResolvedAgentName = preview.TargetAgentName
 	if err := s.verifyRunnableAgent(ctx, tx, projectID, targetAgentID); err != nil {
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrConflict) {
 			reason := store.IssueCommentMentionReasonTargetUnavailable
@@ -445,6 +472,75 @@ func (s *Store) issueCommentMentionTargetTx(ctx context.Context, tx pgx.Tx, proj
 	}
 	preview.Eligible = true
 	return preview, nil
+}
+
+func (s *Store) issueCommentTargetTx(ctx context.Context, tx pgx.Tx, projectID, issueID string, target store.IssueCommentTarget) (store.IssueCommentMentionPreview, error) {
+	if target.Type == store.IssueCommentTargetTypeAgent {
+		return s.issueCommentMentionTargetTx(ctx, tx, projectID, issueID, target.ID)
+	}
+	if target.Type != store.IssueCommentTargetTypeSquad {
+		return store.IssueCommentMentionPreview{}, store.ErrInvalidArgument
+	}
+	preview := store.IssueCommentMentionPreview{Target: target}
+	if err := tx.QueryRow(ctx, `
+		SELECT name, leader_agent_id::text
+		FROM squads
+		WHERE project_id=$1 AND id=$2
+		FOR SHARE
+	`, projectID, target.ID).Scan(&preview.TargetName, &preview.ResolvedAgentID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			reason := store.IssueCommentMentionReasonTargetUnavailable
+			preview.ReasonCode = &reason
+			return preview, nil
+		}
+		return store.IssueCommentMentionPreview{}, err
+	}
+	preview.TargetAgentID = preview.ResolvedAgentID
+	preview.TargetAgentName = preview.ResolvedAgentName
+	agentPreview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, issueID, preview.ResolvedAgentID)
+	if err != nil {
+		return store.IssueCommentMentionPreview{}, err
+	}
+	preview.Eligible = agentPreview.Eligible
+	preview.ReasonCode = agentPreview.ReasonCode
+	preview.ResolvedAgentName = agentPreview.TargetAgentName
+	preview.TargetAgentName = preview.ResolvedAgentName
+	return preview, nil
+}
+
+func normalizeIssueCommentTargets(values []store.IssueCommentTarget, legacyAgentIDs []string) ([]store.IssueCommentTarget, error) {
+	if len(values) == 0 && len(legacyAgentIDs) != 0 {
+		values = make([]store.IssueCommentTarget, 0, len(legacyAgentIDs))
+		for _, id := range legacyAgentIDs {
+			values = append(values, store.IssueCommentTarget{Type: store.IssueCommentTargetTypeAgent, ID: id})
+		}
+	}
+	if len(values) > store.MaxIssueCommentMentions {
+		return nil, store.ErrInvalidArgument
+	}
+	result := make([]store.IssueCommentTarget, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, target := range values {
+		target.Type = strings.TrimSpace(target.Type)
+		target.ID = strings.TrimSpace(target.ID)
+		if !target.Valid() || !validUUIDText(target.ID) {
+			return nil, store.ErrInvalidArgument
+		}
+		key := target.Type + ":" + target.ID
+		if _, duplicate := seen[key]; duplicate {
+			return nil, store.ErrInvalidArgument
+		}
+		seen[key] = struct{}{}
+		result = append(result, target)
+	}
+	return result, nil
+}
+
+func nullableString(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
 }
 
 func normalizeIssueCommentMentionAgentIDs(values []string) ([]string, error) {
@@ -840,14 +936,19 @@ func loadIssueCommentMentionsWith(ctx context.Context, q issueCommentRowsQuerier
 		return nil
 	}
 	rows, err := q.Query(ctx, `
-		SELECT m.comment_id::text, m.id::text, m.target_agent_id::text,
-		       COALESCE(a.name, ''), m.outcome, m.reason_code,
+		SELECT m.comment_id::text, m.id::text, m.target_agent_id::text, m.target_type, m.target_id::text,
+		       COALESCE(CASE WHEN m.target_type='SQUAD' THEN s.name ELSE a.name END, ''),
+		       m.resolved_agent_id::text, COALESCE(ra.name, a.name, ''), m.outcome, m.reason_code,
 		       COALESCE(m.delegation_id, wr.delegation_id)::text, m.work_request_id::text,
 		       d.delegated_run_id::text, m.created_at
 		FROM issue_comment_mentions AS m
 		LEFT JOIN agents AS a
 		  ON a.id=m.target_agent_id
 		 AND (a.project_id IS NULL OR a.project_id=m.project_id)
+		LEFT JOIN squads AS s ON s.project_id=m.project_id AND s.id=m.target_id
+		LEFT JOIN agents AS ra
+		  ON ra.id=m.resolved_agent_id
+		 AND (ra.project_id IS NULL OR ra.project_id=m.project_id)
 		LEFT JOIN agent_work_requests AS wr
 		  ON wr.project_id=m.project_id
 		 AND wr.id=m.work_request_id
@@ -871,8 +972,8 @@ func loadIssueCommentMentionsWith(ctx context.Context, q issueCommentRowsQuerier
 		var commentID string
 		var mention store.IssueCommentMention
 		if err := rows.Scan(
-			&commentID, &mention.ID, &mention.TargetAgentID, &mention.TargetAgentName,
-			&mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.WorkRequestID, &mention.DelegatedRunID, &mention.CreatedAt,
+			&commentID, &mention.ID, &mention.TargetAgentID, &mention.Target.Type, &mention.Target.ID, &mention.TargetName,
+			&mention.ResolvedAgentID, &mention.ResolvedAgentName, &mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.WorkRequestID, &mention.DelegatedRunID, &mention.CreatedAt,
 		); err != nil {
 			return err
 		}
@@ -880,6 +981,7 @@ func loadIssueCommentMentionsWith(ctx context.Context, q issueCommentRowsQuerier
 		if !ok {
 			continue
 		}
+		mention.TargetAgentName = mention.ResolvedAgentName
 		values[index].Mentions = append(values[index].Mentions, mention)
 	}
 	return rows.Err()
@@ -944,12 +1046,12 @@ func sameIssueCommentRequest(existing, requested store.IssueComment) bool {
 	return existing.SourceRunID != nil && requested.SourceRunID != nil && *existing.SourceRunID == *requested.SourceRunID
 }
 
-func sameIssueCommentMentionTargets(existing []store.IssueCommentMention, requested []string) bool {
+func sameIssueCommentMentionTargets(existing []store.IssueCommentMention, requested []store.IssueCommentTarget) bool {
 	if len(existing) != len(requested) {
 		return false
 	}
 	for index := range existing {
-		if existing[index].TargetAgentID != requested[index] {
+		if existing[index].Target.Type != requested[index].Type || existing[index].Target.ID != requested[index].ID {
 			return false
 		}
 	}

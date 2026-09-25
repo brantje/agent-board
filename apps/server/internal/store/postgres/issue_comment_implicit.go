@@ -19,7 +19,7 @@ func (s *Store) PreviewIssueCommentTriggers(
 ) (store.IssueCommentTriggerPreview, error) {
 	projectID = strings.TrimSpace(projectID)
 	issueID = strings.TrimSpace(issueID)
-	mentions, err := normalizeIssueCommentMentionAgentIDs(request.MentionAgentIDs)
+	mentions, err := normalizeIssueCommentTargets(request.MentionTargets, request.MentionAgentIDs)
 	if err != nil || projectID == "" || issueID == "" {
 		return store.IssueCommentTriggerPreview{}, store.ErrInvalidArgument
 	}
@@ -43,8 +43,8 @@ func (s *Store) PreviewIssueCommentTriggers(
 	result := store.IssueCommentTriggerPreview{
 		Mentions: make([]store.IssueCommentMentionPreview, 0, len(mentions)),
 	}
-	for _, targetAgentID := range mentions {
-		preview, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, issueID, targetAgentID)
+	for _, target := range mentions {
+		preview, err := s.issueCommentTargetTx(ctx, tx, projectID, issueID, target)
 		if err != nil {
 			return store.IssueCommentTriggerPreview{}, err
 		}
@@ -54,12 +54,14 @@ func (s *Store) PreviewIssueCommentTriggers(
 		return result, nil
 	}
 
-	target, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, issueID, route.TargetAgentID)
+	target, err := s.issueCommentTargetTx(ctx, tx, projectID, issueID, route.Target)
 	if err != nil {
 		return store.IssueCommentTriggerPreview{}, err
 	}
 	implicit := &store.IssueCommentImplicitTriggerPreview{
-		TargetAgentID: route.TargetAgentID, TargetAgentName: target.TargetAgentName, RoutingReason: route.RoutingReason,
+		Target: route.Target, TargetName: target.TargetName, ResolvedAgentID: target.ResolvedAgentID,
+		ResolvedAgentName: target.ResolvedAgentName, TargetAgentID: target.ResolvedAgentID,
+		TargetAgentName: target.ResolvedAgentName, RoutingReason: route.RoutingReason,
 	}
 	switch {
 	case request.SuppressImplicit:
@@ -93,7 +95,7 @@ func (s *Store) createIssueCommentImplicitTriggerTx(
 		return nil, nil, err
 	}
 
-	target, err := s.issueCommentMentionTargetTx(ctx, tx, projectID, comment.IssueID, route.TargetAgentID)
+	target, err := s.issueCommentTargetTx(ctx, tx, projectID, comment.IssueID, route.Target)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -117,7 +119,7 @@ func (s *Store) createIssueCommentImplicitTriggerTx(
 	default:
 		requested, requestErr := s.requestAgentWorkTx(ctx, tx, agentWorkRequestInput{
 			ProjectID: projectID, IssueID: comment.IssueID, SourceCommentID: comment.ID,
-			TargetAgentID: route.TargetAgentID, Task: comment.Body, AuthorityKind: store.AgentWorkRequestAuthorityIssue,
+			TargetAgentID: target.ResolvedAgentID, Task: comment.Body, AuthorityKind: store.AgentWorkRequestAuthorityIssue,
 		})
 		if requestErr == nil {
 			outcome = requested.Outcome
@@ -139,18 +141,26 @@ func (s *Store) createIssueCommentImplicitTriggerTx(
 		workRequestID = &workRequest.ID
 	}
 	var value store.IssueCommentImplicitTrigger
+	storedAgentID := target.ResolvedAgentID
+	if storedAgentID == "" {
+		storedAgentID = route.Target.ID
+	}
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO issue_comment_implicit_triggers (
-			project_id, issue_id, comment_id, target_agent_id, routing_reason, outcome, reason_code, delegation_id, work_request_id
+			project_id, issue_id, comment_id, target_agent_id, target_type, target_id, resolved_agent_id, routing_reason, outcome, reason_code, delegation_id, work_request_id
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-		RETURNING target_agent_id::text, routing_reason, outcome, reason_code, delegation_id::text, work_request_id::text, created_at
-	`, projectID, comment.IssueID, comment.ID, route.TargetAgentID, route.RoutingReason, outcome, reasonCode, persistedDelegationID, workRequestID).Scan(
-		&value.TargetAgentID, &value.RoutingReason, &value.Outcome, &value.ReasonCode, &value.DelegationID, &value.WorkRequestID, &value.CreatedAt,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		RETURNING target_agent_id::text, target_type, target_id::text, resolved_agent_id::text, routing_reason, outcome, reason_code, delegation_id::text, work_request_id::text, created_at
+	`, projectID, comment.IssueID, comment.ID, storedAgentID, route.Target.Type, route.Target.ID, nullableString(target.ResolvedAgentID), route.RoutingReason, outcome, reasonCode, persistedDelegationID, workRequestID).Scan(
+		&value.TargetAgentID, &value.Target.Type, &value.Target.ID, &value.ResolvedAgentID, &value.RoutingReason, &value.Outcome, &value.ReasonCode, &value.DelegationID, &value.WorkRequestID, &value.CreatedAt,
 	); err != nil {
 		return nil, nil, err
 	}
-	value.TargetAgentName = target.TargetAgentName
+	value.Target = route.Target
+	value.TargetName = target.TargetName
+	value.ResolvedAgentName = target.ResolvedAgentName
+	value.TargetAgentID = storedAgentID
+	value.TargetAgentName = target.ResolvedAgentName
 	if workRequest != nil && workRequest.DelegationID != nil {
 		value.DelegationID = workRequest.DelegationID
 		value.DelegatedRunID = workRequest.RunID
@@ -301,7 +311,9 @@ func loadIssueCommentImplicitTriggersWith(ctx context.Context, q issueCommentRow
 		return nil
 	}
 	rows, err := q.Query(ctx, `
-		SELECT t.comment_id::text, t.target_agent_id::text, COALESCE(a.name, ''),
+		SELECT t.comment_id::text, t.target_agent_id::text, t.target_type, t.target_id::text,
+		       COALESCE(CASE WHEN t.target_type='SQUAD' THEN s.name ELSE a.name END, ''),
+		       t.resolved_agent_id::text, COALESCE(ra.name, a.name, ''),
 		       t.routing_reason, t.outcome, t.reason_code,
 		       COALESCE(t.delegation_id, wr.delegation_id)::text, t.work_request_id::text,
 		       d.delegated_run_id::text, t.created_at
@@ -309,6 +321,10 @@ func loadIssueCommentImplicitTriggersWith(ctx context.Context, q issueCommentRow
 		LEFT JOIN agents AS a
 		  ON a.id=t.target_agent_id
 		 AND (a.project_id IS NULL OR a.project_id=t.project_id)
+		LEFT JOIN squads AS s ON s.project_id=t.project_id AND s.id=t.target_id
+		LEFT JOIN agents AS ra
+		  ON ra.id=t.resolved_agent_id
+		 AND (ra.project_id IS NULL OR ra.project_id=t.project_id)
 		LEFT JOIN agent_work_requests AS wr
 		  ON wr.project_id=t.project_id
 		 AND wr.id=t.work_request_id
@@ -332,7 +348,8 @@ func loadIssueCommentImplicitTriggersWith(ctx context.Context, q issueCommentRow
 		var commentID string
 		var trigger store.IssueCommentImplicitTrigger
 		if err := rows.Scan(
-			&commentID, &trigger.TargetAgentID, &trigger.TargetAgentName,
+			&commentID, &trigger.TargetAgentID, &trigger.Target.Type, &trigger.Target.ID, &trigger.TargetName,
+			&trigger.ResolvedAgentID, &trigger.ResolvedAgentName,
 			&trigger.RoutingReason, &trigger.Outcome, &trigger.ReasonCode,
 			&trigger.DelegationID, &trigger.WorkRequestID, &trigger.DelegatedRunID, &trigger.CreatedAt,
 		); err != nil {
@@ -342,6 +359,7 @@ func loadIssueCommentImplicitTriggersWith(ctx context.Context, q issueCommentRow
 		if !ok {
 			continue
 		}
+		trigger.TargetAgentName = trigger.ResolvedAgentName
 		values[index].ImplicitTrigger = &trigger
 	}
 	return rows.Err()

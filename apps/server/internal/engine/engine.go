@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/brantje/agent-board/apps/server/internal/executioncontext"
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 // ProcessLauncher is the only process capability exposed to Engine adapters.
@@ -122,6 +123,7 @@ type InteractiveQuestionReplyTracker interface {
 type IssueCommentPublishRequest struct {
 	Body            string
 	RequestKey      string
+	MentionTargets  []store.IssueCommentTarget
 	MentionAgentIDs []string
 }
 
