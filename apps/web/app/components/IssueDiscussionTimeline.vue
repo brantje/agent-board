@@ -187,14 +187,23 @@ function implicitTriggerStatus(trigger: IssueCommentImplicitTrigger) {
   return triggerOutcomeLabel(trigger.outcome, trigger.reasonCode)
 }
 
-function mentionPreviewFor(agentID: string) {
-  return triggerPreview.value.mentions.find(item => item.targetAgentId === agentID)
+function mentionPreviewFor(target: Pick<IssueCommentTarget, 'type' | 'id'>) {
+  return triggerPreview.value.mentions.find(item => {
+    if (item.targetType && item.targetId) {
+      return item.targetType === target.type && item.targetId === target.id
+    }
+    return target.type === 'AGENT' && item.targetAgentId === target.id
+  })
 }
 
-function mentionPreviewLabel(agentID: string) {
-  const preview = mentionPreviewFor(agentID)
+function mentionPreviewLabel(target: Pick<IssueCommentTarget, 'type' | 'id'>) {
+  const preview = mentionPreviewFor(target)
   if (!preview) return 'Checking eligibility…'
-  return preview.eligible ? 'Eligible to request work' : mentionReasonLabel(preview.reasonCode)
+  if (!preview.eligible) return mentionReasonLabel(preview.reasonCode)
+  if (target.type === 'SQUAD' && preview.resolvedAgentName) {
+    return `Eligible to request work · leader: ${preview.resolvedAgentName}`
+  }
+  return 'Eligible to request work'
 }
 
 async function loadMentionAgents() {
@@ -219,6 +228,9 @@ async function loadMentionAgents() {
 
 async function refreshTriggerPreview() {
   const targetAgentIDs = [...selectedMentionAgentIDs.value]
+  const typedTargets = selectedMentionSquads.value.length
+    ? selectedMentionTargets.value.map(({ type, id }) => ({ type, id }))
+    : undefined
   const generation = ++triggerPreviewGeneration
   triggerPreviewError.value = undefined
   try {
@@ -229,8 +241,7 @@ async function refreshTriggerPreview() {
         body: {
           parentCommentId: replyTo.value?.id ?? null,
           body: body.value.trim(),
-          ...(selectedMentionSquads.value.length ? { mentionTargets: selectedMentionTargets.value.map(({ type, id }) => ({ type, id })) } : {}),
-          mentionAgentIds: targetAgentIDs,
+          ...(typedTargets ? { mentionTargets: typedTargets } : { mentionAgentIds: targetAgentIDs }),
           suppressImplicitAgentTrigger: suppressImplicitAgentTrigger.value
         }
       }
@@ -392,11 +403,10 @@ async function submit() {
     requestId: draftRequestId.value,
     suppressImplicitAgentTrigger: suppressImplicitAgentTrigger.value
   }
-  if (mentionAgentIds.length) {
-    requestBody.mentionAgentIds = mentionAgentIds
-  }
   if (selectedMentionSquads.value.length) {
     requestBody.mentionTargets = selectedMentionTargets.value.map(({ type, id }) => ({ type, id }))
+  } else if (mentionAgentIds.length) {
+    requestBody.mentionAgentIds = mentionAgentIds
   }
 
   submitting.value = true
@@ -669,10 +679,10 @@ defineExpose({ refresh: timeline.refresh })
         <UAlert v-if="triggerPreviewError" title="Trigger preview unavailable" :description="triggerPreviewError.message" color="warning" />
         <div v-if="selectedMentionTargets.length" class="space-y-1 text-xs text-muted" aria-label="Agent mention preview">
           <p v-for="agent in selectedMentionAgents" :key="agent.id">
-            @{{ agent.name }} · {{ mentionPreviewLabel(agent.id) }}
+            @{{ agent.name }} · {{ mentionPreviewLabel({ type: 'AGENT', id: agent.id }) }}
           </p>
           <p v-for="squad in selectedMentionSquads" :key="squad.id">
-            @{{ squad.name }} · Squad target
+            @{{ squad.name }} · {{ mentionPreviewLabel({ type: 'SQUAD', id: squad.id }) }}
           </p>
         </div>
         <div
