@@ -640,7 +640,7 @@ defineExpose({ refresh: timeline.refresh })
         </div>
 
         <div v-if="mentionPickerOpen" class="space-y-2 rounded-md border border-default p-2">
-          <UInput v-model="mentionQuery" :disabled="submitting || mentionLoading" placeholder="Filter Agents or Squads…" />
+          <UInput v-model="mentionQuery" :disabled="submitting || mentionLoading" placeholder="Filter Agents…" />
           <p v-if="mentionLoading" class="text-xs text-muted">Loading Agents…</p>
           <UAlert v-else-if="mentionLoadError" title="Unable to load Agents" :description="mentionLoadError.message" color="error" />
           <div v-else class="flex flex-wrap gap-2">
