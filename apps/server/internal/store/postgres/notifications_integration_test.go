@@ -123,8 +123,43 @@ func TestIssueSubscriptionsAndNotificationsAreScopedIdempotentAndDurable(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+	issueBeforeNotifications, err := s.GetIssue(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runsBeforeNotifications, err := s.ListRuns(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := s.CreateIssueCommentNotifications(ctx, project.ID, agentReply.Comment.ID); err != nil {
 		t.Fatal(err)
+	}
+	issueAfterNotifications, err := s.GetIssue(ctx, project.ID, issue.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runsAfterNotifications, err := s.ListRuns(ctx, project.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issueAfterNotifications.Status != issueBeforeNotifications.Status ||
+		(issueAfterNotifications.AssigneeType == nil) != (issueBeforeNotifications.AssigneeType == nil) ||
+		(issueAfterNotifications.AssigneeID == nil) != (issueBeforeNotifications.AssigneeID == nil) {
+		t.Fatalf("notification generation mutated issue before=%+v after=%+v", issueBeforeNotifications, issueAfterNotifications)
+	}
+	if issueBeforeNotifications.AssigneeType != nil && *issueAfterNotifications.AssigneeType != *issueBeforeNotifications.AssigneeType {
+		t.Fatalf("notification generation changed assignee type before=%q after=%q", *issueBeforeNotifications.AssigneeType, *issueAfterNotifications.AssigneeType)
+	}
+	if issueBeforeNotifications.AssigneeID != nil && *issueAfterNotifications.AssigneeID != *issueBeforeNotifications.AssigneeID {
+		t.Fatalf("notification generation changed assignee id before=%q after=%q", *issueBeforeNotifications.AssigneeID, *issueAfterNotifications.AssigneeID)
+	}
+	if len(runsAfterNotifications) != len(runsBeforeNotifications) {
+		t.Fatalf("notification generation changed run count before=%d after=%d", len(runsBeforeNotifications), len(runsAfterNotifications))
+	}
+	for i := range runsBeforeNotifications {
+		if runsAfterNotifications[i].ID != runsBeforeNotifications[i].ID || runsAfterNotifications[i].Status != runsBeforeNotifications[i].Status {
+			t.Fatalf("notification generation changed run state before=%+v after=%+v", runsBeforeNotifications, runsAfterNotifications)
+		}
 	}
 	authorPage, err = s.ListUserNotifications(ctx, author.ID)
 	if err != nil || len(authorPage.Notifications) != 2 || authorPage.UnreadCount != 2 {
@@ -159,6 +194,18 @@ func TestIssueSubscriptionsAndNotificationsAreScopedIdempotentAndDurable(t *test
 			t.Fatalf("read agent notification=%+v", notification)
 		}
 	}
+	if err := s.SetNotificationRead(ctx, author.ID, agentNotificationID, false); err != nil {
+		t.Fatal(err)
+	}
+	authorPage, err = s.ListUserNotifications(ctx, author.ID)
+	if err != nil || authorPage.UnreadCount != 2 {
+		t.Fatalf("unread author page=%+v err=%v", authorPage, err)
+	}
+	for _, notification := range authorPage.Notifications {
+		if notification.ID == agentNotificationID && notification.ReadAt != nil {
+			t.Fatalf("unread agent notification=%+v", notification)
+		}
+	}
 	if updated, err := s.MarkAllNotificationsRead(ctx, subscriber.ID); err != nil || updated != 2 {
 		t.Fatalf("mark all updated=%d err=%v", updated, err)
 	}
@@ -175,5 +222,126 @@ func TestIssueSubscriptionsAndNotificationsAreScopedIdempotentAndDurable(t *test
 	}
 	if err := s.SetIssueSubscription(ctx, project.ID, issue.ID, subscriber.ID, false); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("inaccessible unsubscribe err=%v", err)
+	}
+
+	projectB, err := s.CreateProjectWithAdmin(ctx, testProjectInput("Other Notifications", "/repo/notifications-b", "NTB"), other.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertProjectUserAccess(ctx, store.ProjectUserAccess{ProjectID: projectB.ID, UserID: author.ID, Role: store.ProjectRoleViewer}); err != nil {
+		t.Fatal(err)
+	}
+	issueB, err := s.CreateIssue(ctx, store.Issue{ProjectID: projectB.ID, Title: "Private discussion", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetIssueSubscription(ctx, projectB.ID, issueB.ID, author.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	projectBKey := "project-b-comment"
+	projectBComment, err := s.CreateIssueComment(ctx, projectB.ID, store.IssueComment{
+		IssueID: issueB.ID, AuthorType: store.ActorTypeHuman, AuthorID: other.ID, Body: "Project B only", SourceActionKey: &projectBKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateIssueCommentNotifications(ctx, projectB.ID, projectBComment.Comment.ID); err != nil {
+		t.Fatal(err)
+	}
+	authorPage, err = s.ListUserNotifications(ctx, author.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectBNotificationID := ""
+	for _, notification := range authorPage.Notifications {
+		if notification.ProjectID == projectB.ID {
+			projectBNotificationID = notification.ID
+		}
+	}
+	if projectBNotificationID == "" {
+		t.Fatalf("project B notification missing before access removal: %+v", authorPage)
+	}
+	if err := s.DeleteProjectUserAccess(ctx, projectB.ID, author.ID); err != nil {
+		t.Fatal(err)
+	}
+	authorPage, err = s.ListUserNotifications(ctx, author.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, notification := range authorPage.Notifications {
+		if notification.ProjectID == projectB.ID {
+			t.Fatalf("inaccessible project B notification leaked: %+v", notification)
+		}
+	}
+	if err := s.SetNotificationRead(ctx, author.ID, projectBNotificationID, true); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("inaccessible project B notification mutation err=%v", err)
+	}
+	if err := s.SetNotificationRead(ctx, author.ID, agentNotificationID, true); err != nil {
+		t.Fatalf("project A notification should remain mutable: %v", err)
+	}
+}
+
+func TestUserNotificationsAreDeterministicallyOrdered(t *testing.T) {
+	s := New(testPool(t))
+	ctx := context.Background()
+	recipient, err := s.CreateUser(ctx, authUser("notification-order-recipient", "notification-order-recipient@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	author, err := s.CreateUser(ctx, authUser("notification-order-author", "notification-order-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.CreateProjectWithAdmin(ctx, testProjectInput("Notification order", "/repo/notification-order", "NTO"), recipient.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issue, err := s.CreateIssue(ctx, store.Issue{ProjectID: project.ID, Title: "Order notifications", Status: "TODO"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	comments := make([]store.IssueComment, 0, 3)
+	for i, key := range []string{"order-comment-1", "order-comment-2", "order-comment-3"} {
+		created, err := s.CreateIssueComment(ctx, project.ID, store.IssueComment{
+			IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, Body: key, SourceActionKey: &key,
+		})
+		if err != nil {
+			t.Fatalf("create ordering comment %d: %v", i+1, err)
+		}
+		comments = append(comments, created.Comment)
+	}
+
+	ids := []string{
+		"10000000-0000-4000-8000-000000000001",
+		"10000000-0000-4000-8000-000000000002",
+		"00000000-0000-4000-8000-000000000001",
+	}
+	createdAt := []string{
+		"2099-01-01T00:00:00Z",
+		"2099-01-01T00:00:00Z",
+		"2099-01-02T00:00:00Z",
+	}
+	for i := range comments {
+		if _, err := s.pool.Exec(ctx, `
+			INSERT INTO user_notifications (id, recipient_user_id, project_id, issue_id, source_comment_id, kind, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz)
+		`, ids[i], recipient.ID, project.ID, issue.ID, comments[i].ID, store.NotificationKindIssueComment, createdAt[i]); err != nil {
+			t.Fatalf("insert ordering notification %d: %v", i+1, err)
+		}
+	}
+
+	page, err := s.ListUserNotifications(ctx, recipient.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Notifications) != 3 {
+		t.Fatalf("ordered notification page=%+v", page)
+	}
+	want := []string{ids[2], ids[1], ids[0]}
+	for i, notification := range page.Notifications {
+		if notification.ID != want[i] {
+			t.Fatalf("notification[%d]=%s want=%s page=%+v", i, notification.ID, want[i], page)
+		}
 	}
 }
