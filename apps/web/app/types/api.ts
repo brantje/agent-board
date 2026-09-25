@@ -101,8 +101,21 @@ export type IssueCommentMentionReasonCode =
   | 'TARGET_BUSY'
   | 'DELEGATION_BLOCKED'
 
+export type IssueCommentTargetType = 'AGENT' | 'SQUAD'
+
+export interface IssueCommentTarget {
+  type: IssueCommentTargetType
+  id: string
+  name?: string
+}
+
 export interface IssueCommentMention {
   id: string
+  targetType?: IssueCommentTargetType
+  targetId?: string
+  targetName?: string
+  resolvedAgentId?: string | null
+  resolvedAgentName?: string
   targetAgentId: string
   targetAgentName: string
   outcome: IssueCommentMentionOutcome
@@ -112,6 +125,11 @@ export interface IssueCommentMention {
 }
 
 export interface IssueCommentMentionPreview {
+  targetType?: IssueCommentTargetType
+  targetId?: string
+  targetName?: string
+  resolvedAgentId?: string | null
+  resolvedAgentName?: string
   targetAgentId: string
   targetAgentName: string
   eligible: boolean
@@ -122,6 +140,7 @@ export type IssueCommentImplicitRoutingReason =
   | 'DIRECT_AGENT_REPLY'
   | 'UNIQUE_THREAD_AGENT'
   | 'ISSUE_ASSIGNEE'
+  | 'ISSUE_SQUAD_ASSIGNEE'
 
 export type IssueCommentImplicitOutcome = 'QUEUED' | 'COALESCED' | 'DEFERRED' | 'BLOCKED' | 'SUPPRESSED'
 
@@ -130,6 +149,11 @@ export type IssueCommentImplicitReasonCode =
   | 'WORKFLOW_BLOCKED'
 
 export interface IssueCommentImplicitTrigger {
+  targetType?: IssueCommentTargetType
+  targetId?: string
+  targetName?: string
+  resolvedAgentId?: string | null
+  resolvedAgentName?: string
   targetAgentId: string
   targetAgentName: string
   routingReason: IssueCommentImplicitRoutingReason
@@ -140,6 +164,11 @@ export interface IssueCommentImplicitTrigger {
 }
 
 export interface IssueCommentImplicitTriggerPreview {
+  targetType?: IssueCommentTargetType
+  targetId?: string
+  targetName?: string
+  resolvedAgentId?: string | null
+  resolvedAgentName?: string
   targetAgentId: string
   targetAgentName: string
   routingReason: IssueCommentImplicitRoutingReason
