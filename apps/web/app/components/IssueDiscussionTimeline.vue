@@ -501,7 +501,7 @@ defineExpose({ refresh: timeline.refresh })
                 :key="mention.id"
                 class="flex flex-wrap items-center gap-2 rounded-md bg-elevated px-2 py-1 text-xs"
               >
-                <UBadge :label="`@${mention.targetName || mention.targetAgentName || 'Unavailable target'}`" size="xs" variant="subtle" />
+                <UBadge :label="`@${mention.targetName || mention.targetAgentName || (mention.targetType === 'SQUAD' ? 'Unavailable Squad' : 'Unavailable Agent')}`" size="xs" variant="subtle" />
                 <span>{{ triggerOutcomeLabel(mention.outcome, mention.reasonCode) }}</span>
                 <span v-if="mention.targetType === 'SQUAD'" class="text-muted">· leader: {{ mention.resolvedAgentName || 'unavailable' }}</span>
                 <NuxtLink
@@ -519,7 +519,7 @@ defineExpose({ refresh: timeline.refresh })
               class="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-elevated px-2 py-1 text-xs"
               aria-label="Implicit collaboration trigger"
             >
-              <UBadge :label="`@${entry.comment.implicitTrigger.targetName || entry.comment.implicitTrigger.targetAgentName || 'Unavailable target'}`" size="xs" variant="subtle" />
+              <UBadge :label="`@${entry.comment.implicitTrigger.targetName || entry.comment.implicitTrigger.targetAgentName || (entry.comment.implicitTrigger.targetType === 'SQUAD' ? 'Unavailable Squad' : 'Unavailable Agent')}`" size="xs" variant="subtle" />
               <span>{{ implicitTriggerStatus(entry.comment.implicitTrigger) }}</span>
               <span v-if="entry.comment.implicitTrigger.targetType === 'SQUAD'" class="text-muted">· leader: {{ entry.comment.implicitTrigger.resolvedAgentName || 'unavailable' }}</span>
               <span class="text-muted">· {{ routingReasonLabel(entry.comment.implicitTrigger.routingReason) }}</span>
@@ -628,7 +628,7 @@ defineExpose({ refresh: timeline.refresh })
 
       <div class="space-y-2">
         <div class="flex flex-wrap items-center gap-2">
-          <UButton label="Mention Agent or Squad" variant="outline" size="sm" :disabled="submitting" @click="loadMentionAgents" />
+          <UButton label="Mention Agent" variant="outline" size="sm" :disabled="submitting" @click="loadMentionAgents" />
           <div v-for="agent in selectedMentionAgents" :key="agent.id" class="flex items-center gap-1 rounded-md bg-elevated px-2 py-1 text-xs">
             <span>@{{ agent.name }}</span>
             <UButton :label="`Remove @${agent.name}`" variant="ghost" size="sm" :disabled="submitting" @click="removeMention(agent.id)" />
@@ -681,7 +681,7 @@ defineExpose({ refresh: timeline.refresh })
           aria-label="Implicit Agent routing preview"
         >
           <p>
-            @{{ triggerPreview.implicit.targetName || triggerPreview.implicit.targetAgentName || 'Unavailable target' }}
+            @{{ triggerPreview.implicit.targetName || triggerPreview.implicit.targetAgentName || (triggerPreview.implicit.targetType === 'SQUAD' ? 'Unavailable Squad' : 'Unavailable Agent') }}
             · {{ routingReasonLabel(triggerPreview.implicit.routingReason) }}
             · {{ implicitPreviewStatus() }}
           </p>
