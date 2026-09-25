@@ -14,19 +14,48 @@ type issueCommentWithoutMentionsStore struct {
 	store.IssueCommentStore
 }
 
+type legacyIssueCommentMentionStore struct {
+	*issueCommentWithoutMentionsStore
+	legacyCreateCalls int
+}
+
+func (s *legacyIssueCommentMentionStore) CreateIssueCommentWithMentions(ctx context.Context, projectID string, input store.IssueComment, targetAgentIDs []string) (store.IssueCommentMutationResult, error) {
+	s.legacyCreateCalls++
+	return s.CreateIssueComment(ctx, projectID, input)
+}
+
+func (s *legacyIssueCommentMentionStore) PreviewIssueCommentMentions(ctx context.Context, projectID, issueID string, targetAgentIDs []string) ([]store.IssueCommentMentionPreview, error) {
+	return nil, nil
+}
+
+func (s *legacyIssueCommentMentionStore) CreateIssueCommentWithTriggers(ctx context.Context, projectID string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	if len(request.MentionAgentIDs) != 0 {
+		return s.CreateIssueCommentWithMentions(ctx, projectID, input, request.MentionAgentIDs)
+	}
+	return s.CreateIssueComment(ctx, projectID, input)
+}
+
+func (s *legacyIssueCommentMentionStore) PreviewIssueCommentTriggers(ctx context.Context, projectID, issueID string, parentCommentID *string, body string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
+	mentions, err := s.PreviewIssueCommentMentions(ctx, projectID, issueID, request.MentionAgentIDs)
+	return store.IssueCommentTriggerPreview{Mentions: mentions}, err
+}
+
 type issueCommentTestStore struct {
 	*projectWorkflowAuthorizationStore
-	comments    []store.IssueComment
-	events      []store.Event
-	commentErr  error
-	mutationErr error
-	activityErr error
-	createCalls int
+	comments            []store.IssueComment
+	events              []store.Event
+	commentErr          error
+	mutationErr         error
+	activityErr         error
+	createCalls         int
 	lastCreate          store.IssueComment
 	mentionPreview      []store.IssueCommentMentionPreview
 	mentionErr          error
 	mentionCreateCalls  int
 	lastMentionAgentIDs []string
+	targetPreview       []store.IssueCommentMentionPreview
+	targetCreateCalls   int
+	lastTargets         []store.IssueCommentTarget
 }
 
 func (s *issueCommentTestStore) ListIssueComments(_ context.Context, projectID, issueID string) ([]store.IssueComment, error) {
@@ -70,11 +99,11 @@ func (s *issueCommentTestStore) CreateIssueCommentWithMentions(ctx context.Conte
 	result.Comment.Mentions = make([]store.IssueCommentMention, 0, len(targetAgentIDs))
 	for index, targetAgentID := range targetAgentIDs {
 		result.Comment.Mentions = append(result.Comment.Mentions, store.IssueCommentMention{
-			ID: "mention-" + targetAgentID,
-			TargetAgentID: targetAgentID,
+			ID:              "mention-" + targetAgentID,
+			TargetAgentID:   targetAgentID,
 			TargetAgentName: "Agent " + targetAgentID,
-			Outcome: store.IssueCommentMentionOutcomeQueued,
-			CreatedAt: result.Comment.CreatedAt.Add(time.Duration(index) * time.Millisecond),
+			Outcome:         store.IssueCommentMentionOutcomeQueued,
+			CreatedAt:       result.Comment.CreatedAt.Add(time.Duration(index) * time.Millisecond),
 		})
 	}
 	s.comments[len(s.comments)-1] = result.Comment
@@ -82,10 +111,27 @@ func (s *issueCommentTestStore) CreateIssueCommentWithMentions(ctx context.Conte
 }
 
 func (s *issueCommentTestStore) CreateIssueCommentWithTriggers(ctx context.Context, projectID string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	if len(request.MentionTargets) != 0 {
+		return s.CreateIssueCommentWithTargets(ctx, projectID, input, request.MentionTargets)
+	}
 	if len(request.MentionAgentIDs) != 0 {
 		return s.CreateIssueCommentWithMentions(ctx, projectID, input, request.MentionAgentIDs)
 	}
 	return s.CreateIssueComment(ctx, projectID, input)
+}
+
+func (s *issueCommentTestStore) CreateIssueCommentWithTargets(ctx context.Context, projectID string, input store.IssueComment, targets []store.IssueCommentTarget) (store.IssueCommentMutationResult, error) {
+	s.targetCreateCalls++
+	s.lastTargets = append([]store.IssueCommentTarget(nil), targets...)
+	result, err := s.CreateIssueComment(ctx, projectID, input)
+	if err != nil {
+		return store.IssueCommentMutationResult{}, err
+	}
+	for _, target := range targets {
+		result.Comment.Mentions = append(result.Comment.Mentions, store.IssueCommentMention{Target: target, TargetName: "Squad", Outcome: store.IssueCommentMentionOutcomeQueued})
+	}
+	s.comments[len(s.comments)-1] = result.Comment
+	return result, nil
 }
 
 func (s *issueCommentTestStore) PreviewIssueCommentTriggers(ctx context.Context, projectID, issueID string, _ *string, _ string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
@@ -112,15 +158,30 @@ func (s *issueCommentTestStore) PreviewIssueCommentMentions(_ context.Context, p
 	result := make([]store.IssueCommentMentionPreview, 0, len(targetAgentIDs))
 	for _, targetAgentID := range targetAgentIDs {
 		result = append(result, store.IssueCommentMentionPreview{
-			TargetAgentID: targetAgentID,
+			TargetAgentID:   targetAgentID,
 			TargetAgentName: "Agent " + targetAgentID,
-			Eligible: true,
+			Eligible:        true,
 		})
 	}
 	return result, nil
 }
 
-
+func (s *issueCommentTestStore) PreviewIssueCommentTargets(_ context.Context, projectID, issueID string, targets []store.IssueCommentTarget) ([]store.IssueCommentMentionPreview, error) {
+	if s.mentionErr != nil {
+		return nil, s.mentionErr
+	}
+	if projectID != s.project.ID {
+		return nil, store.ErrNotFound
+	}
+	if s.targetPreview != nil {
+		return append([]store.IssueCommentMentionPreview(nil), s.targetPreview...), nil
+	}
+	result := make([]store.IssueCommentMentionPreview, 0, len(targets))
+	for _, target := range targets {
+		result = append(result, store.IssueCommentMentionPreview{Target: target, TargetName: "Squad", Eligible: true})
+	}
+	return result, nil
+}
 
 func (s *issueCommentTestStore) GetIssueComment(_ context.Context, projectID, issueID, commentID string) (store.IssueComment, error) {
 	if projectID != s.project.ID {
@@ -374,7 +435,6 @@ func TestProjectAccessIssueCommentsUseAuthenticatedHumanAndMemberPolicy(t *testi
 	}
 }
 
-
 func TestIssueCommentMentionApplicationFailsClosedWithoutMentionStore(t *testing.T) {
 	const projectID = "project-1"
 	const issueID = "issue-1"
@@ -394,12 +454,55 @@ func TestIssueCommentMentionApplicationFailsClosedWithoutMentionStore(t *testing
 	if _, err := service.PreviewIssueCommentMentions(t.Context(), projectID, issueID, []string{"agent-2"}); err == nil {
 		t.Fatal("preview unexpectedly succeeded without structured mention store")
 	}
+	if _, err := service.PreviewIssueCommentTargets(t.Context(), projectID, issueID, []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeSquad, ID: "squad-2"}}); err == nil {
+		t.Fatal("typed preview unexpectedly succeeded without structured mention store")
+	}
 
 	noComments := New(base)
 	if _, err := noComments.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
 		ProjectID: projectID, IssueID: issueID, Body: "body",
 	}, "author"); err == nil {
 		t.Fatal("comment creation unexpectedly succeeded without Issue comment store")
+	}
+}
+
+func TestIssueCommentTypedMentionsFailClosedWithoutTypedStore(t *testing.T) {
+	const projectID = "project-1"
+	const issueID = "issue-1"
+	base := &projectWorkflowAuthorizationStore{
+		project: store.Project{ID: projectID, IssuePrefix: "AB"},
+		issues: map[string]store.Issue{
+			issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"},
+		},
+		runs: map[string]store.Run{},
+	}
+	full := &issueCommentTestStore{projectWorkflowAuthorizationStore: base}
+	legacy := &legacyIssueCommentMentionStore{issueCommentWithoutMentionsStore: &issueCommentWithoutMentionsStore{
+		ControlPlaneStore: full,
+		IssueCommentStore: full,
+	}}
+	service := New(legacy)
+	targets := []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeSquad, ID: "squad-1"}}
+
+	if _, err := service.PreviewIssueCommentTriggers(t.Context(), projectID, issueID, nil, "ask the Squad", store.IssueCommentTriggerRequest{MentionTargets: targets}); err == nil {
+		t.Fatal("typed trigger preview unexpectedly used the legacy store")
+	}
+	if _, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "ask the Squad", RequestKey: "typed-request", MentionTargets: targets,
+	}, "author"); err == nil {
+		t.Fatal("typed comment unexpectedly used the legacy store")
+	}
+	if legacy.legacyCreateCalls != 0 || len(full.comments) != 0 {
+		t.Fatalf("typed request was not rejected before legacy persistence: calls=%d comments=%d", legacy.legacyCreateCalls, len(full.comments))
+	}
+
+	if _, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "ask the Agent", RequestKey: "legacy-request", MentionAgentIDs: []string{"agent-1"},
+	}, "author"); err != nil {
+		t.Fatalf("legacy Agent-only request failed: %v", err)
+	}
+	if legacy.legacyCreateCalls != 1 {
+		t.Fatalf("legacy Agent-only request calls=%d want 1", legacy.legacyCreateCalls)
 	}
 }
 
@@ -418,6 +521,9 @@ func TestIssueCommentMentionApplicationPreviewAndCreate(t *testing.T) {
 		projectWorkflowAuthorizationStore: base,
 		mentionPreview: []store.IssueCommentMentionPreview{{
 			TargetAgentID: "agent-2", TargetAgentName: "Verifier", Eligible: false, ReasonCode: &reason,
+		}},
+		targetPreview: []store.IssueCommentMentionPreview{{
+			Target: store.IssueCommentTarget{Type: store.IssueCommentTargetTypeSquad, ID: "squad-2"}, TargetName: "Backend", Eligible: true,
 		}},
 	}
 	service := New(fake)
@@ -441,6 +547,30 @@ func TestIssueCommentMentionApplicationPreviewAndCreate(t *testing.T) {
 	if fake.mentionCreateCalls != 1 || len(fake.lastMentionAgentIDs) != 1 || fake.lastMentionAgentIDs[0] != "agent-2" ||
 		len(created.Mentions) != 1 || created.Mentions[0].TargetAgentID != "agent-2" {
 		t.Fatalf("created=%+v calls=%d targets=%+v", created, fake.mentionCreateCalls, fake.lastMentionAgentIDs)
+	}
+
+	targets := []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeSquad, ID: "squad-2"}}
+	targetPreview, err := service.PreviewIssueCommentTargets(t.Context(), projectID, issueID, targets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targetPreview) != 1 || targetPreview[0].Target != targets[0] || targetPreview[0].TargetName != "Backend" {
+		t.Fatalf("target preview=%+v", targetPreview)
+	}
+	fake.mentionErr = store.ErrInvalidArgument
+	if _, err := service.PreviewIssueCommentTargets(t.Context(), projectID, issueID, targets); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("typed preview error=%v want invalid argument", err)
+	}
+	fake.mentionErr = nil
+	targetCreated, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
+		ProjectID: projectID, IssueID: issueID, Body: "Please ask the squad.", RequestKey: "squad-request", MentionTargets: targets,
+	}, "author")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.targetCreateCalls != 1 || len(fake.lastTargets) != 1 || fake.lastTargets[0] != targets[0] ||
+		len(targetCreated.Mentions) != 1 || targetCreated.Mentions[0].Target != targets[0] {
+		t.Fatalf("target created=%+v calls=%d targets=%+v", targetCreated, fake.targetCreateCalls, fake.lastTargets)
 	}
 
 	fake.mentionErr = store.ErrInvalidArgument
@@ -563,6 +693,20 @@ func TestPublishAgentIssueCommentDerivesTrustedRunContext(t *testing.T) {
 	}
 	if len(publisher.published) != 1 || publisher.published[0].Type != "issue.comment_created" {
 		t.Fatalf("published=%+v", publisher.published)
+	}
+	targetCreated, err := service.PublishAgentIssueCommentTargets(t.Context(), projectID, runID, "tool-call-target", "Targeted finding", []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeSquad, ID: "squad-2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if targetCreated.AuthorID != agentID || len(targetCreated.Mentions) != 1 || targetCreated.Mentions[0].Target.Type != store.IssueCommentTargetTypeSquad ||
+		fake.targetCreateCalls != 1 || len(fake.lastTargets) != 1 {
+		t.Fatalf("typed Agent comment=%+v calls=%d targets=%+v", targetCreated, fake.targetCreateCalls, fake.lastTargets)
+	}
+	if _, err := service.PublishAgentIssueCommentTargets(t.Context(), projectID, runID, "tool-call-too-many", "body", []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeAgent, ID: "agent-2"}, {Type: store.IssueCommentTargetTypeSquad, ID: "squad-2"}}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("multiple typed targets error=%v want invalid argument", err)
+	}
+	if _, err := service.PublishAgentIssueCommentTargets(t.Context(), projectID, "missing", "tool-call-missing-target", "body", nil); err == nil {
+		t.Fatal("missing Run unexpectedly published a typed comment")
 	}
 
 	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, "missing", "tool-call-2", "body", nil); err == nil {
@@ -741,7 +885,6 @@ func TestIssueTimelineMergesCommentsWithRelevantDurableActivity(t *testing.T) {
 	}
 }
 
-
 func TestProjectAccessIssueCommentLifecycleAuthorizationAndExecutionNeutrality(t *testing.T) {
 	const projectID = "project-1"
 	const issueID = "issue-1"
@@ -906,8 +1049,8 @@ func TestIssueCommentLifecycleRejectsMissingOrDeletedTargets(t *testing.T) {
 	const issueID = "issue-1"
 	base := &projectWorkflowAuthorizationStore{
 		project: store.Project{ID: projectID, IssuePrefix: "AB"},
-		issues: map[string]store.Issue{issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"}},
-		runs: map[string]store.Run{},
+		issues:  map[string]store.Issue{issueID: {ID: issueID, ProjectID: projectID, Number: 1, Title: "Issue", Status: "TODO"}},
+		runs:    map[string]store.Run{},
 	}
 	at := time.Now()
 	deletedAt := at.Add(time.Second)
@@ -932,7 +1075,6 @@ func TestIssueCommentLifecycleRejectsMissingOrDeletedTargets(t *testing.T) {
 		t.Fatal("deleted reaction unexpectedly succeeded")
 	}
 }
-
 
 func TestIssueCommentLifecycleValidationAndDeletedNoOpBranches(t *testing.T) {
 	const projectID = "project-1"
@@ -998,7 +1140,6 @@ func TestIssueCommentLifecycleValidationAndDeletedNoOpBranches(t *testing.T) {
 		t.Fatal("reaction removal from missing comment unexpectedly succeeded")
 	}
 }
-
 
 func TestIssueCommentLifecycleValidationAndMutationFailures(t *testing.T) {
 	const projectID = "project-1"

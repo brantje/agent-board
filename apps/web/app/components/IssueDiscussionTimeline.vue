@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import type {
   Agent,
+  IssueCommentTarget,
   IssueComment,
   IssueCommentImplicitReasonCode,
   IssueCommentImplicitRoutingReason,
@@ -9,7 +10,8 @@ import type {
   IssueCommentMentionReasonCode,
   IssueCommentReactionKey,
   IssueCommentTriggerPreview,
-  IssueTimelineEntry
+  IssueTimelineEntry,
+  Squad
 } from '../types/api'
 import { apiPath, apiRequest } from '../utils/api'
 import { eventActivityIcon, eventDescription, eventTitle, formatActivityTime } from '../utils/events'
@@ -32,7 +34,9 @@ const mentionLoading = ref(false)
 const mentionLoadError = ref<Error>()
 const mentionQuery = ref('')
 const mentionAgents = ref<Agent[]>([])
+const mentionSquads = ref<Squad[]>([])
 const selectedMentionAgentIDs = ref<string[]>([])
+const selectedMentionSquadIDs = ref<string[]>([])
 const triggerPreview = ref<IssueCommentTriggerPreview>({ mentions: [], implicit: null })
 const triggerPreviewError = ref<Error>()
 const suppressImplicitAgentTrigger = ref(false)
@@ -61,12 +65,31 @@ const selectedMentionAgents = computed(() => {
   return selectedMentionAgentIDs.value.map(id => byID.get(id)).filter((agent): agent is Agent => Boolean(agent))
 })
 
+const selectedMentionSquads = computed(() => {
+  const byID = new Map(mentionSquads.value.map(squad => [squad.id, squad]))
+  return selectedMentionSquadIDs.value.map(id => byID.get(id)).filter((squad): squad is Squad => Boolean(squad))
+})
+
+const selectedMentionTargets = computed<IssueCommentTarget[]>(() => [
+  ...selectedMentionAgents.value.map(agent => ({ type: 'AGENT' as const, id: agent.id, name: agent.name })),
+  ...selectedMentionSquads.value.map(squad => ({ type: 'SQUAD' as const, id: squad.id, name: squad.name }))
+])
+
 const filteredMentionAgents = computed(() => {
   const query = mentionQuery.value.trim().toLocaleLowerCase()
   const selected = new Set(selectedMentionAgentIDs.value)
   return mentionAgents.value
     .filter(agent => !selected.has(agent.id))
     .filter(agent => !query || agent.name.toLocaleLowerCase().includes(query))
+    .slice(0, 8)
+})
+
+const filteredMentionSquads = computed(() => {
+  const query = mentionQuery.value.trim().toLocaleLowerCase()
+  const selected = new Set(selectedMentionSquadIDs.value)
+  return mentionSquads.value
+    .filter(squad => !selected.has(squad.id))
+    .filter(squad => !query || squad.name.toLocaleLowerCase().includes(query))
     .slice(0, 8)
 })
 
@@ -138,6 +161,7 @@ function routingReasonLabel(reason: IssueCommentImplicitRoutingReason) {
     case 'DIRECT_AGENT_REPLY': return 'replying directly to this Agent'
     case 'UNIQUE_THREAD_AGENT': return 'only Agent participating in this discussion'
     case 'ISSUE_ASSIGNEE': return 'current Issue Agent assignee'
+    case 'ISSUE_SQUAD_ASSIGNEE': return 'current Issue Squad assignee'
   }
 }
 
@@ -163,23 +187,38 @@ function implicitTriggerStatus(trigger: IssueCommentImplicitTrigger) {
   return triggerOutcomeLabel(trigger.outcome, trigger.reasonCode)
 }
 
-function mentionPreviewFor(agentID: string) {
-  return triggerPreview.value.mentions.find(item => item.targetAgentId === agentID)
+function mentionPreviewFor(target: Pick<IssueCommentTarget, 'type' | 'id'>) {
+  return triggerPreview.value.mentions.find(item => {
+    if (item.targetType && item.targetId) {
+      return item.targetType === target.type && item.targetId === target.id
+    }
+    return target.type === 'AGENT' && item.targetAgentId === target.id
+  })
 }
 
-function mentionPreviewLabel(agentID: string) {
-  const preview = mentionPreviewFor(agentID)
+function mentionPreviewLabel(target: Pick<IssueCommentTarget, 'type' | 'id'>) {
+  const preview = mentionPreviewFor(target)
   if (!preview) return 'Checking eligibility…'
-  return preview.eligible ? 'Eligible to request work' : mentionReasonLabel(preview.reasonCode)
+  if (!preview.eligible) return mentionReasonLabel(preview.reasonCode)
+  if (target.type === 'SQUAD' && preview.resolvedAgentName) {
+    return `Eligible to request work · leader: ${preview.resolvedAgentName}`
+  }
+  return 'Eligible to request work'
 }
 
 async function loadMentionAgents() {
   mentionPickerOpen.value = true
-  if (mentionAgents.value.length || mentionLoading.value) return
+  if ((mentionAgents.value.length && mentionSquads.value.length) || mentionLoading.value) return
   mentionLoading.value = true
   mentionLoadError.value = undefined
   try {
     mentionAgents.value = await apiRequest<Agent[]>(apiPath('agents', props.projectId))
+    try {
+      mentionSquads.value = await apiRequest<Squad[]>(apiPath('squads', props.projectId))
+    } catch {
+      // Agent selection remains usable when an older deployment does not yet expose Squads.
+      mentionSquads.value = []
+    }
   } catch (failure) {
     mentionLoadError.value = failure as Error
   } finally {
@@ -189,6 +228,9 @@ async function loadMentionAgents() {
 
 async function refreshTriggerPreview() {
   const targetAgentIDs = [...selectedMentionAgentIDs.value]
+  const typedTargets = selectedMentionSquads.value.length
+    ? selectedMentionTargets.value.map(({ type, id }) => ({ type, id }))
+    : undefined
   const generation = ++triggerPreviewGeneration
   triggerPreviewError.value = undefined
   try {
@@ -199,7 +241,7 @@ async function refreshTriggerPreview() {
         body: {
           parentCommentId: replyTo.value?.id ?? null,
           body: body.value.trim(),
-          mentionAgentIds: targetAgentIDs,
+          ...(typedTargets ? { mentionTargets: typedTargets } : { mentionAgentIds: targetAgentIDs }),
           suppressImplicitAgentTrigger: suppressImplicitAgentTrigger.value
         }
       }
@@ -213,6 +255,14 @@ async function refreshTriggerPreview() {
   }
 }
 
+function addSquad(squad: Squad) {
+  if (selectedMentionSquadIDs.value.includes(squad.id)) return
+  selectedMentionSquadIDs.value = [...selectedMentionSquadIDs.value, squad.id]
+  mentionQuery.value = ''
+  routingInputChanged()
+  void refreshTriggerPreview()
+}
+
 async function addMention(agent: Agent) {
   if (selectedMentionAgentIDs.value.includes(agent.id)) return
   selectedMentionAgentIDs.value = [...selectedMentionAgentIDs.value, agent.id]
@@ -223,6 +273,12 @@ async function addMention(agent: Agent) {
 
 async function removeMention(agentID: string) {
   selectedMentionAgentIDs.value = selectedMentionAgentIDs.value.filter(id => id !== agentID)
+  routingInputChanged()
+  await refreshTriggerPreview()
+}
+
+async function removeSquad(squadID: string) {
+  selectedMentionSquadIDs.value = selectedMentionSquadIDs.value.filter(id => id !== squadID)
   routingInputChanged()
   await refreshTriggerPreview()
 }
@@ -338,6 +394,7 @@ async function submit() {
     body: string
     parentCommentId: string | null
     requestId: string
+    mentionTargets?: Array<{ type: 'AGENT' | 'SQUAD'; id: string }>
     mentionAgentIds?: string[]
     suppressImplicitAgentTrigger: boolean
   } = {
@@ -346,7 +403,9 @@ async function submit() {
     requestId: draftRequestId.value,
     suppressImplicitAgentTrigger: suppressImplicitAgentTrigger.value
   }
-  if (mentionAgentIds.length) {
+  if (selectedMentionSquads.value.length) {
+    requestBody.mentionTargets = selectedMentionTargets.value.map(({ type, id }) => ({ type, id }))
+  } else if (mentionAgentIds.length) {
     requestBody.mentionAgentIds = mentionAgentIds
   }
 
@@ -362,6 +421,7 @@ async function submit() {
     mentionPickerOpen.value = false
     mentionQuery.value = ''
     selectedMentionAgentIDs.value = []
+    selectedMentionSquadIDs.value = []
     triggerPreview.value = { mentions: [], implicit: null }
     triggerPreviewError.value = undefined
     suppressImplicitAgentTrigger.value = false
@@ -445,14 +505,15 @@ defineExpose({ refresh: timeline.refresh })
             </div>
             <MarkdownContent v-else-if="entry.comment.body !== null" class="mt-2" :content="entry.comment.body" />
 
-            <div v-if="entry.comment.mentions?.length" class="mt-3 space-y-2" aria-label="Structured Agent mentions">
+            <div v-if="entry.comment.mentions?.length" class="mt-3 space-y-2" aria-label="Structured collaboration targets">
               <div
                 v-for="mention in entry.comment.mentions"
                 :key="mention.id"
                 class="flex flex-wrap items-center gap-2 rounded-md bg-elevated px-2 py-1 text-xs"
               >
-                <UBadge :label="`@${mention.targetAgentName || 'Unavailable Agent'}`" size="xs" variant="subtle" />
+                <UBadge :label="`@${mention.targetName || mention.targetAgentName || (mention.targetType === 'SQUAD' ? 'Unavailable Squad' : 'Unavailable Agent')}`" size="xs" variant="subtle" />
                 <span>{{ triggerOutcomeLabel(mention.outcome, mention.reasonCode) }}</span>
+                <span v-if="mention.targetType === 'SQUAD'" class="text-muted">· leader: {{ mention.resolvedAgentName || 'unavailable' }}</span>
                 <NuxtLink
                   v-if="mention.delegatedRunId"
                   :to="`/projects/${projectId}/runs/${mention.delegatedRunId}`"
@@ -466,10 +527,11 @@ defineExpose({ refresh: timeline.refresh })
             <div
               v-if="entry.comment.implicitTrigger"
               class="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-elevated px-2 py-1 text-xs"
-              aria-label="Implicit Agent trigger"
+              aria-label="Implicit collaboration trigger"
             >
-              <UBadge :label="`@${entry.comment.implicitTrigger.targetAgentName || 'Unavailable Agent'}`" size="xs" variant="subtle" />
+              <UBadge :label="`@${entry.comment.implicitTrigger.targetName || entry.comment.implicitTrigger.targetAgentName || (entry.comment.implicitTrigger.targetType === 'SQUAD' ? 'Unavailable Squad' : 'Unavailable Agent')}`" size="xs" variant="subtle" />
               <span>{{ implicitTriggerStatus(entry.comment.implicitTrigger) }}</span>
+              <span v-if="entry.comment.implicitTrigger.targetType === 'SQUAD'" class="text-muted">· leader: {{ entry.comment.implicitTrigger.resolvedAgentName || 'unavailable' }}</span>
               <span class="text-muted">· {{ routingReasonLabel(entry.comment.implicitTrigger.routingReason) }}</span>
               <NuxtLink
                 v-if="entry.comment.implicitTrigger.delegatedRunId"
@@ -581,6 +643,10 @@ defineExpose({ refresh: timeline.refresh })
             <span>@{{ agent.name }}</span>
             <UButton :label="`Remove @${agent.name}`" variant="ghost" size="sm" :disabled="submitting" @click="removeMention(agent.id)" />
           </div>
+          <div v-for="squad in selectedMentionSquads" :key="squad.id" class="flex items-center gap-1 rounded-md bg-elevated px-2 py-1 text-xs">
+            <span>@{{ squad.name }} · Squad</span>
+            <UButton :label="`Remove @${squad.name}`" variant="ghost" size="sm" :disabled="submitting" @click="removeSquad(squad.id)" />
+          </div>
         </div>
 
         <div v-if="mentionPickerOpen" class="space-y-2 rounded-md border border-default p-2">
@@ -597,14 +663,26 @@ defineExpose({ refresh: timeline.refresh })
               :disabled="submitting"
               @click="addMention(agent)"
             />
-            <span v-if="!filteredMentionAgents.length" class="text-xs text-muted">No matching Agents.</span>
+            <UButton
+              v-for="squad in filteredMentionSquads"
+              :key="squad.id"
+              :label="`@${squad.name} · Squad`"
+              variant="ghost"
+              size="sm"
+              :disabled="submitting"
+              @click="addSquad(squad)"
+            />
+            <span v-if="!filteredMentionAgents.length && !filteredMentionSquads.length" class="text-xs text-muted">No matching Agents or Squads.</span>
           </div>
         </div>
 
         <UAlert v-if="triggerPreviewError" title="Trigger preview unavailable" :description="triggerPreviewError.message" color="warning" />
-        <div v-if="selectedMentionAgents.length" class="space-y-1 text-xs text-muted" aria-label="Agent mention preview">
+        <div v-if="selectedMentionTargets.length" class="space-y-1 text-xs text-muted" aria-label="Agent mention preview">
           <p v-for="agent in selectedMentionAgents" :key="agent.id">
-            @{{ agent.name }} · {{ mentionPreviewLabel(agent.id) }}
+            @{{ agent.name }} · {{ mentionPreviewLabel({ type: 'AGENT', id: agent.id }) }}
+          </p>
+          <p v-for="squad in selectedMentionSquads" :key="squad.id">
+            @{{ squad.name }} · {{ mentionPreviewLabel({ type: 'SQUAD', id: squad.id }) }}
           </p>
         </div>
         <div
@@ -613,7 +691,7 @@ defineExpose({ refresh: timeline.refresh })
           aria-label="Implicit Agent routing preview"
         >
           <p>
-            @{{ triggerPreview.implicit.targetAgentName || 'Unavailable Agent' }}
+            @{{ triggerPreview.implicit.targetName || triggerPreview.implicit.targetAgentName || (triggerPreview.implicit.targetType === 'SQUAD' ? 'Unavailable Squad' : 'Unavailable Agent') }}
             · {{ routingReasonLabel(triggerPreview.implicit.routingReason) }}
             · {{ implicitPreviewStatus() }}
           </p>

@@ -78,9 +78,11 @@ The public API exposes parent-scoped delegation listing and child-Run lineage in
 
 ## Structured Issue-comment Agent mentions
 
-Structured `@Agent` mentions are implemented as an adapter into canonical delegation, not as a second execution system.
+Structured `@Agent` and `@Squad` mentions are implemented as an adapter into canonical delegation, not as a second execution system.
 
-The durable comment stores explicit target identities separately from prose. A mention is selected by stable Agent ID; the display name is resolved for presentation and can change without breaking historical identity. Plain text that looks like `@name` has no routing semantics. The posting API and OpenCode `publish_issue_comment(body, mentionAgentIds?)` tool carry mention intent structurally.
+The durable comment stores explicit typed target identities separately from prose. A mention is selected by stable `AGENT` or `SQUAD` ID; the display name is resolved for presentation and can change without breaking historical identity. Plain text that looks like `@name` has no routing semantics. The posting API and OpenCode `publish_issue_comment(body, mentionTargets?)` tool carry mention intent structurally.
+
+For a Squad target, the stored target remains the Squad while dispatch resolves the current leader Agent through the canonical Squad/Issue execution resolver. The resolved Agent is recorded as provenance; changing the leader does not rewrite historical comments or delegations. Individual Squad members remain ordinary Agent targets when explicitly selected.
 
 Before posting, the Issue UI can ask the server for an advisory eligibility preview. Posting always revalidates current Project/Agent eligibility and canonical delegation policy. Each durable mention records only the target identity, its posting outcome, a safe reason when blocked, and the minimum shared work-request/delegation/Run correlation needed for inspection:
 
@@ -107,14 +109,15 @@ Retry safety follows existing request identity conventions. Human clients send o
 
 Human Issue discussions also support a convenience routing layer over the same comment-origin delegation path used by structured mentions. It does not parse prose, change ownership, or introduce a second execution lifecycle.
 
-For a newly posted human comment with no explicit structured Agent mentions, the server resolves at most one target using this fixed precedence:
+For a newly posted human comment with no explicit structured targets, the server resolves at most one target using this fixed precedence:
 
 1. a direct reply to an Agent-authored comment routes to that Agent;
 2. otherwise a reply routes when exactly one Agent has authored a comment anywhere in that discussion thread;
 3. otherwise a top-level comment routes to the current `AGENT` Issue assignee;
-4. otherwise no implicit execution target exists.
+4. otherwise a top-level comment on a `SQUAD`-owned Issue routes to the Squad target and its current leader;
+5. otherwise no implicit execution target exists.
 
-Explicit structured mentions always disable the fallback. A multi-Agent thread never fans out and does not fall through to the Issue assignee. User, Squad and unassigned Issue ownership do not provide an implicit owner target. Agent-authored comments are intentionally excluded from implicit routing so ordinary Agent publication cannot become hidden Agent-to-Agent recursion.
+Explicit structured targets always disable the fallback. A multi-Agent thread never fans out and does not fall through to the Issue assignee. User and unassigned Issue ownership do not provide an implicit owner target. Squad ownership provides only the single current-leader target; it never fans out to members. Agent-authored comments are intentionally excluded from implicit routing so ordinary Agent publication cannot become hidden Agent-to-Agent recursion.
 
 The composer uses the same server-owned routing and eligibility helpers as posting to preview the selected Agent, the routing reason, and known blocked state. Preview is advisory; posting re-evaluates current state transactionally. The human can suppress the implicit trigger for that comment without changing its text. Suppression is per-request intent, not a Project or user preference.
 

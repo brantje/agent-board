@@ -8,20 +8,21 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 const (
-	issueCommentToolName = "publish_issue_comment"
+	issueCommentToolName   = "publish_issue_comment"
 	issueCommentToolSource = `import { tool } from "@opencode-ai/plugin"
 
 export default tool({
-  description: "Publish a concise durable comment on the current Agent Board Issue. Use it deliberately for findings, results, handoffs, non-blocking collaboration questions, or pointers to existing Run/Review evidence. To request focused Agent work, pass at most one stable Agent ID explicitly in mentionAgentIds; plain @name text never routes work. Do not copy raw logs, command/test output, file contents, progress chatter, or hidden reasoning. Use the native Question capability for blocking human input.",
+  description: "Publish a concise durable comment on the current Agent Board Issue. Use it deliberately for findings, results, handoffs, non-blocking collaboration questions, or pointers to existing Run/Review evidence. To request focused work, pass at most one stable typed target in mentionTargets; plain @name text never routes work. Do not copy raw logs, command/test output, file contents, progress chatter, or hidden reasoning. Use the native Question capability for blocking human input.",
   args: {
     body: tool.schema.string().describe("Concise user-visible Issue comment"),
-    mentionAgentIds: tool.schema.array(tool.schema.string()).optional().describe("Optional single stable Agent ID to mention structurally and request focused work from"),
+    mentionTargets: tool.schema.array(tool.schema.object({ type: tool.schema.enum(["AGENT", "SQUAD"]), id: tool.schema.string() })).optional().describe("Optional single stable Agent or Squad target to mention structurally and request focused work from"),
   },
-  async execute({ body, mentionAgentIds }) {
-    return JSON.stringify({ status: "emitted", mentionAgentIds: mentionAgentIds ?? [] })
+  async execute({ body, mentionTargets }) {
+    return JSON.stringify({ status: "emitted", mentionTargets: mentionTargets ?? [] })
   },
 })
 `
@@ -126,12 +127,19 @@ func (t *issueCommentToolTracker) applyPart(ctx context.Context, part issueComme
 	if body == "" {
 		return fmt.Errorf("opencode engine: Issue comment tool requires body")
 	}
-	mentionAgentIDs, err := issueCommentMentionAgentIDs(input["mentionAgentIds"])
+	mentionTargets, err := issueCommentTargets(input["mentionTargets"])
 	if err != nil {
 		return err
 	}
+	var mentionAgentIDs []string
+	if input["mentionTargets"] == nil {
+		mentionAgentIDs, err = issueCommentMentionAgentIDs(input["mentionAgentIds"])
+		if err != nil {
+			return err
+		}
+	}
 	published, err := publisher.PublishIssueComment(ctx, engine.IssueCommentPublishRequest{
-		Body: body, RequestKey: partID, MentionAgentIDs: mentionAgentIDs,
+		Body: body, RequestKey: partID, MentionTargets: mentionTargets, MentionAgentIDs: mentionAgentIDs,
 	})
 	if err != nil {
 		return fmt.Errorf("opencode engine: publish Issue comment: %w", err)
@@ -162,3 +170,28 @@ func issueCommentMentionAgentIDs(raw any) ([]string, error) {
 	return result, nil
 }
 
+func issueCommentTargets(raw any) ([]store.IssueCommentTarget, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	values, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("opencode engine: Issue comment mentionTargets must be an array")
+	}
+	result := make([]store.IssueCommentTarget, 0, len(values))
+	for _, value := range values {
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("opencode engine: Issue comment mentionTargets must contain objects")
+		}
+		typeValue, typeOK := object["type"].(string)
+		id, idOK := object["id"].(string)
+		typeValue = strings.TrimSpace(typeValue)
+		id = strings.TrimSpace(id)
+		if !typeOK || !idOK || (typeValue != store.IssueCommentTargetTypeAgent && typeValue != store.IssueCommentTargetTypeSquad) || id == "" {
+			return nil, fmt.Errorf("opencode engine: Issue comment mentionTargets must contain valid typed targets")
+		}
+		result = append(result, store.IssueCommentTarget{Type: typeValue, ID: id})
+	}
+	return result, nil
+}

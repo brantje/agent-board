@@ -1,9 +1,18 @@
 package httpapi
 
 import (
+	"strings"
+
 	"github.com/brantje/agent-board/apps/server/internal/app"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
+
+func nullableIssueCommentAgentID(value string) *string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return &value
+}
 
 func projectDTO(v store.Project) ProjectDTO {
 	return ProjectDTO{
@@ -71,6 +80,8 @@ func issueCommentDTO(v store.IssueComment, issueKey, viewerID string) IssueComme
 	mentions := make([]IssueCommentMentionDTO, 0, len(v.Mentions))
 	for _, mention := range v.Mentions {
 		mentions = append(mentions, IssueCommentMentionDTO{
+			TargetType: mention.Target.Type, TargetID: mention.Target.ID, TargetName: mention.TargetName,
+			ResolvedAgentID: nullableIssueCommentAgentID(mention.ResolvedAgentID), ResolvedAgentName: mention.ResolvedAgentName,
 			ID: mention.ID, TargetAgentID: mention.TargetAgentID, TargetAgentName: mention.TargetAgentName,
 			Outcome: mention.Outcome, ReasonCode: mention.ReasonCode, DelegationID: mention.DelegationID, DelegatedRunID: mention.DelegatedRunID,
 		})
@@ -78,6 +89,8 @@ func issueCommentDTO(v store.IssueComment, issueKey, viewerID string) IssueComme
 	var implicit *IssueCommentImplicitTriggerDTO
 	if v.ImplicitTrigger != nil {
 		implicit = &IssueCommentImplicitTriggerDTO{
+			TargetType: v.ImplicitTrigger.Target.Type, TargetID: v.ImplicitTrigger.Target.ID, TargetName: v.ImplicitTrigger.TargetName,
+			ResolvedAgentID: nullableIssueCommentAgentID(v.ImplicitTrigger.ResolvedAgentID), ResolvedAgentName: v.ImplicitTrigger.ResolvedAgentName,
 			TargetAgentID: v.ImplicitTrigger.TargetAgentID, TargetAgentName: v.ImplicitTrigger.TargetAgentName,
 			RoutingReason: v.ImplicitTrigger.RoutingReason, Outcome: v.ImplicitTrigger.Outcome,
 			ReasonCode: v.ImplicitTrigger.ReasonCode, DelegationID: v.ImplicitTrigger.DelegationID,

@@ -25,14 +25,14 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	parentAgent := setup.Agent
 	scope := project.ID
 	target, err := fixture.services.ControlPlane.CreateAgent(fixture.ctx, store.Agent{
-		ProjectID: &scope,
-		Name: "OpenCode delegation target",
+		ProjectID:        &scope,
+		Name:             "OpenCode delegation target",
 		RoleInstructions: "Perform only the bounded delegated task. Do not attempt to change Issue status or delegate further.",
-		Engine: opencode.Name,
-		ModelProfileID: parentAgent.ModelProfileID,
-		EngineSettings: store.EmptyObject,
+		Engine:           opencode.Name,
+		ModelProfileID:   parentAgent.ModelProfileID,
+		EngineSettings:   store.EmptyObject,
 		ConcurrencyLimit: 1,
-		State: "ENABLED",
+		State:            "ENABLED",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -44,10 +44,10 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	}
 	memberRole := "implementation"
 	squad, err := fixture.services.ControlPlane.CreateSquad(fixture.ctx, store.Squad{
-		ProjectID: project.ID,
-		Name: "OpenCode delegation Squad",
+		ProjectID:     project.ID,
+		Name:          "OpenCode delegation Squad",
 		LeaderAgentID: parentAgent.ID,
-		Members: []store.SquadMember{{Type: store.SquadMemberTypeAgent, ID: target.ID, Role: &memberRole}},
+		Members:       []store.SquadMember{{Type: store.SquadMemberTypeAgent, ID: target.ID, Role: &memberRole}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -188,7 +188,6 @@ func TestOpenCodeDockerOpenRouterDelegationEndToEnd(t *testing.T) {
 	assertOpenCodeDelegationResultEvidence(t, fixture, project.ID, parentRun.ID, child.ID)
 }
 
-
 func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T) {
 	fixture := newOpenCodeIntegrationFixture(t)
 	if !strings.EqualFold(fixture.env.providerKind, "openrouter") {
@@ -208,20 +207,20 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 	parentAgent := setup.Agent
 	scope := project.ID
 	target, err := fixture.services.ControlPlane.CreateAgent(fixture.ctx, store.Agent{
-		ProjectID: &scope,
-		Name: "OpenCode structured mention target",
+		ProjectID:        &scope,
+		Name:             "OpenCode structured mention target",
 		RoleInstructions: "Perform only the bounded delegated task. Plain @name text is prose and has no routing meaning. Do not publish comments, delegate, ask a Question, or change Issue status.",
-		Engine: opencode.Name,
-		ModelProfileID: parentAgent.ModelProfileID,
-		EngineSettings: store.EmptyObject,
+		Engine:           opencode.Name,
+		ModelProfileID:   parentAgent.ModelProfileID,
+		EngineSettings:   store.EmptyObject,
 		ConcurrencyLimit: 1,
-		State: "ENABLED",
+		State:            "ENABLED",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	parentAgent.AllowDelegation = true
-	parentAgent.RoleInstructions = "If the prompt contains 'Delegation result returned to this parent Run:', do not call publish_issue_comment or delegate_task again. Verify mentioned-result.txt contains exactly this literal content: " + expectedChildFile + ". Then create parent-after-mention.txt containing exactly parent-after-mention-ok with no trailing newline and finish normally without changing Issue status. Otherwise call publish_issue_comment exactly once. Pass exactly this raw body string with no added punctuation or formatting: " + expectedBody + " Set mentionAgentIds to a single-item array containing exactly this stable Agent ID: " + target.ID + ". Use the trusted Available delegation targets only to confirm that exact ID is available; do not substitute a name or another ID. Do not call delegate_task. Do not ask a Question, change Issue status, or modify files. After publish_issue_comment completes, stop."
+	parentAgent.RoleInstructions = "If the prompt contains 'Delegation result returned to this parent Run:', do not call publish_issue_comment or delegate_task again. Verify mentioned-result.txt contains exactly this literal content: " + expectedChildFile + ". Then create parent-after-mention.txt containing exactly parent-after-mention-ok with no trailing newline and finish normally without changing Issue status. Otherwise call publish_issue_comment exactly once. Pass exactly this raw body string with no added punctuation or formatting: " + expectedBody + " Set mentionTargets to a single-item array containing exactly this typed target: {type: AGENT, id: " + target.ID + "}. Use the trusted Available delegation targets only to confirm that exact ID is available; do not substitute a name or another ID. Do not call delegate_task. Do not ask a Question, change Issue status, or modify files. After publish_issue_comment completes, stop."
 	if _, err := fixture.services.ControlPlane.UpdateAgent(fixture.ctx, &scope, parentAgent); err != nil {
 		t.Fatal(err)
 	}
@@ -297,9 +296,13 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 			t.Fatalf("publish_issue_comment body=%q does not preserve the requested work and inert prose mention", body)
 		}
 		publishedBody = body
-		mentionIDs, ok := payload.Input["mentionAgentIds"].([]any)
-		if !ok || len(mentionIDs) != 1 || mentionIDs[0] != target.ID {
-			t.Fatalf("publish_issue_comment mentionAgentIds=%+v want [%s]", payload.Input["mentionAgentIds"], target.ID)
+		mentionTargets, ok := payload.Input["mentionTargets"].([]any)
+		if !ok || len(mentionTargets) != 1 {
+			t.Fatalf("publish_issue_comment mentionTargets=%+v want one target", payload.Input["mentionTargets"])
+		}
+		mentionTarget, ok := mentionTargets[0].(map[string]any)
+		if !ok || mentionTarget["type"] != store.IssueCommentTargetTypeAgent || mentionTarget["id"] != target.ID {
+			t.Fatalf("publish_issue_comment mentionTarget=%+v want Agent %s", mentionTargets[0], target.ID)
 		}
 	}
 	if completedPublishes != 1 {
@@ -316,7 +319,7 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 	comment := comments[0]
 	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != parentAgent.ID ||
 		comment.SourceRunID == nil || *comment.SourceRunID != parentRun.ID ||
-		comment.Body != publishedBody || delegation.Task != publishedBody || len(comment.Mentions) != 1 {
+		comment.Body != publishedBody || delegation.Task != strings.TrimSpace(publishedBody) || len(comment.Mentions) != 1 {
 		t.Fatalf("structured Agent comment=%+v delegation=%+v publishedBody=%q", comment, delegation, publishedBody)
 	}
 	if !strings.Contains(comment.Body, "@"+parentAgent.Name) {
@@ -374,7 +377,6 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 		t.Fatalf("structured mention changed Issue assignment/status: before=%+v after=%+v", beforeIssue, afterIssue)
 	}
 }
-
 
 func waitForOpenCodeDelegation(t *testing.T, fixture *openCodeIntegrationFixture, projectID, parentRunID string) store.Delegation {
 	t.Helper()

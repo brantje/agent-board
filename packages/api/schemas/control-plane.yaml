@@ -346,9 +346,14 @@ IssueCommentMentionOutcome:
 IssueCommentMention:
   type: object
   additionalProperties: false
-  required: [id, targetAgentId, targetAgentName, outcome, reasonCode, delegationId, delegatedRunId]
+  required: [id, targetType, targetId, targetName, resolvedAgentId, resolvedAgentName, targetAgentId, targetAgentName, outcome, reasonCode, delegationId, delegatedRunId]
   properties:
     id: {type: string, format: uuid}
+    targetType: {type: string, enum: [AGENT, SQUAD]}
+    targetId: {type: string, format: uuid}
+    targetName: {type: string}
+    resolvedAgentId: {type: [string, 'null'], format: uuid}
+    resolvedAgentName: {type: string}
     targetAgentId: {type: string, format: uuid}
     targetAgentName: {type: string}
     outcome: {$ref: '#/IssueCommentMentionOutcome'}
@@ -358,8 +363,13 @@ IssueCommentMention:
 IssueCommentMentionPreview:
   type: object
   additionalProperties: false
-  required: [targetAgentId, targetAgentName, eligible, reasonCode]
+  required: [targetType, targetId, targetName, resolvedAgentId, resolvedAgentName, targetAgentId, targetAgentName, eligible, reasonCode]
   properties:
+    targetType: {type: string, enum: [AGENT, SQUAD]}
+    targetId: {type: string, format: uuid}
+    targetName: {type: string}
+    resolvedAgentId: {type: [string, 'null'], format: uuid}
+    resolvedAgentName: {type: string}
     targetAgentId: {type: string, format: uuid}
     targetAgentName: {type: string}
     eligible: {type: boolean}
@@ -367,8 +377,18 @@ IssueCommentMentionPreview:
 IssueCommentMentionPreviewInput:
   type: object
   additionalProperties: false
-  required: [mentionAgentIds]
+  required: []
   properties:
+    mentionTargets:
+      type: array
+      maxItems: 10
+      items:
+        type: object
+        additionalProperties: false
+        required: [type, id]
+        properties:
+          type: {type: string, enum: [AGENT, SQUAD]}
+          id: {type: string, format: uuid}
     mentionAgentIds:
       type: array
       maxItems: 10
@@ -376,7 +396,7 @@ IssueCommentMentionPreviewInput:
       items: {type: string, format: uuid}
 IssueCommentImplicitRoutingReason:
   type: string
-  enum: [DIRECT_AGENT_REPLY, UNIQUE_THREAD_AGENT, ISSUE_ASSIGNEE]
+  enum: [DIRECT_AGENT_REPLY, UNIQUE_THREAD_AGENT, ISSUE_ASSIGNEE, ISSUE_SQUAD_ASSIGNEE]
 IssueCommentImplicitOutcome:
   type: string
   enum: [QUEUED, COALESCED, DEFERRED, BLOCKED, SUPPRESSED]
@@ -386,8 +406,13 @@ IssueCommentImplicitReasonCode:
 IssueCommentImplicitTrigger:
   type: object
   additionalProperties: false
-  required: [targetAgentId, targetAgentName, routingReason, outcome, reasonCode, delegationId, delegatedRunId]
+  required: [targetType, targetId, targetName, resolvedAgentId, resolvedAgentName, targetAgentId, targetAgentName, routingReason, outcome, reasonCode, delegationId, delegatedRunId]
   properties:
+    targetType: {type: string, enum: [AGENT, SQUAD]}
+    targetId: {type: string, format: uuid}
+    targetName: {type: string}
+    resolvedAgentId: {type: [string, 'null'], format: uuid}
+    resolvedAgentName: {type: string}
     targetAgentId: {type: string, format: uuid}
     targetAgentName: {type: string}
     routingReason: {$ref: '#/IssueCommentImplicitRoutingReason'}
@@ -398,8 +423,13 @@ IssueCommentImplicitTrigger:
 IssueCommentImplicitTriggerPreview:
   type: object
   additionalProperties: false
-  required: [targetAgentId, targetAgentName, routingReason, eligible, suppressed, reasonCode]
+  required: [targetType, targetId, targetName, resolvedAgentId, resolvedAgentName, targetAgentId, targetAgentName, routingReason, eligible, suppressed, reasonCode]
   properties:
+    targetType: {type: string, enum: [AGENT, SQUAD]}
+    targetId: {type: string, format: uuid}
+    targetName: {type: string}
+    resolvedAgentId: {type: [string, 'null'], format: uuid}
+    resolvedAgentName: {type: string}
     targetAgentId: {type: string, format: uuid}
     targetAgentName: {type: string}
     routingReason: {$ref: '#/IssueCommentImplicitRoutingReason'}
@@ -424,6 +454,16 @@ IssueCommentTriggerPreviewInput:
   properties:
     parentCommentId: {type: [string, 'null'], format: uuid}
     body: {type: string}
+    mentionTargets:
+      type: array
+      maxItems: 10
+      items:
+        type: object
+        additionalProperties: false
+        required: [type, id]
+        properties:
+          type: {type: string, enum: [AGENT, SQUAD]}
+          id: {type: string, format: uuid}
     mentionAgentIds:
       type: array
       maxItems: 10
@@ -476,6 +516,16 @@ IssueCommentCreate:
       type: string
       format: uuid
       description: Stable client request identity used to make comment creation and any resulting Agent trigger idempotent.
+    mentionTargets:
+      type: array
+      maxItems: 10
+      items:
+        type: object
+        additionalProperties: false
+        required: [type, id]
+        properties:
+          type: {type: string, enum: [AGENT, SQUAD]}
+          id: {type: string, format: uuid}
     mentionAgentIds:
       type: array
       maxItems: 10

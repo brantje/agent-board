@@ -18,6 +18,25 @@ const (
 	httpReplyID   = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 )
 
+func TestIssueCommentTargetRequestsValidation(t *testing.T) {
+	validID := "11111111-1111-4111-8111-111111111111"
+	if targets, ok := issueCommentTargetRequests([]IssueCommentTargetRequest{{Type: store.IssueCommentTargetTypeAgent, ID: validID}, {Type: store.IssueCommentTargetTypeSquad, ID: validID}}); !ok || len(targets) != 2 {
+		t.Fatalf("valid typed targets=%+v ok=%v", targets, ok)
+	}
+	cases := []IssueCommentTargetRequest{
+		{Type: "USER", ID: validID},
+		{Type: store.IssueCommentTargetTypeAgent, ID: "not-a-uuid"},
+	}
+	for _, value := range cases {
+		if targets, ok := issueCommentTargetRequests([]IssueCommentTargetRequest{value}); ok || targets != nil {
+			t.Fatalf("invalid typed target accepted: %+v", value)
+		}
+	}
+	if targets, ok := issueCommentTargetRequests([]IssueCommentTargetRequest{{Type: store.IssueCommentTargetTypeAgent, ID: validID}, {Type: store.IssueCommentTargetTypeAgent, ID: validID}}); ok || targets != nil {
+		t.Fatal("duplicate typed target accepted")
+	}
+}
+
 type issueCommentHTTPStore struct {
 	*fakeControlPlaneStore
 	comments []store.IssueComment
@@ -51,7 +70,6 @@ func (s *issueCommentHTTPStore) CreateIssueComment(_ context.Context, pid string
 	return store.IssueCommentMutationResult{Comment: input, Events: []store.Event{event}}, nil
 }
 
-
 func (s *issueCommentHTTPStore) CreateIssueCommentWithMentions(ctx context.Context, pid string, input store.IssueComment, targetAgentIDs []string) (store.IssueCommentMutationResult, error) {
 	result, err := s.CreateIssueComment(ctx, pid, input)
 	if err != nil {
@@ -71,23 +89,44 @@ func (s *issueCommentHTTPStore) CreateIssueCommentWithMentions(ctx context.Conte
 }
 
 func (s *issueCommentHTTPStore) CreateIssueCommentWithTriggers(ctx context.Context, pid string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	if len(request.MentionTargets) != 0 {
+		return s.CreateIssueCommentWithTargets(ctx, pid, input, request.MentionTargets)
+	}
 	if len(request.MentionAgentIDs) != 0 {
 		return s.CreateIssueCommentWithMentions(ctx, pid, input, request.MentionAgentIDs)
 	}
 	return s.CreateIssueComment(ctx, pid, input)
 }
 
+func (s *issueCommentHTTPStore) CreateIssueCommentWithTargets(ctx context.Context, pid string, input store.IssueComment, targets []store.IssueCommentTarget) (store.IssueCommentMutationResult, error) {
+	result, err := s.CreateIssueComment(ctx, pid, input)
+	if err != nil {
+		return store.IssueCommentMutationResult{}, err
+	}
+	for _, target := range targets {
+		result.Comment.Mentions = append(result.Comment.Mentions, store.IssueCommentMention{Target: target, TargetName: "Squad", Outcome: store.IssueCommentMentionOutcomeQueued})
+	}
+	s.comments[len(s.comments)-1].Mentions = result.Comment.Mentions
+	return result, nil
+}
+
 func (s *issueCommentHTTPStore) PreviewIssueCommentTriggers(ctx context.Context, pid, id string, _ *string, _ string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
-	mentions, err := s.PreviewIssueCommentMentions(ctx, pid, id, request.MentionAgentIDs)
+	var mentions []store.IssueCommentMentionPreview
+	var err error
+	if len(request.MentionTargets) != 0 {
+		mentions, err = s.PreviewIssueCommentTargets(ctx, pid, id, request.MentionTargets)
+	} else {
+		mentions, err = s.PreviewIssueCommentMentions(ctx, pid, id, request.MentionAgentIDs)
+	}
 	if err != nil {
 		return store.IssueCommentTriggerPreview{}, err
 	}
 	result := store.IssueCommentTriggerPreview{Mentions: mentions}
-	if len(request.MentionAgentIDs) == 0 {
+	if len(request.MentionTargets) == 0 && len(request.MentionAgentIDs) == 0 {
 		result.Implicit = &store.IssueCommentImplicitTriggerPreview{
 			TargetAgentID: agentID, TargetAgentName: "Agent",
 			RoutingReason: store.IssueCommentImplicitRoutingReasonIssueAssignee,
-			Eligible: !request.SuppressImplicit, Suppressed: request.SuppressImplicit,
+			Eligible:      !request.SuppressImplicit, Suppressed: request.SuppressImplicit,
 		}
 	}
 	return result, nil
@@ -100,6 +139,17 @@ func (s *issueCommentHTTPStore) PreviewIssueCommentMentions(_ context.Context, p
 	result := make([]store.IssueCommentMentionPreview, 0, len(targetAgentIDs))
 	for _, targetAgentID := range targetAgentIDs {
 		result = append(result, store.IssueCommentMentionPreview{TargetAgentID: targetAgentID, TargetAgentName: "Agent", Eligible: true})
+	}
+	return result, nil
+}
+
+func (s *issueCommentHTTPStore) PreviewIssueCommentTargets(_ context.Context, pid, id string, targets []store.IssueCommentTarget) ([]store.IssueCommentMentionPreview, error) {
+	if pid != projectID || id != issueID {
+		return nil, store.ErrNotFound
+	}
+	result := make([]store.IssueCommentMentionPreview, 0, len(targets))
+	for _, target := range targets {
+		result = append(result, store.IssueCommentMentionPreview{Target: target, TargetName: "Squad", Eligible: true})
 	}
 	return result, nil
 }
@@ -331,7 +381,6 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 	}
 }
 
-
 func TestIssueCommentHTTPTriggerPreviewUsesAuthorizedSharedRoutingContract(t *testing.T) {
 	fixture, _ := newIssueCommentHTTPFixture(t)
 	member, token := fixture.createUser(t, "trigger-preview-member", store.DeploymentRoleMember)
@@ -437,6 +486,13 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	if len(previews) != 1 || previews[0].TargetAgentID != agentID || !previews[0].Eligible {
 		t.Fatalf("preview=%+v", previews)
 	}
+	squadID := "56565656-5656-4565-8565-565656565656"
+	squadPreview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview",
+		`{"mentionTargets":[{"type":"SQUAD","id":"`+squadID+`"}]}`, bearer(token))
+	if squadPreview.Code != http.StatusOK || !strings.Contains(squadPreview.Body.String(), `"targetType":"SQUAD"`) ||
+		!strings.Contains(squadPreview.Body.String(), `"resolvedAgentId":null`) || strings.Contains(squadPreview.Body.String(), `"resolvedAgentId":""`) {
+		t.Fatalf("Squad preview status=%d body=%s", squadPreview.Code, squadPreview.Body.String())
+	}
 
 	requestID := "12121212-1212-4212-8212-121212121212"
 	created := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
@@ -451,6 +507,19 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	if len(comment.Mentions) != 1 || comment.Mentions[0].TargetAgentID != agentID ||
 		comment.Mentions[0].Outcome != store.IssueCommentMentionOutcomeQueued {
 		t.Fatalf("comment mentions=%+v", comment.Mentions)
+	}
+	squadCreated := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
+		`{"body":"Please ask the Squad","requestId":"66666666-6666-4666-8666-666666666666","mentionTargets":[{"type":"SQUAD","id":"`+squadID+`"}]}`, bearer(token))
+	if squadCreated.Code != http.StatusCreated || !strings.Contains(squadCreated.Body.String(), `"targetType":"SQUAD"`) ||
+		!strings.Contains(squadCreated.Body.String(), `"resolvedAgentId":null`) || strings.Contains(squadCreated.Body.String(), `"resolvedAgentId":""`) {
+		t.Fatalf("Squad create status=%d body=%s", squadCreated.Code, squadCreated.Body.String())
+	}
+	var squadComment IssueCommentDTO
+	if err := json.Unmarshal(squadCreated.Body.Bytes(), &squadComment); err != nil {
+		t.Fatal(err)
+	}
+	if len(squadComment.Mentions) != 1 || squadComment.Mentions[0].ResolvedAgentID != nil {
+		t.Fatalf("unresolved Squad mention=%+v", squadComment.Mentions)
 	}
 
 	missingRequest := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
@@ -494,6 +563,120 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	}
 	if len(plainComment.Mentions) != 0 {
 		t.Fatalf("plain mention-looking text gained structured mentions: %+v", plainComment.Mentions)
+	}
+}
+
+func TestIssueCommentHTTPTypedMentionTargetsAreAuthoritativeForLimits(t *testing.T) {
+	fixture, _ := newIssueCommentHTTPFixture(t)
+	member, token := fixture.createUser(t, "typed-limit-member", store.DeploymentRoleMember)
+	fixture.access.roles[projectGrantKey(projectID, member.ID)] = store.ProjectRoleMember
+	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments"
+	requestID := "78787878-7878-4787-8787-787878787878"
+	agentIDs := []string{
+		"10101010-1010-4010-8010-101010101010",
+		"20202020-2020-4020-8020-202020202020",
+		"30303030-3030-4030-8030-303030303030",
+		"40404040-4040-4040-8040-404040404040",
+		"50505050-5050-4050-8050-505050505050",
+	}
+	squadIDs := []string{
+		"60606060-6060-4060-8060-606060606060",
+		"70707070-7070-4070-8070-707070707070",
+		"80808080-8080-4080-8080-808080808080",
+		"90909090-9090-4090-8090-909090909090",
+		"abababab-abab-4aba-8aba-abababababab",
+	}
+	targets := make([]IssueCommentTargetRequest, 0, len(agentIDs)+len(squadIDs))
+	for _, id := range agentIDs {
+		targets = append(targets, IssueCommentTargetRequest{Type: store.IssueCommentTargetTypeAgent, ID: id})
+	}
+	for _, id := range squadIDs {
+		targets = append(targets, IssueCommentTargetRequest{Type: store.IssueCommentTargetTypeSquad, ID: id})
+	}
+
+	createBody, err := json.Marshal(CreateIssueCommentRequest{
+		Body: "mixed typed targets", RequestID: requestID, MentionTargets: targets, MentionAgentIDs: agentIDs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := authHTTPRequest(t, fixture.handler, http.MethodPost, base, string(createBody), bearer(token))
+	if created.Code != http.StatusCreated {
+		t.Fatalf("mixed typed create status=%d body=%s", created.Code, created.Body.String())
+	}
+	var comment IssueCommentDTO
+	if err := json.Unmarshal(created.Body.Bytes(), &comment); err != nil {
+		t.Fatal(err)
+	}
+	if len(comment.Mentions) != len(targets) {
+		t.Fatalf("mixed typed mentions=%d want %d: %+v", len(comment.Mentions), len(targets), comment.Mentions)
+	}
+	seen := make(map[string]bool, len(comment.Mentions))
+	for _, mention := range comment.Mentions {
+		key := mention.TargetType + ":" + mention.TargetID
+		if seen[key] {
+			t.Fatalf("duplicate typed mention %s: %+v", key, comment.Mentions)
+		}
+		seen[key] = true
+	}
+
+	previewBody, err := json.Marshal(PreviewIssueCommentTriggersRequest{Body: "mixed preview", MentionTargets: targets, MentionAgentIDs: agentIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/trigger-preview", string(previewBody), bearer(token))
+	if preview.Code != http.StatusOK {
+		t.Fatalf("mixed trigger preview status=%d body=%s", preview.Code, preview.Body.String())
+	}
+	var triggerPreview IssueCommentTriggerPreviewDTO
+	if err := json.Unmarshal(preview.Body.Bytes(), &triggerPreview); err != nil {
+		t.Fatal(err)
+	}
+	if len(triggerPreview.Mentions) != len(targets) {
+		t.Fatalf("mixed trigger preview mentions=%d want %d", len(triggerPreview.Mentions), len(targets))
+	}
+
+	mentionPreviewBody, err := json.Marshal(PreviewIssueCommentMentionsRequest{MentionTargets: targets, MentionAgentIDs: agentIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mentionPreview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview", string(mentionPreviewBody), bearer(token))
+	if mentionPreview.Code != http.StatusOK {
+		t.Fatalf("mixed mention preview status=%d body=%s", mentionPreview.Code, mentionPreview.Body.String())
+	}
+	var mentionPreviews []IssueCommentMentionPreviewDTO
+	if err := json.Unmarshal(mentionPreview.Body.Bytes(), &mentionPreviews); err != nil {
+		t.Fatal(err)
+	}
+	if len(mentionPreviews) != len(targets) {
+		t.Fatalf("mixed mention preview=%d want %d", len(mentionPreviews), len(targets))
+	}
+
+	tooManyTargets := append(append([]IssueCommentTargetRequest(nil), targets...), IssueCommentTargetRequest{
+		Type: store.IssueCommentTargetTypeSquad, ID: "cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd",
+	})
+	tooManyBody, err := json.Marshal(CreateIssueCommentRequest{Body: "too many", RequestID: "89898989-8989-4898-8989-898989898989", MentionTargets: tooManyTargets, MentionAgentIDs: agentIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tooMany := authHTTPRequest(t, fixture.handler, http.MethodPost, base, string(tooManyBody), bearer(token))
+	if tooMany.Code != http.StatusBadRequest {
+		t.Fatalf("too-many typed create status=%d body=%s", tooMany.Code, tooMany.Body.String())
+	}
+}
+
+func TestIssueCommentDTOUnresolvedAgentIDsSerializeAsNull(t *testing.T) {
+	comment := store.IssueComment{
+		Mentions:        []store.IssueCommentMention{{ResolvedAgentID: ""}},
+		ImplicitTrigger: &store.IssueCommentImplicitTrigger{ResolvedAgentID: ""},
+	}
+	payload, err := json.Marshal(issueCommentDTO(comment, "AB-1", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(payload)
+	if !strings.Contains(body, `"resolvedAgentId":null`) || strings.Contains(body, `"resolvedAgentId":""`) {
+		t.Fatalf("unresolved Agent IDs serialized incorrectly: %s", body)
 	}
 }
 
@@ -562,7 +745,6 @@ func TestIssueCommentLowLevelRouterReadCompatibilityAndWriteFailClosed(t *testin
 		t.Fatalf("low-level create status=%d body=%s", create.Code, create.Body.String())
 	}
 }
-
 
 func TestIssueCommentHTTPLifecycleResolutionAndReactions(t *testing.T) {
 	fixture, database := newIssueCommentHTTPFixture(t)
@@ -699,12 +881,12 @@ func TestIssueCommentLifecycleLowLevelWritesFailClosed(t *testing.T) {
 	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments/" + httpCommentID
 
 	for name, request := range map[string]*http.Request{
-		"edit":     httptest.NewRequest(http.MethodPatch, base, strings.NewReader(`{"body":"edit"}`)),
-		"delete":   httptest.NewRequest(http.MethodDelete, base, nil),
-		"resolve":  httptest.NewRequest(http.MethodPut, base+"/resolution", nil),
-		"reopen":   httptest.NewRequest(http.MethodDelete, base+"/resolution", nil),
-		"react":    httptest.NewRequest(http.MethodPut, base+"/reactions/"+store.IssueCommentReactionHeart, nil),
-		"unreact":  httptest.NewRequest(http.MethodDelete, base+"/reactions/"+store.IssueCommentReactionHeart, nil),
+		"edit":    httptest.NewRequest(http.MethodPatch, base, strings.NewReader(`{"body":"edit"}`)),
+		"delete":  httptest.NewRequest(http.MethodDelete, base, nil),
+		"resolve": httptest.NewRequest(http.MethodPut, base+"/resolution", nil),
+		"reopen":  httptest.NewRequest(http.MethodDelete, base+"/resolution", nil),
+		"react":   httptest.NewRequest(http.MethodPut, base+"/reactions/"+store.IssueCommentReactionHeart, nil),
+		"unreact": httptest.NewRequest(http.MethodDelete, base+"/reactions/"+store.IssueCommentReactionHeart, nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			response := httptest.NewRecorder()

@@ -71,39 +71,59 @@ type IssueCommentReactionSummaryDTO struct {
 }
 
 type IssueCommentMentionDTO struct {
-	ID              string  `json:"id"`
-	TargetAgentID   string  `json:"targetAgentId"`
-	TargetAgentName string  `json:"targetAgentName"`
-	Outcome         string  `json:"outcome"`
-	ReasonCode      *string `json:"reasonCode"`
-	DelegationID    *string `json:"delegationId"`
-	DelegatedRunID  *string `json:"delegatedRunId"`
+	ID                string  `json:"id"`
+	TargetType        string  `json:"targetType"`
+	TargetID          string  `json:"targetId"`
+	TargetName        string  `json:"targetName"`
+	ResolvedAgentID   *string `json:"resolvedAgentId"`
+	ResolvedAgentName string  `json:"resolvedAgentName"`
+	TargetAgentID     string  `json:"targetAgentId"`
+	TargetAgentName   string  `json:"targetAgentName"`
+	Outcome           string  `json:"outcome"`
+	ReasonCode        *string `json:"reasonCode"`
+	DelegationID      *string `json:"delegationId"`
+	DelegatedRunID    *string `json:"delegatedRunId"`
 }
 
 type IssueCommentMentionPreviewDTO struct {
-	TargetAgentID   string  `json:"targetAgentId"`
-	TargetAgentName string  `json:"targetAgentName"`
-	Eligible        bool    `json:"eligible"`
-	ReasonCode      *string `json:"reasonCode"`
+	TargetType        string  `json:"targetType"`
+	TargetID          string  `json:"targetId"`
+	TargetName        string  `json:"targetName"`
+	ResolvedAgentID   *string `json:"resolvedAgentId"`
+	ResolvedAgentName string  `json:"resolvedAgentName"`
+	TargetAgentID     string  `json:"targetAgentId"`
+	TargetAgentName   string  `json:"targetAgentName"`
+	Eligible          bool    `json:"eligible"`
+	ReasonCode        *string `json:"reasonCode"`
 }
 
 type IssueCommentImplicitTriggerDTO struct {
-	TargetAgentID   string  `json:"targetAgentId"`
-	TargetAgentName string  `json:"targetAgentName"`
-	RoutingReason   string  `json:"routingReason"`
-	Outcome         string  `json:"outcome"`
-	ReasonCode      *string `json:"reasonCode"`
-	DelegationID    *string `json:"delegationId"`
-	DelegatedRunID  *string `json:"delegatedRunId"`
+	TargetType        string  `json:"targetType"`
+	TargetID          string  `json:"targetId"`
+	TargetName        string  `json:"targetName"`
+	ResolvedAgentID   *string `json:"resolvedAgentId"`
+	ResolvedAgentName string  `json:"resolvedAgentName"`
+	TargetAgentID     string  `json:"targetAgentId"`
+	TargetAgentName   string  `json:"targetAgentName"`
+	RoutingReason     string  `json:"routingReason"`
+	Outcome           string  `json:"outcome"`
+	ReasonCode        *string `json:"reasonCode"`
+	DelegationID      *string `json:"delegationId"`
+	DelegatedRunID    *string `json:"delegatedRunId"`
 }
 
 type IssueCommentImplicitTriggerPreviewDTO struct {
-	TargetAgentID   string  `json:"targetAgentId"`
-	TargetAgentName string  `json:"targetAgentName"`
-	RoutingReason   string  `json:"routingReason"`
-	Eligible        bool    `json:"eligible"`
-	Suppressed      bool    `json:"suppressed"`
-	ReasonCode      *string `json:"reasonCode"`
+	TargetType        string  `json:"targetType"`
+	TargetID          string  `json:"targetId"`
+	TargetName        string  `json:"targetName"`
+	ResolvedAgentID   *string `json:"resolvedAgentId"`
+	ResolvedAgentName string  `json:"resolvedAgentName"`
+	TargetAgentID     string  `json:"targetAgentId"`
+	TargetAgentName   string  `json:"targetAgentName"`
+	RoutingReason     string  `json:"routingReason"`
+	Eligible          bool    `json:"eligible"`
+	Suppressed        bool    `json:"suppressed"`
+	ReasonCode        *string `json:"reasonCode"`
 }
 
 type IssueCommentTriggerPreviewDTO struct {
@@ -122,29 +142,37 @@ type IssueCommentDTO struct {
 	ResolvedAt      *time.Time                       `json:"resolvedAt"`
 	ResolvedBy      *IssueCommentResolverDTO         `json:"resolvedBy"`
 	Reactions       []IssueCommentReactionSummaryDTO `json:"reactions"`
-	Mentions        []IssueCommentMentionDTO          `json:"mentions"`
-	ImplicitTrigger *IssueCommentImplicitTriggerDTO   `json:"implicitTrigger"`
+	Mentions        []IssueCommentMentionDTO         `json:"mentions"`
+	ImplicitTrigger *IssueCommentImplicitTriggerDTO  `json:"implicitTrigger"`
 	CreatedAt       time.Time                        `json:"createdAt"`
 	UpdatedAt       time.Time                        `json:"updatedAt"`
 }
 
 type CreateIssueCommentRequest struct {
-	ParentCommentID         *string  `json:"parentCommentId"`
-	Body                    string   `json:"body"`
-	RequestID               string   `json:"requestId"`
-	MentionAgentIDs         []string `json:"mentionAgentIds"`
-	SuppressImplicitTrigger bool     `json:"suppressImplicitAgentTrigger"`
+	ParentCommentID         *string                     `json:"parentCommentId"`
+	Body                    string                      `json:"body"`
+	RequestID               string                      `json:"requestId"`
+	MentionTargets          []IssueCommentTargetRequest `json:"mentionTargets"`
+	MentionAgentIDs         []string                    `json:"mentionAgentIds"`
+	SuppressImplicitTrigger bool                        `json:"suppressImplicitAgentTrigger"`
 }
 
 type PreviewIssueCommentTriggersRequest struct {
-	ParentCommentID         *string  `json:"parentCommentId"`
-	Body                    string   `json:"body"`
-	MentionAgentIDs         []string `json:"mentionAgentIds"`
-	SuppressImplicitTrigger bool     `json:"suppressImplicitAgentTrigger"`
+	ParentCommentID         *string                     `json:"parentCommentId"`
+	Body                    string                      `json:"body"`
+	MentionTargets          []IssueCommentTargetRequest `json:"mentionTargets"`
+	MentionAgentIDs         []string                    `json:"mentionAgentIds"`
+	SuppressImplicitTrigger bool                        `json:"suppressImplicitAgentTrigger"`
 }
 
 type PreviewIssueCommentMentionsRequest struct {
-	MentionAgentIDs []string `json:"mentionAgentIds"`
+	MentionTargets  []IssueCommentTargetRequest `json:"mentionTargets"`
+	MentionAgentIDs []string                    `json:"mentionAgentIds"`
+}
+
+type IssueCommentTargetRequest struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
 }
 
 type UpdateIssueCommentRequest struct {
@@ -360,7 +388,7 @@ type UpdateProviderRequest struct {
 	Name          *string          `json:"name"`
 	Kind          *string          `json:"kind"`
 	BaseURL       *string          `json:"baseUrl"`
-	CredentialRef *string         `json:"credentialRef"`
+	CredentialRef *string          `json:"credentialRef"`
 	Enabled       *bool            `json:"enabled"`
 	SafeMetadata  *json.RawMessage `json:"safeMetadata"`
 }

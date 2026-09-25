@@ -539,6 +539,9 @@ CREATE TABLE issue_comment_mentions (
     comment_id uuid NOT NULL,
     ordinal integer NOT NULL CHECK (ordinal >= 0),
     target_agent_id uuid NOT NULL,
+    target_type text NOT NULL DEFAULT 'AGENT' CHECK (target_type IN ('AGENT', 'SQUAD')),
+    target_id uuid NOT NULL,
+    resolved_agent_id uuid,
     outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'COALESCED', 'DEFERRED', 'BLOCKED')),
     reason_code text CHECK (reason_code IS NULL OR btrim(reason_code) <> ''),
     delegation_id uuid,
@@ -553,7 +556,7 @@ CREATE TABLE issue_comment_mentions (
         OR (outcome IN ('COALESCED', 'DEFERRED') AND work_request_id IS NOT NULL AND delegation_id IS NULL AND reason_code IS NULL)
         OR (outcome = 'BLOCKED' AND work_request_id IS NULL AND delegation_id IS NULL AND reason_code IS NOT NULL)
     ),
-    UNIQUE (issue_id, comment_id, target_agent_id),
+    UNIQUE (issue_id, comment_id, target_type, target_id),
     UNIQUE (issue_id, comment_id, ordinal),
     UNIQUE (project_id, id)
 );
@@ -567,7 +570,10 @@ CREATE TABLE issue_comment_implicit_triggers (
     issue_id uuid NOT NULL,
     comment_id uuid NOT NULL,
     target_agent_id uuid NOT NULL,
-    routing_reason text NOT NULL CHECK (routing_reason IN ('DIRECT_AGENT_REPLY', 'UNIQUE_THREAD_AGENT', 'ISSUE_ASSIGNEE')),
+    target_type text NOT NULL DEFAULT 'AGENT' CHECK (target_type IN ('AGENT', 'SQUAD')),
+    target_id uuid NOT NULL,
+    resolved_agent_id uuid,
+    routing_reason text NOT NULL CHECK (routing_reason IN ('DIRECT_AGENT_REPLY', 'UNIQUE_THREAD_AGENT', 'ISSUE_ASSIGNEE', 'ISSUE_SQUAD_ASSIGNEE')),
     outcome text NOT NULL CHECK (outcome IN ('QUEUED', 'COALESCED', 'DEFERRED', 'BLOCKED', 'SUPPRESSED')),
     reason_code text CHECK (reason_code IS NULL OR btrim(reason_code) <> ''),
     delegation_id uuid,

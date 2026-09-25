@@ -1094,4 +1094,133 @@ describe('IssueDiscussionTimeline', () => {
     wrapper.unmount()
   })
 
+  it('selects a Squad target and keeps the resolved leader visible', async () => {
+    stubAuth()
+    const requestId = '99999999-9999-4999-8999-999999999999'
+    const squad = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', projectId: 'p', name: 'Backend Squad',
+      leaderAgentId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', members: [],
+      createdAt: root.createdAt, updatedAt: root.updatedAt
+    }
+    const leader = { id: squad.leaderAgentId, projectId: 'p', name: 'Leader', roleInstructions: '', engine: 'opencode', modelProfileId: 'model', engineSettings: {}, concurrencyLimit: 1, allowDelegation: true, state: 'ENABLED' }
+    let timeline: unknown[] = []
+    const fetch = vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) return new Response(JSON.stringify(timeline))
+      if (url.endsWith('/agents')) return new Response(JSON.stringify([leader]))
+      if (url.endsWith('/squads')) return new Response(JSON.stringify([squad]))
+      if (url.endsWith('/comments/trigger-preview')) {
+        const input = JSON.parse(String(options.body)) as { mentionTargets?: Array<{ type: string; id: string }> }
+        expect(input.mentionTargets).toEqual([{ type: 'AGENT', id: leader.id }, { type: 'SQUAD', id: squad.id }])
+        return new Response(JSON.stringify({ mentions: [
+          { targetType: 'AGENT', targetId: leader.id, targetAgentId: leader.id, targetAgentName: leader.name, eligible: true, reasonCode: null },
+          { targetType: 'SQUAD', targetId: squad.id, targetName: squad.name, resolvedAgentId: leader.id, resolvedAgentName: leader.name, eligible: true, reasonCode: null }
+        ], implicit: null }))
+      }
+      if (url.endsWith('/comments')) {
+        const input = JSON.parse(String(options.body)) as { mentionTargets?: Array<{ type: string; id: string }> }
+        expect(input.mentionTargets).toEqual([{ type: 'AGENT', id: leader.id }, { type: 'SQUAD', id: squad.id }])
+        const created = { ...root, body: 'Please investigate', mentions: [
+          { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', targetType: 'AGENT', targetId: leader.id, targetAgentId: leader.id, targetAgentName: leader.name, outcome: 'QUEUED', reasonCode: null, delegationId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', delegatedRunId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee' },
+          { id: 'dededede-dede-4ded-8ded-dededededede', targetType: 'SQUAD', targetId: squad.id, targetName: squad.name, resolvedAgentId: leader.id, resolvedAgentName: leader.name, outcome: 'QUEUED', reasonCode: null, delegationId: 'efefefef-efef-4efe-8efe-efefefefefef', delegatedRunId: 'fefefefe-fefe-4fef-8fef-fefefefefefe' }
+        ] }
+        timeline = [{ kind: 'comment', id: created.id, occurredAt: created.createdAt, comment: created, activity: null }]
+        return new Response(JSON.stringify(created), { status: 201 })
+      }
+      throw new Error(`unexpected request ${options.method || 'GET'} ${url}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    vi.stubGlobal('crypto', { randomUUID: () => requestId })
+
+    const wrapper = mount(IssueDiscussionTimeline, { props: { projectId: 'p', issueId: 'AB-1' }, global: { stubs: { ...uiStubs, IdentityAvatar: true } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Mention Agent')!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Mention Agent')!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === '@Leader')!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('@Backend Squad'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('Remove @Backend Squad'))!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('@Backend Squad'))!.trigger('click')
+    await wrapper.get('textarea').setValue('Please investigate')
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushPromises()
+    expect(wrapper.text()).toContain('Eligible to request work · leader: Leader')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Backend Squad')
+    expect(wrapper.text()).toContain('leader: Leader')
+    wrapper.unmount()
+  })
+
+  it('keeps Agent mention selection usable when the Squad directory is unavailable', async () => {
+    stubAuth()
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (String(path).endsWith('/timeline')) return new Response(JSON.stringify([]))
+      if (String(path).endsWith('/agents')) return new Response(JSON.stringify([]))
+      if (String(path).endsWith('/squads')) throw new Error('Squads unavailable')
+      throw new Error(`unexpected request ${path}`)
+    }))
+    const wrapper = mount(IssueDiscussionTimeline, { props: { projectId: 'p', issueId: 'AB-1' }, global: { stubs: { ...uiStubs, IdentityAvatar: true } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Mention Agent')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Unable to load Agents')
+    wrapper.unmount()
+  })
+
+  it('shows unavailable Squad mention eligibility from the backend preview', async () => {
+    stubAuth()
+    const squad = {
+      id: 'abababab-abab-4aba-8aba-abababababab', projectId: 'p', name: 'Backend Squad',
+      leaderAgentId: 'cdcdcdcd-cdcd-4cdc-8dcd-cdcdcdcdcdcd', members: [],
+      createdAt: root.createdAt, updatedAt: root.updatedAt
+    }
+    vi.stubGlobal('fetch', vi.fn(async (path: string, options: RequestInit = {}) => {
+      const url = String(path)
+      if (url.endsWith('/timeline')) return new Response(JSON.stringify([]))
+      if (url.endsWith('/agents')) return new Response(JSON.stringify([]))
+      if (url.endsWith('/squads')) return new Response(JSON.stringify([squad]))
+      if (url.endsWith('/comments/trigger-preview')) {
+        const input = JSON.parse(String(options.body)) as { mentionTargets?: Array<{ type: string; id: string }> }
+        expect(input.mentionTargets).toEqual([{ type: 'SQUAD', id: squad.id }])
+        return new Response(JSON.stringify({ mentions: [{ targetType: 'SQUAD', targetId: squad.id, targetName: squad.name, resolvedAgentId: null, resolvedAgentName: '', eligible: false, reasonCode: 'TARGET_UNAVAILABLE' }], implicit: null }))
+      }
+      throw new Error(`unexpected request ${options.method || 'GET'} ${url}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, { props: { projectId: 'p', issueId: 'AB-1' }, global: { stubs: { ...uiStubs, IdentityAvatar: true } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Mention Agent')!.trigger('click')
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text().includes('@Backend Squad'))!.trigger('click')
+    await wrapper.get('textarea').setValue('Please investigate')
+    await new Promise(resolve => setTimeout(resolve, 300))
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Backend Squad · Agent unavailable')
+    wrapper.unmount()
+  })
+
+  it('renders an unavailable Squad implicit target distinctly', async () => {
+    stubAuth()
+    const comment = {
+      ...root,
+      implicitTrigger: {
+        targetType: 'SQUAD', targetId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', targetName: 'Backend Squad',
+        resolvedAgentId: null, resolvedAgentName: '', targetAgentId: '', targetAgentName: '',
+        routingReason: 'ISSUE_SQUAD_ASSIGNEE', outcome: 'BLOCKED', reasonCode: 'TARGET_UNAVAILABLE', delegationId: null, delegatedRunId: null
+      }
+    }
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => String(path).endsWith('/timeline')
+      ? new Response(JSON.stringify([{ kind: 'comment', id: comment.id, occurredAt: comment.createdAt, comment, activity: null }]))
+      : new Response(JSON.stringify([]))))
+    const wrapper = mount(IssueDiscussionTimeline, { props: { projectId: 'p', issueId: 'AB-1' }, global: { stubs: { ...uiStubs, IdentityAvatar: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('@Backend Squad')
+    expect(wrapper.text()).toContain('current Issue Squad assignee')
+    wrapper.unmount()
+  })
+
 })

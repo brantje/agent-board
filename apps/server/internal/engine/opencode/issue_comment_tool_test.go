@@ -9,6 +9,7 @@ import (
 
 	"github.com/brantje/agent-board/apps/server/internal/engine"
 	"github.com/brantje/agent-board/apps/server/internal/engine/opencode/client"
+	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
 type recordingIssueCommentPublisher struct {
@@ -110,7 +111,7 @@ func issueCommentToolEvent(t *testing.T, sessionID, partID, body, status string)
 	t.Helper()
 	properties, err := json.Marshal(map[string]any{
 		"sessionID": sessionID,
-		"part": issueCommentToolPartPayload(sessionID, partID, body, status),
+		"part":      issueCommentToolPartPayload(sessionID, partID, body, status),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +129,7 @@ func issueCommentToolPartPayload(sessionID, partID, body, status string) map[str
 func TestIssueCommentToolPassesStructuredMentionsAndSignalsCanonicalHandoff(t *testing.T) {
 	tracker := newIssueCommentToolTracker()
 	publisher := &recordingIssueCommentPublisher{published: engine.PublishedIssueComment{
-		ID: "comment-1",
+		ID:         "comment-1",
 		Delegation: &engine.Delegation{ID: "delegation-1", RunID: "child-run-1"},
 	}}
 	event := issueCommentToolEventWithMentions(t, "ses_1", "part_mentions", "Please inspect this.", []string{"agent-2"}, "completed")
@@ -169,6 +170,30 @@ func TestIssueCommentToolRejectsMalformedStructuredMentionInput(t *testing.T) {
 	}
 	if err := tracker.Handle(t.Context(), client.Event{Type: "message.part.updated", Properties: properties}, "ses_1", &recordingIssueCommentPublisher{}); err == nil {
 		t.Fatal("blank structured mention Agent ID unexpectedly accepted")
+	}
+}
+
+func TestIssueCommentToolPublishesTypedTargets(t *testing.T) {
+	publisher := &recordingIssueCommentPublisher{}
+	tracker := newIssueCommentToolTracker()
+	properties, err := json.Marshal(map[string]any{
+		"sessionID": "ses_typed",
+		"part": map[string]any{
+			"id": "part_typed_mentions", "sessionID": "ses_typed", "type": "tool", "tool": issueCommentToolName,
+			"state": map[string]any{"status": "completed", "input": map[string]any{
+				"body": "finding", "mentionTargets": []any{map[string]any{"type": store.IssueCommentTargetTypeSquad, "id": "squad-2"}},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tracker.Handle(t.Context(), client.Event{Type: "message.part.updated", Properties: properties}, "ses_typed", publisher); err != nil {
+		t.Fatal(err)
+	}
+	if len(publisher.requests) != 1 || len(publisher.requests[0].MentionTargets) != 1 ||
+		publisher.requests[0].MentionTargets[0].Type != store.IssueCommentTargetTypeSquad {
+		t.Fatalf("typed target request=%+v", publisher.requests)
 	}
 }
 
