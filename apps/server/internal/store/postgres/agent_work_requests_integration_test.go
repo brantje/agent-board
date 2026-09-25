@@ -83,6 +83,78 @@ func TestRequestAgentWorkTxQueuesAndCoalescesCompatibleQueuedWork(t *testing.T) 
 	}
 }
 
+func TestRequestAgentWorkTxCoalescesIntoOrdinaryQueuedRun(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-ordinary-author", "work-ordinary-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var queuedRunID string
+	if err := f.store.pool.QueryRow(ctx, `
+		INSERT INTO runs (project_id, issue_id, workspace_id, agent_id, attempt, status)
+		VALUES ($1,$2,$3,$4,2,'QUEUED')
+		RETURNING id::text
+	`, f.project.ID, f.issue.ID, f.parentRun.WorkspaceID, f.target.ID).Scan(&queuedRunID); err != nil {
+		t.Fatal(err)
+	}
+	comment := createPlainWorkRequestComment(t, f, author.ID, "Fold this into the ordinary queued Run")
+	result := requestAgentWorkForTest(t, f, comment, nil)
+	if result.Outcome != agentWorkRequestOutcomeCoalesced || result.WorkRequest.RunID == nil ||
+		*result.WorkRequest.RunID != queuedRunID || result.WorkRequest.DelegationID != nil {
+		t.Fatalf("ordinary queued coalescing=%+v run=%s", result, queuedRunID)
+	}
+}
+
+func TestRequestAgentWorkTxCoalescesIntoQueuedIssueDelegation(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-issue-delegation-author", "work-issue-delegation-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := createPlainWorkRequestComment(t, f, author.ID, "Canonical Issue-origin work")
+	delegation, err := f.store.RequestIssueDelegation(ctx, store.RequestIssueDelegationCommand{
+		ProjectID: f.project.ID, IssueID: f.issue.ID, SourceCommentID: source.ID,
+		TargetAgentID: f.target.ID, Task: source.Body, RequestKey: "preexisting-issue-delegation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	followUp := createPlainWorkRequestComment(t, f, author.ID, "Fold into the existing Issue-origin delegation")
+	result := requestAgentWorkForTest(t, f, followUp, nil)
+	if result.Outcome != agentWorkRequestOutcomeCoalesced || result.WorkRequest.RunID == nil ||
+		*result.WorkRequest.RunID != delegation.DelegatedRun.ID || result.WorkRequest.DelegationID == nil ||
+		*result.WorkRequest.DelegationID != delegation.Delegation.ID {
+		t.Fatalf("Issue delegation coalescing=%+v delegation=%+v", result, delegation)
+	}
+}
+
+func TestRequestAgentWorkTxDefersBehindQueuedParentDelegation(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("work-parent-delegation-author", "work-parent-delegation-author@example.com", store.UserStatusActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegation, err := f.store.RequestDelegation(ctx, store.RequestDelegationCommand{
+		ProjectID: f.project.ID, ParentRunID: f.parentRun.ID, TargetAgentID: f.target.ID,
+		Task: "Parent-authority delegated task", RequestKey: "preexisting-parent-delegation",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if delegation.DelegatedRun.Status != "QUEUED" {
+		t.Fatalf("delegated Run=%+v", delegation.DelegatedRun)
+	}
+	comment := createPlainWorkRequestComment(t, f, author.ID, "Issue-authority follow-up must not fold into parent authority")
+	result := requestAgentWorkForTest(t, f, comment, nil)
+	if result.Outcome != agentWorkRequestOutcomeDeferred || result.WorkRequest.RunID != nil ||
+		result.WorkRequest.DelegationID != nil {
+		t.Fatalf("parent delegation compatibility leaked across authority: result=%+v delegation=%+v", result, delegation)
+	}
+}
+
 func TestRequestAgentWorkTxDefersAfterQueuedRunCrossesSafeBoundary(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
