@@ -272,7 +272,7 @@ try {
     assert.equal(preview.mentions[0].eligible, true)
     assert.equal(preview.mentions[0].reasonCode, null)
     assert.equal(preview.implicit, null)
-    await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Eligible to queue work').waitFor()
+    await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Eligible to request work').waitFor()
 
     await page.locator('textarea').fill(mentionBody)
     const mentionPostPromise = page.waitForResponse(response => (
