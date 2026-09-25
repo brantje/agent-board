@@ -628,6 +628,12 @@ func TestPublishAgentIssueCommentDerivesTrustedRunContext(t *testing.T) {
 		fake.targetCreateCalls != 1 || len(fake.lastTargets) != 1 {
 		t.Fatalf("typed Agent comment=%+v calls=%d targets=%+v", targetCreated, fake.targetCreateCalls, fake.lastTargets)
 	}
+	if _, err := service.PublishAgentIssueCommentTargets(t.Context(), projectID, runID, "tool-call-too-many", "body", []store.IssueCommentTarget{{Type: store.IssueCommentTargetTypeAgent, ID: "agent-2"}, {Type: store.IssueCommentTargetTypeSquad, ID: "squad-2"}}); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("multiple typed targets error=%v want invalid argument", err)
+	}
+	if _, err := service.PublishAgentIssueCommentTargets(t.Context(), projectID, "missing", "tool-call-missing-target", "body", nil); err == nil {
+		t.Fatal("missing Run unexpectedly published a typed comment")
+	}
 
 	if _, err := service.PublishAgentIssueComment(t.Context(), projectID, "missing", "tool-call-2", "body", nil); err == nil {
 		t.Fatal("missing Run unexpectedly published a comment")
