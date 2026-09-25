@@ -272,7 +272,13 @@ try {
     assert.equal(preview.mentions[0].eligible, true)
     assert.equal(preview.mentions[0].reasonCode, null)
     assert.equal(preview.implicit, null)
-    await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Eligible to queue work').waitFor()
+    await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Eligible to request work').waitFor()
+
+    const pausedRunnerProject = await call('PATCH', '/api/projects/' + project.id, {
+      token: creator.tokens.accessToken,
+      body: { allowInternalRunner: false }
+    })
+    assert.equal(pausedRunnerProject.allowInternalRunner, false, 'failed to pause internal runner admission for coalescing proof')
 
     await page.locator('textarea').fill(mentionBody)
     const mentionPostPromise = page.waitForResponse(response => (
@@ -316,42 +322,49 @@ try {
 
     await page.getByRole('button', { name: 'Mention Agent' }).click()
     await page.getByPlaceholder('Filter Agents…').fill('Mention E2E Target')
-    const busyPreviewPromise = page.waitForResponse(response => (
+    const followUpPreviewPromise = page.waitForResponse(response => (
       response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments/trigger-preview')
       && response.request().method() === 'POST'
       && response.request().postDataJSON()?.mentionAgentIds?.includes(mentionAgent.id)
     ), { timeout: 15_000 })
     await page.getByRole('button', { name: '@Mention E2E Target' }).click()
-    const busyPreviewResponse = await busyPreviewPromise
-    assert.equal(busyPreviewResponse.status(), 200, 'real busy mention preview request failed')
-    const busyPreview = await busyPreviewResponse.json()
-    assert.equal(busyPreview.mentions.length, 1)
-    assert.equal(busyPreview.mentions[0].targetAgentId, mentionAgent.id)
-    assert.equal(busyPreview.mentions[0].eligible, false)
-    assert.equal(busyPreview.mentions[0].reasonCode, 'TARGET_BUSY')
-    assert.equal(busyPreview.implicit, null)
-    await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Agent already has active work on this Issue').waitFor()
+    const followUpPreviewResponse = await followUpPreviewPromise
+    assert.equal(followUpPreviewResponse.status(), 200, 'real follow-up mention preview request failed')
+    const followUpPreview = await followUpPreviewResponse.json()
+    assert.equal(followUpPreview.mentions.length, 1)
+    assert.equal(followUpPreview.mentions[0].targetAgentId, mentionAgent.id)
+    assert.equal(followUpPreview.mentions[0].eligible, true)
+    assert.equal(followUpPreview.mentions[0].reasonCode, null)
+    assert.equal(followUpPreview.implicit, null)
+    await page.locator('[aria-label="Agent mention preview"]').getByText('@Mention E2E Target · Eligible to request work').waitFor()
 
-    const blockedBody = 'Browser blocked structured mention proof.'
-    await page.locator('textarea').fill(blockedBody)
-    const blockedPostPromise = page.waitForResponse(response => (
+    const coalescedBody = 'Browser coalesced structured mention proof.'
+    await page.locator('textarea').fill(coalescedBody)
+    const coalescedPostPromise = page.waitForResponse(response => (
       response.url().includes('/api/projects/' + project.id + '/issues/' + issue.id + '/comments')
       && !response.url().includes('/trigger-preview')
       && response.request().method() === 'POST'
     ), { timeout: 15_000 })
     await page.getByRole('button', { name: 'Post comment' }).click()
-    const blockedPostResponse = await blockedPostPromise
-    assert.equal(blockedPostResponse.status(), 201, 'real blocked mention comment POST failed')
-    const blockedComment = await blockedPostResponse.json()
-    assert.equal(blockedComment.mentions.length, 1)
-    assert.equal(blockedComment.mentions[0].targetAgentId, mentionAgent.id)
-    assert.equal(blockedComment.mentions[0].outcome, 'BLOCKED')
-    assert.equal(blockedComment.mentions[0].reasonCode, 'TARGET_BUSY')
-    assert.equal(blockedComment.mentions[0].delegatedRunId, null)
-    const blockedArticle = page.locator('article').filter({ hasText: blockedBody })
-    await blockedArticle.getByText('@Mention E2E Target', { exact: true }).waitFor()
-    await blockedArticle.getByText('Agent already has active work on this Issue').waitFor()
-    assert.equal(await blockedArticle.getByRole('link', { name: 'Open delegated Run' }).count(), 0)
+    const coalescedPostResponse = await coalescedPostPromise
+    assert.equal(coalescedPostResponse.status(), 201, 'real coalesced mention comment POST failed')
+    const coalescedComment = await coalescedPostResponse.json()
+    assert.equal(coalescedComment.mentions.length, 1)
+    assert.equal(coalescedComment.mentions[0].targetAgentId, mentionAgent.id)
+    assert.equal(coalescedComment.mentions[0].outcome, 'COALESCED')
+    assert.equal(coalescedComment.mentions[0].reasonCode, null)
+    assert.equal(coalescedComment.mentions[0].delegatedRunId, postedMentionComment.mentions[0].delegatedRunId)
+
+    const resumedRunnerProject = await call('PATCH', '/api/projects/' + project.id, {
+      token: creator.tokens.accessToken,
+      body: { allowInternalRunner: true }
+    })
+    assert.equal(resumedRunnerProject.allowInternalRunner, true, 'failed to resume internal runner admission after coalescing proof')
+
+    const coalescedArticle = page.locator('article').filter({ hasText: coalescedBody })
+    await coalescedArticle.getByText('@Mention E2E Target', { exact: true }).waitFor()
+    await coalescedArticle.getByText('Folded into pending Agent work').waitFor()
+    assert.equal(await coalescedArticle.getByRole('link', { name: 'Open delegated Run' }).getAttribute('href'), '/projects/' + project.id + '/runs/' + postedMentionComment.mentions[0].delegatedRunId)
 
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.getByText(mentionBody).waitFor()
@@ -362,8 +375,8 @@ try {
       await mentionArticle.getByRole('link', { name: 'Open delegated Run' }).getAttribute('href'),
       '/projects/' + project.id + '/runs/' + postedMentionComment.mentions[0].delegatedRunId
     )
-    await page.getByText(blockedBody).waitFor()
-    await page.locator('article').filter({ hasText: blockedBody }).getByText('Agent already has active work on this Issue').waitFor()
+    await page.getByText(coalescedBody).waitFor()
+    await page.locator('article').filter({ hasText: coalescedBody }).getByText('Folded into pending Agent work').waitFor()
 
     mentionComments = await call('GET', '/api/projects/' + project.id + '/issues/' + issue.id + '/comments', {
       token: collaborator.tokens.accessToken

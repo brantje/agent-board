@@ -445,7 +445,7 @@ describe('IssueDiscussionTimeline', () => {
 
     await wrapper.findAll('button').find(button => button.text() === '@Verifier')!.trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('@Verifier · Eligible to queue work')
+    expect(wrapper.text()).toContain('@Verifier · Eligible to request work')
 
     await wrapper.get('textarea').setValue('Please verify this change')
     await wrapper.get('form').trigger('submit')
@@ -455,6 +455,64 @@ describe('IssueDiscussionTimeline', () => {
     expect(wrapper.text()).toContain('Work queued')
     expect(wrapper.text()).toContain('Open delegated Run')
     expect(wrapper.find('a').attributes('href')).toBe('/projects/p/runs/dededede-dede-4ded-8ded-dededededede')
+    wrapper.unmount()
+  })
+
+
+  it('renders coalesced and deferred Agent work outcomes distinctly', async () => {
+    stubAuth()
+    const coalesced = {
+      ...root,
+      id: '12121212-1212-4121-8121-121212121212',
+      mentions: [{
+        id: '13131313-1313-4131-8131-131313131313',
+        targetAgentId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        targetAgentName: 'Verifier',
+        outcome: 'COALESCED' as const,
+        reasonCode: null,
+        delegationId: '14141414-1414-4141-8141-141414141414',
+        delegatedRunId: '15151515-1515-4151-8151-151515151515'
+      }]
+    }
+    const deferred = {
+      ...reply,
+      id: '16161616-1616-4161-8161-161616161616',
+      implicitTrigger: {
+        targetAgentId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        targetAgentName: 'Verifier',
+        routingReason: 'DIRECT_AGENT_REPLY' as const,
+        outcome: 'DEFERRED' as const,
+        reasonCode: null,
+        delegationId: null,
+        delegatedRunId: null
+      }
+    }
+    vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+      if (String(path).endsWith('/timeline')) {
+        return new Response(JSON.stringify([
+          { kind: 'comment', id: coalesced.id, occurredAt: coalesced.createdAt, comment: coalesced, activity: null },
+          { kind: 'comment', id: deferred.id, occurredAt: deferred.createdAt, comment: deferred, activity: null }
+        ]))
+      }
+      throw new Error(`unexpected request ${path}`)
+    }))
+
+    const wrapper = mount(IssueDiscussionTimeline, {
+      props: { projectId: 'p', issueId: 'AB-1' },
+      global: {
+        stubs: {
+          ...uiStubs,
+          IssueDiscussionTimeline: false,
+          IdentityAvatar: true,
+          NuxtLink: { props: ['to'], template: '<a :href="to"><slot/></a>' }
+        }
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Folded into pending Agent work')
+    expect(wrapper.text()).toContain('Follow-up saved until current Agent work finishes')
+    expect(wrapper.text()).toContain('Open delegated Run')
     wrapper.unmount()
   })
 
@@ -754,7 +812,7 @@ describe('IssueDiscussionTimeline', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('@Draft B Agent')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
     expect(wrapper.text()).not.toContain('@Draft A Agent')
     wrapper.unmount()
   })
@@ -815,12 +873,12 @@ describe('IssueDiscussionTimeline', () => {
     await replyButtons[0]!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('@Agent A')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
 
     await replyButtons[1]!.trigger('click')
     expect(wrapper.text()).toContain('Replying to Agent B')
     expect(wrapper.text()).not.toContain('@Agent A')
-    expect(wrapper.text()).not.toContain('Will queue work')
+    expect(wrapper.text()).not.toContain('Will request Agent work')
 
     previewB.resolve(new Response(JSON.stringify({
       mentions: [],
@@ -836,7 +894,7 @@ describe('IssueDiscussionTimeline', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('@Agent B')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
     expect(wrapper.text()).not.toContain('@Agent A')
     wrapper.unmount()
   })
@@ -921,7 +979,7 @@ describe('IssueDiscussionTimeline', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Reply')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('@Routing Agent')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
 
     const suppress = wrapper.find('input[type="checkbox"]')
     await suppress.setValue(true)
@@ -929,7 +987,7 @@ describe('IssueDiscussionTimeline', () => {
 
     expect(wrapper.text()).toContain('Trigger preview unavailable')
     expect(wrapper.text()).not.toContain('@Routing Agent')
-    expect(wrapper.text()).not.toContain('Will queue work')
+    expect(wrapper.text()).not.toContain('Will request Agent work')
     wrapper.unmount()
   })
 
@@ -1019,7 +1077,7 @@ describe('IssueDiscussionTimeline', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('@Builder Agent')
     expect(wrapper.text()).toContain('replying directly to this Agent')
-    expect(wrapper.text()).toContain('Will queue work')
+    expect(wrapper.text()).toContain('Will request Agent work')
 
     const suppress = wrapper.find('input[type="checkbox"]')
     expect(suppress.exists()).toBe(true)

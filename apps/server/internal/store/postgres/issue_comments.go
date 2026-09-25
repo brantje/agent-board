@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -360,8 +359,8 @@ func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, pro
 			return nil, nil, err
 		}
 
-		var delegationID *string
-		var delegatedRunID *string
+		var persistedDelegationID *string
+		var workRequest *store.AgentWorkRequest
 		var reasonCode *string
 		outcome := store.IssueCommentMentionOutcomeBlocked
 		if !preview.Eligible {
@@ -370,46 +369,52 @@ func (s *Store) createIssueCommentMentionsTx(ctx context.Context, tx pgx.Tx, pro
 			reason := store.IssueCommentMentionReasonDelegationBlocked
 			reasonCode = &reason
 		} else {
-			requestKey := issueCommentMentionRequestKey(comment.ID, index, targetAgentID)
-			var delegation store.RequestDelegationResult
+			authority := store.AgentWorkRequestAuthorityIssue
+			var parentRunID *string
 			if comment.AuthorType == store.ActorTypeAgent {
-				delegation, err = s.requestDelegationTx(ctx, tx, store.RequestDelegationCommand{
-					ProjectID: projectID, ParentRunID: *comment.SourceRunID, TargetAgentID: targetAgentID,
-					Task: comment.Body, RequestKey: requestKey,
-				})
-			} else {
-				delegation, err = s.requestIssueDelegationTx(ctx, tx, store.RequestIssueDelegationCommand{
-					ProjectID: projectID, IssueID: comment.IssueID, SourceCommentID: comment.ID, TargetAgentID: targetAgentID,
-					Task: comment.Body, RequestKey: requestKey,
-				})
+				authority = store.AgentWorkRequestAuthorityParentRun
+				parentRunID = comment.SourceRunID
 			}
-			if err == nil {
-				outcome = store.IssueCommentMentionOutcomeQueued
-				delegationID = &delegation.Delegation.ID
-				delegatedRunID = &delegation.DelegatedRun.ID
-				events = append(events, delegation.Events...)
-			} else if errors.Is(err, store.ErrConflict) || errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalidArgument) {
+			requested, requestErr := s.requestAgentWorkTx(ctx, tx, agentWorkRequestInput{
+				ProjectID: projectID, IssueID: comment.IssueID, SourceCommentID: comment.ID,
+				TargetAgentID: targetAgentID, Task: comment.Body, AuthorityKind: authority, ParentRunID: parentRunID,
+			})
+			if requestErr == nil {
+				outcome = requested.Outcome
+				workRequest = &requested.WorkRequest
+				if requested.Outcome == agentWorkRequestOutcomeQueued {
+					persistedDelegationID = requested.WorkRequest.DelegationID
+				}
+				events = append(events, requested.Events...)
+			} else if errors.Is(requestErr, store.ErrConflict) || errors.Is(requestErr, store.ErrNotFound) || errors.Is(requestErr, store.ErrInvalidArgument) {
 				reason := store.IssueCommentMentionReasonDelegationBlocked
 				reasonCode = &reason
 			} else {
-				return nil, nil, err
+				return nil, nil, requestErr
 			}
 		}
 
+		var workRequestID *string
+		if workRequest != nil {
+			workRequestID = &workRequest.ID
+		}
 		var mention store.IssueCommentMention
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO issue_comment_mentions (
-				project_id, issue_id, comment_id, ordinal, target_agent_id, outcome, reason_code, delegation_id
+				project_id, issue_id, comment_id, ordinal, target_agent_id, outcome, reason_code, delegation_id, work_request_id
 			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-			RETURNING id::text, target_agent_id::text, outcome, reason_code, delegation_id::text, created_at
-		`, projectID, comment.IssueID, comment.ID, index, targetAgentID, outcome, reasonCode, delegationID).Scan(
-			&mention.ID, &mention.TargetAgentID, &mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.CreatedAt,
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+			RETURNING id::text, target_agent_id::text, outcome, reason_code, delegation_id::text, work_request_id::text, created_at
+		`, projectID, comment.IssueID, comment.ID, index, targetAgentID, outcome, reasonCode, persistedDelegationID, workRequestID).Scan(
+			&mention.ID, &mention.TargetAgentID, &mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.WorkRequestID, &mention.CreatedAt,
 		); err != nil {
 			return nil, nil, err
 		}
 		mention.TargetAgentName = preview.TargetAgentName
-		mention.DelegatedRunID = delegatedRunID
+		if workRequest != nil && workRequest.DelegationID != nil {
+			mention.DelegationID = workRequest.DelegationID
+			mention.DelegatedRunID = workRequest.RunID
+		}
 		result = append(result, mention)
 	}
 	return result, events, nil
@@ -438,19 +443,8 @@ func (s *Store) issueCommentMentionTargetTx(ctx context.Context, tx pgx.Tx, proj
 		}
 		return store.IssueCommentMentionPreview{}, err
 	}
-	if _, err := activeRunForAgent(ctx, tx, projectID, issueID, targetAgentID); err == nil {
-		reason := store.IssueCommentMentionReasonTargetBusy
-		preview.ReasonCode = &reason
-		return preview, nil
-	} else if !errors.Is(err, store.ErrNotFound) {
-		return store.IssueCommentMentionPreview{}, err
-	}
 	preview.Eligible = true
 	return preview, nil
-}
-
-func issueCommentMentionRequestKey(commentID string, ordinal int, targetAgentID string) string {
-	return fmt.Sprintf("comment:%s:mention:%d:%s", commentID, ordinal, targetAgentID)
 }
 
 func normalizeIssueCommentMentionAgentIDs(values []string) ([]string, error) {
@@ -847,15 +841,19 @@ func loadIssueCommentMentionsWith(ctx context.Context, q issueCommentRowsQuerier
 	}
 	rows, err := q.Query(ctx, `
 		SELECT m.comment_id::text, m.id::text, m.target_agent_id::text,
-		       COALESCE(a.name, ''), m.outcome, m.reason_code, m.delegation_id::text,
+		       COALESCE(a.name, ''), m.outcome, m.reason_code,
+		       COALESCE(m.delegation_id, wr.delegation_id)::text, m.work_request_id::text,
 		       d.delegated_run_id::text, m.created_at
 		FROM issue_comment_mentions AS m
 		LEFT JOIN agents AS a
 		  ON a.id=m.target_agent_id
 		 AND (a.project_id IS NULL OR a.project_id=m.project_id)
+		LEFT JOIN agent_work_requests AS wr
+		  ON wr.project_id=m.project_id
+		 AND wr.id=m.work_request_id
 		LEFT JOIN delegations AS d
 		  ON d.project_id=m.project_id
-		 AND d.id=m.delegation_id
+		 AND d.id=COALESCE(m.delegation_id, wr.delegation_id)
 		WHERE m.project_id=$1 AND m.issue_id=$2
 		ORDER BY m.comment_id, m.ordinal
 	`, projectID, issueID)
@@ -874,7 +872,7 @@ func loadIssueCommentMentionsWith(ctx context.Context, q issueCommentRowsQuerier
 		var mention store.IssueCommentMention
 		if err := rows.Scan(
 			&commentID, &mention.ID, &mention.TargetAgentID, &mention.TargetAgentName,
-			&mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.DelegatedRunID, &mention.CreatedAt,
+			&mention.Outcome, &mention.ReasonCode, &mention.DelegationID, &mention.WorkRequestID, &mention.DelegatedRunID, &mention.CreatedAt,
 		); err != nil {
 			return err
 		}

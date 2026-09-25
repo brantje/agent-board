@@ -77,14 +77,18 @@ A comment stores one stable ID, its Issue, an optional parent comment on the sam
 
 Structured Agent mentions are separate durable records attached to the comment. Each mention stores the stable target Agent ID, deterministic position, terminal posting outcome, safe reason code when blocked, and only the minimum canonical delegation linkage needed to correlate accepted work. Agent names are read-time display data and may change without changing mention identity. Plain text that resembles `@name` never creates a structured mention or requests work.
 
-The currently supported posting outcomes reflect the canonical execution behavior rather than a mention-specific state machine:
+The currently supported posting outcomes reflect the shared comment-work admission policy rather than a mention-specific state machine:
 
 ```text
 QUEUED
+COALESCED
+DEFERRED
 BLOCKED
 ```
 
-`QUEUED` means canonical delegation accepted the target and created the ordinary delegated Run/scheduler work. `BLOCKED` means no delegated execution was created for that target. Safe blocked reasons are `TARGET_UNAVAILABLE`, `TARGET_BUSY` and `DELEGATION_BLOCKED`; they intentionally do not expose private target configuration. There are no synthetic `coalesced` or `deferred` states while canonical delegation does not provide those outcomes.
+`QUEUED` means the request created normal canonical delegation/Run/scheduler work. `COALESCED` means the triggering comment was durably folded into compatible work that has not crossed the scheduler admission boundary, so no additional Run was created. `DEFERRED` means Issue-authority follow-up arrived after the target had crossed that boundary; the follow-up is durable and the existing scheduler later promotes it through canonical delegation when the target is no longer active. `BLOCKED` means no delegated execution was admitted for that trigger. Safe blocked reasons remain `TARGET_UNAVAILABLE`, `TARGET_BUSY` and `DELEGATION_BLOCKED` and intentionally do not expose private target configuration.
+
+The execution-domain `AgentWorkRequest` is the durable admission/coalescing identity for this behavior. Compatibility is bounded by Project, Issue, Workspace, target Agent and authority; parent-Run authority additionally requires the exact same parent Run. Trigger rows reference the work request so every comment remains independently attributable. A work request associated with a queued Run is sealed atomically when scheduler admission moves that Run to `STARTING`; later Issue-authority comments therefore become a separate deferred follow-up rather than live Engine side-input. Terminal Run handling closes the request. There is no comment-owned scheduler, Run type or duplicate Event history.
 
 A human-authored structured mention creates a canonical comment-origin delegation linked by `source_comment_id`; it does not invent a parent Run or parent continuation. An Agent-authored structured mention crosses the trusted Engine/server boundary as explicit Agent IDs and reuses the same parent-Run canonical delegation request, `Allow delegation` policy and serialized Workspace handoff used by `delegate_task`. Expected eligibility/policy denial leaves the comment and a durable `BLOCKED` mention outcome intact. Accepted work remains an ordinary Run on the Issue Workspace and never changes the Issue assignee or Board status.
 
@@ -100,7 +104,9 @@ Ordinary edit/delete/resolve/reopen/reaction behavior remains Issue collaboratio
 
 When no explicit structured Agent mention exists, a human comment may resolve at most one implicit Agent target. Routing is deterministic: a direct reply to an Agent-authored comment routes to that Agent; otherwise a reply routes only when exactly one Agent has authored a comment in that discussion thread; otherwise a top-level comment may fall back to the current `AGENT` Issue assignee. Ambiguous multi-Agent threads, User/Squad/unassigned ownership, and replies with no unique Agent participant have no implicit target. Agent-authored comments never gain this implicit behavior; they continue to require explicit structured mention intent across the trusted Run boundary.
 
-Implicit routing stores separate provenance from structured mentions: target Agent ID, routing reason, outcome, safe reason when blocked, and optional canonical delegation linkage. The human may suppress the implicit wakeup for one comment without changing its text; that durable comment records a `SUPPRESSED` outcome when a target exists. `BACKLOG` and `DONE` comments may retain a resolved target for explanation but record `BLOCKED / WORKFLOW_BLOCKED` and create no execution. Accepted implicit routing reuses the same comment-origin delegation command, ordinary Run, scheduler and Workspace lifecycle as explicit human mentions. It never changes Issue assignment or Board status.
+Implicit routing stores separate provenance from structured mentions: target Agent ID, routing reason, outcome, safe reason when blocked, and optional canonical delegation linkage. The human may suppress the implicit wakeup for one comment without changing its text; that durable comment records a `SUPPRESSED` outcome when a target exists. `BACKLOG` and `DONE` comments may retain a resolved target for explanation but record `BLOCKED / WORKFLOW_BLOCKED` and create no execution. Accepted implicit routing reuses the same shared comment-work admission policy, canonical delegation command, ordinary Run, scheduler and Workspace lifecycle as explicit human mentions. Its durable outcome may therefore be `QUEUED`, `COALESCED` or `DEFERRED` in addition to `BLOCKED`/`SUPPRESSED`. It never changes Issue assignment or Board status.
+
+Before an admitted comment-work Run starts, the server resolves the comments linked to that work request and supplies their stable IDs, author identity/type, current body/tombstone state, parent/root context and trigger/routing reason as bounded execution-time context. OpenCode includes that context in the Execution Session's immutable admission prompt. The full Issue discussion is not copied into Run provenance or Events; the existing bounded discussion-read capability remains available when the Agent needs more context.
 
 ### Issue Relationship
 

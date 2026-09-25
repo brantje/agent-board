@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -99,8 +98,8 @@ func (s *Store) createIssueCommentImplicitTriggerTx(
 		return nil, nil, err
 	}
 
-	var delegationID *string
-	var delegatedRunID *string
+	var persistedDelegationID *string
+	var workRequest *store.AgentWorkRequest
 	var reasonCode *string
 	var events []store.Event
 	outcome := store.IssueCommentImplicitOutcomeBlocked
@@ -116,19 +115,17 @@ func (s *Store) createIssueCommentImplicitTriggerTx(
 		reason := store.IssueCommentMentionReasonDelegationBlocked
 		reasonCode = &reason
 	default:
-		delegation, requestErr := s.requestIssueDelegationTx(ctx, tx, store.RequestIssueDelegationCommand{
-			ProjectID:       projectID,
-			IssueID:         comment.IssueID,
-			SourceCommentID: comment.ID,
-			TargetAgentID:   route.TargetAgentID,
-			Task:            comment.Body,
-			RequestKey:      issueCommentImplicitRequestKey(comment.ID, route.TargetAgentID),
+		requested, requestErr := s.requestAgentWorkTx(ctx, tx, agentWorkRequestInput{
+			ProjectID: projectID, IssueID: comment.IssueID, SourceCommentID: comment.ID,
+			TargetAgentID: route.TargetAgentID, Task: comment.Body, AuthorityKind: store.AgentWorkRequestAuthorityIssue,
 		})
 		if requestErr == nil {
-			outcome = store.IssueCommentImplicitOutcomeQueued
-			delegationID = &delegation.Delegation.ID
-			delegatedRunID = &delegation.DelegatedRun.ID
-			events = append(events, delegation.Events...)
+			outcome = requested.Outcome
+			workRequest = &requested.WorkRequest
+			if requested.Outcome == agentWorkRequestOutcomeQueued {
+				persistedDelegationID = requested.WorkRequest.DelegationID
+			}
+			events = append(events, requested.Events...)
 		} else if errors.Is(requestErr, store.ErrConflict) || errors.Is(requestErr, store.ErrNotFound) || errors.Is(requestErr, store.ErrInvalidArgument) {
 			reason := store.IssueCommentMentionReasonDelegationBlocked
 			reasonCode = &reason
@@ -137,20 +134,27 @@ func (s *Store) createIssueCommentImplicitTriggerTx(
 		}
 	}
 
+	var workRequestID *string
+	if workRequest != nil {
+		workRequestID = &workRequest.ID
+	}
 	var value store.IssueCommentImplicitTrigger
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO issue_comment_implicit_triggers (
-			project_id, issue_id, comment_id, target_agent_id, routing_reason, outcome, reason_code, delegation_id
+			project_id, issue_id, comment_id, target_agent_id, routing_reason, outcome, reason_code, delegation_id, work_request_id
 		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-		RETURNING target_agent_id::text, routing_reason, outcome, reason_code, delegation_id::text, created_at
-	`, projectID, comment.IssueID, comment.ID, route.TargetAgentID, route.RoutingReason, outcome, reasonCode, delegationID).Scan(
-		&value.TargetAgentID, &value.RoutingReason, &value.Outcome, &value.ReasonCode, &value.DelegationID, &value.CreatedAt,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		RETURNING target_agent_id::text, routing_reason, outcome, reason_code, delegation_id::text, work_request_id::text, created_at
+	`, projectID, comment.IssueID, comment.ID, route.TargetAgentID, route.RoutingReason, outcome, reasonCode, persistedDelegationID, workRequestID).Scan(
+		&value.TargetAgentID, &value.RoutingReason, &value.Outcome, &value.ReasonCode, &value.DelegationID, &value.WorkRequestID, &value.CreatedAt,
 	); err != nil {
 		return nil, nil, err
 	}
 	value.TargetAgentName = target.TargetAgentName
-	value.DelegatedRunID = delegatedRunID
+	if workRequest != nil && workRequest.DelegationID != nil {
+		value.DelegationID = workRequest.DelegationID
+		value.DelegatedRunID = workRequest.RunID
+	}
 	return &value, events, nil
 }
 
@@ -272,10 +276,6 @@ func issueCommentThreadAgentIDsTx(ctx context.Context, tx pgx.Tx, issueID, rootI
 	return agents, truncated, nil
 }
 
-func issueCommentImplicitRequestKey(commentID, targetAgentID string) string {
-	return fmt.Sprintf("comment:%s:implicit:%s", commentID, targetAgentID)
-}
-
 func sameIssueCommentImplicitRequest(existing store.IssueComment, enabled, suppress, persistedSuppress, hasExplicitMentions bool) bool {
 	if !enabled || hasExplicitMentions {
 		return existing.ImplicitTrigger == nil && !persistedSuppress
@@ -302,15 +302,19 @@ func loadIssueCommentImplicitTriggersWith(ctx context.Context, q issueCommentRow
 	}
 	rows, err := q.Query(ctx, `
 		SELECT t.comment_id::text, t.target_agent_id::text, COALESCE(a.name, ''),
-		       t.routing_reason, t.outcome, t.reason_code, t.delegation_id::text,
+		       t.routing_reason, t.outcome, t.reason_code,
+		       COALESCE(t.delegation_id, wr.delegation_id)::text, t.work_request_id::text,
 		       d.delegated_run_id::text, t.created_at
 		FROM issue_comment_implicit_triggers AS t
 		LEFT JOIN agents AS a
 		  ON a.id=t.target_agent_id
 		 AND (a.project_id IS NULL OR a.project_id=t.project_id)
+		LEFT JOIN agent_work_requests AS wr
+		  ON wr.project_id=t.project_id
+		 AND wr.id=t.work_request_id
 		LEFT JOIN delegations AS d
 		  ON d.project_id=t.project_id
-		 AND d.id=t.delegation_id
+		 AND d.id=COALESCE(t.delegation_id, wr.delegation_id)
 		WHERE t.project_id=$1 AND t.issue_id=$2
 		ORDER BY t.comment_id
 	`, projectID, issueID)
@@ -330,7 +334,7 @@ func loadIssueCommentImplicitTriggersWith(ctx context.Context, q issueCommentRow
 		if err := rows.Scan(
 			&commentID, &trigger.TargetAgentID, &trigger.TargetAgentName,
 			&trigger.RoutingReason, &trigger.Outcome, &trigger.ReasonCode,
-			&trigger.DelegationID, &trigger.DelegatedRunID, &trigger.CreatedAt,
+			&trigger.DelegationID, &trigger.WorkRequestID, &trigger.DelegatedRunID, &trigger.CreatedAt,
 		); err != nil {
 			return err
 		}

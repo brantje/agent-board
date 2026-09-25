@@ -18,8 +18,10 @@ const (
 	IssueCommentReactionRocket     = "ROCKET"
 	IssueCommentReactionEyes       = "EYES"
 
-	IssueCommentMentionOutcomeQueued  = "QUEUED"
-	IssueCommentMentionOutcomeBlocked = "BLOCKED"
+	IssueCommentMentionOutcomeQueued    = "QUEUED"
+	IssueCommentMentionOutcomeCoalesced = "COALESCED"
+	IssueCommentMentionOutcomeDeferred  = "DEFERRED"
+	IssueCommentMentionOutcomeBlocked   = "BLOCKED"
 
 	IssueCommentMentionReasonTargetUnavailable = "TARGET_UNAVAILABLE"
 	IssueCommentMentionReasonTargetBusy        = "TARGET_BUSY"
@@ -58,6 +60,7 @@ type IssueCommentMention struct {
 	ReasonCode      *string
 	DelegationID    *string
 	DelegatedRunID  *string
+	WorkRequestID   *string
 	CreatedAt       time.Time
 }
 
@@ -69,6 +72,7 @@ type IssueCommentImplicitTrigger struct {
 	ReasonCode      *string
 	DelegationID    *string
 	DelegatedRunID  *string
+	WorkRequestID   *string
 	CreatedAt       time.Time
 }
 

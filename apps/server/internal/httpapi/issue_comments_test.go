@@ -401,6 +401,16 @@ func TestIssueCommentHTTPTriggerPreviewUsesAuthorizedSharedRoutingContract(t *te
 			}
 		})
 	}
+
+	malformed := authHTTPRequest(t, fixture.handler, http.MethodPost, endpoint, `{`, bearer(token))
+	if malformed.Code != http.StatusBadRequest {
+		t.Fatalf("malformed trigger preview status=%d body=%s", malformed.Code, malformed.Body.String())
+	}
+	invalidProjectEndpoint := "/api/projects/not-a-uuid/issues/" + issueKey + "/comments/trigger-preview"
+	invalidProject := authHTTPRequest(t, fixture.handler, http.MethodPost, invalidProjectEndpoint, `{"body":"Preview"}`, bearer(token))
+	if invalidProject.Code != http.StatusBadRequest {
+		t.Fatalf("invalid-project trigger preview status=%d body=%s", invalidProject.Code, invalidProject.Body.String())
+	}
 }
 
 func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {

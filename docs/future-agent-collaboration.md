@@ -1,6 +1,6 @@
 # Agent collaboration, Squads and worker pools
 
-This document separates the implemented Squad foundation, canonical Agent delegation, serialized Workspace handoff, and durable delegated-result/parent-continuation lifecycle from later collaboration work. Future collaboration must continue to reuse Agent Board's canonical Issue, Run, scheduler, Workspace and Git lifecycle rather than creating a second execution system.
+This document separates the implemented Squad foundation, canonical Agent delegation, serialized Workspace handoff, durable delegated-result/parent-continuation lifecycle, Issue-comment routing, and comment-work coalescing from later collaboration work. Future collaboration must continue to reuse Agent Board's canonical Issue, Run, scheduler, Workspace and Git lifecycle rather than creating a second execution system.
 
 ## Principle
 
@@ -82,14 +82,16 @@ Structured `@Agent` mentions are implemented as an adapter into canonical delega
 
 The durable comment stores explicit target identities separately from prose. A mention is selected by stable Agent ID; the display name is resolved for presentation and can change without breaking historical identity. Plain text that looks like `@name` has no routing semantics. The posting API and OpenCode `publish_issue_comment(body, mentionAgentIds?)` tool carry mention intent structurally.
 
-Before posting, the Issue UI can ask the server for an advisory eligibility preview. Posting always revalidates current Project/Agent eligibility and canonical delegation policy. Each durable mention records only the target identity, its posting outcome, a safe reason when blocked, and the minimum delegation/Run correlation needed for inspection:
+Before posting, the Issue UI can ask the server for an advisory eligibility preview. Posting always revalidates current Project/Agent eligibility and canonical delegation policy. Each durable mention records only the target identity, its posting outcome, a safe reason when blocked, and the minimum shared work-request/delegation/Run correlation needed for inspection:
 
 ```text
 QUEUED
+COALESCED
+DEFERRED
 BLOCKED
 ```
 
-The implementation intentionally does not invent `coalesced` or `deferred` mention states because the current canonical delegation command does not provide them. Safe blocked reasons distinguish unavailable targets, an already-active target on the Issue, and canonical delegation-policy rejection without exposing target configuration details.
+`COALESCED` and `DEFERRED` come from the shared comment-work admission boundary, not a mention-specific scheduler. Safe blocked reasons distinguish unavailable targets, an already-active/incompatible target context, and canonical delegation-policy rejection without exposing target configuration details. Parent-Run-authority Agent mentions may coalesce only with work under that exact parent authority; they are never silently reinterpreted as Issue-authority deferred work.
 
 Human and Agent authors use the same mention representation but enter canonical execution through the appropriate authority boundary:
 
@@ -120,11 +122,24 @@ A durable implicit-trigger record is distinct from an explicit mention. It store
 
 ```text
 QUEUED
+COALESCED
+DEFERRED
 BLOCKED
 SUPPRESSED
 ```
 
 `BACKLOG` and `DONE` never implicitly wake an Agent merely because a comment was posted; the comment persists with a blocked workflow outcome when a route could otherwise be explained. Target usability, active-run conflicts and canonical execution policy remain authoritative in their existing layers. Retry safety uses the comment's stable human request identity, so one logical post cannot multiply the same implicit delegation.
+
+
+## Comment-triggered work coalescing
+
+Explicit mentions and deterministic implicit routes share one durable execution-request coalescing policy. For the same Project, Issue, Workspace, target Agent and compatible authority, the first trigger creates normal canonical delegation work. Additional triggers may join the same work request while its Run is still safely queued. Scheduler admission seals that request in the same transaction that moves the Run to `STARTING`, so comments arriving after the boundary are never injected into the live Engine session.
+
+Issue-authority follow-up work arriving while the target is already active is persisted as a deferred work request. The existing scheduler coordinator reconciles that durable request after the active Run becomes terminal and promotes it through the same canonical comment-origin delegation path. Restart does not require process-local batching state, and terminal failure/cancellation closes the active work request so pending follow-up can progress.
+
+Every mention or implicit-trigger row retains its own comment identity while referencing the shared work request. At execution time the Run receives bounded server-owned context for every folded comment: comment ID, author identity/type, body or tombstone state, parent/root context and trigger/routing provenance. This context is part of the immutable Execution Session admission prompt, not Run provenance or a second comment-history store. The Agent can use `read_issue_discussion` for additional bounded thread context.
+
+This mechanism does not replace active-Run side-input. It never writes directly to a running OpenCode session, does not add a comment queue/worker/Run type, and creates no synthetic comment Run Events.
 
 ## Workspace inheritance and handoff
 
@@ -252,6 +267,7 @@ complete v0.1 coding flow
  -> Squad-aware delegation/member context [implemented]
  -> structured Issue-comment Agent mentions [implemented]
  -> deterministic implicit Issue-comment routing [implemented]
+ -> comment-triggered Agent work coalescing [implemented]
  -> broader messaging/wake policy if needed
  -> worker registry/pools
  -> warm/spot optimizations

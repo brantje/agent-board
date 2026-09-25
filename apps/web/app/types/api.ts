@@ -94,7 +94,7 @@ export interface IssueCommentReactionSummary {
   reactedByCurrentUser: boolean
 }
 
-export type IssueCommentMentionOutcome = 'QUEUED' | 'BLOCKED'
+export type IssueCommentMentionOutcome = 'QUEUED' | 'COALESCED' | 'DEFERRED' | 'BLOCKED'
 
 export type IssueCommentMentionReasonCode =
   | 'TARGET_UNAVAILABLE'
@@ -123,7 +123,7 @@ export type IssueCommentImplicitRoutingReason =
   | 'UNIQUE_THREAD_AGENT'
   | 'ISSUE_ASSIGNEE'
 
-export type IssueCommentImplicitOutcome = 'QUEUED' | 'BLOCKED' | 'SUPPRESSED'
+export type IssueCommentImplicitOutcome = 'QUEUED' | 'COALESCED' | 'DEFERRED' | 'BLOCKED' | 'SUPPRESSED'
 
 export type IssueCommentImplicitReasonCode =
   | IssueCommentMentionReasonCode

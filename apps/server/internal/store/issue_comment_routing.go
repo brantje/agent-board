@@ -8,6 +8,8 @@ const (
 	IssueCommentImplicitRoutingReasonIssueAssignee      = "ISSUE_ASSIGNEE"
 
 	IssueCommentImplicitOutcomeQueued     = "QUEUED"
+	IssueCommentImplicitOutcomeCoalesced  = "COALESCED"
+	IssueCommentImplicitOutcomeDeferred   = "DEFERRED"
 	IssueCommentImplicitOutcomeBlocked    = "BLOCKED"
 	IssueCommentImplicitOutcomeSuppressed = "SUPPRESSED"
 
