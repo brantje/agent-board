@@ -70,3 +70,10 @@ func withAgentWorkParent(value AgentWorkRequest, parent string) AgentWorkRequest
 	value.ParentRunID = &parent
 	return value
 }
+
+func TestSameAgentWorkRequestCompatibilityRejectsUnknownAuthority(t *testing.T) {
+	value := AgentWorkRequest{ProjectID: "project", IssueID: "issue", WorkspaceID: "workspace", TargetAgentID: "agent", AuthorityKind: "UNKNOWN"}
+	if SameAgentWorkRequestCompatibility(value, value) {
+		t.Fatal("unknown authority was treated as compatible")
+	}
+}

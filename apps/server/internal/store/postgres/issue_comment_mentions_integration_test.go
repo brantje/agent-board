@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
@@ -194,6 +195,34 @@ func TestHumanIssueCommentMultipleMentionsPersistMixedOutcomesAndRetryWithoutDup
 		afterIssue.AssigneeType == nil || beforeIssue.AssigneeType == nil || *afterIssue.AssigneeType != *beforeIssue.AssigneeType ||
 		afterIssue.AssigneeID == nil || beforeIssue.AssigneeID == nil || *afterIssue.AssigneeID != *beforeIssue.AssigneeID {
 		t.Fatalf("plural mention changed Issue assignment/status: before=%+v after=%+v", beforeIssue, afterIssue)
+	}
+}
+
+func TestIssueCommentMentionOversizedBodyPersistsBlockedWithoutExecution(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("oversized-mention-author", "oversized-mention@example.com", store.UserStatusActive))
+	if err != nil { t.Fatal(err) }
+	requestKey := "oversized-mention-request"
+	body := strings.Repeat("x", store.MaxDelegationTaskCharacters+1)
+	result, err := f.store.CreateIssueCommentWithMentions(ctx, f.project.ID, store.IssueComment{
+		IssueID: f.issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID,
+		SourceActionKey: &requestKey, Body: body,
+	}, []string{f.target.ID})
+	if err != nil { t.Fatal(err) }
+	if result.Comment.ID == "" || len(result.Comment.Mentions) != 1 {
+		t.Fatalf("comment=%+v", result.Comment)
+	}
+	mention := result.Comment.Mentions[0]
+	if mention.Outcome != store.IssueCommentMentionOutcomeBlocked || mention.ReasonCode == nil ||
+		*mention.ReasonCode != store.IssueCommentMentionReasonDelegationBlocked || mention.WorkRequestID != nil ||
+		mention.DelegationID != nil || mention.DelegatedRunID != nil {
+		t.Fatalf("oversized mention=%+v", mention)
+	}
+	runs, err := f.store.ListRuns(ctx, f.project.ID)
+	if err != nil { t.Fatal(err) }
+	if len(runs) != 1 {
+		t.Fatalf("oversized mention created execution: %+v", runs)
 	}
 }
 

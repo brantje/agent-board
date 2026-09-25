@@ -348,6 +348,37 @@ func TestIssueCommentImplicitOwnerFallbackExcludesUserAndUnassignedIssues(t *tes
 	}
 }
 
+func TestIssueCommentImplicitOversizedBodyPersistsBlockedWithoutExecution(t *testing.T) {
+	f := newDelegationFixture(t, true)
+	ctx := t.Context()
+	author, err := f.store.CreateUser(ctx, authUser("oversized-implicit-author", "oversized-implicit@example.com", store.UserStatusActive))
+	if err != nil { t.Fatal(err) }
+	issue, err := f.store.CreateIssue(ctx, store.Issue{ProjectID: f.project.ID, Title: "Oversized implicit work", Status: "TODO"})
+	if err != nil { t.Fatal(err) }
+	if _, err := f.store.pool.Exec(ctx, `UPDATE issues SET assignee_type='AGENT', assignee_id=$3 WHERE project_id=$1 AND id=$2`, f.project.ID, issue.ID, f.target.ID); err != nil {
+		t.Fatal(err)
+	}
+	key := "oversized-implicit-request"
+	body := strings.Repeat("x", store.MaxDelegationTaskCharacters+1)
+	result, err := f.store.CreateIssueCommentWithTriggers(ctx, f.project.ID, store.IssueComment{
+		IssueID: issue.ID, AuthorType: store.ActorTypeHuman, AuthorID: author.ID, SourceActionKey: &key, Body: body,
+	}, store.IssueCommentTriggerRequest{})
+	if err != nil { t.Fatal(err) }
+	trigger := result.Comment.ImplicitTrigger
+	if trigger == nil || trigger.Outcome != store.IssueCommentImplicitOutcomeBlocked || trigger.ReasonCode == nil ||
+		*trigger.ReasonCode != store.IssueCommentMentionReasonDelegationBlocked || trigger.WorkRequestID != nil ||
+		trigger.DelegationID != nil || trigger.DelegatedRunID != nil {
+		t.Fatalf("oversized implicit trigger=%+v", trigger)
+	}
+	runs, err := f.store.ListRuns(ctx, f.project.ID)
+	if err != nil { t.Fatal(err) }
+	for _, run := range runs {
+		if run.IssueID == issue.ID {
+			t.Fatalf("oversized implicit trigger created execution: %+v", runs)
+		}
+	}
+}
+
 func TestIssueCommentImplicitSuppressionIntentIsStableWithoutRoute(t *testing.T) {
 	f := newDelegationFixture(t, true)
 	ctx := t.Context()
