@@ -98,10 +98,10 @@ func TestInitialTaskPromptDescribesCommentOriginDelegationWithoutInventingParent
 
 func TestIssueCommentPromptRequiresStructuredMentionIDs(t *testing.T) {
 	for _, want := range []string{
-		"publish_issue_comment(body, mentionAgentIds?)",
+		"publish_issue_comment(body, mentionTargets?)",
 		"Plain @name text has no routing semantics",
-		"pass at most one stable Agent ID structurally in mentionAgentIds",
-		"never guess Agent identifiers",
+		"pass at most one stable typed Agent or Squad target structurally in mentionTargets",
+		"never guess target identifiers",
 	} {
 		if !strings.Contains(issueCommentPromptGuidance, want) {
 			t.Fatalf("Issue comment guidance missing %q: %s", want, issueCommentPromptGuidance)

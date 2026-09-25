@@ -21,8 +21,8 @@ export default tool({
     body: tool.schema.string().describe("Concise user-visible Issue comment"),
     mentionTargets: tool.schema.array(tool.schema.object({ type: tool.schema.enum(["AGENT", "SQUAD"]), id: tool.schema.string() })).optional().describe("Optional single stable Agent or Squad target to mention structurally and request focused work from"),
   },
-  async execute({ body, mentionAgentIds }) {
-    return JSON.stringify({ status: "emitted", mentionAgentIds: mentionAgentIds ?? [] })
+  async execute({ body, mentionTargets }) {
+    return JSON.stringify({ status: "emitted", mentionTargets: mentionTargets ?? [] })
   },
 })
 `
