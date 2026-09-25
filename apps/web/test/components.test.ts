@@ -10,7 +10,7 @@ import { navigation } from '../app/utils/navigation'
 import { useResource } from '../app/composables/useResource'
 
 const pass = { template: '<div><slot name="header" :collapsed="false" /><slot name="default" :collapsed="false" /><slot name="footer" /><slot name="body" /><slot name="leading" /></div>' }
-const stubs = Object.fromEntries(['UApp','UDashboardGroup','UDashboardSidebar','UDashboardPanel','UDashboardNavbar','UDashboardToolbar','AppShell','PageFrame','USeparator','ThemeSelector','UDashboardSidebarCollapse','NuxtRouteAnnouncer','USkeleton'].map(name => [name, pass]))
+const stubs = Object.fromEntries(['UApp','UDashboardGroup','UDashboardSidebar','UDashboardPanel','UDashboardNavbar','UDashboardToolbar','AppShell','PageFrame','NotificationCenter','USeparator','ThemeSelector','UDashboardSidebarCollapse','NuxtRouteAnnouncer','USkeleton'].map(name => [name, pass]))
 const menu = { props: ['items'], template: '<nav><a v-for="item in items" :href="item.to">{{ item.label }}</a></nav>' }
 const alert = { props: ['title','description','actions'], template: '<div role="alert">{{ title }} {{ description }}<button @click="actions[0].onClick()">Retry</button></div>' }
 const empty = { props: ['title','description'], template: '<div>{{ title }} {{ description }}</div>' }

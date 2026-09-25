@@ -10,7 +10,7 @@ import { useProjectEvents } from '../composables/useProjectEvents'
 import IssueRelationships from './IssueRelationships.vue'
 import IssueDiscussionTimeline from './IssueDiscussionTimeline.vue'
 
-const props = withDefaults(defineProps<{ projectId: string; issueId: string; canMutate?: boolean }>(), { canMutate: true })
+const props = withDefaults(defineProps<{ projectId: string; issueId: string; canMutate?: boolean; canSubscribe?: boolean }>(), { canMutate: true, canSubscribe: true })
 const { data: issue, pending, error, refresh } = useResource<Issue>(() => apiPath('issues', props.projectId, props.issueId))
 const assignees = useResource<Assignee[]>(() => apiPath('assignees', props.projectId))
 const runs = useResource<Run[]>(() => apiPath('runs', props.projectId))
@@ -203,6 +203,7 @@ async function saved(savedIssue: Issue) {
             :project-id="projectId"
             :issue-id="issueId"
             :can-mutate="canMutate"
+            :can-subscribe="canSubscribe"
           />
 
           <UCard>

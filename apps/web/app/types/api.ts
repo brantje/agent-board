@@ -207,6 +207,34 @@ export interface IssueTimelineEntry {
   activity: EventEvidence | null
 }
 
+export type UserNotificationKind = 'COMMENT_REPLY' | 'ISSUE_COMMENT'
+
+export interface UserNotification {
+  id: string
+  kind: UserNotificationKind
+  projectId: string
+  projectName: string
+  issueId: string
+  issueKey: string
+  issueTitle: string
+  sourceCommentId: string
+  commentAuthorType: 'HUMAN' | 'AGENT'
+  commentAuthorId: string
+  commentAuthorName: string
+  preview: string
+  createdAt: string
+  readAt: string | null
+}
+
+export interface UserNotificationsResponse {
+  notifications: UserNotification[]
+  unreadCount: number
+}
+
+export interface IssueSubscription {
+  subscribed: boolean
+}
+
 export interface IssueRelationship {
   id: string
   projectId: string

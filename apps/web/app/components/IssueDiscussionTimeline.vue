@@ -10,6 +10,7 @@ import type {
   IssueCommentMentionReasonCode,
   IssueCommentReactionKey,
   IssueCommentTriggerPreview,
+  IssueSubscription,
   IssueTimelineEntry,
   Squad
 } from '../types/api'
@@ -18,7 +19,7 @@ import { eventActivityIcon, eventDescription, eventTitle, formatActivityTime } f
 import { useResource } from '../composables/useResource'
 import MarkdownContent from './MarkdownContent.vue'
 
-const props = withDefaults(defineProps<{ projectId: string; issueId: string; canMutate?: boolean }>(), { canMutate: true })
+const props = withDefaults(defineProps<{ projectId: string; issueId: string; canMutate?: boolean; canSubscribe?: boolean }>(), { canMutate: true, canSubscribe: false })
 const auth = useAuth()
 const timeline = useResource<IssueTimelineEntry[]>(() => `${apiPath('issues', props.projectId, props.issueId)}/timeline`)
 const body = ref('')
@@ -41,6 +42,9 @@ const triggerPreview = ref<IssueCommentTriggerPreview>({ mentions: [], implicit:
 const triggerPreviewError = ref<Error>()
 const suppressImplicitAgentTrigger = ref(false)
 const draftRequestId = ref('')
+const subscribed = ref(false)
+const subscriptionPending = ref(false)
+const subscriptionError = ref<Error>()
 let triggerPreviewGeneration = 0
 
 const reactionOptions: Array<{ key: IssueCommentReactionKey; emoji: string; label: string }> = [
@@ -53,6 +57,35 @@ const reactionOptions: Array<{ key: IssueCommentReactionKey; emoji: string; labe
   { key: 'ROCKET', emoji: '🚀', label: 'Rocket' },
   { key: 'EYES', emoji: '👀', label: 'Eyes' }
 ]
+
+async function refreshSubscription() {
+  if (!props.canSubscribe) return
+  subscriptionPending.value = true
+  subscriptionError.value = undefined
+  try {
+    const value = await apiRequest<IssueSubscription>(`${apiPath('issues', props.projectId, props.issueId)}/subscription`)
+    subscribed.value = value.subscribed
+  } catch (failure) {
+    subscriptionError.value = failure as Error
+  } finally {
+    subscriptionPending.value = false
+  }
+}
+
+async function toggleSubscription() {
+  if (!props.canSubscribe || subscriptionPending.value) return
+  const next = !subscribed.value
+  subscriptionPending.value = true
+  subscriptionError.value = undefined
+  try {
+    await apiRequest<IssueSubscription>(`${apiPath('issues', props.projectId, props.issueId)}/subscription`, { method: next ? 'PUT' : 'DELETE' })
+    subscribed.value = next
+  } catch (failure) {
+    subscriptionError.value = failure as Error
+  } finally {
+    subscriptionPending.value = false
+  }
+}
 
 const commentsById = computed(() => new Map(
   (timeline.data.value || [])
@@ -132,6 +165,11 @@ watch(suppressImplicitAgentTrigger, () => {
   routingInputChanged()
   void refreshTriggerPreview()
 })
+
+watch(() => [props.projectId, props.issueId, props.canSubscribe], () => {
+  subscribed.value = false
+  if (props.canSubscribe) void refreshSubscription()
+}, { immediate: true })
 
 function beginReply(comment: IssueComment) {
   if (comment.deletedAt) return
@@ -444,6 +482,18 @@ defineExpose({ refresh: timeline.refresh })
         <h2 class="section-label">Discussion & activity</h2>
         <p class="mt-1 text-sm text-muted">Durable Issue collaboration and workflow activity.</p>
       </div>
+      <div v-if="canSubscribe" class="flex items-center gap-2">
+        <UButton
+          :label="subscribed ? 'Following' : 'Follow'"
+          :icon="subscribed ? 'i-lucide-bell-ring' : 'i-lucide-bell'"
+          size="sm"
+          :variant="subscribed ? 'soft' : 'outline'"
+          :loading="subscriptionPending"
+          data-testid="issue-subscription-toggle"
+          @click="toggleSubscription"
+        />
+        <span v-if="subscriptionError" class="text-xs text-error">{{ subscriptionError.message }}</span>
+      </div>
     </div>
 
     <UAlert v-if="actionError" class="mb-3" title="Unable to update comment" :description="actionError.message" color="error" />
@@ -460,6 +510,7 @@ defineExpose({ refresh: timeline.refresh })
         <li v-for="entry in timeline.data.value" :key="`${entry.kind}:${entry.id}`">
           <article
             v-if="entry.kind === 'comment' && entry.comment"
+            :id="`comment-${entry.comment.id}`"
             class="rounded-md border border-default p-3"
             :class="entry.comment.parentCommentId ? 'ms-6' : ''"
           >
