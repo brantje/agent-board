@@ -59,7 +59,8 @@ The Go backend owns:
 - deployment-global User identity, local authentication, sessions and Groups
 - shared deployment/Project authorization and effective Project access
 - Project/Issue/Agent configuration and commands
-- Project source configuration (`local` or `git`)
+- Project source configuration (`local`, `git`, or planned `connected` Source Connection + Source Repository)
+- planned Tier-1 Source Connection/Repository integration for GitHub, GitLab and Forgejo
 - Provider/Model Profile configuration
 - Engine registry/adapters
 - durable Run scheduling/claiming/reconciliation
@@ -76,6 +77,20 @@ The Go backend owns:
 - legacy Runtime/Runtime Instance configuration/lifecycle only where internal managed-compute code still uses it
 
 HTTP handlers are adapters around separable application/domain/store/runtime logic.
+
+### Planned Source Provider boundary
+
+GitHub, GitLab and Forgejo are the Tier-1 Source Providers.
+
+The provider layer extends the existing source-control and delivery boundaries. It owns Source Connection/Repository identity, repository discovery, scoped ephemeral Git credential resolution, webhook verification/normalization, provider-neutral Change Request operations, checks/pipeline summaries, mergeability/conflict reads and external merge reconciliation.
+
+It does **not** own Run scheduling, Runner placement, Workspace lifecycle, Issue branches, Engine execution or Agent Board Review. Those remain shared provider-neutral backend behavior.
+
+The three concrete providers justify a small shared application adapter boundary. Do not expand it into a generic SCM plugin framework or duplicate provider-specific business behavior across HTTP/webhooks/workers.
+
+Connected-provider credentials are resolved only in trusted server code and injected ephemerally through the existing execution-context/secret boundary. Generic `git` Projects may continue using Runner-host Git authentication as an escape hatch.
+
+See `source-providers.md`.
 
 ### Human authentication and authorization
 
