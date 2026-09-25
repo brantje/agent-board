@@ -76,6 +76,29 @@ func TestSecretOpenAPIMarksPlaintextWriteOnlyAndRequiresCapability(t *testing.T)
 	}
 }
 
+func TestIssueCommentTypedMentionTargetItemsRejectUnknownProperties(t *testing.T) {
+	path := filepath.Join("..", "..", "..", "..", "packages", "api", "schemas", "control-plane.yaml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(data)
+	for _, schema := range []string{"IssueCommentMentionPreviewInput", "IssueCommentTriggerPreviewInput", "IssueCommentCreate"} {
+		t.Run(schema, func(t *testing.T) {
+			block := topLevelYAMLBlock(doc, schema)
+			if block == "" {
+				t.Fatalf("schema %s not found", schema)
+			}
+			if strings.Count(block, "additionalProperties: false") < 2 {
+				t.Fatalf("schema %s must close both the input and mentionTargets item objects: %s", schema, block)
+			}
+			if !strings.Contains(block, "required: [type, id]") {
+				t.Fatalf("schema %s must require typed target type and id", schema)
+			}
+		})
+	}
+}
+
 func topLevelYAMLBlock(doc, name string) string {
 	start := strings.Index(doc, "\n"+name+":\n")
 	if start < 0 {

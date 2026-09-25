@@ -384,6 +384,7 @@ IssueCommentMentionPreviewInput:
       maxItems: 10
       items:
         type: object
+        additionalProperties: false
         required: [type, id]
         properties:
           type: {type: string, enum: [AGENT, SQUAD]}
@@ -458,6 +459,7 @@ IssueCommentTriggerPreviewInput:
       maxItems: 10
       items:
         type: object
+        additionalProperties: false
         required: [type, id]
         properties:
           type: {type: string, enum: [AGENT, SQUAD]}
@@ -519,6 +521,7 @@ IssueCommentCreate:
       maxItems: 10
       items:
         type: object
+        additionalProperties: false
         required: [type, id]
         properties:
           type: {type: string, enum: [AGENT, SQUAD]}
