@@ -319,7 +319,7 @@ func TestOpenCodeDockerPublishesStructuredIssueMentionAndDelegates(t *testing.T)
 	comment := comments[0]
 	if comment.AuthorType != store.ActorTypeAgent || comment.AuthorID != parentAgent.ID ||
 		comment.SourceRunID == nil || *comment.SourceRunID != parentRun.ID ||
-		comment.Body != publishedBody || delegation.Task != publishedBody || len(comment.Mentions) != 1 {
+		comment.Body != publishedBody || delegation.Task != strings.TrimSpace(publishedBody) || len(comment.Mentions) != 1 {
 		t.Fatalf("structured Agent comment=%+v delegation=%+v publishedBody=%q", comment, delegation, publishedBody)
 	}
 	if !strings.Contains(comment.Body, "@"+parentAgent.Name) {
