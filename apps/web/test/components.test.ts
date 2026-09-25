@@ -94,6 +94,22 @@ describe('application foundation', () => {
     expect(mount(Page, { props: { title:'Empty' }, global }).text()).not.toContain('Project context')
     expect(mount(Index, { global }).text()).toContain('Your work starts with a project')
   })
+  it('exposes the notification control from the navbar right area', () => {
+    const wrapper = mount(Page, {
+      props: { title: 'Board' },
+      global: {
+        stubs: {
+          ...global.stubs,
+          UDashboardNavbar: {
+            props: ['title'],
+            template: '<header><span>{{ title }}</span><div data-testid="navbar-right"><slot name="right" /></div></header>'
+          },
+          NotificationCenter: { template: '<button data-testid="navbar-notification-control">Notifications</button>' }
+        }
+      }
+    })
+    expect(wrapper.get('[data-testid="navbar-right"] [data-testid="navbar-notification-control"]').exists()).toBe(true)
+  })
   it('prioritizes loading/error/empty states and exposes retry', async () => {
     const wrapper = mount(AsyncState, { props: { pending:true }, slots: { default:'Loaded data' }, global })
     expect(wrapper.get('[role=status]').attributes('aria-label')).toBe('Loading')
