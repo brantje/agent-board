@@ -667,7 +667,7 @@ defineExpose({ refresh: timeline.refresh })
         </div>
 
         <UAlert v-if="triggerPreviewError" title="Trigger preview unavailable" :description="triggerPreviewError.message" color="warning" />
-        <div v-if="selectedMentionTargets.length" class="space-y-1 text-xs text-muted" aria-label="Mention target preview">
+        <div v-if="selectedMentionTargets.length" class="space-y-1 text-xs text-muted" aria-label="Agent mention preview">
           <p v-for="agent in selectedMentionAgents" :key="agent.id">
             @{{ agent.name }} · {{ mentionPreviewLabel(agent.id) }}
           </p>

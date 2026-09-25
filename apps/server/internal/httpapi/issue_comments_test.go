@@ -51,7 +51,6 @@ func (s *issueCommentHTTPStore) CreateIssueComment(_ context.Context, pid string
 	return store.IssueCommentMutationResult{Comment: input, Events: []store.Event{event}}, nil
 }
 
-
 func (s *issueCommentHTTPStore) CreateIssueCommentWithMentions(ctx context.Context, pid string, input store.IssueComment, targetAgentIDs []string) (store.IssueCommentMutationResult, error) {
 	result, err := s.CreateIssueComment(ctx, pid, input)
 	if err != nil {
@@ -71,10 +70,25 @@ func (s *issueCommentHTTPStore) CreateIssueCommentWithMentions(ctx context.Conte
 }
 
 func (s *issueCommentHTTPStore) CreateIssueCommentWithTriggers(ctx context.Context, pid string, input store.IssueComment, request store.IssueCommentTriggerRequest) (store.IssueCommentMutationResult, error) {
+	if len(request.MentionTargets) != 0 {
+		return s.CreateIssueCommentWithTargets(ctx, pid, input, request.MentionTargets)
+	}
 	if len(request.MentionAgentIDs) != 0 {
 		return s.CreateIssueCommentWithMentions(ctx, pid, input, request.MentionAgentIDs)
 	}
 	return s.CreateIssueComment(ctx, pid, input)
+}
+
+func (s *issueCommentHTTPStore) CreateIssueCommentWithTargets(ctx context.Context, pid string, input store.IssueComment, targets []store.IssueCommentTarget) (store.IssueCommentMutationResult, error) {
+	result, err := s.CreateIssueComment(ctx, pid, input)
+	if err != nil {
+		return store.IssueCommentMutationResult{}, err
+	}
+	for _, target := range targets {
+		result.Comment.Mentions = append(result.Comment.Mentions, store.IssueCommentMention{Target: target, TargetName: "Squad", Outcome: store.IssueCommentMentionOutcomeQueued})
+	}
+	s.comments[len(s.comments)-1].Mentions = result.Comment.Mentions
+	return result, nil
 }
 
 func (s *issueCommentHTTPStore) PreviewIssueCommentTriggers(ctx context.Context, pid, id string, _ *string, _ string, request store.IssueCommentTriggerRequest) (store.IssueCommentTriggerPreview, error) {
@@ -87,7 +101,7 @@ func (s *issueCommentHTTPStore) PreviewIssueCommentTriggers(ctx context.Context,
 		result.Implicit = &store.IssueCommentImplicitTriggerPreview{
 			TargetAgentID: agentID, TargetAgentName: "Agent",
 			RoutingReason: store.IssueCommentImplicitRoutingReasonIssueAssignee,
-			Eligible: !request.SuppressImplicit, Suppressed: request.SuppressImplicit,
+			Eligible:      !request.SuppressImplicit, Suppressed: request.SuppressImplicit,
 		}
 	}
 	return result, nil
@@ -100,6 +114,17 @@ func (s *issueCommentHTTPStore) PreviewIssueCommentMentions(_ context.Context, p
 	result := make([]store.IssueCommentMentionPreview, 0, len(targetAgentIDs))
 	for _, targetAgentID := range targetAgentIDs {
 		result = append(result, store.IssueCommentMentionPreview{TargetAgentID: targetAgentID, TargetAgentName: "Agent", Eligible: true})
+	}
+	return result, nil
+}
+
+func (s *issueCommentHTTPStore) PreviewIssueCommentTargets(_ context.Context, pid, id string, targets []store.IssueCommentTarget) ([]store.IssueCommentMentionPreview, error) {
+	if pid != projectID || id != issueID {
+		return nil, store.ErrNotFound
+	}
+	result := make([]store.IssueCommentMentionPreview, 0, len(targets))
+	for _, target := range targets {
+		result = append(result, store.IssueCommentMentionPreview{Target: target, TargetName: "Squad", Eligible: true})
 	}
 	return result, nil
 }
@@ -331,7 +356,6 @@ func TestIssueCommentHTTPCreateReplyReadAndTimeline(t *testing.T) {
 	}
 }
 
-
 func TestIssueCommentHTTPTriggerPreviewUsesAuthorizedSharedRoutingContract(t *testing.T) {
 	fixture, _ := newIssueCommentHTTPFixture(t)
 	member, token := fixture.createUser(t, "trigger-preview-member", store.DeploymentRoleMember)
@@ -437,6 +461,12 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	if len(previews) != 1 || previews[0].TargetAgentID != agentID || !previews[0].Eligible {
 		t.Fatalf("preview=%+v", previews)
 	}
+	squadID := "56565656-5656-4565-8565-565656565656"
+	squadPreview := authHTTPRequest(t, fixture.handler, http.MethodPost, base+"/mention-preview",
+		`{"mentionTargets":[{"type":"SQUAD","id":"`+squadID+`"}]}`, bearer(token))
+	if squadPreview.Code != http.StatusOK || !strings.Contains(squadPreview.Body.String(), `"targetType":"SQUAD"`) {
+		t.Fatalf("Squad preview status=%d body=%s", squadPreview.Code, squadPreview.Body.String())
+	}
 
 	requestID := "12121212-1212-4212-8212-121212121212"
 	created := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
@@ -451,6 +481,11 @@ func TestIssueCommentHTTPStructuredMentionPreviewAndCreate(t *testing.T) {
 	if len(comment.Mentions) != 1 || comment.Mentions[0].TargetAgentID != agentID ||
 		comment.Mentions[0].Outcome != store.IssueCommentMentionOutcomeQueued {
 		t.Fatalf("comment mentions=%+v", comment.Mentions)
+	}
+	squadCreated := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
+		`{"body":"Please ask the Squad","requestId":"66666666-6666-4666-8666-666666666666","mentionTargets":[{"type":"SQUAD","id":"`+squadID+`"}]}`, bearer(token))
+	if squadCreated.Code != http.StatusCreated || !strings.Contains(squadCreated.Body.String(), `"targetType":"SQUAD"`) {
+		t.Fatalf("Squad create status=%d body=%s", squadCreated.Code, squadCreated.Body.String())
 	}
 
 	missingRequest := authHTTPRequest(t, fixture.handler, http.MethodPost, base,
@@ -562,7 +597,6 @@ func TestIssueCommentLowLevelRouterReadCompatibilityAndWriteFailClosed(t *testin
 		t.Fatalf("low-level create status=%d body=%s", create.Code, create.Body.String())
 	}
 }
-
 
 func TestIssueCommentHTTPLifecycleResolutionAndReactions(t *testing.T) {
 	fixture, database := newIssueCommentHTTPFixture(t)
@@ -699,12 +733,12 @@ func TestIssueCommentLifecycleLowLevelWritesFailClosed(t *testing.T) {
 	base := "/api/projects/" + projectID + "/issues/" + issueKey + "/comments/" + httpCommentID
 
 	for name, request := range map[string]*http.Request{
-		"edit":     httptest.NewRequest(http.MethodPatch, base, strings.NewReader(`{"body":"edit"}`)),
-		"delete":   httptest.NewRequest(http.MethodDelete, base, nil),
-		"resolve":  httptest.NewRequest(http.MethodPut, base+"/resolution", nil),
-		"reopen":   httptest.NewRequest(http.MethodDelete, base+"/resolution", nil),
-		"react":    httptest.NewRequest(http.MethodPut, base+"/reactions/"+store.IssueCommentReactionHeart, nil),
-		"unreact":  httptest.NewRequest(http.MethodDelete, base+"/reactions/"+store.IssueCommentReactionHeart, nil),
+		"edit":    httptest.NewRequest(http.MethodPatch, base, strings.NewReader(`{"body":"edit"}`)),
+		"delete":  httptest.NewRequest(http.MethodDelete, base, nil),
+		"resolve": httptest.NewRequest(http.MethodPut, base+"/resolution", nil),
+		"reopen":  httptest.NewRequest(http.MethodDelete, base+"/resolution", nil),
+		"react":   httptest.NewRequest(http.MethodPut, base+"/reactions/"+store.IssueCommentReactionHeart, nil),
+		"unreact": httptest.NewRequest(http.MethodDelete, base+"/reactions/"+store.IssueCommentReactionHeart, nil),
 	} {
 		t.Run(name, func(t *testing.T) {
 			response := httptest.NewRecorder()
