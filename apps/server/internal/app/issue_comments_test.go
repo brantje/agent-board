@@ -488,6 +488,11 @@ func TestIssueCommentMentionApplicationPreviewAndCreate(t *testing.T) {
 	if len(targetPreview) != 1 || targetPreview[0].Target != targets[0] || targetPreview[0].TargetName != "Backend" {
 		t.Fatalf("target preview=%+v", targetPreview)
 	}
+	fake.mentionErr = store.ErrInvalidArgument
+	if _, err := service.PreviewIssueCommentTargets(t.Context(), projectID, issueID, targets); !errors.Is(err, store.ErrInvalidArgument) {
+		t.Fatalf("typed preview error=%v want invalid argument", err)
+	}
+	fake.mentionErr = nil
 	targetCreated, err := service.CreateHumanIssueComment(t.Context(), CreateIssueCommentInput{
 		ProjectID: projectID, IssueID: issueID, Body: "Please ask the squad.", RequestKey: "squad-request", MentionTargets: targets,
 	}, "author")
