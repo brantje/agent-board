@@ -217,6 +217,14 @@ The canonical relationship types and source -> target meanings are:
 
 A relationship record does not itself mutate Issue status, start/cancel Runs, or perform browser-side orchestration. Any workflow effect from blockers or dependencies is evaluated by trusted server-side policy. Self-links, duplicates and cross-Project targets are rejected by the server.
 
+## Issue discussion notifications
+
+Authenticated Project users can follow or unfollow an Issue from its discussion header. Following is a durable Issue subscription and does not grant access or change assignment, Board status or execution.
+
+The top-right navigation notification control lists all currently accessible discussion notifications newest-first. A notification links to the exact source comment, shows its Project/Issue context and a safe bounded preview, and can be marked read or unread individually or in bulk. Unread state is presentation state backed by durable server records; disabled Users and Users who lose Project access no longer receive or see those notifications.
+
+After a comment is committed, the shared backend collaboration path may create one notification per recipient for a direct reply to a human-authored parent comment or for a User explicitly following the Issue. The direct reply may itself be human- or Agent-authored. The acting human is excluded from self-notification. Agent targeting or Agent mentions alone do not notify humans, and comment creation remains successful if notification persistence fails. Comments remain the authoritative source records; this v0.1 surface does not add email, push, digest or a general notification platform. Project SSE may prompt the browser to re-read notifications, but durable notification reads remain authoritative.
+
 ## Questions and Inbox
 
 Blocking Question:

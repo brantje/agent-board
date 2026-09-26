@@ -5,8 +5,8 @@ import { useProjectPermissions } from '../../../../composables/useProjectPermiss
 const route = useRoute()
 const projectId = computed(() => String(route.params.projectID))
 const issueId = computed(() => String(route.params.issueID))
-const { canMutate } = useProjectPermissions(projectId)
+const { canRead, canMutate } = useProjectPermissions(projectId)
 </script>
 <template>
-  <IssueDetail :key="`${projectId}/${issueId}`" :project-id="projectId" :issue-id="issueId" :can-mutate="canMutate" />
+  <IssueDetail :key="`${projectId}/${issueId}`" :project-id="projectId" :issue-id="issueId" :can-mutate="canMutate" :can-subscribe="canRead" />
 </template>

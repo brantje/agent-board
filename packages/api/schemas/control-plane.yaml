@@ -544,6 +544,52 @@ IssueCommentUpdate:
       type: string
       minLength: 1
       pattern: '\S'
+IssueSubscription:
+  type: object
+  additionalProperties: false
+  required: [subscribed]
+  properties:
+    subscribed: {type: boolean}
+UserNotification:
+  type: object
+  additionalProperties: false
+  required: [id, kind, projectId, projectName, issueId, issueKey, issueTitle, sourceCommentId, commentAuthorType, commentAuthorId, commentAuthorName, preview, createdAt, readAt]
+  properties:
+    id: {type: string, format: uuid}
+    kind: {type: string, enum: [COMMENT_REPLY, ISSUE_COMMENT]}
+    projectId: {type: string, format: uuid}
+    projectName: {type: string}
+    issueId: {type: string, format: uuid}
+    issueKey: {$ref: '#/IssueKey'}
+    issueTitle: {type: string}
+    sourceCommentId: {type: string, format: uuid}
+    commentAuthorType: {type: string, enum: [HUMAN, AGENT]}
+    commentAuthorId: {type: string, format: uuid}
+    commentAuthorName: {type: string}
+    preview: {type: string, maxLength: 240}
+    createdAt: {type: string, format: date-time}
+    readAt: {type: [string, 'null'], format: date-time}
+UserNotifications:
+  type: object
+  additionalProperties: false
+  required: [notifications, unreadCount]
+  properties:
+    notifications:
+      type: array
+      items: {$ref: '#/UserNotification'}
+    unreadCount: {type: integer, minimum: 0}
+NotificationReadInput:
+  type: object
+  additionalProperties: false
+  required: [read]
+  properties:
+    read: {type: boolean}
+NotificationReadAll:
+  type: object
+  additionalProperties: false
+  required: [updated]
+  properties:
+    updated: {type: integer, minimum: 0}
 IssueDiscussionRoot:
   type: object
   additionalProperties: false

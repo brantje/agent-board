@@ -10,7 +10,7 @@ import { navigation } from '../app/utils/navigation'
 import { useResource } from '../app/composables/useResource'
 
 const pass = { template: '<div><slot name="header" :collapsed="false" /><slot name="default" :collapsed="false" /><slot name="footer" /><slot name="body" /><slot name="leading" /></div>' }
-const stubs = Object.fromEntries(['UApp','UDashboardGroup','UDashboardSidebar','UDashboardPanel','UDashboardNavbar','UDashboardToolbar','AppShell','PageFrame','USeparator','ThemeSelector','UDashboardSidebarCollapse','NuxtRouteAnnouncer','USkeleton'].map(name => [name, pass]))
+const stubs = Object.fromEntries(['UApp','UDashboardGroup','UDashboardSidebar','UDashboardPanel','UDashboardNavbar','UDashboardToolbar','AppShell','PageFrame','NotificationCenter','USeparator','ThemeSelector','UDashboardSidebarCollapse','NuxtRouteAnnouncer','USkeleton'].map(name => [name, pass]))
 const menu = { props: ['items'], template: '<nav><a v-for="item in items" :href="item.to">{{ item.label }}</a></nav>' }
 const alert = { props: ['title','description','actions'], template: '<div role="alert">{{ title }} {{ description }}<button @click="actions[0].onClick()">Retry</button></div>' }
 const empty = { props: ['title','description'], template: '<div>{{ title }} {{ description }}</div>' }
@@ -93,6 +93,22 @@ describe('application foundation', () => {
     expect(wrapper.text()).toContain('New issue')
     expect(mount(Page, { props: { title:'Empty' }, global }).text()).not.toContain('Project context')
     expect(mount(Index, { global }).text()).toContain('Your work starts with a project')
+  })
+  it('exposes the notification control from the navbar right area', () => {
+    const wrapper = mount(Page, {
+      props: { title: 'Board' },
+      global: {
+        stubs: {
+          ...global.stubs,
+          UDashboardNavbar: {
+            props: ['title'],
+            template: '<header><span>{{ title }}</span><div data-testid="navbar-right"><slot name="right" /></div></header>'
+          },
+          NotificationCenter: { template: '<button data-testid="navbar-notification-control">Notifications</button>' }
+        }
+      }
+    })
+    expect(wrapper.get('[data-testid="navbar-right"] [data-testid="navbar-notification-control"]').exists()).toBe(true)
   })
   it('prioritizes loading/error/empty states and exposes retry', async () => {
     const wrapper = mount(AsyncState, { props: { pending:true }, slots: { default:'Loaded data' }, global })

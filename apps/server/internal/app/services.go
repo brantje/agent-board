@@ -89,6 +89,7 @@ func newServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	services.ControlPlane.issueComments, _ = controlPlaneStore.(store.IssueCommentStore)
 	services.ControlPlane.issueDiscussions, _ = controlPlaneStore.(store.IssueDiscussionStore)
 	services.ControlPlane.issueActivity, _ = controlPlaneStore.(store.IssueActivityStore)
+	services.ControlPlane.notifications, _ = controlPlaneStore.(store.NotificationStore)
 	// Issue ownership is a control-plane command; the evidence decorator does
 	// not expose this optional capability. Keep its transactional policy intact.
 	services.ControlPlane.assignmentStore, _ = controlPlaneStore.(store.IssueAssignmentStore)

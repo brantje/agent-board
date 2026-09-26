@@ -32,6 +32,42 @@ comments:
       default:
         $ref: ../components/api-components.yaml#/responses/Error
 
+subscription:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/IssueID
+  get:
+    operationId: getIssueSubscription
+    description: Reads whether the authenticated User follows this accessible Issue discussion.
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Issue discussion subscription state.
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/IssueSubscription}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  put:
+    operationId: subscribeIssue
+    description: Idempotently follows this accessible Issue discussion.
+    security: [{BearerAuth: []}]
+    responses:
+      '200':
+        description: Issue discussion is followed.
+        content:
+          application/json:
+            schema: {$ref: ../schemas/control-plane.yaml#/IssueSubscription}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
+  delete:
+    operationId: unsubscribeIssue
+    description: Idempotently unfollows this accessible Issue discussion.
+    security: [{BearerAuth: []}]
+    responses:
+      '204': {description: Issue discussion is not followed.}
+      default:
+        $ref: ../components/api-components.yaml#/responses/Error
 triggerPreview:
   parameters:
   - $ref: ../components/api-components.yaml#/parameters/ProjectID

@@ -71,6 +71,7 @@ The Go backend owns:
 - Engine execution orchestration
 - shared Git finalization and local Review delivery
 - Questions/Decisions/Review commands and authenticated human actor attribution
+- Issue discussion subscriptions and durable User notification projections
 - Event persistence and SSE
 - provenance, raw output and Artifact metadata
 - secret resolution
@@ -275,6 +276,12 @@ Engine / Runner
 Legacy Runtime lifecycle may also emit infrastructure Events when that path is used.
 
 The browser reconstructs live state from persisted reads plus SSE and is never the sole owner of important activity. Nuxt/Nitro process state is never authoritative for Run state or access control. Project SSE subscriptions pass the same viewer authorization boundary as ordinary Project reads.
+
+### Issue discussion notifications
+
+Issue comments remain the authoritative collaboration records. After the comment transaction commits, the shared application comment path invokes the optional notification store; notification-generation failure is logged and nonfatal so a committed comment is never rolled back. PostgreSQL stores only recipient, source Project/Issue/comment identity, kind, timestamps and read state. Bodies are resolved as bounded safe previews at read time, and current active-user/Project-access predicates are applied both when listing notifications and when changing read state or subscriptions.
+
+The notification projection has two v0.1 causes: a direct reply to a recipient's HUMAN-authored parent comment and a comment on an Issue the recipient explicitly follows. The direct-reply source may be HUMAN- or AGENT-authored. The acting human is excluded from self-notification, one recipient/comment is deduplicated with direct-reply precedence, Agent targeting or Agent mentions alone do not create human notifications, and notifications do not create Runs or Board-status changes. The navbar may use existing Project SSE comment events to invalidate/reload its read model; SSE is not the notification authority and no parallel event stream or generic email/push service is introduced.
 
 ## Provenance and Review evidence
 

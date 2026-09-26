@@ -108,6 +108,21 @@ Implicit routing stores separate provenance from structured mentions: target Age
 
 Before an admitted comment-work Run starts, the server resolves the comments linked to that work request and supplies their stable IDs, author identity/type, current body/tombstone state, parent/root context and trigger/routing reason as bounded execution-time context. OpenCode includes that context in the Execution Session's immutable admission prompt. The full Issue discussion is not copied into Run provenance or Events; the existing bounded discussion-read capability remains available when the Agent needs more context.
 
+### Issue Subscription
+
+A durable Project-scoped follow relationship between an active authenticated User and an Issue. Any User with current effective Project access may follow or unfollow an Issue. The relationship is idempotent, is not a Project ACL, and does not change Issue ownership, Board status, Runs or Agent wake behavior.
+
+### User Notification
+
+A durable recipient-owned projection of Issue discussion activity. v0.1 creates a notification after a committed Issue comment for an active User who currently has Project access when either:
+
+- the comment is a direct reply to that User's HUMAN comment; or
+- the User follows the Issue.
+
+The comment author is excluded from their own notification. Agent targeting or an Agent mention does not by itself notify humans. An Agent-authored direct reply to a human-authored parent comment may notify that human parent author through the normal direct-reply rule; otherwise Agent-authored comments notify only independently subscribed Users. One recipient receives at most one notification for one source comment; a direct reply takes precedence over the generic subscribed-comment kind. Notification persistence is best-effort after the comment commit and must not roll back or fail the comment mutation.
+
+Notifications retain the source Project, Issue and comment IDs plus a kind, timestamps and read state. They do not copy comment bodies. The read projection resolves current Project access, active recipient status, current author display data and a bounded whitespace-normalized preview from the source comment, returning a safe tombstone preview when the comment was deleted. Inaccessible Projects and disabled recipients are omitted, and read-state mutations use the same current access boundary. Notifications are not a second comment history or a generic email/push/digest platform; the source comment remains authoritative.
+
 ### Issue Relationship
 
 A durable Project-scoped directed relationship from one source Issue to one target Issue.

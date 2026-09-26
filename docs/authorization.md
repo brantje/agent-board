@@ -78,6 +78,8 @@ Every existing human-facing control-plane surface is intentionally classified un
 | `POST /api/projects` | authenticated active deployment member/admin; creator receives direct Project admin |
 | Project and nested Project reads, including Issues, Issue comments/timeline, Runs, Questions, Reviews, execution evidence, raw logs, Artifacts and Project SSE | effective Project viewer or higher |
 | ordinary Project workflow mutations, including Issue work/relationships/comments (create/reply/edit/delete/resolve/reopen/reactions), assignment, supported Run operations, Question answers and Review decisions | effective Project member or higher |
+| Issue subscription read/create/delete | authenticated User with effective Project viewer access; subscription is not an ACL |
+| notification listing/read-state mutations | authenticated active User; only current accessible Project sources and the recipient's own notifications are returned or mutated |
 | Project settings/configuration mutations and Project access/directories/grants | effective Project admin |
 | Project effective-role read | effective Project viewer or higher |
 | Runner enrollment/WebSocket execution transport | machine-authenticated execution plane, not human deployment authority |
@@ -99,6 +101,8 @@ Project SSE -> no subscription; same not-found isolation
 Authorization is resolved from the authenticated User and Project scope before nested Issue/Run/Question/Review/resource lookup, preventing resource IDs from becoming existence oracles across Projects.
 
 Role/grant changes are authoritative on the next request; frontend state is not an authorization cache.
+
+Issue subscriptions and User notifications reuse the same authenticated User and effective Project-access resolution. A subscription never grants Project access. Notification queries omit inaccessible Projects, deleted source Issues/comments and disabled recipients; direct/nested notification and subscription operations use not-found semantics where the underlying Project/Issue is unavailable. The Go backend, not the navbar, is authoritative for these checks.
 
 ## Human actor attribution
 

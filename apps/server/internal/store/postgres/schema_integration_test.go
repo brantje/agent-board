@@ -19,6 +19,7 @@ func TestCanonicalSchemaCreatesRequiredTables(t *testing.T) {
 		"execution_sessions", "questions", "decisions", "reviews", "run_provenance",
 		"events", "raw_output_chunks", "artifacts", "users", "auth_settings",
 		"auth_sessions", "password_tokens",
+		"issue_subscriptions", "user_notifications",
 	}
 
 	rows, err := pool.Query(ctx, `SELECT tablename FROM pg_tables WHERE schemaname = 'public'`)

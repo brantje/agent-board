@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
@@ -250,8 +251,20 @@ func (s *Service) createIssueComment(ctx context.Context, input issueCommentCrea
 	if err != nil {
 		return store.IssueComment{}, translateStoreError(err, "issue_comment")
 	}
+	s.persistIssueCommentNotifications(ctx, input.ProjectID, result.Comment.ID)
 	s.publishIssueCommentEvents(ctx, result.Events)
 	return result.Comment, nil
+}
+
+func (s *Service) persistIssueCommentNotifications(ctx context.Context, projectID, commentID string) {
+	if s.notifications == nil {
+		return
+	}
+	if err := s.notifications.CreateIssueCommentNotifications(ctx, projectID, commentID); err != nil {
+		// Notification delivery is an attention convenience. A failure must not
+		// turn an already committed collaboration mutation into a failed request.
+		slog.Warn("persist issue comment notifications", "projectId", projectID, "commentId", commentID, "error", err)
+	}
 }
 func (s *Service) UpdateIssueComment(ctx context.Context, projectID, issueID, commentID, actorID, body string) (store.IssueComment, error) {
 	if strings.TrimSpace(body) == "" {

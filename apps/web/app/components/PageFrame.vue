@@ -9,7 +9,7 @@ const settingsShell = useSettingsShell()
 <template>
   <UDashboardPanel id="main-panel" class="min-w-0 w-full" :ui="{ body: 'gap-4 p-4 min-w-0' }">
     <template #header>
-      <UDashboardNavbar :title="title"><template #leading><UDashboardSidebarCollapse /></template></UDashboardNavbar>
+      <UDashboardNavbar :title="title"><template #leading><UDashboardSidebarCollapse /></template><template #right><NotificationCenter /></template></UDashboardNavbar>
       <UDashboardToolbar v-if="$slots.actions || description"><p v-if="description" class="text-sm text-muted">{{ description }}</p><div class="ml-auto flex flex-wrap items-center gap-2"><slot name="actions" /></div></UDashboardToolbar>
     </template>
     <template #body>

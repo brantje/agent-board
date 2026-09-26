@@ -17,6 +17,7 @@ type Service struct {
 	issueComments                  store.IssueCommentStore
 	issueDiscussions               store.IssueDiscussionStore
 	issueActivity                  store.IssueActivityStore
+	notifications                  store.NotificationStore
 	assignmentStore                store.IssueAssignmentStore
 	projectWorkflowUserEligibility store.ProjectWorkflowUserEligibilityStore
 	projectRepositories            repository.ProjectRepositoryProvisioner
@@ -34,12 +35,51 @@ func New(controlPlaneStore store.ControlPlaneStore) *Service {
 	s.issueComments, _ = controlPlaneStore.(store.IssueCommentStore)
 	s.issueDiscussions, _ = controlPlaneStore.(store.IssueDiscussionStore)
 	s.issueActivity, _ = controlPlaneStore.(store.IssueActivityStore)
+	s.notifications, _ = controlPlaneStore.(store.NotificationStore)
 	s.assignmentStore, _ = controlPlaneStore.(store.IssueAssignmentStore)
 	s.projectWorkflowUserEligibility, _ = controlPlaneStore.(store.ProjectWorkflowUserEligibilityStore)
 	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
 		s.Runners = NewRunnerService(runners)
 	}
 	return s
+}
+
+func (s *Service) ListNotifications(ctx context.Context, userID string) (store.UserNotificationPage, error) {
+	if s.notifications == nil {
+		return store.UserNotificationPage{}, errors.New("notifications are unavailable")
+	}
+	page, err := s.notifications.ListUserNotifications(ctx, userID)
+	return page, translateStoreError(err, "notification")
+}
+
+func (s *Service) SetNotificationRead(ctx context.Context, userID, notificationID string, read bool) error {
+	if s.notifications == nil {
+		return errors.New("notifications are unavailable")
+	}
+	return translateStoreError(s.notifications.SetNotificationRead(ctx, userID, notificationID, read), "notification")
+}
+
+func (s *Service) MarkAllNotificationsRead(ctx context.Context, userID string) (int, error) {
+	if s.notifications == nil {
+		return 0, errors.New("notifications are unavailable")
+	}
+	count, err := s.notifications.MarkAllNotificationsRead(ctx, userID)
+	return count, translateStoreError(err, "notification")
+}
+
+func (s *Service) GetIssueSubscription(ctx context.Context, projectID, issueID, userID string) (bool, error) {
+	if s.notifications == nil {
+		return false, errors.New("issue subscriptions are unavailable")
+	}
+	subscribed, err := s.notifications.GetIssueSubscription(ctx, projectID, issueID, userID)
+	return subscribed, translateStoreError(err, "issue_subscription")
+}
+
+func (s *Service) SetIssueSubscription(ctx context.Context, projectID, issueID, userID string, subscribed bool) error {
+	if s.notifications == nil {
+		return errors.New("issue subscriptions are unavailable")
+	}
+	return translateStoreError(s.notifications.SetIssueSubscription(ctx, projectID, issueID, userID, subscribed), "issue_subscription")
 }
 
 func (s *Service) SetProjectRepositoryProvisioner(provisioner repository.ProjectRepositoryProvisioner) {
