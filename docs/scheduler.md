@@ -33,6 +33,19 @@ PostgreSQL is authoritative for:
 
 Process-local worker counts/semaphores may optimize but are never authoritative. Live Runner connectivity is ephemeral, but the durable Execution Session prevents transport loss from becoming duplicate work.
 
+## Queue ordering
+
+`scheduler_jobs.available_at` is the authoritative earliest-admission time for each durable job. Jobs with an `available_at` in the future are not execution candidates, including retry/backoff and future-scheduled work.
+
+Among currently eligible queued jobs, the authoritative PostgreSQL admission path orders work by:
+
+1. live `issues.priority` descending;
+2. `scheduler_jobs.available_at` ascending;
+3. `scheduler_jobs.created_at` ascending;
+4. `scheduler_jobs.id` ascending as the deterministic tie-breaker.
+
+Priority is read from the Issue at admission time rather than copied onto the scheduler job. Board position and drag-and-drop ordering do not affect execution admission. Existing delegation terminal-parent cleanup remains an internal cleanup exception ahead of ordinary runnable work; it cancels invalid held child work rather than admitting it early.
+
 ## Capacity constraints
 
 ### Agent concurrency
