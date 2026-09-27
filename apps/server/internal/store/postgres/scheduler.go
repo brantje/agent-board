@@ -252,6 +252,7 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 			agent.id::text, model.id::text
 		FROM scheduler_jobs AS job
 		JOIN runs AS run ON run.project_id=job.project_id AND run.id=job.run_id
+		JOIN issues AS issue ON issue.project_id=run.project_id AND issue.id=run.issue_id
 		LEFT JOIN agents AS agent
 		  ON agent.id=run.agent_id
 		 AND (agent.project_id IS NULL OR agent.project_id=run.project_id)
@@ -276,7 +277,7 @@ func lockNextAdmissionCandidate(ctx context.Context, tx pgx.Tx) (store.Scheduler
 			job.available_at <= now()
 			OR terminal_parent_cleanup.required IS TRUE
 		  )
-		ORDER BY terminal_parent_cleanup.required DESC NULLS LAST, job.available_at, job.created_at, job.id
+		ORDER BY terminal_parent_cleanup.required DESC NULLS LAST, issue.priority DESC, job.available_at, job.created_at, job.id
 		FOR UPDATE OF job, run SKIP LOCKED
 		LIMIT 1
 	`).Scan(
