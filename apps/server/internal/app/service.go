@@ -20,6 +20,7 @@ type Service struct {
 	notifications                  store.NotificationStore
 	assignmentStore                store.IssueAssignmentStore
 	projectWorkflowUserEligibility store.ProjectWorkflowUserEligibilityStore
+	sources                        store.SourceStore
 	projectRepositories            repository.ProjectRepositoryProvisioner
 	events                         issueEventRecorder
 	Runners                        *RunnerService
@@ -38,6 +39,7 @@ func New(controlPlaneStore store.ControlPlaneStore) *Service {
 	s.notifications, _ = controlPlaneStore.(store.NotificationStore)
 	s.assignmentStore, _ = controlPlaneStore.(store.IssueAssignmentStore)
 	s.projectWorkflowUserEligibility, _ = controlPlaneStore.(store.ProjectWorkflowUserEligibilityStore)
+	s.sources, _ = controlPlaneStore.(store.SourceStore)
 	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
 		s.Runners = NewRunnerService(runners)
 	}
