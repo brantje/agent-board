@@ -96,6 +96,9 @@ func newServicesWithRuntimes(controlPlaneStore store.ControlPlaneStore, material
 	// Workflow User eligibility is also control-plane policy and must remain
 	// bound to the authoritative base store rather than the evidence decorator.
 	services.ControlPlane.projectWorkflowUserEligibility, _ = controlPlaneStore.(store.ProjectWorkflowUserEligibilityStore)
+	// Source Connection and Source Repository configuration are authoritative
+	// control-plane state, not execution evidence. Keep them on the base store.
+	services.ControlPlane.sources, _ = controlPlaneStore.(store.SourceStore)
 	// Authentication and Project access persistence are control-plane security
 	// state, not execution evidence. Bind both to the authoritative base store
 	// instead of teaching the evidence redaction decorator unrelated methods.

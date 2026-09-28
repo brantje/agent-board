@@ -205,3 +205,23 @@ func TestPrepareConnectedProjectSourceRejectsCrossProjectConnection(t *testing.T
 		t.Fatalf("cross-project connected source error = %v, want not found", err)
 	}
 }
+
+
+func TestProductionServicesPreserveSourceStoreCapability(t *testing.T) {
+	fake := newSourceServiceTestStore()
+	services, err := NewServicesWithRuntimes(fake, workspaceMaterializerFunc(func(_ context.Context, _ store.Project, _ store.Issue, workspace store.Workspace) (store.Workspace, error) {
+		return workspace, nil
+	}), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = services.Close() })
+	if services.ControlPlane.sources != fake {
+		t.Fatal("Source Store was not bound to the authoritative control-plane store")
+	}
+	if _, err := services.ControlPlane.CreateSourceConnection(t.Context(), store.SourceConnection{
+		Kind: store.SourceProviderGitHub, Name: "Production GitHub", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
