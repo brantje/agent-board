@@ -24,6 +24,7 @@ func isDeploymentGlobalConfigurationPath(path string) bool {
 		return true
 	}
 	for _, prefix := range []string{
+		"/api/source-connections",
 		"/api/providers",
 		"/api/model-profiles",
 		"/api/runtimes",
