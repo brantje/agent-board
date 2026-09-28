@@ -8,6 +8,7 @@ import (
 )
 
 const sourceRepositorySelectColumns = `id::text, source_connection_id::text, external_id, namespace, name, path, web_url, clone_url, ssh_clone_url, default_branch, archived, disabled, last_synced_at, created_at, updated_at`
+const sourceRepositoryJoinedSelectColumns = `r.id::text, r.source_connection_id::text, r.external_id, r.namespace, r.name, r.path, r.web_url, r.clone_url, r.ssh_clone_url, r.default_branch, r.archived, r.disabled, r.last_synced_at, r.created_at, r.updated_at`
 
 func scanSourceRepository(row pgx.Row) (store.SourceRepository, error) {
 	var value store.SourceRepository
@@ -19,7 +20,7 @@ func scanSourceRepository(row pgx.Row) (store.SourceRepository, error) {
 
 func (s *Store) ListSourceRepositories(ctx context.Context, projectID *string, connectionID string) ([]store.SourceRepository, error) {
 	project, scoped := visibleScope(projectID)
-	rows, err := s.pool.Query(ctx, `SELECT `+sourceRepositorySelectColumns+` FROM source_repositories AS r
+	rows, err := s.pool.Query(ctx, `SELECT `+sourceRepositoryJoinedSelectColumns+` FROM source_repositories AS r
 		JOIN source_connections AS c ON c.id=r.source_connection_id
 		WHERE r.source_connection_id=$3 AND (($2::boolean AND (c.project_id IS NULL OR c.project_id=$1::uuid)) OR (NOT $2::boolean AND c.project_id IS NULL))
 		ORDER BY r.created_at, r.id`, nullableUUID(project, scoped), scoped, connectionID)
@@ -36,7 +37,7 @@ func (s *Store) ListSourceRepositories(ctx context.Context, projectID *string, c
 
 func (s *Store) GetSourceRepository(ctx context.Context, projectID *string, connectionID, repositoryID string) (store.SourceRepository, error) {
 	project, scoped := visibleScope(projectID)
-	return scanSourceRepository(s.pool.QueryRow(ctx, `SELECT `+sourceRepositorySelectColumns+` FROM source_repositories AS r
+	return scanSourceRepository(s.pool.QueryRow(ctx, `SELECT `+sourceRepositoryJoinedSelectColumns+` FROM source_repositories AS r
 		JOIN source_connections AS c ON c.id=r.source_connection_id
 		WHERE r.source_connection_id=$3 AND r.id=$4 AND (($2::boolean AND (c.project_id IS NULL OR c.project_id=$1::uuid)) OR (NOT $2::boolean AND c.project_id IS NULL))`,
 		nullableUUID(project, scoped), scoped, connectionID, repositoryID))
