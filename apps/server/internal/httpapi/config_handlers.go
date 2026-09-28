@@ -16,6 +16,7 @@ func (a *api) registerConfigurationRoutes(r chi.Router) {
 	r.Get("/projects/{projectID}", a.getProject)
 	r.Patch("/projects/{projectID}", a.updateProject)
 	a.registerScopedConfig(r)
+	a.registerSourceRoutes(r)
 
 	r.Get("/providers", a.listGlobalProviders)
 	r.Post("/providers", a.createGlobalProvider)
