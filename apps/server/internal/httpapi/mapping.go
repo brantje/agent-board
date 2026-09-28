@@ -23,6 +23,8 @@ func projectDTO(v store.Project) ProjectDTO {
 		SourceType:          v.SourceType,
 		CloneURL:            v.CloneURL,
 		SourceRef:           v.SourceRef,
+		SourceConnectionID:  v.SourceConnectionID,
+		SourceRepositoryID:  v.SourceRepositoryID,
 		RepositoryPath:      v.RepositoryPath,
 		DefaultBranch:       v.DefaultBranch,
 		WorkflowSettings:    v.WorkflowSettings,

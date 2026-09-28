@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
@@ -87,4 +88,51 @@ func (s *Service) UpsertSourceRepository(ctx context.Context, scope *string, inp
 	}
 	value, err := s.sources.UpsertSourceRepository(ctx, input)
 	return value, translateStoreError(err, "source_repository")
+}
+
+
+func (s *Service) prepareConnectedProjectSource(ctx context.Context, input store.Project) (store.Project, error) {
+	connectionID := ""
+	if input.SourceConnectionID != nil {
+		connectionID = strings.TrimSpace(*input.SourceConnectionID)
+	}
+	repositoryID := ""
+	if input.SourceRepositoryID != nil {
+		repositoryID = strings.TrimSpace(*input.SourceRepositoryID)
+	}
+	if connectionID == "" || repositoryID == "" {
+		return store.Project{}, invalid("connected Projects require sourceConnectionId and sourceRepositoryId")
+	}
+
+	var scope *string
+	if projectID := strings.TrimSpace(input.ID); projectID != "" {
+		scope = &projectID
+	}
+	connection, err := s.GetSourceConnection(ctx, scope, connectionID)
+	if err != nil {
+		return store.Project{}, err
+	}
+	repository, err := s.GetSourceRepository(ctx, scope, connection.ID, repositoryID)
+	if err != nil {
+		return store.Project{}, err
+	}
+
+	ref := ""
+	if input.SourceRef != nil {
+		ref = strings.TrimSpace(*input.SourceRef)
+	}
+	if ref == "" {
+		ref = strings.TrimSpace(repository.DefaultBranch)
+	}
+	if ref == "" {
+		return store.Project{}, invalid("sourceRef is required when the connected repository has no default branch")
+	}
+
+	input.SourceConnectionID = &connection.ID
+	input.SourceRepositoryID = &repository.ID
+	input.SourceRef = &ref
+	input.CloneURL = nil
+	input.RepositoryPath = ""
+	input.DefaultBranch = ""
+	return input, nil
 }

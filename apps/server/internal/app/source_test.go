@@ -157,3 +157,51 @@ func TestSourceRepositoryTrustedUpsertRequiresVisibleConnection(t *testing.T) {
 		t.Fatalf("error = %v, want not found", err)
 	}
 }
+
+
+func TestPrepareConnectedProjectSourceUsesAuthoritativeRepositoryIdentity(t *testing.T) {
+	fake := newSourceServiceTestStore()
+	connection := store.SourceConnection{ID: "connection-1", Kind: store.SourceProviderGitHub, Name: "GitHub", Enabled: true}
+	fake.connections[connection.ID] = connection
+	fake.repositories["repository-1"] = store.SourceRepository{
+		ID: "repository-1", SourceConnectionID: connection.ID, ExternalID: "42",
+		Name: "widget", Path: "acme/widget", WebURL: "https://github.com/acme/widget", DefaultBranch: "main",
+	}
+	service := New(fake)
+	connectionID, repositoryID := connection.ID, "repository-1"
+	project, err := service.ensureProjectRepository(t.Context(), store.Project{
+		Name: "Connected", IssuePrefix: "CON", SourceType: store.ProjectSourceConnected,
+		SourceConnectionID: &connectionID, SourceRepositoryID: &repositoryID,
+		RepositoryPath: "/caller/controlled", DefaultBranch: "caller-branch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if project.SourceRef == nil || *project.SourceRef != "main" {
+		t.Fatalf("source ref = %#v, want repository default branch", project.SourceRef)
+	}
+	if project.CloneURL != nil || project.RepositoryPath != "" || project.DefaultBranch != "" {
+		t.Fatalf("connected source retained caller-controlled local/git fields: %+v", project)
+	}
+}
+
+func TestPrepareConnectedProjectSourceRejectsCrossProjectConnection(t *testing.T) {
+	fake := newSourceServiceTestStore()
+	otherProject := "project-2"
+	fake.connections["connection-2"] = store.SourceConnection{
+		ID: "connection-2", ProjectID: &otherProject, Kind: store.SourceProviderForgejo, Name: "Other", Enabled: true,
+	}
+	fake.repositories["repository-2"] = store.SourceRepository{
+		ID: "repository-2", SourceConnectionID: "connection-2", ExternalID: "9",
+		Name: "repo", Path: "other/repo", WebURL: "https://forgejo.example/other/repo", DefaultBranch: "main",
+	}
+	service := New(fake)
+	connectionID, repositoryID := "connection-2", "repository-2"
+	_, err := service.ensureProjectRepository(t.Context(), store.Project{
+		ID: "project-1", Name: "Project", IssuePrefix: "PRJ", SourceType: store.ProjectSourceConnected,
+		SourceConnectionID: &connectionID, SourceRepositoryID: &repositoryID,
+	})
+	if !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-project connected source error = %v, want not found", err)
+	}
+}

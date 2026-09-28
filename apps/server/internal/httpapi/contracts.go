@@ -24,6 +24,8 @@ type ProjectDTO struct {
 	SourceType          string          `json:"sourceType"`
 	CloneURL            *string         `json:"cloneUrl"`
 	SourceRef           *string         `json:"sourceRef"`
+	SourceConnectionID  *string         `json:"sourceConnectionId"`
+	SourceRepositoryID  *string         `json:"sourceRepositoryId"`
 	RepositoryPath      string          `json:"repositoryPath"`
 	DefaultBranch       string          `json:"defaultBranch"`
 	WorkflowSettings    json.RawMessage `json:"workflowSettings"`
@@ -387,6 +389,8 @@ type CreateProjectRequest struct {
 	SourceType          string          `json:"sourceType"`
 	CloneURL            *string         `json:"cloneUrl"`
 	SourceRef           *string         `json:"sourceRef"`
+	SourceConnectionID  *string         `json:"sourceConnectionId"`
+	SourceRepositoryID  *string         `json:"sourceRepositoryId"`
 	RepositoryPath      string          `json:"repositoryPath"`
 	DefaultBranch       string          `json:"defaultBranch"`
 	WorkflowSettings    json.RawMessage `json:"workflowSettings"`
@@ -417,6 +421,8 @@ type UpdateProjectRequest struct {
 	SourceType          *string                `json:"sourceType"`
 	CloneURL            optionalNullableString `json:"cloneUrl"`
 	SourceRef           optionalNullableString `json:"sourceRef"`
+	SourceConnectionID  *string                `json:"sourceConnectionId"`
+	SourceRepositoryID  *string                `json:"sourceRepositoryId"`
 	RepositoryPath      *string                `json:"repositoryPath"`
 	DefaultBranch       *string                `json:"defaultBranch"`
 	WorkflowSettings    *json.RawMessage       `json:"workflowSettings"`
