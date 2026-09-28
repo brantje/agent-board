@@ -184,6 +184,56 @@ CREATE TABLE secrets (
 CREATE UNIQUE INDEX secrets_global_ref_uq ON secrets (ref) WHERE project_id IS NULL;
 CREATE UNIQUE INDEX secrets_project_ref_uq ON secrets (project_id, ref) WHERE project_id IS NOT NULL;
 
+CREATE TABLE source_connections (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
+    kind text NOT NULL CHECK (kind IN ('github', 'gitlab', 'forgejo')),
+    name text NOT NULL CHECK (btrim(name) <> ''),
+    base_url text CHECK (base_url IS NULL OR btrim(base_url) <> ''),
+    external_account_id text CHECK (external_account_id IS NULL OR btrim(external_account_id) <> ''),
+    credential_ref text CHECK (credential_ref IS NULL OR btrim(credential_ref) <> ''),
+    enabled boolean NOT NULL DEFAULT true,
+    health_status text NOT NULL DEFAULT 'UNKNOWN' CHECK (health_status IN ('UNKNOWN', 'HEALTHY', 'UNHEALTHY')),
+    last_validated_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (project_id, id)
+);
+
+CREATE UNIQUE INDEX source_connections_global_name_uq
+    ON source_connections (lower(name)) WHERE project_id IS NULL;
+CREATE UNIQUE INDEX source_connections_project_name_uq
+    ON source_connections (project_id, lower(name)) WHERE project_id IS NOT NULL;
+CREATE UNIQUE INDEX source_connections_global_external_identity_uq
+    ON source_connections (kind, COALESCE(base_url, ''), external_account_id)
+    WHERE project_id IS NULL AND external_account_id IS NOT NULL;
+CREATE UNIQUE INDEX source_connections_project_external_identity_uq
+    ON source_connections (project_id, kind, COALESCE(base_url, ''), external_account_id)
+    WHERE project_id IS NOT NULL AND external_account_id IS NOT NULL;
+
+CREATE TABLE source_repositories (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    source_connection_id uuid NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
+    external_id text NOT NULL CHECK (btrim(external_id) <> ''),
+    namespace text NOT NULL DEFAULT '',
+    name text NOT NULL CHECK (btrim(name) <> ''),
+    path text NOT NULL CHECK (btrim(path) <> ''),
+    web_url text NOT NULL CHECK (btrim(web_url) <> ''),
+    clone_url text CHECK (clone_url IS NULL OR btrim(clone_url) <> ''),
+    ssh_clone_url text CHECK (ssh_clone_url IS NULL OR btrim(ssh_clone_url) <> ''),
+    default_branch text NOT NULL DEFAULT '',
+    archived boolean NOT NULL DEFAULT false,
+    disabled boolean NOT NULL DEFAULT false,
+    last_synced_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (source_connection_id, external_id),
+    UNIQUE (source_connection_id, id)
+);
+
+CREATE INDEX source_repositories_connection_idx
+    ON source_repositories (source_connection_id, created_at, id);
+
 CREATE TABLE providers (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id uuid REFERENCES projects(id) ON DELETE CASCADE,
