@@ -32,6 +32,8 @@ type Project struct {
 	SourceType          string
 	CloneURL            *string
 	SourceRef           *string
+	SourceConnectionID  *string
+	SourceRepositoryID  *string
 	RepositoryPath      string
 	DefaultBranch       string
 	WorkflowSettings    json.RawMessage
