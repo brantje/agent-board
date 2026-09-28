@@ -275,6 +275,40 @@ func TestProjectScopedSourceConnectionUpdateCannotOverwriteSharedCredential(t *t
 	}
 }
 
+func TestProjectScopedSourceConnectionUpdateStoresCredentialInProjectScope(t *testing.T) {
+	projectScope := projectID
+	existingRef := "source-connection:project"
+	data := &sourceHTTPStore{
+		connection: store.SourceConnection{
+			ID: sourceConnectionTestID, ProjectID: &projectScope, Kind: store.SourceProviderGitHub, Name: "Project GitHub",
+			CredentialRef: &existingRef, Enabled: true, HealthStatus: "UNKNOWN",
+		},
+	}
+	writer := &fakeSecretWriter{}
+	router := NewRouterWithSecrets(app.New(data), writer)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/projects/"+projectID+"/source-connections/"+sourceConnectionTestID,
+		strings.NewReader(`{"name":"Project GitHub Updated","kind":"github","credential":"rotated-project"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if writer.scope.ProjectID == nil || *writer.scope.ProjectID != projectID {
+		t.Fatalf("credential scope = %#v, want Project %s", writer.scope.ProjectID, projectID)
+	}
+	if writer.ref != existingRef || string(writer.value) != "rotated-project" {
+		t.Fatalf("credential write = ref %q value %q", writer.ref, writer.value)
+	}
+	if data.connection.Name != "Project GitHub Updated" {
+		t.Fatalf("connection was not updated: %+v", data.connection)
+	}
+}
+
 func TestSourceConnectionHTTPRequiresSecretStorageForCredentialWrites(t *testing.T) {
 	router := NewRouter(app.New(&sourceHTTPStore{}))
 	rec := httptest.NewRecorder()
