@@ -8,10 +8,16 @@ import (
 var EmptyObject = json.RawMessage(`{}`)
 
 const (
-	ProjectSourceLocal = "local"
-	ProjectSourceGit   = "git"
-	ActorTypeHuman     = "HUMAN"
-	ActorTypeAgent     = "AGENT"
+	ProjectSourceLocal     = "local"
+	ProjectSourceGit       = "git"
+	ProjectSourceConnected = "connected"
+
+	SourceProviderGitHub  = "github"
+	SourceProviderGitLab  = "gitlab"
+	SourceProviderForgejo = "forgejo"
+
+	ActorTypeHuman = "HUMAN"
+	ActorTypeAgent = "AGENT"
 )
 
 func ValidActorType(value string) bool {
@@ -31,6 +37,39 @@ type Project struct {
 	WorkflowSettings    json.RawMessage
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+}
+
+type SourceConnection struct {
+	ID                string
+	ProjectID         *string
+	Kind              string
+	Name              string
+	BaseURL           *string
+	ExternalAccountID *string
+	CredentialRef     *string
+	Enabled           bool
+	HealthStatus      string
+	LastValidatedAt   *time.Time
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}
+
+type SourceRepository struct {
+	ID                 string
+	SourceConnectionID string
+	ExternalID         string
+	Namespace          string
+	Name               string
+	Path               string
+	WebURL             string
+	CloneURL           *string
+	SSHCloneURL        *string
+	DefaultBranch      string
+	Archived           bool
+	Disabled           bool
+	LastSyncedAt       *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 type Issue struct {
