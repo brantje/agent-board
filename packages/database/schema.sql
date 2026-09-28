@@ -12,9 +12,11 @@ CREATE TABLE projects (
     name text NOT NULL CHECK (btrim(name) <> ''),
     issue_prefix text NOT NULL CHECK (issue_prefix ~ '^[A-Z][A-Z0-9]{1,9}$'),
     next_issue_number integer NOT NULL DEFAULT 1 CHECK (next_issue_number >= 1),
-    source_type text NOT NULL DEFAULT 'local' CHECK (source_type IN ('local', 'git')),
+    source_type text NOT NULL DEFAULT 'local' CHECK (source_type IN ('local', 'git', 'connected')),
     clone_url text CHECK (clone_url IS NULL OR btrim(clone_url) <> ''),
     source_ref text CHECK (source_ref IS NULL OR btrim(source_ref) <> ''),
+    source_connection_id uuid,
+    source_repository_id uuid,
     repository_path text NOT NULL DEFAULT '',
     default_branch text NOT NULL DEFAULT 'main',
     workflow_settings jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(workflow_settings) = 'object'),
@@ -22,9 +24,11 @@ CREATE TABLE projects (
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CHECK (
-        (source_type = 'local' AND btrim(repository_path) <> '' AND btrim(default_branch) <> '' AND clone_url IS NULL AND source_ref IS NULL)
+        (source_type = 'local' AND btrim(repository_path) <> '' AND btrim(default_branch) <> '' AND clone_url IS NULL AND source_ref IS NULL AND source_connection_id IS NULL AND source_repository_id IS NULL)
         OR
-        (source_type = 'git' AND clone_url IS NOT NULL AND btrim(clone_url) <> '' AND repository_path = '' AND default_branch = '')
+        (source_type = 'git' AND clone_url IS NOT NULL AND btrim(clone_url) <> '' AND repository_path = '' AND default_branch = '' AND source_connection_id IS NULL AND source_repository_id IS NULL)
+        OR
+        (source_type = 'connected' AND clone_url IS NULL AND source_ref IS NOT NULL AND btrim(source_ref) <> '' AND source_connection_id IS NOT NULL AND source_repository_id IS NOT NULL AND repository_path = '' AND default_branch = '')
     )
 );
 
@@ -233,6 +237,13 @@ CREATE TABLE source_repositories (
 
 CREATE INDEX source_repositories_connection_idx
     ON source_repositories (source_connection_id, created_at, id);
+
+ALTER TABLE projects
+    ADD CONSTRAINT projects_source_connection_fk
+        FOREIGN KEY (source_connection_id) REFERENCES source_connections(id) ON DELETE RESTRICT,
+    ADD CONSTRAINT projects_source_repository_fk
+        FOREIGN KEY (source_connection_id, source_repository_id)
+        REFERENCES source_repositories(source_connection_id, id) ON DELETE RESTRICT;
 
 CREATE TABLE providers (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
