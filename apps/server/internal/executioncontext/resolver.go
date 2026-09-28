@@ -108,6 +108,7 @@ func (r *Resolver) Resolve(ctx context.Context, projectID, runID string) (Resolv
 		Project: ProjectContext{
 			ID: project.ID, Name: project.Name, SourceType: project.SourceType,
 			CloneURL: cloneString(project.CloneURL), SourceRef: cloneString(project.SourceRef),
+			SourceConnectionID: cloneString(project.SourceConnectionID), SourceRepositoryID: cloneString(project.SourceRepositoryID),
 			RepositoryPath: project.RepositoryPath, DefaultBranch: project.DefaultBranch,
 			WorkflowSettings: cloneJSON(project.WorkflowSettings),
 		},

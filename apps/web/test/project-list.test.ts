@@ -91,6 +91,40 @@ describe('ProjectEditor', () => {
     })
   })
 
+  it('preserves connected source identity on unrelated edits', async () => {
+    const connectedProject = {
+      ...project,
+      sourceType: 'connected' as const,
+      cloneUrl: null,
+      sourceRef: 'main',
+      sourceConnectionId: '11111111-1111-4111-8111-111111111111',
+      sourceRepositoryId: '22222222-2222-4222-8222-222222222222',
+      repositoryPath: '',
+      defaultBranch: ''
+    }
+    const fetch = vi.fn(async () => new Response(JSON.stringify(connectedProject)))
+    vi.stubGlobal('fetch', fetch)
+    const wrapper = mount(ProjectEditor, { props: { project: connectedProject }, global })
+    await flushPromises()
+
+    expect(wrapper.find('[data-field=connectedSource]').exists()).toBe(true)
+    expect(wrapper.find('[data-field=repositoryPath]').exists()).toBe(false)
+    expect(wrapper.find('[data-field=cloneUrl]').exists()).toBe(false)
+
+    await wrapper.get('[data-field=name] input').setValue('Connected renamed')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    const patchCall = fetch.mock.calls.find(([, options]) => options.method === 'PATCH')?.[1]
+    expect(JSON.parse(String(patchCall?.body))).toMatchObject({
+      name: 'Connected renamed',
+      sourceType: 'connected',
+      sourceConnectionId: connectedProject.sourceConnectionId,
+      sourceRepositoryId: connectedProject.sourceRepositoryId,
+      sourceRef: 'main'
+    })
+  })
+
   it('rejects invalid prefix', async () => {
     const fetch = vi.fn(async () => new Response(JSON.stringify(project)))
     vi.stubGlobal('fetch', fetch)
@@ -240,7 +274,7 @@ describe('ProjectEditor', () => {
 })
 
 describe('ProjectList', () => {
-  it('renders local and Git project source summaries', async () => {
+  it('renders local, Git and connected project source summaries', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('[]')))
     const wrapper = mount(ProjectList, { global })
     await flushPromises()
@@ -258,13 +292,27 @@ describe('ProjectList', () => {
       repositoryPath: '',
       defaultBranch: ''
     }
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([project, gitProject]))))
+    const connectedProject = {
+      ...project,
+      id: 'project-connected',
+      name: 'Connected',
+      sourceType: 'connected' as const,
+      cloneUrl: null,
+      sourceRef: 'main',
+      sourceConnectionId: '11111111-1111-4111-8111-111111111111',
+      sourceRepositoryId: '22222222-2222-4222-8222-222222222222',
+      repositoryPath: '',
+      defaultBranch: ''
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify([project, gitProject, connectedProject]))))
     const listed = mount(ProjectList, { global })
     await flushPromises()
     expect(listed.text()).toContain('AB · /repo · main')
     expect(listed.text()).toContain('https://example.com/acme/widget.git · remote default')
     expect(listed.text()).toContain('Local repository')
     expect(listed.text()).toContain('Git repository')
+    expect(listed.text()).toContain('Connected repository · main')
+    expect(listed.text()).toContain('Connected repository')
     expect(listed.text()).toContain('Open board')
     listed.unmount()
   })

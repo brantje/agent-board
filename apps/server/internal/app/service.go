@@ -20,6 +20,7 @@ type Service struct {
 	notifications                  store.NotificationStore
 	assignmentStore                store.IssueAssignmentStore
 	projectWorkflowUserEligibility store.ProjectWorkflowUserEligibilityStore
+	sources                        store.SourceStore
 	projectRepositories            repository.ProjectRepositoryProvisioner
 	events                         issueEventRecorder
 	Runners                        *RunnerService
@@ -38,6 +39,7 @@ func New(controlPlaneStore store.ControlPlaneStore) *Service {
 	s.notifications, _ = controlPlaneStore.(store.NotificationStore)
 	s.assignmentStore, _ = controlPlaneStore.(store.IssueAssignmentStore)
 	s.projectWorkflowUserEligibility, _ = controlPlaneStore.(store.ProjectWorkflowUserEligibilityStore)
+	s.sources, _ = controlPlaneStore.(store.SourceStore)
 	if runners, ok := controlPlaneStore.(store.RunnerStore); ok {
 		s.Runners = NewRunnerService(runners)
 	}
@@ -463,6 +465,8 @@ func (s *Service) ensureProjectRepository(ctx context.Context, input store.Proje
 	input.SourceType = sourceType
 
 	if sourceType == store.ProjectSourceGit {
+		input.SourceConnectionID = nil
+		input.SourceRepositoryID = nil
 		input.RepositoryPath = ""
 		input.DefaultBranch = ""
 		if input.CloneURL != nil {
@@ -480,6 +484,12 @@ func (s *Service) ensureProjectRepository(ctx context.Context, input store.Proje
 		return input, nil
 	}
 
+	if sourceType == store.ProjectSourceConnected {
+		return s.prepareConnectedProjectSource(ctx, input)
+	}
+
+	input.SourceConnectionID = nil
+	input.SourceRepositoryID = nil
 	input.CloneURL = nil
 	input.SourceRef = nil
 	if s == nil || s.projectRepositories == nil {
@@ -560,8 +570,15 @@ func validateProject(v store.Project) error {
 		if err != nil && cloneURLHasEmbeddedCredentials(cloneURL) {
 			return invalid("cloneUrl must not contain credentials")
 		}
+	case store.ProjectSourceConnected:
+		if v.SourceConnectionID == nil || strings.TrimSpace(*v.SourceConnectionID) == "" {
+			return invalid("sourceConnectionId is required for connected Projects")
+		}
+		if v.SourceRepositoryID == nil || strings.TrimSpace(*v.SourceRepositoryID) == "" {
+			return invalid("sourceRepositoryId is required for connected Projects")
+		}
 	default:
-		return invalid("sourceType must be local or git")
+		return invalid("sourceType must be local, git or connected")
 	}
 
 	if !validObject(v.WorkflowSettings) {

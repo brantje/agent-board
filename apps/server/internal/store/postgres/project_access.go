@@ -48,10 +48,10 @@ func (s *Store) CreateProjectWithAdmin(ctx context.Context, input store.Project,
 	}
 
 	project, err := scanProject(tx.QueryRow(ctx, `
-		INSERT INTO projects (name, issue_prefix, source_type, clone_url, source_ref, repository_path, default_branch, workflow_settings, allow_internal_runner)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9,true))
+		INSERT INTO projects (name, issue_prefix, source_type, clone_url, source_ref, source_connection_id, source_repository_id, repository_path, default_branch, workflow_settings, allow_internal_runner)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11,true))
 		RETURNING `+projectSelectColumns,
-		input.Name, prefix, sourceType, input.CloneURL, input.SourceRef, input.RepositoryPath, branch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner,
+		input.Name, prefix, sourceType, input.CloneURL, input.SourceRef, input.SourceConnectionID, input.SourceRepositoryID, input.RepositoryPath, branch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner,
 	))
 	if err != nil {
 		return store.Project{}, err

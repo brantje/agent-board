@@ -16,6 +16,7 @@ func (a *api) registerConfigurationRoutes(r chi.Router) {
 	r.Get("/projects/{projectID}", a.getProject)
 	r.Patch("/projects/{projectID}", a.updateProject)
 	a.registerScopedConfig(r)
+	a.registerSourceRoutes(r)
 
 	r.Get("/providers", a.listGlobalProviders)
 	r.Post("/providers", a.createGlobalProvider)
@@ -102,6 +103,8 @@ func (a *api) createProject(w http.ResponseWriter, r *http.Request) {
 		SourceType:          req.SourceType,
 		CloneURL:            req.CloneURL,
 		SourceRef:           req.SourceRef,
+		SourceConnectionID:  req.SourceConnectionID,
+		SourceRepositoryID:  req.SourceRepositoryID,
 		RepositoryPath:      req.RepositoryPath,
 		DefaultBranch:       req.DefaultBranch,
 		WorkflowSettings:    req.WorkflowSettings,
@@ -149,6 +152,12 @@ func (a *api) updateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.SourceRef.Set {
 		current.SourceRef = req.SourceRef.Value
+	}
+	if req.SourceConnectionID != nil {
+		current.SourceConnectionID = req.SourceConnectionID
+	}
+	if req.SourceRepositoryID != nil {
+		current.SourceRepositoryID = req.SourceRepositoryID
 	}
 	if req.RepositoryPath != nil {
 		current.RepositoryPath = *req.RepositoryPath

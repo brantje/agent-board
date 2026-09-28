@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestProjectSourceOpenAPISchemasExposeLocalAndGitConfiguration(t *testing.T) {
+func TestProjectSourceOpenAPISchemasExposeLocalGitAndConnectedConfiguration(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "..", "packages", "api", "schemas", "control-plane.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -21,8 +21,13 @@ func TestProjectSourceOpenAPISchemasExposeLocalAndGitConfiguration(t *testing.T)
 			t.Fatalf("Project schema must require %s: %s", required, project)
 		}
 	}
-	if !strings.Contains(project, "enum: [local, git]") {
-		t.Fatalf("Project sourceType must allow local and git: %s", project)
+	if !strings.Contains(project, "enum: [local, git, connected]") {
+		t.Fatalf("Project sourceType must allow local, git and connected: %s", project)
+	}
+	for _, required := range []string{"sourceConnectionId", "sourceRepositoryId"} {
+		if !strings.Contains(project, "  - "+required) {
+			t.Fatalf("Project schema must require nullable %s: %s", required, project)
+		}
 	}
 	if !strings.Contains(project, "sourceRef:\n      type: [string, 'null']") {
 		t.Fatalf("Project sourceRef must be nullable: %s", project)
@@ -35,7 +40,7 @@ func TestProjectSourceOpenAPISchemasExposeLocalAndGitConfiguration(t *testing.T)
 	if !strings.Contains(create, "required: [name, issuePrefix]") {
 		t.Fatalf("ProjectCreate must not unconditionally require local-only fields: %s", create)
 	}
-	for _, field := range []string{"sourceType:", "cloneUrl:", "sourceRef:", "repositoryPath:", "defaultBranch:"} {
+	for _, field := range []string{"sourceType:", "cloneUrl:", "sourceRef:", "sourceConnectionId:", "sourceRepositoryId:", "repositoryPath:", "defaultBranch:"} {
 		if !strings.Contains(create, field) {
 			t.Fatalf("ProjectCreate missing %s: %s", field, create)
 		}
@@ -51,6 +56,10 @@ func TestProjectSourceOpenAPISchemasExposeLocalAndGitConfiguration(t *testing.T)
 	}
 	if !strings.Contains(create, "sourceType: {type: string, enum: [git]}") || !strings.Contains(create, "cloneUrl: {type: string, minLength: 1}") {
 		t.Fatalf("ProjectCreate git branch must require a non-empty cloneUrl: %s", create)
+	}
+	if !strings.Contains(create, "- required: [sourceType, sourceConnectionId, sourceRepositoryId]") ||
+		!strings.Contains(create, "sourceType: {type: string, enum: [connected]}") {
+		t.Fatalf("ProjectCreate connected branch must require durable source identities: %s", create)
 	}
 
 	update := topLevelYAMLBlock(doc, "ProjectUpdate")

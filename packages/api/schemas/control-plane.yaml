@@ -18,6 +18,8 @@ Project:
   - sourceType
   - cloneUrl
   - sourceRef
+  - sourceConnectionId
+  - sourceRepositoryId
   - repositoryPath
   - defaultBranch
   - workflowSettings
@@ -30,14 +32,22 @@ Project:
     issuePrefix: {$ref: '#/IssuePrefix'}
     sourceType:
       type: string
-      enum: [local, git]
-      description: Project source kind. Existing and omitted-source Projects use local.
+      enum: [local, git, connected]
+      description: Project source kind. Existing and omitted-source Projects use local; connected selects a durable Source Connection and Source Repository.
     cloneUrl:
       type: [string, 'null']
       description: Cloneable Git URL when sourceType is git. Stored without contacting the remote; embedded URI credentials are not allowed.
     sourceRef:
       type: [string, 'null']
-      description: Optional branch, tag, or commit for a git source. Null means the remote default branch is resolved at execution time.
+      description: Optional branch, tag, or commit for a git source, or configured target ref for a connected source.
+    sourceConnectionId:
+      type: [string, 'null']
+      format: uuid
+      description: Durable Source Connection identity when sourceType is connected.
+    sourceRepositoryId:
+      type: [string, 'null']
+      format: uuid
+      description: Durable Source Repository identity when sourceType is connected.
     repositoryPath:
       type: string
       description: Backend-visible local repository path when sourceType is local; empty for git sources.
@@ -60,12 +70,19 @@ ProjectCreate:
       properties:
         sourceType: {type: string, enum: [git]}
         cloneUrl: {type: string, minLength: 1}
+    - required: [sourceType, sourceConnectionId, sourceRepositoryId]
+      properties:
+        sourceType: {type: string, enum: [connected]}
+        sourceConnectionId: {type: string, format: uuid}
+        sourceRepositoryId: {type: string, format: uuid}
   properties:
     name: {type: string}
     issuePrefix: {$ref: '#/IssuePrefix'}
-    sourceType: {type: string, enum: [local, git], default: local}
+    sourceType: {type: string, enum: [local, git, connected], default: local}
     cloneUrl: {type: [string, 'null']}
     sourceRef: {type: [string, 'null']}
+    sourceConnectionId: {type: [string, 'null'], format: uuid}
+    sourceRepositoryId: {type: [string, 'null'], format: uuid}
     repositoryPath: {type: string}
     defaultBranch: {type: string, default: main}
     workflowSettings: {$ref: '#/JSONMap'}
@@ -74,13 +91,69 @@ ProjectUpdate:
   additionalProperties: false
   properties:
     name: {type: string}
-    sourceType: {type: string, enum: [local, git]}
+    sourceType: {type: string, enum: [local, git, connected]}
     cloneUrl: {type: [string, 'null']}
     sourceRef: {type: [string, 'null']}
+    sourceConnectionId: {type: [string, 'null'], format: uuid}
+    sourceRepositoryId: {type: [string, 'null'], format: uuid}
     repositoryPath: {type: string}
     defaultBranch: {type: string}
     workflowSettings: {$ref: '#/JSONMap'}
     allowInternalRunner: {type: boolean}
+SourceConnection:
+  type: object
+  additionalProperties: false
+  description: Safe durable metadata for one authenticated Source Provider connection. Credential plaintext and internal credential references are never returned.
+  required: [id, projectId, kind, name, baseUrl, externalAccountId, credentialConfigured, enabled, healthStatus, lastValidatedAt, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    projectId: {type: [string, 'null'], format: uuid}
+    kind: {type: string, enum: [github, gitlab, forgejo]}
+    name: {type: string}
+    baseUrl: {type: [string, 'null']}
+    externalAccountId: {type: [string, 'null']}
+    credentialConfigured: {type: boolean}
+    enabled: {type: boolean}
+    healthStatus: {type: string, enum: [UNKNOWN, HEALTHY, UNHEALTHY]}
+    lastValidatedAt: {type: [string, 'null'], format: date-time}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
+SourceConnectionInput:
+  type: object
+  additionalProperties: false
+  required: [name, kind]
+  properties:
+    name: {type: string, minLength: 1}
+    kind: {type: string, enum: [github, gitlab, forgejo]}
+    baseUrl: {type: [string, 'null']}
+    externalAccountId: {type: [string, 'null']}
+    credential:
+      type: string
+      minLength: 1
+      writeOnly: true
+      description: Durable provider credential/configuration material accepted only on trusted create/update operations.
+    enabled: {type: boolean, default: true}
+SourceRepository:
+  type: object
+  additionalProperties: false
+  description: Provider-backed repository identity. externalId is stable identity within the Source Connection; names and URLs are mutable metadata.
+  required: [id, sourceConnectionId, externalId, namespace, name, path, webUrl, cloneUrl, sshCloneUrl, defaultBranch, archived, disabled, lastSyncedAt, createdAt, updatedAt]
+  properties:
+    id: {type: string, format: uuid}
+    sourceConnectionId: {type: string, format: uuid}
+    externalId: {type: string}
+    namespace: {type: string}
+    name: {type: string}
+    path: {type: string}
+    webUrl: {type: string}
+    cloneUrl: {type: [string, 'null']}
+    sshCloneUrl: {type: [string, 'null']}
+    defaultBranch: {type: string}
+    archived: {type: boolean}
+    disabled: {type: boolean}
+    lastSyncedAt: {type: [string, 'null'], format: date-time}
+    createdAt: {type: string, format: date-time}
+    updatedAt: {type: string, format: date-time}
 RepositorySettings:
   type: object
   additionalProperties: false

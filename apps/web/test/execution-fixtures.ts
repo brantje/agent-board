@@ -7,6 +7,8 @@ export const project: Project = {
   sourceType: 'local',
   cloneUrl: null,
   sourceRef: null,
+  sourceConnectionId: null,
+  sourceRepositoryId: null,
   repositoryPath: '/repo',
   defaultBranch: 'main',
   workflowSettings: {},

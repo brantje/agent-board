@@ -17,6 +17,8 @@ const projectSelectColumns = `
 	source_type,
 	clone_url,
 	source_ref,
+	source_connection_id::text,
+	source_repository_id::text,
 	repository_path,
 	default_branch,
 	workflow_settings,
@@ -104,10 +106,10 @@ func (s *Store) CreateProject(ctx context.Context, input store.Project) (store.P
 		branch = "main"
 	}
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO projects (name, issue_prefix, source_type, clone_url, source_ref, repository_path, default_branch, workflow_settings, allow_internal_runner)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9,true))
+		INSERT INTO projects (name, issue_prefix, source_type, clone_url, source_ref, source_connection_id, source_repository_id, repository_path, default_branch, workflow_settings, allow_internal_runner)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11,true))
 		RETURNING `+projectSelectColumns+`
-	`, input.Name, prefix, sourceType, input.CloneURL, input.SourceRef, input.RepositoryPath, branch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner)
+	`, input.Name, prefix, sourceType, input.CloneURL, input.SourceRef, input.SourceConnectionID, input.SourceRepositoryID, input.RepositoryPath, branch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner)
 	return scanProject(row)
 }
 
@@ -290,6 +292,8 @@ func scanProject(row pgx.Row) (store.Project, error) {
 		&value.SourceType,
 		&value.CloneURL,
 		&value.SourceRef,
+		&value.SourceConnectionID,
+		&value.SourceRepositoryID,
 		&value.RepositoryPath,
 		&value.DefaultBranch,
 		&value.WorkflowSettings,

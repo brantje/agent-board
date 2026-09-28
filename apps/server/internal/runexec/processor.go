@@ -161,6 +161,9 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 	if err != nil {
 		return failed(err), nil
 	}
+	if err := validateExecutionProjectSource(resolved.Safe); err != nil {
+		return failed(err), nil
+	}
 	delegationContinuation, err := p.loadDelegationContinuation(ctx, claim, run)
 	if err != nil {
 		return failed(err), nil
@@ -173,6 +176,17 @@ func (p *Processor) Process(ctx context.Context, claim *store.SchedulerAdmission
 		return p.attachExistingExecution(ctx, run, resolved.Safe, *live, delegationContinuation)
 	}
 	return p.startNewExecution(ctx, claim, run, resolved.Safe, delegationContinuation)
+}
+
+func validateExecutionProjectSource(safe executioncontext.SafeContext) error {
+	switch strings.TrimSpace(safe.Project.SourceType) {
+	case "", store.ProjectSourceLocal, store.ProjectSourceGit:
+		return nil
+	case store.ProjectSourceConnected:
+		return fmt.Errorf("run execution: connected Project source execution is unavailable until provider Git credentials are supported")
+	default:
+		return fmt.Errorf("run execution: Project source type %q is unsupported", safe.Project.SourceType)
+	}
 }
 
 func (p *Processor) startNewExecution(ctx context.Context, claim *store.SchedulerAdmission, run store.Run, safe executioncontext.SafeContext, delegationContinuation *engine.DelegationContinuation) (scheduler.Result, error) {
