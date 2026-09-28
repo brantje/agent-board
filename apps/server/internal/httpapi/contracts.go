@@ -230,6 +230,39 @@ type IssueRelationshipDTO struct {
 	CreatedAt     time.Time `json:"createdAt"`
 }
 
+type SourceConnectionDTO struct {
+	ID                   string     `json:"id"`
+	ProjectID            *string    `json:"projectId"`
+	Kind                 string     `json:"kind"`
+	Name                 string     `json:"name"`
+	BaseURL              *string    `json:"baseUrl"`
+	ExternalAccountID    *string    `json:"externalAccountId"`
+	CredentialConfigured bool       `json:"credentialConfigured"`
+	Enabled              bool       `json:"enabled"`
+	HealthStatus         string     `json:"healthStatus"`
+	LastValidatedAt      *time.Time `json:"lastValidatedAt"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
+}
+
+type SourceRepositoryDTO struct {
+	ID                 string     `json:"id"`
+	SourceConnectionID string     `json:"sourceConnectionId"`
+	ExternalID         string     `json:"externalId"`
+	Namespace          string     `json:"namespace"`
+	Name               string     `json:"name"`
+	Path               string     `json:"path"`
+	WebURL             string     `json:"webUrl"`
+	CloneURL           *string    `json:"cloneUrl"`
+	SSHCloneURL        *string    `json:"sshCloneUrl"`
+	DefaultBranch      string     `json:"defaultBranch"`
+	Archived           bool       `json:"archived"`
+	Disabled           bool       `json:"disabled"`
+	LastSyncedAt       *time.Time `json:"lastSyncedAt"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
+}
+
 type ProviderDTO struct {
 	ID                 string          `json:"id"`
 	ProjectID          *string         `json:"projectId"`
@@ -406,6 +439,15 @@ type UpdateIssueRequest struct {
 type CreateIssueRelationshipRequest struct {
 	TargetIssueID string `json:"targetIssueId"`
 	Type          string `json:"type"`
+}
+
+type SourceConnectionRequest struct {
+	Name              string  `json:"name"`
+	Kind              string  `json:"kind"`
+	BaseURL           *string `json:"baseUrl"`
+	ExternalAccountID *string `json:"externalAccountId"`
+	Credential        *string `json:"credential"`
+	Enabled           *bool   `json:"enabled"`
 }
 
 type CreateProviderRequest struct {
