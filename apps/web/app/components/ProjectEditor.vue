@@ -23,6 +23,8 @@ const state = reactive({
   sourceType: props.project?.sourceType ?? 'local',
   cloneUrl: props.project?.cloneUrl ?? '',
   sourceRef: props.project?.sourceRef ?? '',
+  sourceConnectionId: props.project?.sourceConnectionId ?? '',
+  sourceRepositoryId: props.project?.sourceRepositoryId ?? '',
   repositoryPath: props.project?.repositoryPath ?? '',
   defaultBranch: props.project?.defaultBranch || 'main',
   newIssuePlacement: initialNewIssuePlacement
@@ -42,6 +44,10 @@ function validate() {
   }
   if (state.sourceType === 'git') {
     if (!state.cloneUrl.trim()) errors.push({ name: 'cloneUrl', message: 'Clone URL is required.' })
+  } else if (state.sourceType === 'connected') {
+    if (!state.sourceConnectionId.trim() || !state.sourceRepositoryId.trim()) {
+      errors.push({ name: 'sourceType', message: 'Connected source identity is unavailable.' })
+    }
   } else {
     if (!state.repositoryPath.trim()) errors.push({ name: 'repositoryPath', message: 'Local repository path is required.' })
     if (!state.defaultBranch.trim()) errors.push({ name: 'defaultBranch', message: 'Default branch is required.' })
@@ -56,6 +62,10 @@ function payload() {
   }
   if (state.sourceType === 'git') {
     body.cloneUrl = state.cloneUrl.trim()
+    body.sourceRef = state.sourceRef.trim()
+  } else if (state.sourceType === 'connected') {
+    body.sourceConnectionId = state.sourceConnectionId.trim()
+    body.sourceRepositoryId = state.sourceRepositoryId.trim()
     body.sourceRef = state.sourceRef.trim()
   } else {
     body.repositoryPath = state.repositoryPath.trim()
@@ -118,7 +128,12 @@ onMounted(async () => {
     <UFormField label="New issue placement" name="newIssuePlacement" description="Choose where newly created issues enter their initial board state.">
       <USelect v-model="state.newIssuePlacement" :items="newIssuePlacementOptions" :disabled="saving" class="w-full" />
     </UFormField>
-    <UFormField label="Source" name="sourceType" required>
+    <div v-if="state.sourceType === 'connected'" data-field="connectedSource" class="space-y-1">
+      <p class="text-sm font-medium text-highlighted">Connected repository</p>
+      <p class="text-xs text-muted">Repository selection is managed by the connected Source Provider. Provider-backed editing is added in the connected repository picker phase.</p>
+      <p class="text-xs font-mono text-muted">{{ state.sourceRef || 'No target ref configured' }}</p>
+    </div>
+    <UFormField v-else label="Source" name="sourceType" required>
       <URadioGroup v-model="state.sourceType" :items="sourceOptions" :disabled="saving" />
     </UFormField>
     <template v-if="state.sourceType === 'git'">
@@ -138,7 +153,7 @@ onMounted(async () => {
         <UInput v-model="state.sourceRef" class="w-full font-mono" :disabled="saving" />
       </UFormField>
     </template>
-    <template v-else>
+    <template v-else-if="state.sourceType === 'local'">
       <UFormField
         label="Local repository path"
         name="repositoryPath"

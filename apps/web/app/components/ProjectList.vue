@@ -28,7 +28,16 @@ function sourceSummary(item: Project) {
   if (item.sourceType === 'git') {
     return `${item.cloneUrl ?? ''} · ${item.sourceRef || 'remote default'}`
   }
+  if (item.sourceType === 'connected') {
+    return `Connected repository · ${item.sourceRef || 'target ref unavailable'}`
+  }
   return `${item.repositoryPath} · ${item.defaultBranch}`
+}
+
+function sourceLabel(item: Project) {
+  if (item.sourceType === 'git') return 'Git repository'
+  if (item.sourceType === 'connected') return 'Connected repository'
+  return 'Local repository'
 }
 
 async function savedProject() {
@@ -65,7 +74,7 @@ useProjectEvents(projectIds, event => {
             <div class="flex flex-wrap items-center gap-3">
               <div class="min-w-0 flex-1">
                 <h2 class="font-medium text-highlighted break-words">{{ item.name }}</h2>
-                <p class="text-xs text-muted">{{ item.sourceType === 'git' ? 'Git repository' : 'Local repository' }}</p>
+                <p class="text-xs text-muted">{{ sourceLabel(item) }}</p>
               </div>
               <div class="flex flex-wrap items-center gap-3" @click.stop>
                 <UButton label="Open board" :to="`/projects/${item.id}/board`" variant="outline" />
