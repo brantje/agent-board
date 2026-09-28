@@ -21,3 +21,43 @@ func (s *Service) ensureSourceStoreAndScope(ctx context.Context, scope *string) 
 	}
 	return s.ensureScope(ctx, scope)
 }
+
+func (s *Service) GetSourceConnection(ctx context.Context, scope *string, id string) (store.SourceConnection, error) {
+	if err := s.ensureSourceStoreAndScope(ctx, scope); err != nil {
+		return store.SourceConnection{}, err
+	}
+	value, err := s.sources.GetSourceConnection(ctx, scope, id)
+	return value, translateStoreError(err, "source_connection")
+}
+
+func (s *Service) CreateSourceConnection(ctx context.Context, input store.SourceConnection) (store.SourceConnection, error) {
+	if err := s.ensureSourceStoreAndScope(ctx, input.ProjectID); err != nil {
+		return store.SourceConnection{}, err
+	}
+	normalized, err := normalizeSourceConnection(input)
+	if err != nil {
+		return store.SourceConnection{}, err
+	}
+	value, err := s.sources.CreateSourceConnection(ctx, normalized)
+	return value, translateStoreError(err, "source_connection")
+}
+
+func (s *Service) UpdateSourceConnection(ctx context.Context, scope *string, input store.SourceConnection) (store.SourceConnection, error) {
+	if err := s.ensureSourceStoreAndScope(ctx, scope); err != nil {
+		return store.SourceConnection{}, err
+	}
+	current, err := s.sources.GetSourceConnection(ctx, scope, input.ID)
+	if err != nil {
+		return store.SourceConnection{}, translateStoreError(err, "source_connection")
+	}
+	input.ProjectID = current.ProjectID
+	if input.CredentialRef == nil {
+		input.CredentialRef = current.CredentialRef
+	}
+	normalized, err := normalizeSourceConnection(input)
+	if err != nil {
+		return store.SourceConnection{}, err
+	}
+	value, err := s.sources.UpdateSourceConnection(ctx, scope, normalized)
+	return value, translateStoreError(err, "source_connection")
+}
