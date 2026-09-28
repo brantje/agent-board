@@ -309,6 +309,72 @@ func TestProjectScopedSourceConnectionUpdateStoresCredentialInProjectScope(t *te
 	}
 }
 
+func TestSourceConnectionHTTPRejectsInvalidAndMissingResourcesBeforeSecretWrites(t *testing.T) {
+	data := &sourceHTTPStore{
+		connection: store.SourceConnection{
+			ID: sourceConnectionTestID, Kind: store.SourceProviderGitHub, Name: "GitHub",
+			Enabled: true, HealthStatus: "UNKNOWN",
+		},
+	}
+	writer := &fakeSecretWriter{}
+	router := NewRouterWithSecrets(app.New(data), writer)
+
+	cases := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		status int
+	}{
+		{
+			name: "invalid provider kind", method: http.MethodPost, path: "/api/source-connections",
+			body: `{"name":"Unsupported","kind":"bitbucket"}`, status: http.StatusBadRequest,
+		},
+		{
+			name: "blank update credential", method: http.MethodPut,
+			path: "/api/source-connections/" + sourceConnectionTestID,
+			body: `{"name":"GitHub","kind":"github","credential":"   "}`, status: http.StatusBadRequest,
+		},
+		{
+			name: "missing connection", method: http.MethodGet,
+			path: "/api/source-connections/" + otherID, status: http.StatusNotFound,
+		},
+		{
+			name: "missing repository", method: http.MethodGet,
+			path: "/api/source-connections/" + sourceConnectionTestID + "/repositories/" + otherID,
+			status: http.StatusNotFound,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
+			if tc.body != "" {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			router.ServeHTTP(rec, req)
+			if rec.Code != tc.status {
+				t.Fatalf("status = %d, want %d body=%s", rec.Code, tc.status, rec.Body.String())
+			}
+		})
+	}
+	if writer.ref != "" || len(writer.value) != 0 {
+		t.Fatalf("invalid requests wrote credential material: ref=%q value=%q", writer.ref, writer.value)
+	}
+
+	withoutSecrets := NewRouter(app.New(data))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/source-connections/"+sourceConnectionTestID,
+		strings.NewReader(`{"name":"GitHub","kind":"github","credential":"replacement"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	withoutSecrets.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("credential update without secret storage status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestSourceConnectionHTTPRequiresSecretStorageForCredentialWrites(t *testing.T) {
 	router := NewRouter(app.New(&sourceHTTPStore{}))
 	rec := httptest.NewRecorder()
