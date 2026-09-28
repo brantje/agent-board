@@ -1,0 +1,100 @@
+globalCollection:
+  get:
+    operationId: listSourceConnections
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceConnectionList}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  post:
+    operationId: createSourceConnection
+    requestBody: {$ref: ../components/api-components.yaml#/requestBodies/SourceConnectionInput}
+    responses:
+      '201': {$ref: ../components/api-components.yaml#/responses/SourceConnection}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+globalResource:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getSourceConnection
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceConnection}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  put:
+    operationId: updateSourceConnection
+    description: Omitted credential preserves the stored encrypted credential.
+    requestBody: {$ref: ../components/api-components.yaml#/requestBodies/SourceConnectionInput}
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceConnection}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+globalRepositories:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: listSourceRepositories
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceRepositoryList}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+globalRepository:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  - name: repositoryID
+    in: path
+    required: true
+    schema: {type: string, format: uuid}
+  get:
+    operationId: getSourceRepository
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceRepository}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+projectCollection:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  get:
+    operationId: listProjectSourceConnections
+    description: Returns Project-owned Source Connections plus visible shared deployment Source Connections.
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceConnectionList}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  post:
+    operationId: createProjectSourceConnection
+    requestBody: {$ref: ../components/api-components.yaml#/requestBodies/SourceConnectionInput}
+    responses:
+      '201': {$ref: ../components/api-components.yaml#/responses/SourceConnection}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+projectResource:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: getProjectSourceConnection
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceConnection}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+  put:
+    operationId: updateProjectSourceConnection
+    description: Mutates Project-owned Source Connections only; shared connections are read-only in Project scope. Omitted credential preserves the stored encrypted credential.
+    requestBody: {$ref: ../components/api-components.yaml#/requestBodies/SourceConnectionInput}
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceConnection}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+projectRepositories:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  get:
+    operationId: listProjectSourceRepositories
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceRepositoryList}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}
+projectRepository:
+  parameters:
+  - $ref: ../components/api-components.yaml#/parameters/ProjectID
+  - $ref: ../components/api-components.yaml#/parameters/ResourceID
+  - name: repositoryID
+    in: path
+    required: true
+    schema: {type: string, format: uuid}
+  get:
+    operationId: getProjectSourceRepository
+    responses:
+      '200': {$ref: ../components/api-components.yaml#/responses/SourceRepository}
+      default: {$ref: ../components/api-components.yaml#/responses/Error}

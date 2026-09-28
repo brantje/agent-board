@@ -106,6 +106,14 @@ paths:
     $ref: ./paths/project-runners.yaml#/revoke
   /api/secrets:
     $ref: ./paths/secrets.yaml#/path1
+  /api/source-connections:
+    $ref: ./paths/source-connections.yaml#/globalCollection
+  /api/source-connections/{resourceID}:
+    $ref: ./paths/source-connections.yaml#/globalResource
+  /api/source-connections/{resourceID}/repositories:
+    $ref: ./paths/source-connections.yaml#/globalRepositories
+  /api/source-connections/{resourceID}/repositories/{repositoryID}:
+    $ref: ./paths/source-connections.yaml#/globalRepository
   /api/providers:
     $ref: ./paths/providers.yaml#/path1
   /api/providers/{resourceID}:
@@ -126,6 +134,14 @@ paths:
     $ref: ./paths/agents.yaml#/path2
   /api/projects/{projectID}/secrets:
     $ref: ./paths/secrets.yaml#/path2
+  /api/projects/{projectID}/source-connections:
+    $ref: ./paths/source-connections.yaml#/projectCollection
+  /api/projects/{projectID}/source-connections/{resourceID}:
+    $ref: ./paths/source-connections.yaml#/projectResource
+  /api/projects/{projectID}/source-connections/{resourceID}/repositories:
+    $ref: ./paths/source-connections.yaml#/projectRepositories
+  /api/projects/{projectID}/source-connections/{resourceID}/repositories/{repositoryID}:
+    $ref: ./paths/source-connections.yaml#/projectRepository
   /api/projects/{projectID}/providers:
     $ref: ./paths/providers.yaml#/path4
   /api/projects/{projectID}/providers/{resourceID}:

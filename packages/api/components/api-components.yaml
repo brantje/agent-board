@@ -58,6 +58,12 @@ requestBodies:
       application/json:
         schema:
           $ref: ../schemas/control-plane.yaml#/SecretUpsertInput
+  SourceConnectionInput:
+    required: true
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/SourceConnectionInput
   ProviderInput:
     required: true
     content:
@@ -139,6 +145,34 @@ responses:
       application/json:
         schema:
           $ref: ../schemas/control-plane.yaml#/SecretMetadata
+  SourceConnection:
+    description: Safe Source Connection metadata.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/SourceConnection
+  SourceConnectionList:
+    description: Source Connections visible in the requested configuration scope.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/SourceConnection
+  SourceRepository:
+    description: Safe Source Repository metadata.
+    content:
+      application/json:
+        schema:
+          $ref: ../schemas/control-plane.yaml#/SourceRepository
+  SourceRepositoryList:
+    description: Source Repositories belonging to the selected Source Connection.
+    content:
+      application/json:
+        schema:
+          type: array
+          items:
+            $ref: ../schemas/control-plane.yaml#/SourceRepository
   Provider:
     description: Provider response.
     content:
