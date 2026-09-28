@@ -27,10 +27,10 @@ func (s *Store) ListProjects(ctx context.Context) ([]store.Project, error) {
 
 func (s *Store) UpdateProject(ctx context.Context, input store.Project) (store.Project, error) {
 	return scanProject(s.pool.QueryRow(ctx, `
-		UPDATE projects SET name=$2, source_type=$3, clone_url=$4, source_ref=$5, repository_path=$6, default_branch=$7, workflow_settings=$8, allow_internal_runner=COALESCE($9,allow_internal_runner), updated_at=now()
+		UPDATE projects SET name=$2, source_type=$3, clone_url=$4, source_ref=$5, source_connection_id=$6, source_repository_id=$7, repository_path=$8, default_branch=$9, workflow_settings=$10, allow_internal_runner=COALESCE($11,allow_internal_runner), updated_at=now()
 		WHERE id=$1
 		RETURNING `+projectSelectColumns+`
-	`, input.ID, input.Name, input.SourceType, input.CloneURL, input.SourceRef, input.RepositoryPath, input.DefaultBranch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner))
+	`, input.ID, input.Name, input.SourceType, input.CloneURL, input.SourceRef, input.SourceConnectionID, input.SourceRepositoryID, input.RepositoryPath, input.DefaultBranch, objectJSON(input.WorkflowSettings), input.AllowInternalRunner))
 }
 
 func (s *Store) ListIssues(ctx context.Context, projectID string) ([]store.Issue, error) {
