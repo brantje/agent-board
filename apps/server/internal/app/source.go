@@ -61,3 +61,30 @@ func (s *Service) UpdateSourceConnection(ctx context.Context, scope *string, inp
 	value, err := s.sources.UpdateSourceConnection(ctx, scope, normalized)
 	return value, translateStoreError(err, "source_connection")
 }
+
+func (s *Service) ListSourceRepositories(ctx context.Context, scope *string, connectionID string) ([]store.SourceRepository, error) {
+	if _, err := s.GetSourceConnection(ctx, scope, connectionID); err != nil {
+		return nil, err
+	}
+	values, err := s.sources.ListSourceRepositories(ctx, scope, connectionID)
+	return values, translateStoreError(err, "source_repository")
+}
+
+func (s *Service) GetSourceRepository(ctx context.Context, scope *string, connectionID, repositoryID string) (store.SourceRepository, error) {
+	if _, err := s.GetSourceConnection(ctx, scope, connectionID); err != nil {
+		return store.SourceRepository{}, err
+	}
+	value, err := s.sources.GetSourceRepository(ctx, scope, connectionID, repositoryID)
+	return value, translateStoreError(err, "source_repository")
+}
+
+func (s *Service) UpsertSourceRepository(ctx context.Context, scope *string, input store.SourceRepository) (store.SourceRepository, error) {
+	if _, err := s.GetSourceConnection(ctx, scope, input.SourceConnectionID); err != nil {
+		return store.SourceRepository{}, err
+	}
+	if err := validateSourceRepository(input); err != nil {
+		return store.SourceRepository{}, err
+	}
+	value, err := s.sources.UpsertSourceRepository(ctx, input)
+	return value, translateStoreError(err, "source_repository")
+}
