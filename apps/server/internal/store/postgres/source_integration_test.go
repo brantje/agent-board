@@ -98,3 +98,46 @@ func TestConnectedProjectSourceEnforcesConnectionRepositoryIdentityAndPreservesD
 		t.Fatal("deleting a Source Connection referenced by a connected Project unexpectedly succeeded")
 	}
 }
+
+
+func TestSourceStoreReadAndUpdatePaths(t *testing.T) {
+	s := New(testPool(t))
+	ctx := t.Context()
+	connection, err := s.CreateSourceConnection(ctx, store.SourceConnection{
+		Kind: store.SourceProviderGitHub, Name: "Global read paths", Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetSourceConnection(ctx, nil, connection.ID)
+	if err != nil || got.ID != connection.ID {
+		t.Fatalf("GetSourceConnection() = %+v, %v", got, err)
+	}
+	connection.Name = "Global renamed"
+	connection.HealthStatus = "HEALTHY"
+	updated, err := s.UpdateSourceConnection(ctx, nil, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "Global renamed" || updated.HealthStatus != "HEALTHY" {
+		t.Fatalf("updated connection = %+v", updated)
+	}
+	repository, err := s.UpsertSourceRepository(ctx, store.SourceRepository{
+		SourceConnectionID: connection.ID, ExternalID: "read-1", Namespace: "acme",
+		Name: "repo", Path: "acme/repo", WebURL: "https://github.com/acme/repo", DefaultBranch: "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := s.ListSourceRepositories(ctx, nil, connection.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ID != repository.ID {
+		t.Fatalf("repositories = %+v", listed)
+	}
+	read, err := s.GetSourceRepository(ctx, nil, connection.ID, repository.ID)
+	if err != nil || read.ExternalID != "read-1" {
+		t.Fatalf("GetSourceRepository() = %+v, %v", read, err)
+	}
+}

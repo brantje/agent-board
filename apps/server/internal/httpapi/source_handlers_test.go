@@ -177,3 +177,85 @@ func TestSourceConnectionCredentialUsesExistingEncryptionBoundary(t *testing.T) 
 		t.Fatalf("resolved credential = %q", resolved)
 	}
 }
+
+
+func TestSourceConnectionHTTPReadUpdateAndValidationPaths(t *testing.T) {
+	data := &sourceHTTPStore{
+		connection: store.SourceConnection{
+			ID: sourceConnectionTestID, Kind: store.SourceProviderGitHub, Name: "GitHub",
+			BaseURL: stringPtrHTTP("https://github.com"), Enabled: true, HealthStatus: "UNKNOWN",
+		},
+		repositories: []store.SourceRepository{{
+			ID: otherID, SourceConnectionID: sourceConnectionTestID, ExternalID: "42", Namespace: "acme",
+			Name: "repo", Path: "acme/repo", WebURL: "https://github.com/acme/repo", DefaultBranch: "main",
+		}},
+	}
+	writer := &fakeSecretWriter{}
+	router := NewRouterWithSecrets(app.New(data), writer)
+
+	for _, path := range []string{
+		"/api/source-connections",
+		"/api/source-connections/" + sourceConnectionTestID,
+		"/api/source-connections/" + sourceConnectionTestID + "/repositories/" + otherID,
+	} {
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut, "/api/source-connections/"+sourceConnectionTestID, strings.NewReader(
+		`{"name":"Renamed","kind":"github","enabled":false}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || data.connection.Name != "Renamed" || data.connection.Enabled {
+		t.Fatalf("update status=%d connection=%+v body=%s", rec.Code, data.connection, rec.Body.String())
+	}
+
+	existingRef := "source-connection:existing"
+	data.connection.CredentialRef = &existingRef
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPut, "/api/source-connections/"+sourceConnectionTestID, strings.NewReader(
+		`{"name":"Renamed Again","kind":"github","credential":"rotated"}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || writer.ref != existingRef || string(writer.value) != "rotated" {
+		t.Fatalf("credential update status=%d ref=%q value=%q body=%s", rec.Code, writer.ref, writer.value, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/source-connections", strings.NewReader(
+		`{"name":"Blank","kind":"github","credential":"   "}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("blank credential status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet,
+		"/api/source-connections/"+sourceConnectionTestID+"/repositories/not-a-uuid", nil))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid repository ID status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSourceConnectionHTTPRequiresSecretStorageForCredentialWrites(t *testing.T) {
+	router := NewRouter(app.New(&sourceHTTPStore{}))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/source-connections", strings.NewReader(
+		`{"name":"GitHub","kind":"github","credential":"secret"}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func stringPtrHTTP(value string) *string { return &value }

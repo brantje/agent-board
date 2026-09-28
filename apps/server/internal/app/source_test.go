@@ -225,3 +225,133 @@ func TestProductionServicesPreserveSourceStoreCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+
+func TestSourceServiceCRUDAndRepositoryReadPaths(t *testing.T) {
+	fake := newSourceServiceTestStore()
+	service := New(fake)
+	projectID := "project-1"
+
+	created, err := service.CreateSourceConnection(t.Context(), store.SourceConnection{
+		ProjectID: &projectID,
+		Kind:      store.SourceProviderGitLab,
+		Name:      " Project GitLab ",
+		Enabled:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ProjectID == nil || *created.ProjectID != projectID || created.BaseURL == nil || *created.BaseURL != "https://gitlab.com" {
+		t.Fatalf("created connection = %+v", created)
+	}
+
+	listed, err := service.ListSourceConnections(t.Context(), &projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || listed[0].ID != created.ID {
+		t.Fatalf("listed connections = %+v", listed)
+	}
+	got, err := service.GetSourceConnection(t.Context(), &projectID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != created.ID {
+		t.Fatalf("got connection = %+v", got)
+	}
+
+	updated, err := service.UpdateSourceConnection(t.Context(), &projectID, store.SourceConnection{
+		ID:      created.ID,
+		Kind:    store.SourceProviderGitLab,
+		Name:    "Renamed",
+		Enabled: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "Renamed" || updated.Enabled {
+		t.Fatalf("updated connection = %+v", updated)
+	}
+
+	repository, err := service.UpsertSourceRepository(t.Context(), &projectID, store.SourceRepository{
+		SourceConnectionID: created.ID,
+		ExternalID:         "repo-42",
+		Namespace:          "acme",
+		Name:               "widget",
+		Path:               "acme/widget",
+		WebURL:             "https://gitlab.com/acme/widget",
+		DefaultBranch:      "main",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repositories, err := service.ListSourceRepositories(t.Context(), &projectID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repositories) != 1 || repositories[0].ID != repository.ID {
+		t.Fatalf("listed repositories = %+v", repositories)
+	}
+	gotRepository, err := service.GetSourceRepository(t.Context(), &projectID, created.ID, repository.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotRepository.ExternalID != "repo-42" {
+		t.Fatalf("repository = %+v", gotRepository)
+	}
+}
+
+func TestSourceValidationAndUnavailableStoreBranches(t *testing.T) {
+	service := New(&missingProjectStore{})
+	if _, err := service.ListSourceConnections(t.Context(), nil); err == nil {
+		t.Fatal("missing Source Store was accepted")
+	}
+
+	for name, input := range map[string]store.SourceConnection{
+		"blank name":        {Kind: store.SourceProviderGitHub, Name: "   ", Enabled: true},
+		"unknown kind":      {Kind: "bitbucket", Name: "Unknown", Enabled: true},
+		"blank external id": {Kind: store.SourceProviderGitHub, Name: "GitHub", ExternalAccountID: stringPointer("  "), Enabled: true},
+		"invalid health":    {Kind: store.SourceProviderGitHub, Name: "GitHub", HealthStatus: "BROKEN", Enabled: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := normalizeSourceConnection(input); err == nil {
+				t.Fatalf("%s accepted: %+v", name, input)
+			}
+		})
+	}
+
+	baseURL := "HTTPS://GitLab.Example.test/root///"
+	normalized, err := normalizeSourceConnection(store.SourceConnection{
+		Kind: store.SourceProviderGitLab, Name: "GitLab", BaseURL: &baseURL, ExternalAccountID: stringPointer(" account "), Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.BaseURL == nil || *normalized.BaseURL != "https://gitlab.example.test/root" ||
+		normalized.ExternalAccountID == nil || *normalized.ExternalAccountID != "account" ||
+		normalized.HealthStatus != "UNKNOWN" {
+		t.Fatalf("normalized connection = %+v", normalized)
+	}
+
+	if err := validateSourceRepository(store.SourceRepository{}); err == nil {
+		t.Fatal("empty Source Repository was accepted")
+	}
+
+	fake := newSourceServiceTestStore()
+	connection := store.SourceConnection{ID: "connection-1", Kind: store.SourceProviderGitHub, Name: "GitHub", Enabled: true}
+	fake.connections[connection.ID] = connection
+	fake.repositories["repository-no-branch"] = store.SourceRepository{
+		ID: "repository-no-branch", SourceConnectionID: connection.ID, ExternalID: "1",
+		Name: "repo", Path: "acme/repo", WebURL: "https://github.com/acme/repo",
+	}
+	connected := New(fake)
+	if _, err := connected.prepareConnectedProjectSource(t.Context(), store.Project{SourceType: store.ProjectSourceConnected}); err == nil {
+		t.Fatal("connected source without durable identities was accepted")
+	}
+	connectionID, repositoryID := connection.ID, "repository-no-branch"
+	if _, err := connected.prepareConnectedProjectSource(t.Context(), store.Project{
+		SourceType: store.ProjectSourceConnected, SourceConnectionID: &connectionID, SourceRepositoryID: &repositoryID,
+	}); err == nil {
+		t.Fatal("connected source without target/default ref was accepted")
+	}
+}
