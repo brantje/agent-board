@@ -133,7 +133,7 @@ func (a *api) authorizeProjectRequest(r *http.Request, actor app.AuthenticatedUs
 	}
 
 	switch tail[0] {
-	case "providers", "model-profiles", "runtimes", "agents", "runners", "secrets", "squads":
+	case "source-connections", "providers", "model-profiles", "runtimes", "agents", "runners", "secrets", "squads":
 		return a.projectAccess.AuthorizeAdministration(r.Context(), actor, projectID)
 	default:
 		return a.projectAccess.AuthorizeWorkflowMutation(r.Context(), actor, projectID)
