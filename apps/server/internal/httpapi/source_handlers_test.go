@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/brantje/agent-board/apps/server/internal/app"
+	"github.com/brantje/agent-board/apps/server/internal/secrets"
 	"github.com/brantje/agent-board/apps/server/internal/store"
 )
 
@@ -107,5 +109,71 @@ func TestSourceRepositoryListReturnsSafePersistedMetadata(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "\"externalId\":\"42\"") || !strings.Contains(rec.Body.String(), "\"defaultBranch\":\"main\"") {
 		t.Fatalf("repository metadata missing: %s", rec.Body.String())
+	}
+}
+
+
+type sourceCredentialCaptureStore struct {
+	record secrets.Record
+}
+
+func (s *sourceCredentialCaptureStore) PutSecret(_ context.Context, record secrets.Record) (secrets.Record, error) {
+	record.ID = "secret-1"
+	s.record = record
+	return record, nil
+}
+
+func (s *sourceCredentialCaptureStore) GetSecret(_ context.Context, projectID *string, ref string) (secrets.Record, error) {
+	if s.record.Ref != ref {
+		return secrets.Record{}, secrets.ErrNotFound
+	}
+	if (s.record.ProjectID == nil) != (projectID == nil) {
+		return secrets.Record{}, secrets.ErrNotFound
+	}
+	if projectID != nil && s.record.ProjectID != nil && *projectID != *s.record.ProjectID {
+		return secrets.Record{}, secrets.ErrNotFound
+	}
+	return s.record, nil
+}
+
+func TestSourceConnectionCredentialUsesExistingEncryptionBoundary(t *testing.T) {
+	key := make([]byte, 32)
+	for index := range key {
+		key[index] = byte(index + 1)
+	}
+	cipher, err := secrets.NewAESGCM(1, map[int][]byte{1: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretStore := &sourceCredentialCaptureStore{}
+	secretService, err := secrets.NewService(secretStore, cipher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := &sourceHTTPStore{}
+	router := NewRouterWithSecrets(app.New(data), secretService)
+
+	const plaintext = "recognizable-source-credential"
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/source-connections", strings.NewReader(
+		`{"name":"GitHub","kind":"github","credential":"`+plaintext+`"}`,
+	))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if len(secretStore.record.Ciphertext) == 0 || bytes.Contains(secretStore.record.Ciphertext, []byte(plaintext)) {
+		t.Fatalf("credential was not encrypted before persistence: %q", secretStore.record.Ciphertext)
+	}
+	if strings.Contains(rec.Body.String(), plaintext) || strings.Contains(rec.Body.String(), secretStore.record.Ref) {
+		t.Fatalf("credential material leaked through HTTP: %s", rec.Body.String())
+	}
+	resolved, err := secretService.Resolve(t.Context(), secrets.Scope{}, secretStore.record.Ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(resolved) != plaintext {
+		t.Fatalf("resolved credential = %q", resolved)
 	}
 }
