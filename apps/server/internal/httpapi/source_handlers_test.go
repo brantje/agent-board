@@ -245,6 +245,36 @@ func TestSourceConnectionHTTPReadUpdateAndValidationPaths(t *testing.T) {
 	}
 }
 
+func TestProjectScopedSourceConnectionUpdateCannotOverwriteSharedCredential(t *testing.T) {
+	existingRef := "source-connection:shared"
+	data := &sourceHTTPStore{
+		connection: store.SourceConnection{
+			ID: sourceConnectionTestID, Kind: store.SourceProviderGitHub, Name: "Shared",
+			CredentialRef: &existingRef, Enabled: true, HealthStatus: "UNKNOWN",
+		},
+	}
+	writer := &fakeSecretWriter{}
+	router := NewRouterWithSecrets(app.New(data), writer)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPut,
+		"/api/projects/"+projectID+"/source-connections/"+sourceConnectionTestID,
+		strings.NewReader(`{"name":"Compromised","kind":"github","credential":"replacement"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if writer.ref != "" || len(writer.value) != 0 {
+		t.Fatalf("credential write occurred before scope rejection: ref=%q value=%q", writer.ref, writer.value)
+	}
+	if data.connection.Name != "Shared" || data.connection.CredentialRef == nil || *data.connection.CredentialRef != existingRef {
+		t.Fatalf("shared connection changed: %+v", data.connection)
+	}
+}
+
 func TestSourceConnectionHTTPRequiresSecretStorageForCredentialWrites(t *testing.T) {
 	router := NewRouter(app.New(&sourceHTTPStore{}))
 	rec := httptest.NewRecorder()

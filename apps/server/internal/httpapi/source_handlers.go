@@ -85,7 +85,7 @@ func (a *api) updateSourceConnection(w http.ResponseWriter, r *http.Request, sco
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	current, err := a.service.GetSourceConnection(r.Context(), scope, id)
+	current, err := a.service.GetSourceConnectionForMutation(r.Context(), scope, id)
 	if err != nil {
 		writeAppError(w, err)
 		return

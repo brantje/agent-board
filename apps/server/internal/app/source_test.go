@@ -10,9 +10,10 @@ import (
 
 type sourceServiceTestStore struct {
 	store.ControlPlaneStore
-	projects    map[string]store.Project
-	connections map[string]store.SourceConnection
+	projects     map[string]store.Project
+	connections  map[string]store.SourceConnection
 	repositories map[string]store.SourceRepository
+	updateCalls  int
 }
 
 func (s *sourceServiceTestStore) GetProject(_ context.Context, id string) (store.Project, error) {
@@ -48,6 +49,7 @@ func (s *sourceServiceTestStore) CreateSourceConnection(_ context.Context, value
 }
 
 func (s *sourceServiceTestStore) UpdateSourceConnection(_ context.Context, scope *string, value store.SourceConnection) (store.SourceConnection, error) {
+	s.updateCalls++
 	current, ok := s.connections[value.ID]
 	if !ok || (current.ProjectID != nil && (scope == nil || *current.ProjectID != *scope)) {
 		return store.SourceConnection{}, store.ErrNotFound
@@ -144,6 +146,34 @@ func TestSourceConnectionUpdatePreservesStoredReference(t *testing.T) {
 	}
 	if updated.CredentialRef == nil || *updated.CredentialRef != ref {
 		t.Fatalf("stored reference was not preserved: %#v", updated.CredentialRef)
+	}
+}
+
+func TestSourceConnectionMutationRequiresExactScope(t *testing.T) {
+	fake := newSourceServiceTestStore()
+	ref := "source-connection:global"
+	fake.connections["global"] = store.SourceConnection{
+		ID: "global", Kind: store.SourceProviderGitHub, Name: "Global", CredentialRef: &ref, Enabled: true,
+	}
+	service := New(fake)
+	projectID := "project-1"
+
+	if _, err := service.GetSourceConnection(t.Context(), &projectID, "global"); err != nil {
+		t.Fatalf("shared connection should remain readable in Project scope: %v", err)
+	}
+	if _, err := service.GetSourceConnectionForMutation(t.Context(), &projectID, "global"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("mutation lookup error = %v, want not found", err)
+	}
+	if _, err := service.UpdateSourceConnection(t.Context(), &projectID, store.SourceConnection{
+		ID: "global", Kind: store.SourceProviderGitHub, Name: "Compromised", Enabled: true,
+	}); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("cross-scope update error = %v, want not found", err)
+	}
+	if fake.updateCalls != 0 {
+		t.Fatalf("store update calls = %d, want 0", fake.updateCalls)
+	}
+	if fake.connections["global"].Name != "Global" {
+		t.Fatalf("global connection was mutated: %+v", fake.connections["global"])
 	}
 }
 

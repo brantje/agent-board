@@ -31,6 +31,24 @@ func (s *Service) GetSourceConnection(ctx context.Context, scope *string, id str
 	return value, translateStoreError(err, "source_connection")
 }
 
+func sourceConnectionOwnedByScope(value store.SourceConnection, scope *string) bool {
+	if scope == nil || value.ProjectID == nil {
+		return scope == nil && value.ProjectID == nil
+	}
+	return *scope == *value.ProjectID
+}
+
+func (s *Service) GetSourceConnectionForMutation(ctx context.Context, scope *string, id string) (store.SourceConnection, error) {
+	value, err := s.GetSourceConnection(ctx, scope, id)
+	if err != nil {
+		return store.SourceConnection{}, err
+	}
+	if !sourceConnectionOwnedByScope(value, scope) {
+		return store.SourceConnection{}, translateStoreError(store.ErrNotFound, "source_connection")
+	}
+	return value, nil
+}
+
 func (s *Service) CreateSourceConnection(ctx context.Context, input store.SourceConnection) (store.SourceConnection, error) {
 	if err := s.ensureSourceStoreAndScope(ctx, input.ProjectID); err != nil {
 		return store.SourceConnection{}, err
@@ -44,12 +62,9 @@ func (s *Service) CreateSourceConnection(ctx context.Context, input store.Source
 }
 
 func (s *Service) UpdateSourceConnection(ctx context.Context, scope *string, input store.SourceConnection) (store.SourceConnection, error) {
-	if err := s.ensureSourceStoreAndScope(ctx, scope); err != nil {
-		return store.SourceConnection{}, err
-	}
-	current, err := s.sources.GetSourceConnection(ctx, scope, input.ID)
+	current, err := s.GetSourceConnectionForMutation(ctx, scope, input.ID)
 	if err != nil {
-		return store.SourceConnection{}, translateStoreError(err, "source_connection")
+		return store.SourceConnection{}, err
 	}
 	input.ProjectID = current.ProjectID
 	if input.CredentialRef == nil {
